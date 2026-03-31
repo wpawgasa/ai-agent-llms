@@ -1,0 +1,29 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c5b0ed976724",
+  "strategy": "manual-commit",
+  "branch": "feature/phase7-integration",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CLAUDE.md",
+    "pyproject.toml",
+    "src/llm_workflow_agents/analysis/__init__.py",
+    "src/llm_workflow_agents/serving/__init__.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c5/b0ed976724/0/metadata.json",
+      "transcript": "/c5/b0ed976724/0/full.jsonl",
+      "content_hash": "/c5/b0ed976724/0/content_hash.txt",
+      "prompt": "/c5/b0ed976724/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1887,
+    "cache_creation_tokens": 426836,
+    "cache_read_tokens": 34238494,
+    "output_tokens": 167469,
+    "api_call_count": 227
+  }
+}

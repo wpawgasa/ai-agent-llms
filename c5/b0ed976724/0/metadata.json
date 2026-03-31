@@ -1,0 +1,38 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c5b0ed976724",
+  "session_id": "566f5fb1-d7ba-477a-b7c5-c87aaa449775",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-31T10:38:03.782045623Z",
+  "branch": "feature/phase7-integration",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CLAUDE.md",
+    "pyproject.toml",
+    "src/llm_workflow_agents/analysis/__init__.py",
+    "src/llm_workflow_agents/serving/__init__.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "2a8ee8005914",
+  "token_usage": {
+    "input_tokens": 1887,
+    "cache_creation_tokens": 426836,
+    "cache_read_tokens": 34238494,
+    "output_tokens": 167469,
+    "api_call_count": 227
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-31T10:38:01.291995051Z",
+    "agent_lines": 0,
+    "human_added": 2068,
+    "human_modified": 7,
+    "human_removed": 0,
+    "total_committed": 2068,
+    "agent_percentage": 0
+  }
+}
