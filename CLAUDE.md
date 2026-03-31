@@ -97,8 +97,8 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] Benchmark matrix execution (10 models x 6 methods)
 
 ### Phase 6: Experiment C (Week 11)
-- [ ] Graph extraction eval (`eval/graph_extraction_eval.py`)
-- [ ] Constrained decoding integration (Outlines/XGrammar)
+- [x] Graph extraction eval (`eval/graph_extraction_eval.py`)
+- [x] Constrained decoding integration (Outlines/XGrammar)
 
 ### Phase 7: Integration & E2E (Weeks 12-14)
 - [ ] Multi-agent orchestrator (`serving/orchestrator.py`)
