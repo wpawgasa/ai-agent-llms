@@ -1,0 +1,23 @@
+model:
+  name: "nvidia/Nemotron-3-30B"
+  family: "nemotron"
+  architecture: "dense_gqa_transformer"
+  params_total: 30_000_000_000
+  params_active: 30_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 60
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "hermes"
+  chat_template: "nemotron"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enforce_eager: false
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

@@ -1,0 +1,21 @@
+method:
+  name: "kivi_4bit"
+  paper: "Liu et al., ICML 2024"
+  status: "stable"
+  kv_cache_dtype: "kivi_4bit"
+  requires_calibration: false
+  bit_widths: [4]
+
+asymmetric:
+  key_quantization: "per_channel"
+  value_quantization: "per_token"
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  runs: 5
+  prompts_per_run: 500

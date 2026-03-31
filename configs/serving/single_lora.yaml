@@ -1,0 +1,12 @@
+mode: "single_lora"
+description: "Single model with LoRA adapter serving"
+kv_cache_dtype: "auto"
+port: 8000
+
+vllm:
+  dtype: "bfloat16"
+  gpu_memory_utilization: 0.90
+  enable_auto_tool_choice: true
+  enable_lora: true
+  max_loras: 1
+  max_lora_rank: 64

@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=75.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "llm-workflow-agents"
+version = "0.1.0"
+description = "LLM workflow-orchestrating agents with KV cache quantization on H100"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [{ name = "wpawgasa" }]
+
+dependencies = [
+    # Core ML
+    "torch>=2.4.0",
+    "transformers>=5.0.0",
+    "peft>=0.14.0",
+    "trl>=0.15.0",
+    "accelerate>=0.34.0",
+
+    # Inference
+    "vllm>=0.8.0",
+
+    # Quantization
+    "triton>=3.0.0",
+
+    # Data & evaluation
+    "datasets>=2.19.0",
+    "networkx>=3.2",
+    "jsonschema>=4.21.0",
+
+    # Analysis & visualization
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+
+    # Config & logging
+    "pydantic>=2.9.0",
+    "pyyaml>=6.0",
+    "structlog>=24.0.0",
+    "wandb>=0.17.0",
+
+    # Constrained decoding
+    "outlines>=0.0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6.0",
+    "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["torch.*", "transformers.*", "peft.*", "trl.*", "vllm.*", "triton.*", "wandb.*", "outlines.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires CUDA GPU",
+    "slow: long-running test",
+]

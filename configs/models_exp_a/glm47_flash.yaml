@@ -1,0 +1,23 @@
+model:
+  name: "THUDM/GLM-4-9B-Chat"
+  family: "glm"
+  architecture: "moe_mla_transformer"
+  params_total: 4_700_000_000
+  params_active: 4_700_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 10
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "hermes"
+  chat_template: "glm"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enforce_eager: false
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

@@ -1,0 +1,23 @@
+method:
+  name: "kvquant"
+  paper: "Hooper et al., NeurIPS 2024"
+  status: "stable"
+  kv_cache_dtype: "kvquant"
+  requires_calibration: true
+  bit_widths: [2, 3, 4]
+
+calibration:
+  pre_rope_quantization: true
+  codebook_type: "nuq"
+  dense_sparse_decomposition: true
+  calibration_samples: 128
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  runs: 5
+  prompts_per_run: 500

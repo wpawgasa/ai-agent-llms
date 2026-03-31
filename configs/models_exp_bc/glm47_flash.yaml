@@ -1,0 +1,51 @@
+model:
+  name: "THUDM/glm-4-9b-chat"
+  family: "glm"
+  params_total: 4_700_000_000
+  precision: "bfloat16"
+
+lora:
+  rank: 64
+  alpha: 64
+  dropout: 0.05
+  target_modules:
+    # MLA attention
+    - "q_a_proj"
+    - "q_b_proj"
+    - "kv_a_proj_with_mqa"
+    - "kv_b_proj"
+    - "o_proj"
+    # Shared experts
+    - "shared_experts.gate_proj"
+    - "shared_experts.up_proj"
+    - "shared_experts.down_proj"
+  # NOTE: mlp.gate (router weights) should be frozen
+  # WARNING: ~60GB VRAM for BF16 LoRA — may need Unsloth MoE kernels or rank=32
+
+training:
+  learning_rate: 5.0e-5
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.03
+  effective_batch_size: 8
+  gradient_accumulation_steps: 8
+  num_epochs: 3
+  max_seq_length: 2048
+  gradient_checkpointing: true
+  packing: true
+  save_steps: 500
+  eval_steps: 500
+  metric_for_best_model: "eval_loss"
+  hardware_vram_estimate_gb: 60
+  mixed_precision: "bf16"
+
+  training_data:
+    sources:
+      - "Salesforce/xlam-function-calling-60k"
+      - "ToolBench"
+      - "custom_synthetic"
+    custom_synthetic_size: 15000
+    negative_example_ratio: 0.15
+    splits:
+      train: 0.85
+      val: 0.10
+      test: 0.05

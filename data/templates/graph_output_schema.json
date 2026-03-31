@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowGraph",
+  "description": "Structured workflow graph extracted from a natural-language prompt",
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique state identifier (e.g., S1, S2)",
+            "pattern": "^S\\d+$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable state name (e.g., Greeting, CollectInfo)"
+          },
+          "tools": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Tool names available in this state"
+          },
+          "entry_actions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Actions to perform on state entry"
+          }
+        },
+        "required": ["id", "name"]
+      },
+      "minItems": 1
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from_state": {
+            "type": "string",
+            "description": "Source state ID"
+          },
+          "to_state": {
+            "type": "string",
+            "description": "Target state ID"
+          },
+          "condition": {
+            "type": "string",
+            "description": "Natural-language condition for this transition"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Evaluation order for ambiguous inputs (lower = higher priority)",
+            "default": 0
+          }
+        },
+        "required": ["from_state", "to_state", "condition"]
+      }
+    },
+    "initial_state": {
+      "type": "string",
+      "description": "ID of the initial state"
+    },
+    "terminal_states": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "IDs of terminal/accepting states",
+      "minItems": 1
+    }
+  },
+  "required": ["nodes", "edges", "initial_state", "terminal_states"]
+}

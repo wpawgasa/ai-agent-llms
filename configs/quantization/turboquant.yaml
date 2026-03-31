@@ -1,0 +1,51 @@
+method:
+  name: "turboquant"
+  paper: "Zandieh et al., ICLR 2026"
+  status: "PR #38280 (community fork: 0xSero/turboquant)"
+  kv_cache_dtype: "turboquant"
+  requires_calibration: false
+
+codebook:
+  distribution: "beta"
+  alpha_formula: "(d - 1) / 2"
+  head_dimensions: [128, 256]
+  bit_widths: [2, 3, 4]
+  precompute_offline: true
+
+rotation:
+  method: "qr_gaussian"
+  seed_deterministic: true
+  seed_base: 42
+
+triton_kernels:
+  encode:
+    operations: ["rotate", "quantize", "pack_indices", "store_norm"]
+    hook_point: "vllm_cache_write"
+  decode:
+    operations: ["unpack", "lookup_centroids", "inverse_rotate"]
+    hook_point: "vllm_cache_read"
+
+vllm_integration:
+  kv_cache_dtype: "turboquant"
+  config_module: "vllm.config.cache"
+  runner_module: "vllm.worker.gpu_model_runner"
+  block_size_bytes_3bit: 52
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  performance_metrics:
+    - "peak_vram_gb"
+    - "kv_cache_size_gb"
+    - "throughput_prefill_tok_s"
+    - "throughput_decode_tok_s"
+    - "latency_ttft_ms"
+    - "latency_tpot_ms"
+    - "latency_itl_p50_p95_p99"
+    - "max_concurrent_batch_4096ctx"
+  runs: 5
+  prompts_per_run: 500
