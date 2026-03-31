@@ -11,3 +11,7 @@ The repository https://github.com/wpawgasa/vlm-ocr-gpu-benchmark can be used as 
 ---
 
 Use /code-implementation skill to implement phase 1: Foundation.
+
+---
+
+Commit changes and create PR
