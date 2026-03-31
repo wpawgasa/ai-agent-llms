@@ -1,0 +1,28 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1122eaf6ce7b",
+  "strategy": "manual-commit",
+  "branch": "feature/phase4-quantization",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/llm_workflow_agents/quantization/__init__.py",
+    "src/llm_workflow_agents/quantization/baselines/__init__.py",
+    "src/llm_workflow_agents/quantization/rotorquant/__init__.py",
+    "src/llm_workflow_agents/quantization/turboquant/__init__.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/11/22eaf6ce7b/0/metadata.json",
+      "transcript": "/11/22eaf6ce7b/0/full.jsonl",
+      "content_hash": "/11/22eaf6ce7b/0/content_hash.txt",
+      "prompt": "/11/22eaf6ce7b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 187,
+    "cache_creation_tokens": 230152,
+    "cache_read_tokens": 20960054,
+    "output_tokens": 107510,
+    "api_call_count": 149
+  }
+}
