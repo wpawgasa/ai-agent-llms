@@ -31,6 +31,13 @@ from llm_workflow_agents.eval.longbench import (
     evaluate_longbench,
     score_task,
 )
+from llm_workflow_agents.eval.graph_extraction_eval import (
+    GraphExtractionMetrics,
+    evaluate_graph_extraction,
+)
+from llm_workflow_agents.eval.constrained_decoding import (
+    WORKFLOW_GRAPH_SCHEMA,
+)
 from llm_workflow_agents.eval.needle_haystack import (
     NeedleHaystackResult,
     NeedleResult,
@@ -62,4 +69,7 @@ __all__ = [
     "NeedleResult",
     "check_needle_found",
     "evaluate_needle_in_haystack",
+    "GraphExtractionMetrics",
+    "evaluate_graph_extraction",
+    "WORKFLOW_GRAPH_SCHEMA",
 ]
