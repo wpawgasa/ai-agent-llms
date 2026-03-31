@@ -78,11 +78,11 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] Adapter merge utility (`training/merge_adapter.py`)
 
 ### Phase 3: Experiment A Evaluation (Weeks 5-6)
-- [ ] State machine accuracy eval (`eval/state_accuracy.py`)
-- [ ] Tool-call F1 eval (`eval/tool_call_f1.py`)
-- [ ] Tool chain propagation eval (`eval/tool_chain_propagation.py`)
-- [ ] Agent benchmark composite (`eval/agent_benchmark.py`)
-- [ ] vLLM launch script (`serving/launch_vllm.sh`)
+- [x] State machine accuracy eval (`eval/state_accuracy.py`)
+- [x] Tool-call F1 eval (`eval/tool_call_f1.py`)
+- [x] Tool chain propagation eval (`eval/tool_chain_propagation.py`)
+- [x] Agent benchmark composite (`eval/agent_benchmark.py`)
+- [x] vLLM launch script (`serving/launch_vllm.sh`)
 
 ### Phase 4: Quantization (Weeks 7-8)
 - [ ] TurboQuant codebook + rotation (`quantization/turboquant/`)
