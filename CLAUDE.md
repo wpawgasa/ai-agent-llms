@@ -91,10 +91,10 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] Baseline wrappers: KIVI, KVQuant (`quantization/baselines/`)
 
 ### Phase 5: Experiment D Benchmarks (Weeks 9-10)
-- [ ] Perplexity eval (`eval/perplexity.py`)
-- [ ] LongBench eval (`eval/longbench.py`)
-- [ ] Needle-in-a-Haystack eval (`eval/needle_haystack.py`)
-- [ ] Benchmark matrix execution (10 models x 6 methods)
+- [x] Perplexity eval (`eval/perplexity.py`)
+- [x] LongBench eval (`eval/longbench.py`)
+- [x] Needle-in-a-Haystack eval (`eval/needle_haystack.py`)
+- [x] Benchmark matrix execution (10 models x 6 methods)
 
 ### Phase 6: Experiment C (Week 11)
 - [ ] Graph extraction eval (`eval/graph_extraction_eval.py`)
