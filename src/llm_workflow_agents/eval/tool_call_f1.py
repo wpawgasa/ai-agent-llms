@@ -50,7 +50,7 @@ class ToolCallMetrics:
     argument_exact_match: float = 0.0  # Target: >=75%
     tool_call_f1: float = 0.0  # Target: >=85%
     hallucinated_tool_rate: float = 0.0  # Target: <=3%
-    error_recovery_rate: float = 0.0  # Target: >=60%
+    # error_recovery_rate is tracked in StateMachineMetrics (recovery_rate), not here.
 
     def to_dict(self) -> dict[str, float]:
         return {
@@ -58,7 +58,6 @@ class ToolCallMetrics:
             "argument_exact_match": self.argument_exact_match,
             "tool_call_f1": self.tool_call_f1,
             "hallucinated_tool_rate": self.hallucinated_tool_rate,
-            "error_recovery_rate": self.error_recovery_rate,
         }
 
 
@@ -156,7 +155,7 @@ def compute_argument_match(
 
 def _deep_equals(a: Any, b: Any) -> bool:
     """Deep equality comparison for JSON-compatible values."""
-    if type(a) != type(b):
+    if type(a) is not type(b):
         # Allow int/float comparison
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             return a == b
@@ -311,7 +310,6 @@ def evaluate_tool_calls(
         hallucinated_tool_rate=(
             total_hallucinated / total_predicted if total_predicted > 0 else 0.0
         ),
-        error_recovery_rate=0.0,  # Computed separately via state_accuracy
     )
 
     logger.info("tool_call_eval_complete", turns=n_turns_with_tools, **metrics.to_dict())

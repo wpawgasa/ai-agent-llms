@@ -179,14 +179,24 @@ class TestCheckRecovery:
         _, errors = check_recovery(messages)
         assert errors == 0
 
+    def test_recovery_through_user_message(self) -> None:
+        # A user message between the tool error and assistant recovery should not
+        # break the recovery detection (prev_was_error must survive user turns).
+        messages = [
+            {"role": "tool", "content": '{"error": "timeout"}'},
+            {"role": "user", "content": "Please try again"},
+            {"role": "assistant", "content": "[STATE: A → B] Retrying..."},
+        ]
+        recoveries, errors = check_recovery(messages)
+        assert errors == 1
+        assert recoveries == 1
+
 
 class TestPass5Consistency:
 
     def test_all_trials_pass(self) -> None:
-        trials = [
-            [{"role": "assistant", "content": "[STATE: A → END]"}],
-            [{"role": "assistant", "content": "[STATE: A → END]"}],
-        ]
+        trial = [{"role": "assistant", "content": "[STATE: A → END]"}]
+        trials = [trial] * 5  # 5 stochastic trials as per pass^5 protocol
         assert compute_pass5_consistency(trials, ["END"])
 
     def test_one_trial_fails(self) -> None:
@@ -503,6 +513,32 @@ class TestComputeLatencyMedian:
         assert compute_latency_median([42.0]) == 42.0
 
 
+class TestComputeFullWorkflowSuccess:
+
+    def test_no_chains_not_penalized(self) -> None:
+        # total_chains=0 means workflow has no tool chains — should not penalize
+        state = StateMachineMetrics(task_completion_rate=1.0)
+        tool = ToolCallMetrics(tool_call_f1=1.0)
+        chain = ChainPropagationMetrics(chain_propagation_accuracy=0.0, total_chains=0)
+        result = compute_full_workflow_success(state, tool, chain)
+        assert result == pytest.approx(1.0)
+
+    def test_zero_accuracy_with_chains_penalized(self) -> None:
+        # chain_propagation_accuracy=0.0 with actual chains should yield 0.0 chain_factor
+        state = StateMachineMetrics(task_completion_rate=1.0)
+        tool = ToolCallMetrics(tool_call_f1=1.0)
+        chain = ChainPropagationMetrics(chain_propagation_accuracy=0.0, total_chains=5)
+        result = compute_full_workflow_success(state, tool, chain)
+        assert result == pytest.approx(0.0)
+
+    def test_partial_chain_accuracy(self) -> None:
+        state = StateMachineMetrics(task_completion_rate=1.0)
+        tool = ToolCallMetrics(tool_call_f1=1.0)
+        chain = ChainPropagationMetrics(chain_propagation_accuracy=0.7, total_chains=3)
+        result = compute_full_workflow_success(state, tool, chain)
+        assert result == pytest.approx(1.0)  # 0.7/0.7 = 1.0 factor
+
+
 class TestEvaluateWorkflowQuality:
 
     def test_composite_evaluation(self) -> None:
@@ -511,7 +547,7 @@ class TestEvaluateWorkflowQuality:
             task_completion_rate=0.8,
         )
         tool = ToolCallMetrics(tool_call_f1=0.85)
-        chain = ChainPropagationMetrics(chain_propagation_accuracy=0.75)
+        chain = ChainPropagationMetrics(chain_propagation_accuracy=0.75, total_chains=4)
 
         metrics = evaluate_workflow_quality(
             state, tool, chain, latencies_ms=[100, 200, 150]

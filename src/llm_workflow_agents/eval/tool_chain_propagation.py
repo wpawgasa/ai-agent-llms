@@ -24,11 +24,13 @@ class ChainPropagationMetrics:
 
     chain_propagation_accuracy: float = 0.0  # Target: >=70%
     per_depth_accuracy: dict[int, float] = field(default_factory=dict)
+    total_chains: int = 0  # Number of chain links evaluated; 0 means no chains present
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "chain_propagation_accuracy": self.chain_propagation_accuracy,
             "per_depth_accuracy": self.per_depth_accuracy,
+            "total_chains": self.total_chains,
         }
 
 
@@ -72,7 +74,7 @@ def extract_tool_chains(messages: list[dict[str, Any]]) -> list[ToolChainLink]:
                             tool_name=call.get("name", ""),
                             arguments=call.get("arguments", {}),
                             response=tool_response,
-                            depth=depth,
+                            depth=depth + 1,  # 1-indexed: first call is depth 1
                         )
                     )
                     depth += 1
@@ -83,14 +85,22 @@ def extract_tool_chains(messages: list[dict[str, Any]]) -> list[ToolChainLink]:
 
 
 def _find_next_tool_response(messages: list[dict[str, Any]], start: int) -> dict[str, Any] | None:
-    """Find the next tool response message starting from index."""
+    """Find the next tool response message starting from index.
+
+    Stops at the next assistant message boundary to avoid associating a tool
+    response from a later exchange with the current tool call.
+    """
     for i in range(start, len(messages)):
-        if messages[i].get("role") == "tool":
+        role = messages[i].get("role")
+        if role == "tool":
             content = messages[i].get("content", "")
             try:
                 return json.loads(content)
             except json.JSONDecodeError:
                 return {"raw": content}
+        elif role == "assistant":
+            # Stop searching once a new assistant turn begins
+            break
     return None
 
 
@@ -153,16 +163,20 @@ def evaluate_chain_propagation(
         pred_links = extract_tool_chains(pred.get("messages", []))
         gt_links = extract_tool_chains(gt.get("messages", []))
 
-        # Evaluate consecutive links for value propagation
-        for i in range(1, len(pred_links)):
-            prev = pred_links[i - 1]
-            curr = pred_links[i]
-            depth = min(curr.depth, 4)  # Cap at 4+ for grouping
+        # Evaluate consecutive links: check whether predicted arguments at position i
+        # contain values from the ground-truth previous tool response.
+        # This validates that the model propagates the *correct* values, not just
+        # that it stays internally self-consistent.
+        n_pairs = min(len(pred_links), len(gt_links))
+        for i in range(1, n_pairs):
+            prev_gt = gt_links[i - 1]   # Ground-truth previous tool response
+            curr_pred = pred_links[i]   # Predicted next tool call arguments
+            depth = min(curr_pred.depth, 4)  # Cap at 4+ for grouping
 
             depth_total[depth] = depth_total.get(depth, 0) + 1
             total_chains += 1
 
-            if check_value_propagation(prev.response, curr.arguments):
+            if check_value_propagation(prev_gt.response, curr_pred.arguments):
                 depth_correct[depth] = depth_correct.get(depth, 0) + 1
                 total_correct += 1
 
@@ -173,6 +187,7 @@ def evaluate_chain_propagation(
     metrics = ChainPropagationMetrics(
         chain_propagation_accuracy=total_correct / max(total_chains, 1),
         per_depth_accuracy=per_depth,
+        total_chains=total_chains,
     )
 
     logger.info("chain_propagation_eval_complete", total_chains=total_chains, **metrics.to_dict())

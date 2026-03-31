@@ -84,8 +84,8 @@ def compute_full_workflow_success(
     tool_factor = min(tool.tool_call_f1 / 0.8, 1.0) if tool.tool_call_f1 > 0 else 0.0
     chain_factor = (
         min(chain.chain_propagation_accuracy / 0.7, 1.0)
-        if chain.chain_propagation_accuracy > 0
-        else 1.0  # No chains = not a failure
+        if chain.total_chains > 0
+        else 1.0  # No chains present = not a failure
     )
 
     return completion_factor * tool_factor * chain_factor

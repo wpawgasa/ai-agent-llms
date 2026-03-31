@@ -157,14 +157,16 @@ def check_recovery(messages: list[dict[str, Any]]) -> tuple[int, int]:
                 prev_was_error = True
             else:
                 prev_was_error = False
-        elif msg.get("role") == "assistant" and prev_was_error:
-            # Check if assistant recovered (has a state transition)
-            content = msg.get("content", "")
-            if _STATE_PATTERN.search(content):
-                recoveries += 1
+        elif msg.get("role") == "assistant":
+            if prev_was_error:
+                # Check if assistant recovered (has a state transition)
+                content = msg.get("content", "")
+                if _STATE_PATTERN.search(content):
+                    recoveries += 1
             prev_was_error = False
-        else:
-            prev_was_error = False
+        # user/system messages do not reset prev_was_error — an error from a tool
+        # followed by a user message and then an assistant message is still a
+        # recovery opportunity.
 
     return recoveries, total_errors
 
