@@ -101,12 +101,12 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] Constrained decoding integration (Outlines/XGrammar)
 
 ### Phase 7: Integration & E2E (Weeks 12-14)
-- [ ] Multi-agent orchestrator (`serving/orchestrator.py`)
-- [ ] E2E benchmark (`serving/benchmark_e2e.py`)
-- [ ] Pareto frontier analysis (`analysis/pareto.py`)
-- [ ] Visualization (`analysis/plot_results.py`)
-- [ ] Experiment runner scripts (`scripts/run_exp_*.sh`)
-- [ ] Final integration testing
+- [x] Multi-agent orchestrator (`serving/orchestrator.py`)
+- [x] E2E benchmark (`serving/benchmark_e2e.py`)
+- [x] Pareto frontier analysis (`analysis/pareto.py`)
+- [x] Visualization (`analysis/plot_results.py`)
+- [x] Experiment runner scripts (`scripts/run_exp_*.sh`)
+- [x] Final integration testing
 
 ## Key Architecture Decisions
 

@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv
-          uv pip install pydantic pyyaml structlog pytest pytest-cov numpy scipy
+          uv pip install pydantic pyyaml structlog pytest pytest-cov pytest-asyncio numpy scipy networkx
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run tests with coverage
