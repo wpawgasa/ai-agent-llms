@@ -15,6 +15,7 @@ from llm_workflow_agents.eval.longbench import (
     LONGBENCH_TASKS,
     LongBenchResult,
     LongBenchTaskResult,
+    _compute_edit_similarity,
     _compute_f1,
     _compute_rouge_l,
     _get_task_category,
@@ -107,7 +108,8 @@ class TestComputeF1:
 
     def test_partial_match(self) -> None:
         f1 = _compute_f1("the cat", "the cat sat")
-        # precision = 2/2, recall = 2/3, F1 = 2*(1*2/3)/(1+2/3) = 0.8
+        # pred bag: {the:1, cat:1}, ref bag: {the:1, cat:1, sat:1}
+        # common = 2, precision = 2/2 = 1.0, recall = 2/3, F1 = 0.8
         assert f1 == pytest.approx(0.8, abs=0.01)
 
     def test_no_match(self) -> None:
@@ -118,6 +120,32 @@ class TestComputeF1:
 
     def test_empty_reference(self) -> None:
         assert _compute_f1("some prediction", "") == 0.0
+
+    def test_repeated_tokens_use_bags(self) -> None:
+        # "the the cat" vs "the cat": set-based would give 1.0 (both sets are {the, cat})
+        # bag-based: pred={the:2,cat:1}, ref={the:1,cat:1}, common=2, precision=2/3, recall=2/2
+        f1 = _compute_f1("the the cat", "the cat")
+        assert f1 == pytest.approx(0.8, abs=0.01)  # Not 1.0
+
+
+class TestComputeEditSimilarity:
+
+    def test_identical(self) -> None:
+        assert _compute_edit_similarity("foo bar", "foo bar") == pytest.approx(1.0)
+
+    def test_empty_both(self) -> None:
+        assert _compute_edit_similarity("", "") == pytest.approx(1.0)
+
+    def test_empty_prediction(self) -> None:
+        assert _compute_edit_similarity("", "reference") == 0.0
+
+    def test_empty_reference(self) -> None:
+        assert _compute_edit_similarity("prediction", "") == 0.0
+
+    def test_partial_overlap(self) -> None:
+        # "abcd" vs "abef" — 2 common chars out of 4+4=8 → ratio = 4/8 = 0.5
+        score = _compute_edit_similarity("abcd", "abef")
+        assert 0.0 < score < 1.0
 
 
 class TestComputeRougeL:
@@ -277,6 +305,27 @@ class TestComputeAggregatedAccuracy:
         _compute_aggregated_accuracy(result)
         assert result.overall_accuracy == 0.0
 
+    def test_error_probes_excluded_from_accuracy(self) -> None:
+        # One valid success, one errored probe that should be excluded
+        result = NeedleHaystackResult(
+            probes=[
+                NeedleResult(2048, 0.5, True, probe_error=False),
+                NeedleResult(2048, 0.5, False, probe_error=True),
+            ]
+        )
+        _compute_aggregated_accuracy(result)
+        # Only the non-error probe counts → accuracy = 1.0
+        assert result.overall_accuracy == 1.0
+
+    def test_all_error_probes_gives_zero_accuracy(self) -> None:
+        result = NeedleHaystackResult(
+            probes=[
+                NeedleResult(2048, 0.5, False, probe_error=True),
+            ]
+        )
+        _compute_aggregated_accuracy(result)
+        assert result.overall_accuracy == 0.0
+
 
 class TestNeedleHaystackResult:
 
@@ -313,12 +362,25 @@ class TestModuleImports:
         assert PerplexityResult is not None
         assert compute_perplexity_from_losses is not None
 
+    def test_import_perplexity_entrypoints(self) -> None:
+        from llm_workflow_agents.eval import evaluate_perplexity, evaluate_perplexity_vllm
+        assert evaluate_perplexity is not None
+        assert evaluate_perplexity_vllm is not None
+
     def test_import_longbench(self) -> None:
         from llm_workflow_agents.eval import LongBenchResult, score_task
         assert LongBenchResult is not None
         assert score_task is not None
 
+    def test_import_longbench_entrypoint(self) -> None:
+        from llm_workflow_agents.eval import evaluate_longbench
+        assert evaluate_longbench is not None
+
     def test_import_needle(self) -> None:
         from llm_workflow_agents.eval import NeedleHaystackResult, check_needle_found
         assert NeedleHaystackResult is not None
         assert check_needle_found is not None
+
+    def test_import_needle_entrypoint(self) -> None:
+        from llm_workflow_agents.eval import evaluate_needle_in_haystack
+        assert evaluate_needle_in_haystack is not None

@@ -7,6 +7,8 @@ code completion. Measures quality degradation from quantization.
 
 from __future__ import annotations
 
+import difflib
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,20 +68,51 @@ def _get_task_category(task_name: str) -> str:
 
 
 def _compute_f1(prediction: str, reference: str) -> float:
-    """Compute token-level F1 between prediction and reference."""
-    pred_tokens = set(prediction.lower().split())
-    ref_tokens = set(reference.lower().split())
+    """Compute token-level F1 between prediction and reference.
+
+    Uses token-count bags (Counter) so repeated tokens are handled
+    correctly, matching the standard SQuAD/LongBench evaluation protocol.
+    """
+    pred_tokens = Counter(prediction.lower().split())
+    ref_tokens = Counter(reference.lower().split())
 
     if not pred_tokens or not ref_tokens:
         return 0.0
 
-    common = pred_tokens & ref_tokens
-    if not common:
+    # Intersection of bags: sum of min counts for each token
+    num_common = sum((pred_tokens & ref_tokens).values())
+    if num_common == 0:
         return 0.0
 
-    precision = len(common) / len(pred_tokens)
-    recall = len(common) / len(ref_tokens)
+    precision = num_common / sum(pred_tokens.values())
+    recall = num_common / sum(ref_tokens.values())
     return 2 * precision * recall / (precision + recall)
+
+
+def _compute_edit_similarity(prediction: str, reference: str) -> float:
+    """Compute character-level edit similarity for code tasks.
+
+    Uses difflib.SequenceMatcher ratio, which is appropriate for
+    code completion tasks (lcc, repobench-p) where edit distance
+    better captures partial credit than token overlap.
+    """
+    if not prediction and not reference:
+        return 1.0
+    if not prediction or not reference:
+        return 0.0
+    return difflib.SequenceMatcher(None, prediction, reference).ratio()
+
+
+def _score_single_sample(category: str, pred: str, ref: str) -> float:
+    """Score a single prediction against a single reference string."""
+    if category in ("single_doc_qa", "multi_doc_qa", "few_shot", "synthetic"):
+        return _compute_f1(pred, ref)
+    elif category == "summarization":
+        return _compute_rouge_l(pred, ref)
+    elif category == "code":
+        return _compute_edit_similarity(pred, ref)
+    else:
+        return 1.0 if pred.strip() == ref.strip() else 0.0
 
 
 def _compute_rouge_l(prediction: str, reference: str) -> float:
@@ -134,15 +167,7 @@ def score_task(
 
     scores: list[float] = []
     for pred, ref in zip(predictions, references):
-        if category in ("single_doc_qa", "multi_doc_qa", "few_shot", "synthetic"):
-            scores.append(_compute_f1(pred, ref))
-        elif category == "summarization":
-            scores.append(_compute_rouge_l(pred, ref))
-        elif category == "code":
-            # Edit similarity for code
-            scores.append(_compute_f1(pred, ref))
-        else:
-            scores.append(1.0 if pred.strip() == ref.strip() else 0.0)
+        scores.append(_score_single_sample(category, pred, ref))
 
     return (sum(scores) / len(scores)) * 100.0 if scores else 0.0
 
@@ -238,15 +263,25 @@ def _evaluate_single_task(
     client = openai.OpenAI(base_url=base_url, api_key="unused")
 
     predictions: list[str] = []
-    references: list[str] = []
+    sample_answers: list[list[str]] = []  # Multiple acceptable answers per sample
     total_input_len = 0
 
     for sample in samples:
         context = sample.get("context", "")
         question = sample.get("input", "")
-        reference = sample.get("answers", [""])[0] if isinstance(sample.get("answers"), list) else sample.get("answers", "")
 
-        prompt = f"{context}\n\nQuestion: {question}\nAnswer:"
+        # Collect all acceptable answers for multi-reference scoring
+        raw_answers = sample.get("answers", [""])
+        if isinstance(raw_answers, list):
+            answers = [str(a) for a in raw_answers if a] or [""]
+        else:
+            answers = [str(raw_answers)]
+
+        # Use task-specific prompt format
+        if category == "code":
+            prompt = f"{context}\n\n{question}"
+        else:
+            prompt = f"{context}\n\nQuestion: {question}\nAnswer:"
         total_input_len += len(prompt.split())
 
         response = client.completions.create(
@@ -258,9 +293,15 @@ def _evaluate_single_task(
 
         pred = response.choices[0].text.strip() if response.choices else ""
         predictions.append(pred)
-        references.append(str(reference))
+        sample_answers.append(answers)
 
-    task_score = score_task(task_name, predictions, references)
+    # Compute per-sample max score across all acceptable answers
+    per_sample_scores: list[float] = []
+    for pred, answers in zip(predictions, sample_answers):
+        best = max(_score_single_sample(category, pred, ref) for ref in answers)
+        per_sample_scores.append(best)
+
+    task_score = (sum(per_sample_scores) / len(per_sample_scores)) * 100.0 if per_sample_scores else 0.0
 
     return LongBenchTaskResult(
         task_name=task_name,

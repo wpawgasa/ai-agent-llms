@@ -23,16 +23,19 @@ from llm_workflow_agents.eval.perplexity import (
     PerplexityResult,
     compute_perplexity_from_losses,
     evaluate_perplexity,
+    evaluate_perplexity_vllm,
 )
 from llm_workflow_agents.eval.longbench import (
     LongBenchResult,
     LongBenchTaskResult,
+    evaluate_longbench,
     score_task,
 )
 from llm_workflow_agents.eval.needle_haystack import (
     NeedleHaystackResult,
     NeedleResult,
     check_needle_found,
+    evaluate_needle_in_haystack,
 )
 
 __all__ = [
@@ -50,10 +53,13 @@ __all__ = [
     "PerplexityResult",
     "compute_perplexity_from_losses",
     "evaluate_perplexity",
+    "evaluate_perplexity_vllm",
     "LongBenchResult",
     "LongBenchTaskResult",
+    "evaluate_longbench",
     "score_task",
     "NeedleHaystackResult",
     "NeedleResult",
     "check_needle_found",
+    "evaluate_needle_in_haystack",
 ]

@@ -40,6 +40,7 @@ class NeedleResult:
     needle_found: bool
     model_response: str = ""
     expected_answer: str = ""
+    probe_error: bool = False  # True when the API call failed (not a model miss)
 
 
 @dataclass
@@ -147,6 +148,7 @@ def evaluate_needle_in_haystack(
             haystack = _build_haystack(ctx_len, needle, depth)
             prompt = f"{haystack}\n\n{QUESTION_TEMPLATE}"
 
+            probe_error = False
             try:
                 response = client.completions.create(
                     model=model_path,
@@ -163,6 +165,7 @@ def evaluate_needle_in_haystack(
                     error=str(exc),
                 )
                 model_response = ""
+                probe_error = True
 
             found = check_needle_found(model_response, magic_number)
 
@@ -173,6 +176,7 @@ def evaluate_needle_in_haystack(
                     needle_found=found,
                     model_response=model_response,
                     expected_answer=magic_number,
+                    probe_error=probe_error,
                 )
             )
 
@@ -184,13 +188,18 @@ def evaluate_needle_in_haystack(
 
 
 def _compute_aggregated_accuracy(result: NeedleHaystackResult) -> None:
-    """Compute accuracy breakdowns by context length and depth."""
-    if not result.probes:
+    """Compute accuracy breakdowns by context length and depth.
+
+    Probes where probe_error=True are excluded from accuracy calculations
+    so transient API failures don't deflate model accuracy scores.
+    """
+    valid_probes = [p for p in result.probes if not p.probe_error]
+    if not valid_probes:
         return
 
     # By context length
     len_groups: dict[int, list[bool]] = {}
-    for p in result.probes:
+    for p in valid_probes:
         len_groups.setdefault(p.context_length, []).append(p.needle_found)
     result.accuracy_by_length = {
         k: sum(v) / len(v) for k, v in sorted(len_groups.items())
@@ -198,11 +207,11 @@ def _compute_aggregated_accuracy(result: NeedleHaystackResult) -> None:
 
     # By depth
     depth_groups: dict[float, list[bool]] = {}
-    for p in result.probes:
+    for p in valid_probes:
         depth_groups.setdefault(p.depth_position, []).append(p.needle_found)
     result.accuracy_by_depth = {
         k: sum(v) / len(v) for k, v in sorted(depth_groups.items())
     }
 
     # Overall
-    result.overall_accuracy = sum(p.needle_found for p in result.probes) / len(result.probes)
+    result.overall_accuracy = sum(p.needle_found for p in valid_probes) / len(valid_probes)

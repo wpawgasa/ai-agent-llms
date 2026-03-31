@@ -108,12 +108,14 @@ def evaluate_perplexity_vllm(
 
     all_losses: list[float] = []
     total_tokens = 0
+    num_processed = 0
 
     for text in texts:
         # Truncate to max_model_len tokens approximately (4 chars per token)
         truncated = text[: max_model_len * 4]
         if not truncated.strip():
             continue
+        num_processed += 1
 
         response = client.completions.create(
             model=model_name,
@@ -138,7 +140,7 @@ def evaluate_perplexity_vllm(
         perplexity=ppl,
         avg_neg_log_likelihood=avg_nll,
         num_tokens=total_tokens,
-        num_sequences=len(texts),
+        num_sequences=num_processed,
     )
 
     logger.info("perplexity_complete", **result.to_dict())
@@ -150,6 +152,8 @@ def evaluate_perplexity(
     datasets: list[Literal["wikitext2", "c4"]] | None = None,
     kv_cache_dtype: str = "auto",
     max_samples: int = 500,
+    base_url: str = "http://localhost:8000/v1",
+    max_model_len: int = 2048,
 ) -> dict[str, float]:
     """Evaluate perplexity on multiple datasets.
 
@@ -160,6 +164,8 @@ def evaluate_perplexity(
         datasets: List of datasets to evaluate on.
         kv_cache_dtype: KV cache dtype for logging.
         max_samples: Max samples per dataset.
+        base_url: vLLM server URL.
+        max_model_len: Maximum sequence length for truncation.
 
     Returns:
         Dict mapping dataset name to perplexity value.
@@ -175,6 +181,8 @@ def evaluate_perplexity(
                 dataset_name=ds_name,
                 kv_cache_dtype=kv_cache_dtype,
                 max_samples=max_samples,
+                base_url=base_url,
+                max_model_len=max_model_len,
             )
             results[ds_name] = result.perplexity
         except Exception as exc:
