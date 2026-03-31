@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "92fa59a705a9",
+  "strategy": "manual-commit",
+  "branch": "feature/phase2-training",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "CLAUDE.md",
+    "src/llm_workflow_agents/training/__init__.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/92/fa59a705a9/0/metadata.json",
+      "transcript": "/92/fa59a705a9/0/full.jsonl",
+      "content_hash": "/92/fa59a705a9/0/content_hash.txt",
+      "prompt": "/92/fa59a705a9/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 101,
+    "cache_creation_tokens": 139340,
+    "cache_read_tokens": 7591967,
+    "output_tokens": 60546,
+    "api_call_count": 79
+  }
+}
