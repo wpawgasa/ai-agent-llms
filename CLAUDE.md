@@ -72,10 +72,10 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] Data validation and chat template converter
 
 ### Phase 2: Training (Weeks 3-4)
-- [ ] LoRA target module registry (`training/lora_targets.py`)
-- [ ] Unified SFTTrainer entry point (`training/train_specialist.py`)
-- [ ] Graph extraction trainer (`training/train_graph_extractor.py`)
-- [ ] Adapter merge utility (`training/merge_adapter.py`)
+- [x] LoRA target module registry (`training/lora_targets.py`)
+- [x] Unified SFTTrainer entry point (`training/train_specialist.py`)
+- [x] Graph extraction trainer (`training/train_graph_extractor.py`)
+- [x] Adapter merge utility (`training/merge_adapter.py`)
 
 ### Phase 3: Experiment A Evaluation (Weeks 5-6)
 - [ ] State machine accuracy eval (`eval/state_accuracy.py`)
