@@ -26,11 +26,12 @@ from llm_workflow_agents.training.lora_targets import (
     get_lora_target_spec,
     get_trainable_param_summary,
 )
+from llm_workflow_agents.training._utils import _build_training_arguments
 from llm_workflow_agents.training.train_specialist import (
     TrainingResult,
     _build_peft_config,
-    _build_training_arguments,
     _freeze_modules,
+    _load_datasets,
 )
 from llm_workflow_agents.training.train_graph_extractor import (
     GRAPH_EXTRACTION_SYSTEM_PROMPT,
@@ -166,7 +167,7 @@ class TestGetLoRATargetSpec:
             model_name="Qwen/Qwen2.5-3B-Instruct",
             explicit_targets=["custom_proj"],
         )
-        assert spec.target_modules == ["custom_proj"]
+        assert spec.target_modules == ("custom_proj",)
 
     def test_model_specific_registry(self) -> None:
         spec = get_lora_target_spec(model_name="Qwen/Qwen2.5-3B-Instruct")
@@ -182,7 +183,7 @@ class TestGetLoRATargetSpec:
 
     def test_no_match_returns_empty(self) -> None:
         spec = get_lora_target_spec(model_name="totally/unknown-model")
-        assert spec.target_modules == []
+        assert spec.target_modules == ()
 
     def test_glm_returns_warnings(self) -> None:
         spec = get_lora_target_spec(model_name="THUDM/glm-4-9b-chat")
@@ -410,6 +411,239 @@ class TestMergeAdapter:
                 adapter_path=tmp_path / "nonexistent",
                 output_path=tmp_path / "output",
             )
+
+
+# --- Merge Adapter Happy Path Tests ---
+
+
+class TestMergeAdapterHappyPath:
+    """Tests for merge_and_export success path and hub_repo_id validation.
+
+    Heavy deps (peft, transformers) are mocked via sys.modules so these tests
+    run without GPU or installed heavy packages.
+    """
+
+    def _mock_heavy_modules(self, mock_model: MagicMock, mock_tokenizer: MagicMock) -> dict:
+        """Return a sys.modules patch dict that stubs peft and transformers."""
+        mock_peft_model_instance = MagicMock()
+        mock_peft_model_instance.merge_and_unload.return_value = mock_model
+
+        mock_peft = MagicMock()
+        mock_peft.PeftModel.from_pretrained.return_value = mock_peft_model_instance
+
+        mock_transformers = MagicMock()
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = MagicMock()
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
+
+        return {"peft": mock_peft, "transformers": mock_transformers}
+
+    def test_merge_and_export_success(self, tmp_path: Path) -> None:
+        adapter_path = tmp_path / "adapter"
+        adapter_path.mkdir()
+        output_path = tmp_path / "merged"
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        with patch.dict("sys.modules", self._mock_heavy_modules(mock_model, mock_tokenizer)):
+            result = merge_and_export(
+                base_model="test/base",
+                adapter_path=adapter_path,
+                output_path=output_path,
+            )
+
+        assert result == output_path
+        mock_model.save_pretrained.assert_called_once_with(str(output_path))
+        mock_tokenizer.save_pretrained.assert_called_once_with(str(output_path))
+
+    def test_push_to_hub_requires_hub_repo_id(self, tmp_path: Path) -> None:
+        adapter_path = tmp_path / "adapter"
+        adapter_path.mkdir()
+        with pytest.raises(ValueError, match="hub_repo_id is required"):
+            merge_and_export(
+                base_model="test/base",
+                adapter_path=adapter_path,
+                output_path=tmp_path / "merged",
+                push_to_hub=True,
+            )
+
+    def test_push_to_hub_uses_repo_id(self, tmp_path: Path) -> None:
+        adapter_path = tmp_path / "adapter"
+        adapter_path.mkdir()
+        output_path = tmp_path / "merged"
+
+        mock_model = MagicMock()
+        mock_tokenizer = MagicMock()
+
+        with patch.dict("sys.modules", self._mock_heavy_modules(mock_model, mock_tokenizer)):
+            merge_and_export(
+                base_model="test/base",
+                adapter_path=adapter_path,
+                output_path=output_path,
+                push_to_hub=True,
+                hub_repo_id="myorg/my-model",
+            )
+
+        mock_model.push_to_hub.assert_called_once_with("myorg/my-model")
+        mock_tokenizer.push_to_hub.assert_called_once_with("myorg/my-model")
+
+
+# --- GLM OOM Fallback Tests ---
+
+
+class TestGLMOOMFallback:
+    """Tests for GLM rank fallback on out-of-memory errors.
+
+    transformers and trl are mocked via sys.modules so tests run without
+    those packages installed.
+    """
+
+    def test_glm_falls_back_to_rank_32_on_oom(
+        self, glm_training_config: TrainingModelConfig, tmp_path: Path
+    ) -> None:
+        from llm_workflow_agents.training.train_specialist import train_from_config
+
+        call_count = {"n": 0}
+
+        def mock_load(config: TrainingModelConfig, lora_rank: int | None = None) -> tuple:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("CUDA out of memory")
+            mock_model = MagicMock()
+            mock_model.parameters.return_value = []
+            return mock_model, MagicMock()
+
+        mock_trainer = MagicMock()
+        mock_trainer.train.return_value = MagicMock(global_step=10, metrics={"train_loss": 0.5})
+        mock_trainer.evaluate.return_value = {"eval_loss": 0.4}
+
+        mock_trl = MagicMock()
+        mock_trl.SFTTrainer.return_value = mock_trainer
+
+        with (
+            patch.dict("sys.modules", {"transformers": MagicMock(), "trl": mock_trl}),
+            patch("llm_workflow_agents.training.train_specialist._load_and_prepare_model", side_effect=mock_load),
+            patch("llm_workflow_agents.training.train_specialist._load_datasets", return_value=(MagicMock(), MagicMock())),
+            patch("torch.cuda.empty_cache"),
+        ):
+            result = train_from_config(glm_training_config, output_dir=tmp_path)
+
+        assert result.error is None
+        assert call_count["n"] == 2  # first call OOMed, second succeeded
+
+    def test_glm_oom_on_all_ranks_returns_error(
+        self, glm_training_config: TrainingModelConfig, tmp_path: Path
+    ) -> None:
+        from llm_workflow_agents.training.train_specialist import train_from_config
+
+        def always_oom(config: TrainingModelConfig, lora_rank: int | None = None) -> tuple:
+            raise RuntimeError("CUDA out of memory")
+
+        with (
+            patch.dict("sys.modules", {"transformers": MagicMock(), "trl": MagicMock()}),
+            patch("llm_workflow_agents.training.train_specialist._load_and_prepare_model", side_effect=always_oom),
+            patch("torch.cuda.empty_cache"),
+        ):
+            result = train_from_config(glm_training_config, output_dir=tmp_path)
+
+        assert result.error is not None
+        assert "OOM" in result.error
+
+
+# --- _load_datasets Tests ---
+
+
+def _make_config_with_sources(sources: list[str]) -> TrainingModelConfig:
+    """Build a minimal TrainingModelConfig with specific data sources."""
+    from llm_workflow_agents.config.schema import TrainingDataConfig
+
+    return TrainingModelConfig(
+        model=ModelConfig(
+            name="Qwen/Qwen2.5-3B-Instruct",
+            family=ModelFamily.QWEN,
+            params_total=3_000_000_000,
+        ),
+        training=TrainingConfig(
+            training_data=TrainingDataConfig(sources=sources),
+        ),
+    )
+
+
+class TestLoadDatasets:
+    """Tests for the _load_datasets helper.
+
+    `datasets` is mocked via sys.modules so these tests run without the package.
+    """
+
+    def _datasets_mock(self, load_fn: MagicMock) -> MagicMock:
+        """Build a mock `datasets` module with a given load_dataset side effect."""
+        mock_mod = MagicMock()
+        mock_mod.load_dataset = load_fn
+        return mock_mod
+
+    def test_load_from_hf_hub_with_train_test_splits(self) -> None:
+        config = _make_config_with_sources(["some_hf_dataset"])
+        mock_train = MagicMock()
+        mock_test = MagicMock()
+
+        mock_load = MagicMock(return_value={"train": mock_train, "test": mock_test})
+        with patch.dict("sys.modules", {"datasets": self._datasets_mock(mock_load)}):
+            train_ds, eval_ds = _load_datasets(config)
+
+        assert train_ds is mock_train
+        assert eval_ds is mock_test
+
+    def test_load_from_hf_hub_train_only_splits(self) -> None:
+        config = _make_config_with_sources(["some_hf_dataset"])
+        mock_split_train = MagicMock()
+        mock_split_test = MagicMock()
+        mock_inner = MagicMock()
+        mock_inner.train_test_split.return_value = {"train": mock_split_train, "test": mock_split_test}
+
+        mock_load = MagicMock(return_value={"train": mock_inner})
+        with patch.dict("sys.modules", {"datasets": self._datasets_mock(mock_load)}):
+            train_ds, eval_ds = _load_datasets(config)
+
+        assert train_ds is mock_split_train
+        assert eval_ds is mock_split_test
+
+    def test_falls_back_to_local_jsonl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = _make_config_with_sources([])  # empty sources → skip hub, go to local
+        exp_b_dir = tmp_path / "data" / "output" / "exp_b"
+        exp_b_dir.mkdir(parents=True)
+        (exp_b_dir / "train.jsonl").write_text('{"text": "hi"}\n')
+        (exp_b_dir / "val.jsonl").write_text('{"text": "there"}\n')
+
+        mock_local_train = MagicMock()
+        mock_local_val = MagicMock()
+
+        call_count = {"n": 0}
+
+        def mock_load(source: str, *args: object, **kwargs: object) -> object:
+            call_count["n"] += 1
+            return mock_local_train if call_count["n"] == 1 else mock_local_val
+
+        monkeypatch.chdir(tmp_path)
+        with patch.dict("sys.modules", {"datasets": self._datasets_mock(mock_load)}):
+            train_ds, eval_ds = _load_datasets(config)
+
+        assert train_ds is mock_local_train
+        assert eval_ds is mock_local_val
+
+    def test_raises_when_no_data_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = _make_config_with_sources([])  # no sources, no local files
+        monkeypatch.chdir(tmp_path)
+
+        mock_load = MagicMock(side_effect=OSError("not found"))
+        with (
+            patch.dict("sys.modules", {"datasets": self._datasets_mock(mock_load)}),
+            pytest.raises(FileNotFoundError, match="No training data found"),
+        ):
+            _load_datasets(config)
 
 
 # --- Module Import Tests ---

@@ -16,7 +16,12 @@ import structlog
 
 from llm_workflow_agents.config.loader import load_training_model_config
 from llm_workflow_agents.config.schema import TrainingModelConfig
-from llm_workflow_agents.training.train_specialist import TrainingResult, _load_and_prepare_model
+from llm_workflow_agents.training._utils import _build_training_arguments
+from llm_workflow_agents.training.train_specialist import (
+    TrainingResult,
+    _GLM_OOM_FALLBACK_RANK,
+    _load_and_prepare_model,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -84,7 +89,6 @@ def train_graph_extractor_from_config(
     from trl import SFTTrainer
 
     from llm_workflow_agents.training.lora_targets import get_trainable_param_summary
-    from llm_workflow_agents.training.train_specialist import _build_training_arguments
 
     if output_dir is None:
         model_short = config.model.name.split("/")[-1].lower().replace("-", "_")
@@ -93,13 +97,40 @@ def train_graph_extractor_from_config(
 
     result = TrainingResult()
 
-    # Load model with LoRA
-    try:
-        model, tokenizer = _load_and_prepare_model(config)
-        result.param_summary = get_trainable_param_summary(model)
-    except RuntimeError as exc:
-        result.error = f"Failed to load model: {exc}"
-        logger.error("model_load_failed", error=result.error)
+    # Determine LoRA ranks to try (VRAM fallback for GLM — Risk R7)
+    is_glm = "glm" in config.model.name.lower()
+    if is_glm and config.lora.rank > _GLM_OOM_FALLBACK_RANK:
+        logger.warning(
+            "glm_oom_fallback_enabled",
+            configured_rank=config.lora.rank,
+            fallback_rank=_GLM_OOM_FALLBACK_RANK,
+            reason="GLM VRAM constraint (Risk R7) — will retry at fallback rank on OOM",
+        )
+        ranks_to_try = [config.lora.rank, _GLM_OOM_FALLBACK_RANK]
+    else:
+        ranks_to_try = [config.lora.rank]
+
+    model = None
+    tokenizer = None
+
+    for rank in ranks_to_try:
+        try:
+            logger.info("attempting_training", model=config.model.name, lora_rank=rank)
+            model, tokenizer = _load_and_prepare_model(config, lora_rank=rank)
+            result.param_summary = get_trainable_param_summary(model)
+            break
+        except RuntimeError as exc:
+            if "out of memory" in str(exc).lower() and rank != ranks_to_try[-1]:
+                logger.warning("oom_fallback", rank=rank, next_rank=ranks_to_try[-1])
+                import torch
+                torch.cuda.empty_cache()
+                continue
+            result.error = f"OOM even at rank {rank}: {exc}"
+            logger.error("training_failed_oom", error=result.error)
+            return result
+
+    if model is None:
+        result.error = "Failed to load model"
         return result
 
     # Load graph datasets
@@ -109,6 +140,20 @@ def train_graph_extractor_from_config(
         result.error = str(exc)
         logger.error("dataset_not_found", error=result.error)
         return result
+
+    # Prepend system prompt to every training example so the model learns
+    # to produce JSON graphs given the structured extraction instruction.
+    def _prepend_system_prompt(example: dict) -> dict:
+        if "messages" in example:
+            example = dict(example)
+            example["messages"] = [
+                {"role": "system", "content": GRAPH_EXTRACTION_SYSTEM_PROMPT},
+                *example["messages"],
+            ]
+        return example
+
+    train_dataset = train_dataset.map(_prepend_system_prompt)
+    eval_dataset = eval_dataset.map(_prepend_system_prompt)
 
     # Build training arguments
     training_args_kwargs = _build_training_arguments(config, output_dir)

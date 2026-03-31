@@ -18,6 +18,7 @@ def merge_and_export(
     adapter_path: Path,
     output_path: Path,
     push_to_hub: bool = False,
+    hub_repo_id: str | None = None,
     torch_dtype: str = "bfloat16",
 ) -> Path:
     """Load base model + LoRA adapter, merge, and save.
@@ -27,6 +28,8 @@ def merge_and_export(
         adapter_path: Path to the LoRA adapter directory.
         output_path: Path to save the merged model.
         push_to_hub: Whether to push to HuggingFace Hub.
+        hub_repo_id: Hub repo ID of the form ``"org/repo-name"``. Required
+            when ``push_to_hub=True``.
         torch_dtype: Torch dtype string ("bfloat16" or "float16").
 
     Returns:
@@ -34,8 +37,11 @@ def merge_and_export(
 
     Raises:
         FileNotFoundError: If adapter_path does not exist.
+        ValueError: If push_to_hub is True but hub_repo_id is not provided.
         RuntimeError: If merge fails.
     """
+    if push_to_hub and not hub_repo_id:
+        raise ValueError("hub_repo_id is required when push_to_hub=True (expected 'org/repo-name')")
     if not adapter_path.exists():
         raise FileNotFoundError(f"Adapter not found: {adapter_path}")
 
@@ -79,8 +85,8 @@ def merge_and_export(
 
     # Optionally push to hub
     if push_to_hub:
-        logger.info("pushing_to_hub", output=str(output_path))
-        model.push_to_hub(str(output_path.name))
-        tokenizer.push_to_hub(str(output_path.name))
+        logger.info("pushing_to_hub", repo_id=hub_repo_id)
+        model.push_to_hub(hub_repo_id)
+        tokenizer.push_to_hub(hub_repo_id)
 
     return output_path

@@ -18,65 +18,69 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(frozen=True)
 class LoRATargetSpec:
-    """Specification for LoRA target modules of a model."""
+    """Specification for LoRA target modules of a model.
 
-    target_modules: list[str]
-    modules_to_freeze: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    All sequence fields are tuples to preserve true immutability with frozen=True.
+    (Lists inside a frozen dataclass can still be mutated; tuples cannot.)
+    """
+
+    target_modules: tuple[str, ...]
+    modules_to_freeze: tuple[str, ...] = field(default_factory=tuple)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
 # --- Registry ---
 
 LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
     "qwen25_3b": LoRATargetSpec(
-        target_modules=[
+        target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
-        ],
+        ),
     ),
     "qwen35_4b": LoRATargetSpec(
-        target_modules=[
+        target_modules=(
             # Standard attention
             "q_proj", "k_proj", "v_proj", "o_proj",
             # DeltaNet layers
             "in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj",
             # MLP
             "gate_proj", "up_proj", "down_proj",
-        ],
-        warnings=["QLoRA degrades hybrid DeltaNet architecture"],
+        ),
+        warnings=("QLoRA degrades hybrid DeltaNet architecture",),
     ),
     "glm47_flash": LoRATargetSpec(
-        target_modules=[
+        target_modules=(
             # MLA attention
             "q_a_proj", "q_b_proj", "kv_a_proj_with_mqa", "kv_b_proj", "o_proj",
             # Shared experts
             "shared_experts.gate_proj", "shared_experts.up_proj",
             "shared_experts.down_proj",
-        ],
-        modules_to_freeze=["mlp.gate"],
-        warnings=["~60GB VRAM for BF16 LoRA — may need Unsloth MoE kernels or rank=32"],
+        ),
+        modules_to_freeze=("mlp.gate",),
+        warnings=("~60GB VRAM for BF16 LoRA — may need Unsloth MoE kernels or rank=32",),
     ),
     "gemma_2b": LoRATargetSpec(
-        target_modules=[
+        target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
-        ],
+        ),
     ),
     "gemma3_4b": LoRATargetSpec(
-        target_modules=[
+        target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
-        ],
+        ),
     ),
 }
 
 # Model family to default target modules (fallback when specific model not in registry)
-_FAMILY_DEFAULTS: dict[ModelFamily, list[str]] = {
-    ModelFamily.QWEN: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    ModelFamily.GEMMA: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    ModelFamily.MISTRAL: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    ModelFamily.NEMOTRON: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    ModelFamily.GLM: ["q_a_proj", "q_b_proj", "kv_a_proj_with_mqa", "kv_b_proj", "o_proj"],
+_FAMILY_DEFAULTS: dict[ModelFamily, tuple[str, ...]] = {
+    ModelFamily.QWEN: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
+    ModelFamily.GEMMA: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
+    ModelFamily.MISTRAL: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
+    ModelFamily.NEMOTRON: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
+    ModelFamily.GLM: ("q_a_proj", "q_b_proj", "kv_a_proj_with_mqa", "kv_b_proj", "o_proj"),
 }
 
 # Model name pattern matching (HF model ID substring -> registry key)
@@ -121,7 +125,7 @@ def get_lora_target_spec(
     # Priority 1: explicit config
     if explicit_targets:
         logger.debug("using_explicit_lora_targets", count=len(explicit_targets))
-        return LoRATargetSpec(target_modules=explicit_targets)
+        return LoRATargetSpec(target_modules=tuple(explicit_targets))
 
     # Priority 2: model-specific registry
     model_key = detect_model_key(model_name)
@@ -138,7 +142,7 @@ def get_lora_target_spec(
 
     # No match — return empty (PEFT auto-detection)
     logger.warning("no_lora_targets_found", model=model_name)
-    return LoRATargetSpec(target_modules=[])
+    return LoRATargetSpec(target_modules=())
 
 
 def get_trainable_param_summary(model: Any) -> dict[str, Any]:

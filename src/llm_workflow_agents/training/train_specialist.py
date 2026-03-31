@@ -23,12 +23,13 @@ import structlog
 
 from llm_workflow_agents.config.loader import load_training_model_config
 from llm_workflow_agents.config.schema import TrainingModelConfig
+from llm_workflow_agents.training._utils import _build_training_arguments
 from llm_workflow_agents.training.lora_targets import get_lora_target_spec, get_trainable_param_summary
 
 logger = structlog.get_logger(__name__)
 
-# GLM VRAM fallback ranks (R7 risk mitigation)
-_GLM_FALLBACK_RANKS = [64, 32]
+# GLM VRAM fallback rank (R7 risk mitigation) — used when configured rank > this
+_GLM_OOM_FALLBACK_RANK = 32
 
 
 @dataclass
@@ -69,45 +70,6 @@ def _build_peft_config(config: TrainingModelConfig) -> dict[str, Any]:
         peft_kwargs["modules_to_save"] = config.lora.modules_to_save
 
     return peft_kwargs
-
-
-def _build_training_arguments(config: TrainingModelConfig, output_dir: Path) -> dict[str, Any]:
-    """Build HuggingFace TrainingArguments kwargs from config."""
-    micro_batch_size = config.training.effective_batch_size // config.training.gradient_accumulation_steps
-
-    args_kwargs: dict[str, Any] = {
-        "output_dir": str(output_dir),
-        "per_device_train_batch_size": micro_batch_size,
-        "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
-        "learning_rate": config.training.learning_rate,
-        "lr_scheduler_type": config.training.lr_scheduler,
-        "warmup_ratio": config.training.warmup_ratio,
-        "num_train_epochs": config.training.num_epochs,
-        "max_seq_length": config.training.max_seq_length,
-        "logging_steps": 10,
-        "save_strategy": config.training.save_strategy,
-        "save_steps": config.training.save_steps,
-        "eval_strategy": "steps",
-        "eval_steps": config.training.eval_steps,
-        "load_best_model_at_end": True,
-        "metric_for_best_model": config.training.metric_for_best_model,
-        "greater_is_better": False,
-        "report_to": "wandb",
-        "remove_unused_columns": False,
-        "gradient_checkpointing": config.training.gradient_checkpointing,
-    }
-
-    # Precision
-    if config.training.mixed_precision == "bf16":
-        args_kwargs["bf16"] = True
-    elif config.training.mixed_precision == "fp16":
-        args_kwargs["fp16"] = True
-
-    # Gradient checkpointing kwargs
-    if config.training.gradient_checkpointing:
-        args_kwargs["gradient_checkpointing_kwargs"] = {"use_reentrant": False}
-
-    return args_kwargs
 
 
 def _freeze_modules(model: Any, patterns: list[str]) -> int:
@@ -210,7 +172,7 @@ def _load_datasets(config: TrainingModelConfig) -> tuple[Any, Any]:
                 )
                 return split_ds["train"], split_ds["test"]
         except Exception:
-            logger.warning("dataset_load_failed", source=source)
+            logger.warning("dataset_load_failed", source=source, exc_info=True)
             continue
 
     # Fallback: try loading from local JSONL
@@ -262,9 +224,19 @@ def train_from_config(
 
     result = TrainingResult()
 
-    # Determine LoRA ranks to try (VRAM fallback for GLM — Risk R7)
+    # Determine LoRA ranks to try (VRAM fallback for GLM — Risk R7).
+    # Always start from the user-configured rank; only append fallback if GLM and rank > fallback.
     is_glm = "glm" in config.model.name.lower()
-    ranks_to_try = _GLM_FALLBACK_RANKS if is_glm else [config.lora.rank]
+    if is_glm and config.lora.rank > _GLM_OOM_FALLBACK_RANK:
+        logger.warning(
+            "glm_oom_fallback_enabled",
+            configured_rank=config.lora.rank,
+            fallback_rank=_GLM_OOM_FALLBACK_RANK,
+            reason="GLM VRAM constraint (Risk R7) — will retry at fallback rank on OOM",
+        )
+        ranks_to_try = [config.lora.rank, _GLM_OOM_FALLBACK_RANK]
+    else:
+        ranks_to_try = [config.lora.rank]
 
     model = None
     tokenizer = None
@@ -322,12 +294,11 @@ def train_from_config(
     result.checkpoint_path = output_dir / "best"
     result.total_steps = train_output.global_step
     result.metrics = train_output.metrics
-    result.best_eval_loss = train_output.metrics.get("train_loss")
 
     # Run final evaluation
     eval_metrics = trainer.evaluate()
     result.metrics.update(eval_metrics)
-    result.best_eval_loss = eval_metrics.get("eval_loss", result.best_eval_loss)
+    result.best_eval_loss = eval_metrics.get("eval_loss")
 
     logger.info(
         "training_complete",
