@@ -84,6 +84,12 @@ class MultiAgentOrchestrator:
                     for spec in self.specialist_configs:
                         if spec.get("tag") == specialist_tag or spec.get("model_name") == specialist_tag:
                             return spec["model_name"], spec.get("lora_adapter")
+                    logger.warning(
+                        "specialist_not_found",
+                        state=state,
+                        specialist_tag=specialist_tag,
+                        fallback=self.orchestrator_model,
+                    )
         return self.orchestrator_model, None
 
     def _extract_state_transitions(self, content: str) -> list[dict[str, str]]:
@@ -195,6 +201,9 @@ class MultiAgentOrchestrator:
                     model=model_name,
                     latency_ms=round(elapsed_ms, 2),
                 )
+
+                if current_state in terminal_states:
+                    break
 
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0

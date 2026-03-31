@@ -88,6 +88,11 @@ print(c['model']['name'])
         fi
         sleep 5
     done
+    if ! curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+        echo "ERROR: vLLM server failed to start within 300s for $MODEL_NAME" >&2
+        kill "$VLLM_PID" 2>/dev/null || true
+        exit 1
+    fi
 
     # Run graph extraction evaluation (with constrained JSON decoding)
     RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}.json"

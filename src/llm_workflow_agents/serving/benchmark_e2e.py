@@ -13,6 +13,7 @@ Expected concurrency at 4096-token context (from spec):
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import subprocess
 import time
 from dataclasses import dataclass
@@ -66,6 +67,24 @@ def _read_peak_vram_gb() -> float:
         return 0.0
 
 
+def _run_async(coro: Any) -> Any:
+    """Run an async coroutine from a sync context.
+
+    Falls back to a thread executor when called from inside an already-running
+    event loop (e.g. Jupyter, async test runners, or ``run_workflow``), where
+    a bare ``asyncio.run()`` would raise ``RuntimeError: This event loop is
+    already running``.
+    """
+    try:
+        asyncio.get_running_loop()
+        # Already inside a running loop — execute in a fresh thread with its
+        # own event loop to avoid nesting.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
 def _compute_p95(latencies: list[float]) -> float:
     """Compute P95 latency from a sorted or unsorted list."""
     if not latencies:
@@ -92,9 +111,11 @@ async def _run_concurrent_requests(
                 max_tokens=64,
                 temperature=0.0,
             )
+            return (time.perf_counter() - t0) * 1000.0
         except Exception:
-            pass
-        return (time.perf_counter() - t0) * 1000.0
+            # Return inf so failed requests are not counted as fast responses,
+            # which would skew P95 downward and mask real errors under load.
+            return float("inf")
 
     tasks = [_single_request() for _ in range(num_concurrent)]
     return await asyncio.gather(*tasks)
@@ -107,7 +128,7 @@ def benchmark_concurrency(
     base_url: str = "http://localhost:8000/v1",
     latency_threshold_ms: float = 10_000.0,
     max_search_concurrency: int = 1024,
-    task_completion_rate: float = 0.0,
+    task_completion_rate: float | None = None,
 ) -> BenchmarkResult:
     """Benchmark maximum concurrency for a model + quantization combination.
 
@@ -122,10 +143,16 @@ def benchmark_concurrency(
         latency_threshold_ms: P95 latency ceiling for concurrency search.
         max_search_concurrency: Upper bound for binary search.
         task_completion_rate: Task completion rate from eval (passed in, not measured here).
+            Must be provided explicitly; ``None`` will raise ``AssertionError``
+            so callers are reminded to supply the value.
 
     Returns:
         BenchmarkResult with measured concurrency and latency statistics.
     """
+    assert task_completion_rate is not None, (
+        "task_completion_rate must be provided; it is not measured by this function"
+    )
+
     import openai
 
     client = openai.AsyncOpenAI(base_url=base_url, api_key="unused")
@@ -148,7 +175,7 @@ def benchmark_concurrency(
 
     while lo <= hi:
         mid = (lo + hi) // 2
-        latencies = asyncio.run(
+        latencies = _run_async(
             _run_concurrent_requests(client, model_name, prompt, mid)
         )
         p95 = _compute_p95(latencies)
@@ -219,12 +246,15 @@ def compute_pareto_frontier(
     ]
 
     frontier_points = find_pareto_frontier(points, maximize=maximize, minimize=minimize)
-    frontier_names = {p.config_name for p in frontier_points}
+    # Use object identity (id) rather than config_name to filter, so duplicate
+    # config names (e.g. two runs of the same model+dtype+context) are handled
+    # correctly — only the specific ParetoPoint objects on the frontier are kept.
+    frontier_ids = {id(p) for p in frontier_points}
 
     pareto_results = [
         r
         for r, p in zip(results, points)
-        if p.config_name in frontier_names
+        if id(p) in frontier_ids
     ]
 
     logger.info(

@@ -440,3 +440,214 @@ class TestModuleImports:
         from llm_workflow_agents.analysis import ParetoPoint, find_pareto_frontier
         assert ParetoPoint is not None
         assert find_pareto_frontier is not None
+
+
+# ============================================================
+# _select_model Tests
+# ============================================================
+
+
+class TestSelectModel:
+
+    def _make_orch(self, specialists: list | None = None) -> MultiAgentOrchestrator:
+        return MultiAgentOrchestrator(
+            {"model_name": "orchestrator-model"},
+            specialists or [],
+        )
+
+    def test_no_matching_node_returns_orchestrator(self) -> None:
+        orch = self._make_orch()
+        model, adapter = orch._select_model("UNKNOWN_STATE", {"nodes": []})
+        assert model == "orchestrator-model"
+        assert adapter is None
+
+    def test_node_without_specialist_tag_returns_orchestrator(self) -> None:
+        orch = self._make_orch()
+        graph = {"nodes": [{"id": "INTAKE"}]}
+        model, adapter = orch._select_model("INTAKE", graph)
+        assert model == "orchestrator-model"
+        assert adapter is None
+
+    def test_specialist_selected_by_tag(self) -> None:
+        specs = [{"model_name": "billing-model", "tag": "billing", "lora_adapter": "billing-lora"}]
+        orch = self._make_orch(specs)
+        graph = {"nodes": [{"id": "BILLING", "specialist": "billing"}]}
+        model, adapter = orch._select_model("BILLING", graph)
+        assert model == "billing-model"
+        assert adapter == "billing-lora"
+
+    def test_specialist_selected_by_model_name(self) -> None:
+        specs = [{"model_name": "routing-model", "tag": "other"}]
+        orch = self._make_orch(specs)
+        graph = {"nodes": [{"id": "ROUTE", "specialist": "routing-model"}]}
+        model, adapter = orch._select_model("ROUTE", graph)
+        assert model == "routing-model"
+
+    def test_missing_specialist_falls_back_and_warns(self) -> None:
+        """State has a specialist tag but no matching config — falls back with warning."""
+        orch = self._make_orch(specialists=[])
+        graph = {"nodes": [{"id": "S", "specialist": "nonexistent"}]}
+        model, adapter = orch._select_model("S", graph)
+        assert model == "orchestrator-model"
+        assert adapter is None
+
+    def test_specialist_lora_adapter_none_when_missing(self) -> None:
+        specs = [{"model_name": "m", "tag": "t"}]  # no lora_adapter key
+        orch = self._make_orch(specs)
+        graph = {"nodes": [{"id": "X", "specialist": "t"}]}
+        _, adapter = orch._select_model("X", graph)
+        assert adapter is None
+
+
+# ============================================================
+# _extract_tool_calls Tests
+# ============================================================
+
+
+class TestExtractToolCalls:
+
+    def test_no_tool_calls_returns_empty(self) -> None:
+        orch = MultiAgentOrchestrator({"model_name": "m"}, [])
+        msg = MagicMock()
+        msg.tool_calls = None
+        assert orch._extract_tool_calls(msg) == []
+
+    def test_tool_calls_extracted(self) -> None:
+        orch = MultiAgentOrchestrator({"model_name": "m"}, [])
+        tc = MagicMock()
+        tc.id = "call_1"
+        tc.function.name = "search"
+        tc.function.arguments = '{"query": "test"}'
+        msg = MagicMock()
+        msg.tool_calls = [tc]
+        calls = orch._extract_tool_calls(msg)
+        assert len(calls) == 1
+        assert calls[0]["name"] == "search"
+        assert calls[0]["id"] == "call_1"
+
+    def test_message_without_tool_calls_attr(self) -> None:
+        orch = MultiAgentOrchestrator({"model_name": "m"}, [])
+
+        class NoAttr:
+            pass
+
+        assert orch._extract_tool_calls(NoAttr()) == []
+
+
+# ============================================================
+# _compute_p95 Tests
+# ============================================================
+
+
+class TestComputeP95:
+    from llm_workflow_agents.serving.benchmark_e2e import _compute_p95 as _p95
+
+    def test_empty_returns_zero(self) -> None:
+        from llm_workflow_agents.serving.benchmark_e2e import _compute_p95
+        assert _compute_p95([]) == 0.0
+
+    def test_single_element(self) -> None:
+        from llm_workflow_agents.serving.benchmark_e2e import _compute_p95
+        assert _compute_p95([42.0]) == pytest.approx(42.0)
+
+    def test_typical_list(self) -> None:
+        from llm_workflow_agents.serving.benchmark_e2e import _compute_p95
+        lats = list(range(1, 101))  # 1..100
+        p95 = _compute_p95(lats)
+        # idx = max(0, int(100*0.95)-1) = max(0, 94) = 94 → sorted_lats[94] = 95
+        assert p95 == pytest.approx(95.0)
+
+    def test_inf_values_included(self) -> None:
+        """Failed requests returning inf are not silently ignored."""
+        from llm_workflow_agents.serving.benchmark_e2e import _compute_p95
+        lats = [100.0] * 95 + [float("inf")] * 5
+        p95 = _compute_p95(lats)
+        # 95th percentile of a list that has inf values should be inf or 100
+        # idx = max(0, int(100*0.95)-1) = 94 → sorted_lats[94] = 100.0
+        assert p95 == pytest.approx(100.0)
+
+
+# ============================================================
+# Orchestrator early exit on terminal state
+# ============================================================
+
+
+class TestOrchestratorEarlyExit:
+
+    @pytest.mark.asyncio
+    async def test_stops_after_terminal_state(self) -> None:
+        """Workflow loop should stop processing turns once terminal state is reached."""
+        import sys
+
+        call_count = 0
+
+        async def _mock_create(**kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            msg = MagicMock()
+            msg.content = "[STATE: INTAKE -> RESOLVED]"
+            msg.tool_calls = None
+            choice = MagicMock()
+            choice.message = msg
+            resp = MagicMock()
+            resp.choices = [choice]
+            return resp
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = _mock_create
+        mock_openai = MagicMock()
+        mock_openai.AsyncOpenAI = MagicMock(return_value=mock_client)
+
+        orch = MultiAgentOrchestrator({"model_name": "m"}, [])
+        graph = {
+            "initial_state": "INTAKE",
+            "terminal_states": ["RESOLVED"],
+            "nodes": [{"id": "INTAKE"}, {"id": "RESOLVED"}],
+            "edges": [],
+        }
+        # Three user turns — should stop after the first since it hits RESOLVED
+        conversation = [
+            {"role": "user", "content": "turn 1"},
+            {"role": "user", "content": "turn 2"},
+            {"role": "user", "content": "turn 3"},
+        ]
+
+        with patch.dict(sys.modules, {"openai": mock_openai}):
+            result = await orch.run_workflow(conversation, graph)
+
+        assert call_count == 1, "Should have stopped after reaching terminal state on turn 1"
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_success_false_when_terminal_not_reached(self) -> None:
+        """success should be False when workflow ends without hitting terminal state."""
+        import sys
+
+        async def _mock_create(**kwargs: object) -> MagicMock:
+            msg = MagicMock()
+            msg.content = "No state transition here."
+            msg.tool_calls = None
+            choice = MagicMock()
+            choice.message = msg
+            resp = MagicMock()
+            resp.choices = [choice]
+            return resp
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = _mock_create
+        mock_openai = MagicMock()
+        mock_openai.AsyncOpenAI = MagicMock(return_value=mock_client)
+
+        orch = MultiAgentOrchestrator({"model_name": "m"}, [])
+        graph = {
+            "initial_state": "INTAKE",
+            "terminal_states": ["RESOLVED"],
+            "nodes": [],
+            "edges": [],
+        }
+        conversation = [{"role": "user", "content": "go"}]
+
+        with patch.dict(sys.modules, {"openai": mock_openai}):
+            result = await orch.run_workflow(conversation, graph)
+
+        assert result.success is False

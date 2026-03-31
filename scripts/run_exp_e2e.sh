@@ -40,6 +40,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+VALID_DTYPES=("auto" "fp8" "bf16" "kivi_2bit" "kivi_4bit" "kvquant" "turboquant" "rotorquant")
+dtype_valid=false
+for valid in "${VALID_DTYPES[@]}"; do
+    if [[ "$KV_CACHE_DTYPE" == "$valid" ]]; then
+        dtype_valid=true
+        break
+    fi
+done
+if [[ "$dtype_valid" != true ]]; then
+    echo "ERROR: Invalid --kv-cache-dtype '$KV_CACHE_DTYPE'. Valid options: ${VALID_DTYPES[*]}" >&2
+    exit 1
+fi
+
 mkdir -p "$RESULTS_DIR/plots"
 
 echo "=== E2E Integration Experiment ==="
@@ -71,6 +84,11 @@ for i in $(seq 1 90); do
     fi
     sleep 5
 done
+if ! curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+    echo "ERROR: Orchestrator server failed to start within 450s" >&2
+    kill "$ORCHESTRATOR_PID" 2>/dev/null || true
+    exit 1
+fi
 
 # --- Step 2: Run E2E workflow test ---
 echo ""
@@ -130,7 +148,7 @@ configs = [
 
 results = []
 for model_name, dtype in configs:
-    result = benchmark_concurrency(model_name, dtype, context_length=4096)
+    result = benchmark_concurrency(model_name, dtype, context_length=4096, task_completion_rate=0.0)
     results.append(result.to_dict())
 
 # Pareto analysis
