@@ -22,7 +22,7 @@ from llm_workflow_agents.eval.graph_extraction_eval import (
 )
 from llm_workflow_agents.eval.constrained_decoding import (
     WORKFLOW_GRAPH_SCHEMA,
-    build_xgrammar_constraint,
+    get_guided_json_schema,
     load_graph_schema,
 )
 
@@ -43,13 +43,15 @@ def _make_graph(
     )
 
 
-SIMPLE_GOLD = _make_graph(
-    nodes=[{"id": "S1", "name": "Start"}, {"id": "S2", "name": "Mid"}, {"id": "S3", "name": "End"}],
-    edges=[
-        {"from_state": "S1", "to_state": "S2", "condition": "proceed"},
-        {"from_state": "S2", "to_state": "S3", "condition": "done"},
-    ],
-)
+def _simple_gold() -> WorkflowGraph:
+    """Return a fresh _simple_gold() instance per call to prevent cross-test mutation."""
+    return _make_graph(
+        nodes=[{"id": "S1", "name": "Start"}, {"id": "S2", "name": "Mid"}, {"id": "S3", "name": "End"}],
+        edges=[
+            {"from_state": "S1", "to_state": "S2", "condition": "proceed"},
+            {"from_state": "S2", "to_state": "S3", "condition": "done"},
+        ],
+    )
 
 
 # ============================================================
@@ -75,6 +77,12 @@ class TestExtractJson:
 
     def test_unclosed_json(self) -> None:
         assert _extract_json('{"a": 1') is None
+
+    def test_brace_in_string_value(self) -> None:
+        """raw_decode handles braces inside string values correctly."""
+        text = '{"key": "value with { brace"}'
+        result = _extract_json(text)
+        assert result == '{"key": "value with { brace"}'
 
 
 class TestParseGraphJson:
@@ -119,20 +127,20 @@ class TestComputeNodeF1:
             nodes=[{"id": "S1"}, {"id": "S2"}, {"id": "S3"}],
             edges=[],
         )
-        assert compute_node_f1(pred, SIMPLE_GOLD) == pytest.approx(1.0)
+        assert compute_node_f1(pred, _simple_gold()) == pytest.approx(1.0)
 
     def test_partial_match(self) -> None:
         pred = _make_graph(
             nodes=[{"id": "S1"}, {"id": "S2"}],  # Missing S3
             edges=[],
         )
-        f1 = compute_node_f1(pred, SIMPLE_GOLD)
+        f1 = compute_node_f1(pred, _simple_gold())
         # precision=2/2=1.0, recall=2/3, F1=0.8
         assert f1 == pytest.approx(0.8, abs=0.01)
 
     def test_no_overlap(self) -> None:
         pred = _make_graph(nodes=[{"id": "X1"}], edges=[])
-        assert compute_node_f1(pred, SIMPLE_GOLD) == 0.0
+        assert compute_node_f1(pred, _simple_gold()) == 0.0
 
     def test_both_empty(self) -> None:
         pred = _make_graph(nodes=[], edges=[])
@@ -141,7 +149,7 @@ class TestComputeNodeF1:
 
     def test_pred_empty(self) -> None:
         pred = _make_graph(nodes=[], edges=[])
-        assert compute_node_f1(pred, SIMPLE_GOLD) == 0.0
+        assert compute_node_f1(pred, _simple_gold()) == 0.0
 
 
 # ============================================================
@@ -159,20 +167,20 @@ class TestComputeEdgeF1:
                 {"from_state": "S2", "to_state": "S3"},
             ],
         )
-        assert compute_edge_f1(pred, SIMPLE_GOLD) == pytest.approx(1.0)
+        assert compute_edge_f1(pred, _simple_gold()) == pytest.approx(1.0)
 
     def test_partial_match(self) -> None:
         pred = _make_graph(
             nodes=[],
             edges=[{"from_state": "S1", "to_state": "S2"}],
         )
-        f1 = compute_edge_f1(pred, SIMPLE_GOLD)
+        f1 = compute_edge_f1(pred, _simple_gold())
         # precision=1/1=1.0, recall=1/2=0.5, F1=2/3
         assert f1 == pytest.approx(2 / 3, abs=0.01)
 
     def test_no_overlap(self) -> None:
         pred = _make_graph(nodes=[], edges=[{"from_state": "X", "to_state": "Y"}])
-        assert compute_edge_f1(pred, SIMPLE_GOLD) == 0.0
+        assert compute_edge_f1(pred, _simple_gold()) == 0.0
 
     def test_both_empty(self) -> None:
         pred = _make_graph(nodes=[], edges=[])
@@ -188,7 +196,7 @@ class TestComputeEdgeF1:
 class TestComputeGED:
 
     def test_identical_graphs(self) -> None:
-        ged = compute_graph_edit_distance(SIMPLE_GOLD, SIMPLE_GOLD)
+        ged = compute_graph_edit_distance(_simple_gold(), _simple_gold())
         assert ged == pytest.approx(0.0)
 
     def test_different_graphs(self) -> None:
@@ -196,14 +204,22 @@ class TestComputeGED:
             nodes=[{"id": "A"}, {"id": "B"}],
             edges=[{"from_state": "A", "to_state": "B"}],
         )
-        ged = compute_graph_edit_distance(pred, SIMPLE_GOLD)
+        ged = compute_graph_edit_distance(pred, _simple_gold())
         assert ged > 0.0
         assert ged <= 1.0  # normalized
 
     def test_empty_vs_nonempty(self) -> None:
         pred = _make_graph(nodes=[], edges=[])
-        ged = compute_graph_edit_distance(pred, SIMPLE_GOLD)
+        ged = compute_graph_edit_distance(pred, _simple_gold())
         assert ged > 0.0
+
+    def test_normalized_ged_never_exceeds_one(self) -> None:
+        """Fallback heuristic must not produce values > 1.0."""
+        # Two graphs that would produce a large raw diff
+        pred = _make_graph(nodes=[{"id": "X"}], edges=[], initial="X", terminals=["X"])
+        gold = _make_graph(nodes=[], edges=[])
+        ged = compute_graph_edit_distance(pred, gold)
+        assert ged <= 1.0
 
 
 # ============================================================
@@ -214,7 +230,7 @@ class TestComputeGED:
 class TestCheckStructuralValidity:
 
     def test_valid_graph(self) -> None:
-        assert check_structural_validity(SIMPLE_GOLD)
+        assert check_structural_validity(_simple_gold())
 
     def test_empty_nodes(self) -> None:
         assert not check_structural_validity(_make_graph(nodes=[], edges=[]))
@@ -265,7 +281,7 @@ class TestCheckStructuralValidity:
 class TestCheckMermaidRenderability:
 
     def test_valid_graph(self) -> None:
-        assert check_mermaid_renderability(SIMPLE_GOLD)
+        assert check_mermaid_renderability(_simple_gold())
 
     def test_empty_graph(self) -> None:
         assert not check_mermaid_renderability(_make_graph(nodes=[], edges=[]))
@@ -288,7 +304,7 @@ class TestCheckMermaidRenderability:
 class TestGraphToMermaid:
 
     def test_simple_graph(self) -> None:
-        mermaid = graph_to_mermaid(SIMPLE_GOLD)
+        mermaid = graph_to_mermaid(_simple_gold())
         assert "graph TD" in mermaid
         assert "S1[Start]" in mermaid
         assert "S1 -->|proceed| S2" in mermaid
@@ -331,7 +347,7 @@ class TestEvaluateGraphExtraction:
             "initial_state": "S1",
             "terminal_states": ["S3"],
         }
-        metrics = evaluate_graph_extraction([pred], [SIMPLE_GOLD])
+        metrics = evaluate_graph_extraction([pred], [_simple_gold()])
         assert metrics.node_f1 == pytest.approx(1.0)
         assert metrics.edge_f1 == pytest.approx(1.0)
         assert metrics.json_validity == 1.0
@@ -355,7 +371,7 @@ class TestEvaluateGraphExtraction:
         assert metrics.json_validity == 1.0
 
     def test_invalid_json_input(self) -> None:
-        metrics = evaluate_graph_extraction(["not json"], [SIMPLE_GOLD])
+        metrics = evaluate_graph_extraction(["not json"], [_simple_gold()])
         assert metrics.json_validity == 0.0
         assert metrics.node_f1 == 0.0
 
@@ -380,6 +396,11 @@ class TestConstrainedDecoding:
             "nodes", "edges", "initial_state", "terminal_states"
         }
 
+    def test_edge_condition_is_optional_in_schema(self) -> None:
+        """condition must not be in edge required fields (eval only matches on from/to)."""
+        edge_required = WORKFLOW_GRAPH_SCHEMA["properties"]["edges"]["items"].get("required", [])
+        assert "condition" not in edge_required
+
     def test_load_graph_schema_default(self) -> None:
         schema = load_graph_schema()
         assert schema == WORKFLOW_GRAPH_SCHEMA
@@ -391,13 +412,13 @@ class TestConstrainedDecoding:
         loaded = load_graph_schema(path)
         assert loaded == custom
 
-    def test_build_xgrammar_constraint(self) -> None:
-        schema = build_xgrammar_constraint()
+    def test_get_guided_json_schema_default(self) -> None:
+        schema = get_guided_json_schema()
         assert schema == WORKFLOW_GRAPH_SCHEMA
 
-    def test_build_xgrammar_custom_schema(self) -> None:
+    def test_get_guided_json_schema_custom(self) -> None:
         custom = {"type": "object"}
-        assert build_xgrammar_constraint(custom) == custom
+        assert get_guided_json_schema(custom) == custom
 
 
 # ============================================================

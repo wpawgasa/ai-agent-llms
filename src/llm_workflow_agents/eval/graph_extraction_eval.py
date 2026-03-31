@@ -10,6 +10,7 @@ Uses networkx for GED computation.
 from __future__ import annotations
 
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -82,21 +83,21 @@ def parse_graph_json(text: str) -> tuple[WorkflowGraph | None, bool]:
 
 
 def _extract_json(text: str) -> str | None:
-    """Extract the first JSON object from text."""
-    # Find first { and last matching }
+    """Extract the first JSON object from text.
+
+    Uses json.JSONDecoder.raw_decode so that braces inside string values
+    are handled correctly by the JSON parser rather than a naive counter.
+    """
     start = text.find("{")
     if start == -1:
         return None
 
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
+    decoder = json.JSONDecoder()
+    try:
+        _, end = decoder.raw_decode(text, start)
+        return text[start:end]
+    except json.JSONDecodeError:
+        return None
 
 
 def compute_node_f1(
@@ -199,7 +200,7 @@ def compute_graph_edit_distance(
             len(g_gold) + g_gold.number_of_edges(),
             1,
         )
-        return ged / max_size
+        return min(ged / max_size, 1.0)
 
     return ged
 
@@ -271,15 +272,15 @@ def check_structural_validity(graph: WorkflowGraph) -> bool:
         if dst in rev_adjacency and src in node_ids:
             rev_adjacency[dst].append(src)
 
+    # Compute backward reachability from all terminals once (multi-source BFS)
+    backward_reach: set[str] = set()
+    for ts in graph.terminal_states:
+        backward_reach |= _bfs(ts, rev_adjacency)
+
     # Every node should be reachable from initial OR be able to reach a terminal
     for nid in node_ids:
-        if nid not in reachable:
-            # Check if this node can reach any terminal via reverse search
-            backward_reach = set()
-            for ts in graph.terminal_states:
-                backward_reach |= _bfs(ts, rev_adjacency)
-            if nid not in backward_reach:
-                return False
+        if nid not in reachable and nid not in backward_reach:
+            return False
 
     return True
 
@@ -287,9 +288,9 @@ def check_structural_validity(graph: WorkflowGraph) -> bool:
 def _bfs(start: str, adjacency: dict[str, list[str]]) -> set[str]:
     """BFS from start node, return set of reachable nodes."""
     visited: set[str] = set()
-    queue = [start]
+    queue: deque[str] = deque([start])
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         if node in visited:
             continue
         visited.add(node)
@@ -333,7 +334,7 @@ def graph_to_mermaid(graph: WorkflowGraph) -> str:
 
     for node in graph.nodes:
         nid = node.get("id", node.get("name", ""))
-        name = node.get("name", nid)
+        name = node.get("name", nid).replace("]", "&#93;")
         lines.append(f"    {nid}[{name}]")
 
     for edge in graph.edges:
@@ -341,7 +342,8 @@ def graph_to_mermaid(graph: WorkflowGraph) -> str:
         dst = edge.get("to_state", "")
         condition = edge.get("condition", "")
         if condition:
-            lines.append(f"    {src} -->|{condition}| {dst}")
+            escaped_condition = condition.replace("|", "&#124;")
+            lines.append(f"    {src} -->|{escaped_condition}| {dst}")
         else:
             lines.append(f"    {src} --> {dst}")
 
@@ -371,7 +373,6 @@ def evaluate_graph_extraction(
     valid_json_count = 0
     valid_struct_count = 0
     mermaid_count = 0
-    ged_count = 0
 
     for i, gold in enumerate(gold_graphs):
         # Parse prediction
@@ -398,6 +399,8 @@ def evaluate_graph_extraction(
             valid_json_count += 1
 
         if pred_graph is None:
+            # Failed predictions count as worst case for GED
+            total_ged += 1.0
             continue
 
         # Node F1
@@ -406,13 +409,11 @@ def evaluate_graph_extraction(
         # Edge F1
         total_edge_f1 += compute_edge_f1(pred_graph, gold)
 
-        # GED
+        # GED — failures count as 1.0 to keep denominator consistent with n
         try:
-            ged = compute_graph_edit_distance(pred_graph, gold)
-            total_ged += ged
-            ged_count += 1
+            total_ged += compute_graph_edit_distance(pred_graph, gold)
         except Exception:
-            pass
+            total_ged += 1.0
 
         # Structural validity
         if check_structural_validity(pred_graph):
@@ -425,7 +426,7 @@ def evaluate_graph_extraction(
     metrics = GraphExtractionMetrics(
         node_f1=total_node_f1 / n,
         edge_f1=total_edge_f1 / n,
-        graph_edit_distance=total_ged / max(ged_count, 1),
+        graph_edit_distance=total_ged / n,
         json_validity=valid_json_count / n,
         structural_validity=valid_struct_count / n,
         mermaid_renderability=mermaid_count / n,

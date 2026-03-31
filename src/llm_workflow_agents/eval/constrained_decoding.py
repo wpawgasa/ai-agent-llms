@@ -41,7 +41,7 @@ WORKFLOW_GRAPH_SCHEMA: dict[str, Any] = {
                     "condition": {"type": "string"},
                     "priority": {"type": "integer"},
                 },
-                "required": ["from_state", "to_state", "condition"],
+                "required": ["from_state", "to_state"],
             },
         },
         "initial_state": {"type": "string"},
@@ -98,13 +98,14 @@ def build_outlines_generator(
     return generator
 
 
-def build_xgrammar_constraint(
+def get_guided_json_schema(
     schema: dict[str, Any] | None = None,
 ) -> Any:
-    """Build an XGrammar JSON constraint for vLLM guided decoding.
+    """Return a JSON schema dict for vLLM's guided_json (XGrammar) decoding.
 
-    XGrammar integrates with vLLM's guided decoding interface via
-    the `guided_json` parameter in the API request.
+    vLLM's guided decoding accepts a raw JSON schema via the ``guided_json``
+    request parameter and compiles it through XGrammar internally — no
+    additional transformation is needed on the client side.
 
     Args:
         schema: JSON schema to constrain output. Defaults to WORKFLOW_GRAPH_SCHEMA.
@@ -115,7 +116,7 @@ def build_xgrammar_constraint(
     if schema is None:
         schema = WORKFLOW_GRAPH_SCHEMA
 
-    logger.info("xgrammar_constraint_built")
+    logger.info("guided_json_schema_returned")
     return schema
 
 
@@ -141,7 +142,7 @@ def generate_constrained_graph(
     import openai
 
     if schema is None:
-        schema = WORKFLOW_GRAPH_SCHEMA
+        schema = get_guided_json_schema()
 
     client = openai.OpenAI(base_url=base_url, api_key="unused")
 
