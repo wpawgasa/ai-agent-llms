@@ -190,5 +190,5 @@ def evaluate_chain_propagation(
         total_chains=total_chains,
     )
 
-    logger.info("chain_propagation_eval_complete", total_chains=total_chains, **metrics.to_dict())
+    logger.info("chain_propagation_eval_complete", **metrics.to_dict())
     return metrics
