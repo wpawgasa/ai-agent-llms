@@ -1,0 +1,22 @@
+mode: "multi_instance"
+description: "Multi-model deployment for E2E integration"
+kv_cache_dtype: "turboquant"
+port: 8000
+
+orchestrator:
+  model_config: "configs/models_exp_a/qwen3_32b.yaml"
+  weight_quantization: "awq_int4"
+
+specialists:
+  - model_config: "configs/models_exp_bc/qwen25_3b.yaml"
+    adapter: "specialist"
+  - model_config: "configs/models_exp_bc/gemma3_4b.yaml"
+    adapter: "specialist"
+
+vllm:
+  dtype: "bfloat16"
+  gpu_memory_utilization: 0.92
+  enable_auto_tool_choice: true
+  enable_lora: true
+  max_loras: 4
+  max_lora_rank: 64

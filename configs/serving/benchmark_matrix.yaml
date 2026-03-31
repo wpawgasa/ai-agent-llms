@@ -1,0 +1,30 @@
+mode: "benchmark_matrix"
+description: "Full benchmark sweep across models and quantization methods"
+
+models:
+  exp_a:
+    - "configs/models_exp_a/gemma3_27b.yaml"
+    - "configs/models_exp_a/qwen3_32b.yaml"
+    - "configs/models_exp_a/mistral_24b.yaml"
+    - "configs/models_exp_a/nemotron_30b.yaml"
+    - "configs/models_exp_a/glm47_flash.yaml"
+  exp_bc:
+    - "configs/models_exp_bc/qwen25_3b.yaml"
+    - "configs/models_exp_bc/qwen35_4b.yaml"
+    - "configs/models_exp_bc/glm47_flash.yaml"
+    - "configs/models_exp_bc/gemma_2b.yaml"
+    - "configs/models_exp_bc/gemma3_4b.yaml"
+
+quantization_methods:
+  - "configs/quantization/fp8.yaml"
+  - "configs/quantization/kivi_2bit.yaml"
+  - "configs/quantization/kivi_4bit.yaml"
+  - "configs/quantization/kvquant.yaml"
+  - "configs/quantization/turboquant.yaml"
+  - "configs/quantization/rotorquant.yaml"
+
+benchmark:
+  context_lengths: [2048, 4096, 8192, 16384, 32768]
+  runs_per_config: 5
+  prompts_per_run: 500
+  seed: 42

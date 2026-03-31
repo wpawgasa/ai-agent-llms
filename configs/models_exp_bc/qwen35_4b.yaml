@@ -1,0 +1,55 @@
+model:
+  name: "Qwen/Qwen3.5-4B"
+  family: "qwen"
+  params_total: 4_000_000_000
+  precision: "bfloat16"
+
+lora:
+  rank: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules:
+    # Standard attention
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    # DeltaNet layers
+    - "in_proj_qkv"
+    - "in_proj_z"
+    - "in_proj_b"
+    - "in_proj_a"
+    - "out_proj"
+    # MLP
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  # WARNING: QLoRA degrades hybrid DeltaNet architecture
+
+training:
+  learning_rate: 1.0e-4
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.03
+  effective_batch_size: 16
+  gradient_accumulation_steps: 4
+  num_epochs: 3
+  max_seq_length: 4096
+  gradient_checkpointing: true
+  packing: true
+  save_steps: 500
+  eval_steps: 500
+  metric_for_best_model: "eval_loss"
+  hardware_vram_estimate_gb: 22
+  mixed_precision: "bf16"
+
+  training_data:
+    sources:
+      - "Salesforce/xlam-function-calling-60k"
+      - "ToolBench"
+      - "custom_synthetic"
+    custom_synthetic_size: 15000
+    negative_example_ratio: 0.15
+    splits:
+      train: 0.85
+      val: 0.10
+      test: 0.05

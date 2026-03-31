@@ -1,0 +1,46 @@
+model:
+  name: "google/gemma-3-4b-it"
+  family: "gemma"
+  params_total: 4_000_000_000
+  precision: "bfloat16"
+
+lora:
+  rank: 64
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+training:
+  learning_rate: 1.0e-4
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.03
+  effective_batch_size: 16
+  gradient_accumulation_steps: 4
+  num_epochs: 3
+  max_seq_length: 2048
+  gradient_checkpointing: true
+  packing: true
+  save_steps: 500
+  eval_steps: 500
+  metric_for_best_model: "eval_loss"
+  hardware_vram_estimate_gb: 18
+  mixed_precision: "bf16"
+
+  training_data:
+    sources:
+      - "Salesforce/xlam-function-calling-60k"
+      - "ToolBench"
+      - "custom_synthetic"
+    custom_synthetic_size: 15000
+    negative_example_ratio: 0.15
+    splits:
+      train: 0.85
+      val: 0.10
+      test: 0.05

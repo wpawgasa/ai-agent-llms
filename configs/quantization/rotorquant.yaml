@@ -1,0 +1,30 @@
+method:
+  name: "rotorquant"
+  paper: "Novel — Cl(3,0) geometric algebra rotor rotation"
+  status: "experimental (no vLLM integration)"
+  kv_cache_dtype: "rotorquant"
+  requires_calibration: false
+
+clifford_algebra:
+  signature: [3, 0]
+  rotor_fmas_per_d128: 100
+  dense_rotation_fmas_per_d128: 16384
+
+codebook:
+  type: "grade_aware_lloyd_max"
+  head_dimensions: [128, 256]
+  bit_widths: [2, 3, 4]
+
+triton_kernels:
+  fused:
+    operations: ["embed", "rotor_sandwich", "quantize", "inverse", "extract"]
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  runs: 5
+  prompts_per_run: 500

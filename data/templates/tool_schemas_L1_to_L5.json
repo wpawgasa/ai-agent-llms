@@ -1,0 +1,343 @@
+{
+  "L1": {
+    "domain": "faq_lookup",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_faq",
+          "description": "Search the FAQ database for answers",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {"type": "string", "description": "Search query"},
+              "category": {"type": "string", "enum": ["billing", "technical", "general"]}
+            },
+            "required": ["query"]
+          }
+        }
+      }
+    ]
+  },
+  "L2": {
+    "domain": "order_status_cancel",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_order",
+          "description": "Look up order details by order ID",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {"type": "string", "description": "The order ID"}
+            },
+            "required": ["order_id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cancel_order",
+          "description": "Cancel an active order",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {"type": "string"},
+              "reason": {"type": "string"}
+            },
+            "required": ["order_id", "reason"]
+          }
+        }
+      }
+    ]
+  },
+  "L3": {
+    "domain": "booking_payment",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_availability",
+          "description": "Search for available booking slots",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "date": {"type": "string", "format": "date"},
+              "service_type": {"type": "string"},
+              "location": {"type": "string"}
+            },
+            "required": ["date", "service_type"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "create_booking",
+          "description": "Create a new booking",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "slot_id": {"type": "string"},
+              "customer_name": {"type": "string"},
+              "customer_email": {"type": "string", "format": "email"}
+            },
+            "required": ["slot_id", "customer_name"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_payment",
+          "description": "Process payment for a booking",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "booking_id": {"type": "string"},
+              "amount": {"type": "number"},
+              "payment_method": {"type": "string", "enum": ["credit_card", "debit_card", "bank_transfer"]}
+            },
+            "required": ["booking_id", "amount", "payment_method"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "send_confirmation",
+          "description": "Send booking confirmation to customer",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "booking_id": {"type": "string"},
+              "channel": {"type": "string", "enum": ["email", "sms", "both"]}
+            },
+            "required": ["booking_id"]
+          }
+        }
+      }
+    ]
+  },
+  "L4": {
+    "domain": "it_troubleshoot_escalation",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "check_system_status",
+          "description": "Check status of an IT system or service",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "system_name": {"type": "string"},
+              "check_type": {"type": "string", "enum": ["health", "connectivity", "performance"]}
+            },
+            "required": ["system_name"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "run_diagnostic",
+          "description": "Run a diagnostic test on a system",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "system_name": {"type": "string"},
+              "diagnostic_type": {"type": "string"},
+              "verbose": {"type": "boolean"}
+            },
+            "required": ["system_name", "diagnostic_type"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "apply_fix",
+          "description": "Apply a known fix to a system issue",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "system_name": {"type": "string"},
+              "fix_id": {"type": "string"},
+              "force": {"type": "boolean"}
+            },
+            "required": ["system_name", "fix_id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "create_ticket",
+          "description": "Create an escalation ticket",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {"type": "string"},
+              "description": {"type": "string"},
+              "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+              "assignee_group": {"type": "string"}
+            },
+            "required": ["title", "priority"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "restart_service",
+          "description": "Restart a system service",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "service_name": {"type": "string"},
+              "graceful": {"type": "boolean"}
+            },
+            "required": ["service_name"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "notify_team",
+          "description": "Send notification to an operations team",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "team": {"type": "string"},
+              "message": {"type": "string"},
+              "urgency": {"type": "string", "enum": ["info", "warning", "critical"]}
+            },
+            "required": ["team", "message"]
+          }
+        }
+      }
+    ]
+  },
+  "L5": {
+    "domain": "multi_dept_workflow",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "route_to_department",
+          "description": "Route request to appropriate department",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "department": {"type": "string"},
+              "request_summary": {"type": "string"},
+              "priority": {"type": "string", "enum": ["low", "medium", "high"]}
+            },
+            "required": ["department", "request_summary"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_customer",
+          "description": "Look up customer information",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "customer_id": {"type": "string"},
+              "lookup_type": {"type": "string", "enum": ["full", "summary", "contact"]}
+            },
+            "required": ["customer_id"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "check_policy",
+          "description": "Check applicable policies for a request",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "policy_area": {"type": "string"},
+              "customer_tier": {"type": "string"},
+              "request_type": {"type": "string"}
+            },
+            "required": ["policy_area"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_refund",
+          "description": "Process a customer refund",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {"type": "string"},
+              "amount": {"type": "number"},
+              "reason": {"type": "string"},
+              "refund_method": {"type": "string"}
+            },
+            "required": ["order_id", "amount", "reason"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "schedule_callback",
+          "description": "Schedule a callback from a specialist",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "customer_id": {"type": "string"},
+              "department": {"type": "string"},
+              "preferred_time": {"type": "string"},
+              "notes": {"type": "string"}
+            },
+            "required": ["customer_id", "department"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_account",
+          "description": "Update customer account information",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "customer_id": {"type": "string"},
+              "field": {"type": "string"},
+              "new_value": {"type": "string"},
+              "verification_code": {"type": "string"}
+            },
+            "required": ["customer_id", "field", "new_value"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "generate_report",
+          "description": "Generate a summary report of customer interactions",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "customer_id": {"type": "string"},
+              "report_type": {"type": "string", "enum": ["interaction", "billing", "service"]},
+              "date_range_days": {"type": "integer"}
+            },
+            "required": ["customer_id", "report_type"]
+          }
+        }
+      }
+    ]
+  }
+}

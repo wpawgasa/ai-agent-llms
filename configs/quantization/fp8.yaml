@@ -1,0 +1,28 @@
+method:
+  name: "fp8"
+  paper: "Native FP8 E4M3 (vLLM built-in)"
+  status: "stable"
+  kv_cache_dtype: "fp8"
+  requires_calibration: false
+
+vllm_integration:
+  kv_cache_dtype: "fp8"
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  performance_metrics:
+    - "peak_vram_gb"
+    - "kv_cache_size_gb"
+    - "throughput_prefill_tok_s"
+    - "throughput_decode_tok_s"
+    - "latency_ttft_ms"
+    - "latency_tpot_ms"
+    - "latency_itl_p50_p95_p99"
+    - "max_concurrent_batch_4096ctx"
+  runs: 5
+  prompts_per_run: 500
