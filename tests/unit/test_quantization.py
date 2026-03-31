@@ -190,11 +190,11 @@ class TestTurboQuantEncodeDecode:
         codebook = torch.linspace(0, 1, 16)  # 4-bit
 
         indices, norms = turboquant_encode(kv, rotation, codebook)
-        reconstructed = turboquant_decode(indices, norms, codebook, rotation)
+        reconstructed = turboquant_decode(indices, norms, codebook, rotation.T)
 
         # Quantization introduces error, but should be bounded
         error = torch.mean((kv - reconstructed) ** 2).item()
-        assert error < 2.0  # Reasonable bound for 4-bit quantization with rotation
+        assert error < 0.05  # Tight bound for 4-bit (16 levels) 16-dim quantization
 
 
 # ============================================================

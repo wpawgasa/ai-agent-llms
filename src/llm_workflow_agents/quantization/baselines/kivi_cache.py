@@ -25,7 +25,6 @@ class KIVIConfig:
     value_bits: int = 2
     key_quantization: str = "per_channel"  # Per-channel for keys
     value_quantization: str = "per_token"  # Per-token for values
-    group_size: int = 128
 
 
 @dataclass

@@ -11,7 +11,8 @@ Reference: Hooper et al., NeurIPS 2024.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,20 +32,30 @@ class KVQuantConfig:
     outlier_threshold: float = 6.0  # Standard deviations for outlier detection
     calibration_samples: int = 128
     n_clusters: int | None = None  # Defaults to 2^bits
+    seed: int = 0  # Random seed for reproducible k-means
 
 
 @dataclass
 class NUQCodebook:
     """Non-uniform quantization codebook from k-means clustering."""
 
-    centroids: np.ndarray  # Shape: (n_clusters,)
+    centroids: np.ndarray  # Shape: (n_clusters,), must be sorted
     bits: int
     channel_idx: int | None = None  # Per-channel codebook index
 
     def quantize(self, values: np.ndarray) -> np.ndarray:
-        """Quantize values to nearest centroid index."""
-        distances = np.abs(values[..., np.newaxis] - self.centroids)
-        return np.argmin(distances, axis=-1).astype(np.int32)
+        """Quantize values to nearest centroid index.
+
+        Uses binary search (O(log n)) since centroids are sorted.
+        """
+        # searchsorted finds the insertion point; compare neighbors to pick nearest
+        idx = np.searchsorted(self.centroids, values)
+        idx = np.clip(idx, 0, len(self.centroids) - 1)
+        # Compare with the left neighbor to find the truly nearest centroid
+        left_idx = np.maximum(idx - 1, 0)
+        left_dist = np.abs(values - self.centroids[left_idx])
+        right_dist = np.abs(values - self.centroids[idx])
+        return np.where(left_dist < right_dist, left_idx, idx).astype(np.int32)
 
     def dequantize(self, indices: np.ndarray) -> np.ndarray:
         """Reconstruct values from centroid indices."""
@@ -65,6 +76,7 @@ def compute_nuq_codebook(
     calibration_values: np.ndarray,
     n_clusters: int,
     max_iter: int = 100,
+    seed: int = 0,
 ) -> NUQCodebook:
     """Compute a non-uniform quantization codebook via k-means.
 
@@ -72,11 +84,12 @@ def compute_nuq_codebook(
         calibration_values: 1D array of calibration values.
         n_clusters: Number of codebook centroids (2^bits).
         max_iter: Maximum k-means iterations.
+        seed: Random seed for reproducibility.
 
     Returns:
-        NUQCodebook with optimized centroids.
+        NUQCodebook with optimized centroids (sorted).
     """
-    from scipy.cluster.vq import kmeans
+    from scipy.cluster.vq import kmeans2
 
     # Flatten and remove NaN/Inf
     flat = calibration_values.flatten().astype(np.float64)
@@ -86,7 +99,9 @@ def compute_nuq_codebook(
         # Fallback to uniform quantization
         centroids = np.linspace(flat.min(), flat.max(), n_clusters)
     else:
-        centroids, _ = kmeans(flat, n_clusters, iter=max_iter)
+        rng = np.random.RandomState(seed)
+        # Use kmeans2 with 'points' initialization for reproducibility
+        centroids, _ = kmeans2(flat, n_clusters, iter=max_iter, minit="points", seed=rng)
         centroids = np.sort(centroids)
 
     bits = int(np.log2(n_clusters))
@@ -99,12 +114,12 @@ def detect_outlier_channels(
 ) -> list[int]:
     """Detect outlier channels for dense-sparse decomposition.
 
-    A channel is an outlier if its values exceed the threshold number
-    of standard deviations from the mean.
+    A channel is an outlier if its max absolute value exceeds the given
+    percentile threshold of max absolute values across all channels.
 
     Args:
         calibration_values: Array of shape (samples, channels).
-        threshold: Number of standard deviations for outlier detection.
+        threshold: Multiplier above the median channel max for outlier detection.
 
     Returns:
         List of outlier channel indices.
@@ -113,13 +128,12 @@ def detect_outlier_channels(
         return []
 
     channel_max = np.max(np.abs(calibration_values), axis=0)
-    overall_std = np.std(calibration_values)
-    overall_mean = np.mean(np.abs(calibration_values))
+    median_max = np.median(channel_max)
 
-    if overall_std < 1e-8:
+    if median_max < 1e-8:
         return []
 
-    outlier_mask = channel_max > overall_mean + threshold * overall_std
+    outlier_mask = channel_max > threshold * median_max
     return list(np.where(outlier_mask)[0])
 
 
@@ -162,7 +176,7 @@ def calibrate(
     n_channels = calibration_data.shape[-1] if calibration_data.ndim > 1 else 1
 
     if calibration_data.ndim == 1:
-        codebook = compute_nuq_codebook(calibration_data, n_clusters)
+        codebook = compute_nuq_codebook(calibration_data, n_clusters, seed=config.seed)
         codebook.channel_idx = 0
         result.codebooks.append(codebook)
     else:
@@ -172,7 +186,7 @@ def calibrate(
                 continue
 
             ch_data = calibration_data[:, ch]
-            codebook = compute_nuq_codebook(ch_data, n_clusters)
+            codebook = compute_nuq_codebook(ch_data, n_clusters, seed=config.seed)
             codebook.channel_idx = ch
             result.codebooks.append(codebook)
 
@@ -202,7 +216,11 @@ def _estimate_compression(
 
 
 def save_calibration(result: KVQuantCalibrationResult, path: Path) -> None:
-    """Save calibration result to disk."""
+    """Save calibration result to disk.
+
+    Saves codebook centroids, outlier channel indices, and the full config
+    so that calibration state can be fully restored at inference time.
+    """
     path.mkdir(parents=True, exist_ok=True)
 
     for codebook in result.codebooks:
@@ -210,4 +228,44 @@ def save_calibration(result: KVQuantCalibrationResult, path: Path) -> None:
         np.save(path / f"codebook_ch{ch_idx}.npy", codebook.centroids)
 
     np.save(path / "outlier_channels.npy", np.array(result.outlier_channels))
+
+    # Save config so inference can restore full calibration state
+    config_dict = asdict(result.config)
+    with open(path / "config.json", "w") as f:
+        json.dump(config_dict, f, indent=2)
+
     logger.info("calibration_saved", path=str(path))
+
+
+def load_calibration(path: Path) -> KVQuantCalibrationResult:
+    """Load a previously saved calibration result from disk.
+
+    Args:
+        path: Directory previously written by :func:`save_calibration`.
+
+    Returns:
+        KVQuantCalibrationResult reconstructed from saved files.
+    """
+    path = Path(path)
+
+    with open(path / "config.json") as f:
+        config_dict = json.load(f)
+    config = KVQuantConfig(**config_dict)
+
+    outlier_channels = np.load(path / "outlier_channels.npy").tolist()
+
+    codebooks: list[NUQCodebook] = []
+    for cb_path in sorted(path.glob("codebook_ch*.npy")):
+        # Extract channel index from filename: codebook_ch<idx>.npy
+        ch_idx = int(cb_path.stem.split("ch")[-1])
+        centroids = np.load(cb_path)
+        bits = int(np.log2(len(centroids)))
+        codebooks.append(NUQCodebook(centroids=centroids, bits=bits, channel_idx=ch_idx))
+
+    result = KVQuantCalibrationResult(
+        codebooks=codebooks,
+        outlier_channels=outlier_channels,
+        config=config,
+    )
+    logger.info("calibration_loaded", path=str(path), n_codebooks=len(codebooks))
+    return result

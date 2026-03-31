@@ -57,7 +57,7 @@ def verify_orthogonality(matrix: "torch.Tensor", tol: float = 1e-5) -> bool:
 
     d = matrix.shape[0]
     product = matrix.T @ matrix
-    identity = torch.eye(d, dtype=matrix.dtype)
+    identity = torch.eye(d, dtype=matrix.dtype, device=matrix.device)
     max_deviation = torch.max(torch.abs(product - identity)).item()
     return max_deviation < tol
 

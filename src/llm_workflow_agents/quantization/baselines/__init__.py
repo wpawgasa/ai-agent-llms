@@ -11,6 +11,8 @@ from llm_workflow_agents.quantization.baselines.kvquant_calibrate import (
     KVQuantConfig,
     NUQCodebook,
     calibrate,
+    load_calibration,
+    save_calibration,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "calibrate",
     "kivi_dequantize",
     "kivi_quantize",
+    "load_calibration",
+    "save_calibration",
 ]

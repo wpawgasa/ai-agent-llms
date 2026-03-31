@@ -1,9 +1,10 @@
 """Cl(3,0) geometric algebra primitives for RotorQuant.
 
 Implements the Clifford algebra Cl(3,0) with 8-dimensional multivectors
-for rotor-based rotation of KV cache vectors. The rotor sandwich product
-R x R† requires ~100 FMAs for d=128, compared to 16,384 FMAs for dense
-matrix-vector rotation.
+for rotor-based rotation of KV cache vectors. For d=128, the implementation
+processes ⌈128/3⌉ = 43 chunks, each requiring ~128 FMAs for the rotor
+sandwich (2 geometric products on 8-component multivectors), totalling
+~5,500 FMAs compared to 16,384 FMAs for dense matrix-vector rotation.
 
 Algebra structure:
   Cl(3,0) basis: {1, e1, e2, e3, e12, e13, e23, e123}
@@ -56,7 +57,7 @@ class CliffordAlgebra:
 
     Key operations:
       - embed(v: R^d) → Cl(3,0) multivector (grade-1)
-      - rotor_sandwich(R, x) → R x R† (~100 FMAs for d=128)
+      - rotor_sandwich(R, x) → R x R† (~128 FMAs/chunk, ~5,500 total for d=128)
       - extract(mv) → R^d
     """
 
@@ -260,8 +261,9 @@ class CliffordAlgebra:
     def sandwich_product(self, rotor: Rotor, x: "torch.Tensor") -> "torch.Tensor":
         """Apply rotor sandwich product: R x R†.
 
-        This is the core rotation operation. For d=128, this requires
-        ~100 FMAs compared to 16,384 for dense matrix rotation.
+        This is the core rotation operation. For a single R^3 chunk this requires
+        ~128 FMAs (2 geometric products on 8-component multivectors). For d=128,
+        ⌈128/3⌉ = 43 chunks yields ~5,500 FMAs vs 16,384 for dense matrix rotation.
 
         Args:
             rotor: Normalized rotor.
