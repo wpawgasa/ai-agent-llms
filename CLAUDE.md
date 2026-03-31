@@ -85,10 +85,10 @@ Detailed specs and checklists for each module are in `.claude/rules/`:
 - [x] vLLM launch script (`serving/launch_vllm.sh`)
 
 ### Phase 4: Quantization (Weeks 7-8)
-- [ ] TurboQuant codebook + rotation (`quantization/turboquant/`)
-- [ ] TurboQuant Triton kernels + vLLM integration
-- [ ] RotorQuant Clifford algebra + Triton kernels (`quantization/rotorquant/`)
-- [ ] Baseline wrappers: KIVI, KVQuant (`quantization/baselines/`)
+- [x] TurboQuant codebook + rotation (`quantization/turboquant/`)
+- [x] TurboQuant Triton kernels + vLLM integration
+- [x] RotorQuant Clifford algebra + Triton kernels (`quantization/rotorquant/`)
+- [x] Baseline wrappers: KIVI, KVQuant (`quantization/baselines/`)
 
 ### Phase 5: Experiment D Benchmarks (Weeks 9-10)
 - [ ] Perplexity eval (`eval/perplexity.py`)
