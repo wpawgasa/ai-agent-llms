@@ -1,0 +1,21 @@
+Initialize project with CLAUDE.md. Read @docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md Include project overview, implementation checklist and progress tracking. Keep CLAUDE.md not too long. Separate each module implementation detail and checklist into separate markdown files. Keep these module implementation details in `.claude/rules` directory.
+
+---
+
+Install github CLI
+
+---
+
+The repository https://github.com/wpawgasa/vlm-ocr-gpu-benchmark can be used as a reference design for several modules in this project. Indicate in CLAUDE.md that you should look for similar implementation in this repository.
+
+---
+
+Use /code-implementation skill to implement phase 1: Foundation.
+
+---
+
+Commit changes and create PR
+
+---
+
+Create github workflow to run tests and check coverage.
