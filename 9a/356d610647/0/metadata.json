@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9a356d610647",
+  "session_id": "566f5fb1-d7ba-477a-b7c5-c87aaa449775",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-31T07:12:54.592392418Z",
+  "branch": "feature/phase4-quantization",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "82f948fe48cd",
+  "token_usage": {
+    "input_tokens": 196,
+    "cache_creation_tokens": 233508,
+    "cache_read_tokens": 22663758,
+    "output_tokens": 109244,
+    "api_call_count": 156
+  },
+  "session_metrics": {
+    "turn_count": 13
+  }
+}
