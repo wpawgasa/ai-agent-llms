@@ -1,0 +1,23 @@
+model:
+  name: "zai-org/GLM-4.7-Flash"
+  family: "glm"
+  architecture: "dense_mla_transformer"
+  params_total: 30_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 60
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "glm4"
+  chat_template: "glm_chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "C"
+
+benchmark_tasks:
+  - "task_b"
+  - "task_c"
+
+# Risk R7: GLM LoRA VRAM overflow → auto-reduce rank 64→32 or inference-only

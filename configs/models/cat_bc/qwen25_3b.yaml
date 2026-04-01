@@ -1,0 +1,22 @@
+model:
+  name: "Qwen/Qwen2.5-3B-Instruct"
+  family: "qwen"
+  architecture: "dense_gqa_transformer"
+  params_total: 3_000_000_000
+  params_active: 3_000_000_000
+  context_length: 32768
+  precision: "bfloat16"
+  vram_estimate_gb: 6
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "hermes"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "B"
+
+benchmark_tasks:
+  - "task_b"
+  - "task_c"

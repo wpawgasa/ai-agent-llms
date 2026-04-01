@@ -1,0 +1,42 @@
+stage: "grpo"
+framework: "unsloth"
+
+model:
+  # Populated at runtime with SFT checkpoint from training/sft_cat_c.yaml
+  # If same model wins B + C (Risk R2), this diverges from sft_cat_b checkpoint at GRPO
+  sft_checkpoint: null
+
+grpo:
+  algorithm: "GRPO"
+  normalization: "DAPO"
+  num_generations: 4
+  beta: 0.04
+  epsilon: 0.2
+  learning_rate: 5.0e-6
+  training_steps: 1000
+  generation_backend: "vllm"
+  fp8_rl: true
+
+reward:
+  function: "reward_graph_extraction"
+  weights:
+    json_validity_bonus: 0.10  # early exit → 0.0 if JSON invalid
+    node_f1: 0.35
+    edge_f1: 0.35
+    structural_validity: 0.10
+    normalized_ged_complement: 0.10  # 1 - normalized_GED
+
+data:
+  source: "data/output/task_c"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+monitoring:
+  eval_held_out_every: 50
+  reward_hacking_detector: true
+  kl_divergence_log: true
+
+logging:
+  wandb_project: "llm-workflow-agents-grpo"

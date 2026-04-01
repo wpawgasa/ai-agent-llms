@@ -1,0 +1,37 @@
+description: "Composite score weights for Phase 1 model selection per category"
+
+# Composite score = sum(weight_i * normalized_metric_i)
+# All metrics normalized to [0, 1]; latency/memory scores inverted (lower is better)
+
+cat_a:
+  quality: 0.40
+  latency_p95: 0.25
+  throughput: 0.20
+  memory: 0.15
+
+  quality_metric_mapping:
+    # Cat A quality = 0.5 * state_transition_accuracy + 0.5 * tool_call_f1
+    state_transition_accuracy: 0.50
+    tool_call_f1: 0.50
+
+cat_b:
+  quality: 0.35
+  latency_p95: 0.30
+  throughput: 0.20
+  memory: 0.15
+
+  quality_metric_mapping:
+    # Cat B quality = 0.6 * tool_call_f1 + 0.4 * slot_accuracy
+    tool_call_f1: 0.60
+    slot_accuracy: 0.40
+
+cat_c:
+  quality: 0.40
+  latency_p95: 0.20
+  throughput: 0.20
+  memory: 0.20
+
+  quality_metric_mapping:
+    # Cat C quality = 0.5 * node_f1 + 0.5 * edge_f1
+    node_f1: 0.50
+    edge_f1: 0.50

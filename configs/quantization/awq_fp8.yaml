@@ -1,0 +1,36 @@
+method:
+  name: "awq_fp8"
+  paper: "AWQ-INT4 weight quantization + FP8 E4M3 KV cache"
+  status: "stable"
+  weight_quant_dtype: "awq_int4"
+  kv_cache_dtype: "fp8"
+  requires_calibration: true
+
+awq:
+  bits: 4
+  group_size: 128
+  zero_point: true
+  version: "GEMM"
+
+kv_cache:
+  dtype: "fp8_e4m3"
+  backend: "vllm_native"
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  performance_metrics:
+    - "peak_vram_gb"
+    - "kv_cache_size_gb"
+    - "throughput_prefill_tok_s"
+    - "throughput_decode_tok_s"
+    - "latency_ttft_ms"
+    - "latency_tpot_ms"
+    - "latency_itl_p50_p95_p99"
+    - "max_concurrent_batch_4096ctx"
+  runs: 5
+  prompts_per_run: 500

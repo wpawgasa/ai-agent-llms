@@ -1,0 +1,30 @@
+method:
+  name: "kivi"
+  paper: "Liu et al., ICML 2024"
+  status: "stable"
+  kv_cache_dtype: "kivi"
+  requires_calibration: false
+  bit_widths: [2, 4]
+
+asymmetric:
+  key_quantization: "per_channel"
+  value_quantization: "per_token"
+
+benchmark:
+  quality_tasks:
+    - "wikitext2_ppl"
+    - "c4_ppl"
+    - "longbench_15task"
+    - "needle_in_haystack"
+    - "tool_call_f1"
+  performance_metrics:
+    - "peak_vram_gb"
+    - "kv_cache_size_gb"
+    - "throughput_prefill_tok_s"
+    - "throughput_decode_tok_s"
+    - "latency_ttft_ms"
+    - "latency_tpot_ms"
+    - "latency_itl_p50_p95_p99"
+    - "max_concurrent_batch_4096ctx"
+  runs: 5
+  prompts_per_run: 500

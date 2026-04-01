@@ -26,6 +26,10 @@ def load_model_config(path: Path) -> ModelConfig:
     """Load a model configuration from YAML."""
     raw = _load_yaml(path)
     model_data = raw.get("model", raw)
+    # Merge top-level category and benchmark_tasks into model data
+    for key in ("category", "benchmark_tasks", "serving", "inference"):
+        if key in raw and key not in model_data:
+            model_data[key] = raw[key]
     return ModelConfig(**model_data)
 
 

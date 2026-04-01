@@ -1,0 +1,33 @@
+mode: "multi_agent"
+description: "Multi-model deployment: orchestrator (Cat A) + specialist (Cat B) + visualizer (Cat C)"
+
+kv_cache_dtype: "turboquant"
+port: 8000
+
+# Roles are populated at runtime with Phase 1 winners + best quantization from Phase 3
+orchestrator:
+  role: "routes intent, manages workflow state"
+  model_config: null  # Cat A winner, e.g. configs/models/cat_a/qwen3_32b.yaml
+
+specialist:
+  role: "executes tool calls and state transitions"
+  model_config: null  # Cat B winner, e.g. configs/models/cat_bc/qwen35_4b.yaml
+  adapter: "specialist_lora"
+
+visualizer:
+  role: "converts prompts to workflow graphs on demand"
+  model_config: null  # Cat C winner, e.g. configs/models/cat_bc/qwen35_4b.yaml
+  adapter: "visualizer_lora"
+
+vllm:
+  dtype: "bfloat16"
+  gpu_memory_utilization: 0.92
+  enable_auto_tool_choice: true
+  enable_lora: true
+  max_loras: 4
+  max_lora_rank: 64
+
+# If Cat B and Cat C share same base model: use vLLM LoRA multi-adapter serving
+lora_multi_adapter:
+  enabled: true
+  base_model_config: null

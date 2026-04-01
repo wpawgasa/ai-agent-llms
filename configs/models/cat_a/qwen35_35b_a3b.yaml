@@ -1,0 +1,23 @@
+model:
+  name: "Qwen/Qwen3.5-35B-A3B"
+  family: "qwen35"
+  architecture: "moe_deltanet_transformer"
+  params_total: 35_000_000_000
+  params_active: 3_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 70
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "hermes"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# Risk R1: BF16 ~70GB → Unsloth QLoRA 4-bit (~17.5GB) + FP8 RL for Phase 2

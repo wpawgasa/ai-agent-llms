@@ -1,0 +1,41 @@
+stage: "grpo"
+framework: "unsloth"
+
+model:
+  # Populated at runtime with SFT checkpoint from training/sft_cat_a.yaml
+  sft_checkpoint: null
+
+grpo:
+  algorithm: "GRPO"
+  normalization: "DAPO"
+  num_generations: 4
+  beta: 0.04
+  epsilon: 0.2
+  learning_rate: 5.0e-6
+  training_steps: 1000
+  generation_backend: "vllm"
+  fp8_rl: true
+
+reward:
+  function: "reward_business_logic"
+  weights:
+    state_transition: 0.30
+    tool_call_f1: 0.30
+    chain_propagation: 0.20
+    format_compliance: 0.10
+    task_completion: 0.10
+
+data:
+  source: "data/output/task_a"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+monitoring:
+  eval_held_out_every: 50
+  reward_hacking_detector: true
+  kl_divergence_log: true
+
+logging:
+  wandb_project: "llm-workflow-agents-grpo"
