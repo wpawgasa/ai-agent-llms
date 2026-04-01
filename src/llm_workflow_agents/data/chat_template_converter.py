@@ -1,6 +1,7 @@
 """Convert unified JSONL to model-specific chat template formats.
 
-Supports: Qwen (ChatML), Gemma, Mistral v3, Nemotron, GLM.
+Supports: Qwen (ChatML + Hermes), Qwen3.5 (ChatML + qwen3_coder), Gemma,
+Mistral v3, Nemotron, GLM (ChatML).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-ModelFamilyName = Literal["qwen", "gemma", "mistral", "nemotron", "glm"]
+ModelFamilyName = Literal["qwen", "qwen35", "gemma", "mistral", "nemotron", "glm"]
 
 
 @dataclass
@@ -40,6 +41,45 @@ def _convert_to_qwen(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif role == "assistant" and "<tool_call>" in content:
             # Wrap tool calls in Hermes format
             converted.append({"role": "assistant", "content": content})
+        else:
+            converted.append({"role": role, "content": content})
+
+    return converted
+
+
+def _convert_to_qwen35(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert to Qwen3.5 ChatML format with qwen3_coder tool-call style.
+
+    Qwen3.5 uses <tool_call> blocks wrapped in ```tool_code fences and expects
+    tool results in <tool_response> tags, following the qwen3_coder parser.
+    """
+    converted: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+
+        if role == "assistant" and "annotations" in msg:
+            annotations = msg["annotations"]
+            tool_calls = annotations.get("tool_calls", [])
+            if tool_calls:
+                # Format tool calls in qwen3_coder style
+                tc_blocks = []
+                for tc in tool_calls:
+                    tc_json = json.dumps(
+                        {"name": tc["name"], "arguments": tc["arguments"]},
+                        ensure_ascii=False,
+                    )
+                    tc_blocks.append(f"```tool_code\n{tc_json}\n```")
+                # Prepend any text content, then append tool blocks
+                parts = [content] if content.strip() else []
+                parts.extend(tc_blocks)
+                converted.append({"role": "assistant", "content": "\n".join(parts)})
+            else:
+                converted.append({"role": role, "content": content})
+        elif role == "tool":
+            converted.append(
+                {"role": "tool", "content": f"<tool_response>\n{content}\n</tool_response>"}
+            )
         else:
             converted.append({"role": role, "content": content})
 
@@ -125,6 +165,7 @@ def _convert_to_glm(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # Converter registry
 _CONVERTERS: dict[ModelFamilyName, Any] = {
     "qwen": _convert_to_qwen,
+    "qwen35": _convert_to_qwen35,
     "gemma": _convert_to_gemma,
     "mistral": _convert_to_mistral,
     "nemotron": _convert_to_nemotron,

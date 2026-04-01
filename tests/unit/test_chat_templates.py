@@ -51,9 +51,9 @@ def sample_jsonl(tmp_path: Path) -> Path:
 
 
 class TestChatTemplateConverter:
-    """Tests for format conversion across all 5 model families."""
+    """Tests for format conversion across all 6 model families."""
 
-    @pytest.mark.parametrize("family", ["qwen", "gemma", "mistral", "nemotron", "glm"])
+    @pytest.mark.parametrize("family", ["qwen", "qwen35", "gemma", "mistral", "nemotron", "glm"])
     def test_convert_all_families(self, sample_jsonl: Path, tmp_path: Path, family: str) -> None:
         output = tmp_path / f"output_{family}.jsonl"
         stats = convert_to_model_format(sample_jsonl, family, output)
@@ -94,6 +94,21 @@ class TestChatTemplateConverter:
             messages = sample["messages"]
             obs_msgs = [m for m in messages if m["role"] == "observation"]
             assert len(obs_msgs) == 1
+
+    def test_qwen35_uses_tool_code_fences(self, sample_jsonl: Path, tmp_path: Path) -> None:
+        output = tmp_path / "qwen35.jsonl"
+        convert_to_model_format(sample_jsonl, "qwen35", output)
+
+        with open(output) as f:
+            sample = json.loads(f.readline())
+            messages = sample["messages"]
+            # Assistant message with tool call should use ```tool_code fences
+            assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+            assert any("```tool_code" in m["content"] for m in assistant_msgs)
+            # Tool response should be wrapped in <tool_response> tags
+            tool_msgs = [m for m in messages if m["role"] == "tool"]
+            assert len(tool_msgs) == 1
+            assert "<tool_response>" in tool_msgs[0]["content"]
 
     def test_mistral_adds_tool_calls_field(self, sample_jsonl: Path, tmp_path: Path) -> None:
         output = tmp_path / "mistral.jsonl"
