@@ -35,3 +35,7 @@ Use /code-implementation skill to implement what left in phase 5: quantization b
 ---
 
 Use /code-implementation skill to implement what left in phase 6: graph eval. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 7: integration. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
