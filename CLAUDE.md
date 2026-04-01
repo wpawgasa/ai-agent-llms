@@ -115,9 +115,9 @@ Detailed specs for each module are in `.claude/rules/`:
 - [x] Pareto frontier analysis (`analysis/pareto.py` → v3: `integration/pareto.py`)
 - [x] Visualization (`analysis/plot_results.py` → v3: split into `analysis/plot_*.py`)
 - [x] Experiment runner scripts
-- [ ] Phase 1 benchmark module (`benchmark/`)
-- [ ] v3 integration module (`integration/`)
-- [ ] v3 analysis plots (plot_phase1_rankings.py, plot_sft_vs_rl.py, plot_quant_matrix.py, plot_pareto.py)
+- [x] Phase 1 benchmark module (`benchmark/`)
+- [x] v3 integration module (`integration/`)
+- [x] v3 analysis plots (plot_phase1_rankings.py, plot_sft_vs_rl.py, plot_quant_matrix.py, plot_pareto.py)
 
 ## Key Architecture Decisions
 

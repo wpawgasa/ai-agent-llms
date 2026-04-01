@@ -16,5 +16,10 @@ from llm_workflow_agents.analysis.pareto import (
 __all__ = [
     "ParetoPoint",
     "find_pareto_frontier",
-    # plot_results: import directly — deferred matplotlib/seaborn/pandas deps
+    # Plot modules: import directly — deferred matplotlib/seaborn deps
+    # from llm_workflow_agents.analysis import plot_phase1_rankings
+    # from llm_workflow_agents.analysis import plot_sft_vs_rl
+    # from llm_workflow_agents.analysis import plot_quant_matrix
+    # from llm_workflow_agents.analysis import plot_pareto
+    # from llm_workflow_agents.analysis import plot_results
 ]
