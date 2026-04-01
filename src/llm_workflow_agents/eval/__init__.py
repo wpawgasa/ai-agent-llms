@@ -47,6 +47,13 @@ from llm_workflow_agents.eval.graph_extraction_eval import (
 from llm_workflow_agents.eval.constrained_decoding import (
     WORKFLOW_GRAPH_SCHEMA,
 )
+from llm_workflow_agents.eval.intent_classification import (
+    IntentClassificationMetrics,
+    IntentSample,
+    evaluate_intent_classification,
+    generate_intent_samples,
+    run_intent_benchmark,
+)
 from llm_workflow_agents.eval.needle_haystack import (
     NeedleHaystackResult,
     NeedleResult,
@@ -81,6 +88,11 @@ __all__ = [
     "GraphExtractionMetrics",
     "evaluate_graph_extraction",
     "WORKFLOW_GRAPH_SCHEMA",
+    "IntentClassificationMetrics",
+    "IntentSample",
+    "evaluate_intent_classification",
+    "generate_intent_samples",
+    "run_intent_benchmark",
     "CompositeResult",
     "compute_weighted_workflow_score",
     "full_workflow_success_rate",
