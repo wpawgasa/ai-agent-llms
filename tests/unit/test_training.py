@@ -106,7 +106,10 @@ class TestLoRATargetRegistry:
     """Tests for the LoRA target module registry."""
 
     def test_all_models_registered(self) -> None:
-        expected = {"qwen25_3b", "qwen35_4b", "glm47_flash", "gemma_2b", "gemma3_4b"}
+        expected = {
+            "qwen25_3b", "qwen35_4b", "glm47_flash", "gemma_2b", "gemma3_4b",
+            "qwen3_32b", "qwen35_35b_a3b", "nemotron_30b", "mistral_24b", "gemma3_27b",
+        }
         assert set(LORA_TARGET_MODULES.keys()) == expected
 
     def test_qwen25_targets(self) -> None:
@@ -136,6 +139,23 @@ class TestLoRATargetRegistry:
             assert "q_proj" in spec.target_modules
             assert len(spec.target_modules) == 7
 
+    def test_qwen35_35b_a3b_has_deltanet_and_freeze(self) -> None:
+        spec = LORA_TARGET_MODULES["qwen35_35b_a3b"]
+        assert "in_proj_qkv" in spec.target_modules
+        assert "mlp.gate" in spec.modules_to_freeze
+        assert any("QLoRA" in w for w in spec.warnings)
+
+    def test_nemotron_30b_has_mamba_warning(self) -> None:
+        spec = LORA_TARGET_MODULES["nemotron_30b"]
+        assert "mlp.gate" in spec.modules_to_freeze
+        assert any("Mamba" in w for w in spec.warnings)
+
+    def test_cat_a_standard_models(self) -> None:
+        for key in ("qwen3_32b", "mistral_24b", "gemma3_27b"):
+            spec = LORA_TARGET_MODULES[key]
+            assert "q_proj" in spec.target_modules
+            assert len(spec.target_modules) == 7
+
 
 class TestDetectModelKey:
     """Tests for model name pattern detection."""
@@ -154,6 +174,21 @@ class TestDetectModelKey:
 
     def test_detect_gemma3_4b(self) -> None:
         assert detect_model_key("google/gemma-3-4b-it") == "gemma3_4b"
+
+    def test_detect_qwen3_32b(self) -> None:
+        assert detect_model_key("Qwen/Qwen3-32B") == "qwen3_32b"
+
+    def test_detect_qwen35_35b(self) -> None:
+        assert detect_model_key("Qwen/Qwen3.5-35B-A3B") == "qwen35_35b_a3b"
+
+    def test_detect_nemotron(self) -> None:
+        assert detect_model_key("nvidia/Nemotron-3-Nano-30B") == "nemotron_30b"
+
+    def test_detect_mistral_small(self) -> None:
+        assert detect_model_key("mistralai/Mistral-Small-3.1-24B") == "mistral_24b"
+
+    def test_detect_gemma3_27b(self) -> None:
+        assert detect_model_key("google/gemma-3-27b-it") == "gemma3_27b"
 
     def test_unknown_model(self) -> None:
         assert detect_model_key("unknown/model-7b") is None
@@ -662,7 +697,7 @@ class TestModuleImports:
 
     def test_import_lora_targets(self) -> None:
         from llm_workflow_agents.training.lora_targets import LORA_TARGET_MODULES
-        assert len(LORA_TARGET_MODULES) == 5
+        assert len(LORA_TARGET_MODULES) == 10
 
     def test_import_training_result(self) -> None:
         from llm_workflow_agents.training.train_specialist import TrainingResult

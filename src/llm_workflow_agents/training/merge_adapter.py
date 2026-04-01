@@ -20,6 +20,7 @@ def merge_and_export(
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     torch_dtype: str = "bfloat16",
+    quantize_merged: str | None = None,
 ) -> Path:
     """Load base model + LoRA adapter, merge, and save.
 
@@ -31,6 +32,7 @@ def merge_and_export(
         hub_repo_id: Hub repo ID of the form ``"org/repo-name"``. Required
             when ``push_to_hub=True``.
         torch_dtype: Torch dtype string ("bfloat16" or "float16").
+        quantize_merged: Optional post-merge quantization ("fp8" or None).
 
     Returns:
         Path to the saved merged model.
@@ -75,6 +77,11 @@ def merge_and_export(
     # Load and merge adapter
     model = PeftModel.from_pretrained(model, str(adapter_path))
     model = model.merge_and_unload()
+
+    # Optionally quantize the merged model
+    if quantize_merged == "fp8":
+        logger.info("quantizing_merged_model", method="fp8")
+        model = model.to(torch.float8_e4m3fn)
 
     # Save merged model
     output_path.mkdir(parents=True, exist_ok=True)
