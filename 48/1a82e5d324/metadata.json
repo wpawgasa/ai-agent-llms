@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "481a82e5d324",
+  "strategy": "manual-commit",
+  "branch": "feature/expanded-domain-registry",
+  "checkpoints_count": 6,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/48/1a82e5d324/0/metadata.json",
+      "transcript": "/48/1a82e5d324/0/full.jsonl",
+      "content_hash": "/48/1a82e5d324/0/content_hash.txt",
+      "prompt": "/48/1a82e5d324/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 268,
+    "cache_creation_tokens": 342793,
+    "cache_read_tokens": 34427539,
+    "output_tokens": 115543,
+    "api_call_count": 220
+  }
+}

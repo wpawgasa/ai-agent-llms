@@ -1,0 +1,212 @@
+Create PR
+
+---
+
+Update checklist in @.claude/rules/01-configs.md
+
+---
+
+Update checklist in @.claude/rules/02-data-generation.md
+
+---
+
+Implement chat_template_converter.py for all model families
+
+---
+
+Commit change and create PR
+
+---
+
+Use /code-implementation skill to implement what left in phase 2: training. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules @.claude/rules/03-training.md. Update checklist in CLAUDE.md and 03-training.md when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 3: Experiment A evaluation. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 4: quantization. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 5: quantization benchmark. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 6: graph eval. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Use /code-implementation skill to implement what left in phase 7: integration. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules. Update checklist in CLAUDE.md and related rules when done.
+
+---
+
+Now that all codebase are complete, how should I start the experiment?
+
+---
+
+How workflows are generated?
+
+---
+
+The current conversation domains are limited. Let's consider these domains and intents:
+
+---
+
+Here's a comprehensive list of conversation domains for call center services, organized by category:
+
+---
+
+## 🏢 Core Business Domains
+
+### 1. Customer Account Management
+- Account creation, verification, and closure
+- Profile updates (address, contact info, email)
+- Password reset and authentication
+- Subscription management
+- Loyalty/rewards program inquiries
+
+### 2. Billing & Payments
+- Invoice inquiries and disputes
+- Payment processing and confirmation
+- Refund and chargeback requests
+- Payment plan negotiations
+- Late fee waivers
+- Tax and receipt requests
+
+### 3. Order Management
+- Order placement and tracking
+- Order modification or cancellation
+- Delivery status and rescheduling
+- Return, exchange, and warranty claims
+- Missing or damaged item reports
+
+### 4. Technical Support
+- Product setup and installation
+- Troubleshooting and diagnostics
+- Software/firmware update guidance
+- Device compatibility questions
+- Bug reporting
+- Remote assistance escalation
+
+### 5. Product & Service Information
+- Product specifications and availability
+- Pricing and promotions
+- Feature comparisons
+- Upgrade or upsell recommendations
+- Service coverage and limitations
+
+---
+
+## 🏥 Industry-Specific Domains
+
+### 6. Healthcare & Insurance
+- Appointment scheduling and reminders
+- Prescription refill requests
+- Claims status and submission
+- Coverage verification (benefits inquiry)
+- Referral management
+- Prior authorization
+
+### 7. Banking & Financial Services
+- Balance and transaction inquiries
+- Fund transfers and wire requests
+- Card activation, blocking, and replacement
+- Loan and mortgage inquiries
+- Fraud alerts and dispute resolution
+- Interest rate and fee inquiries
+
+### 8. Telecommunications
+- Plan changes and upgrades
+- SIM card and number porting
+- Network outage reporting
+- Roaming and international usage
+- Device unlocking requests
+
+### 9. Utilities (Electric, Water, Gas)
+- Meter reading and billing disputes
+- Service connection and disconnection
+- Outage reporting and restoration ETA
+- Energy usage analysis
+- Green energy program enrollment
+
+### 10. Travel & Hospitality
+- Flight/hotel/car booking and modification
+- Cancellation and rebooking
+- Loyalty point redemption
+- Check-in assistance
+- Travel insurance claims
+- Visa and documentation guidance
+
+### 11. E-Commerce & Retail
+- Product recommendations
+- Stock availability and back-order status
+- Coupon and voucher application
+- Cart abandonment follow-up
+- In-store vs. online price matching
+
+### 12. Government & Public Services
+- Tax filing assistance
+- Permit and license inquiries
+- Social benefit eligibility and status
+- Document verification requests
+- Complaint and grievance filing
+
+---
+
+## 🤝 Operational Domains
+
+### 13. Complaints & Escalations
+- Formal complaint registration
+- Escalation routing to supervisors
+- Service recovery and goodwill gestures
+- SLA breach handling
+- Follow-up and case closure
+
+### 14. Appointment & Scheduling
+- Booking service technicians
+- Consultation scheduling
+- Reminder confirmation and rescheduling
+- Waitlist management
+
+### 15. Sales & Lead Generation
+- Inbound sales inquiries
+- Outbound cold/warm calling
+- Upsell and cross-sell conversations
+- Promotional campaign responses
+- Contract renewal negotiations
+
+### 16. Surveys & Feedback
+- Post-interaction CSAT surveys
+- NPS collection
+- Product/service feedback gathering
+- Complaint trend reporting
+
+### 17. Emergency & Critical Services
+- Emergency dispatch coordination
+- Critical incident reporting
+- SOS and safety check-ins
+- Service interruption notifications
+
+---
+
+## 🌐 Cross-Cutting Conversational Intents
+
+Regardless of domain, every call center typically handles these **universal intents**:
+
+| Intent | Description |
+|---|---|
+| **Greeting / Opening** | Initial contact and identity verification |
+| **Clarification** | Re-asking or confirming customer intent |
+| **Hold & Transfer** | Managing wait states and routing |
+| **Authentication** | OTP, KYC, PIN verification |
+| **Closing** | Summarizing resolution, follow-up promises |
+| **Language Switch** | Handling multilingual requests |
+| **Repeat / Rephrase** | Handling ASR misrecognition |
+| **Out-of-scope** | Gracefully deflecting unknown topics |
+| **Human Handoff** | Escalating to live agent |
+
+---
+
+This taxonomy is particularly useful for **voicebot NLU design** — each domain maps to a set of intents, entities, and dialog flows. Want me to expand any specific domain into full intent trees or slot definitions?
