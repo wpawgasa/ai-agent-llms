@@ -210,3 +210,7 @@ Regardless of domain, every call center typically handles these **universal inte
 ---
 
 This taxonomy is particularly useful for **voicebot NLU design** — each domain maps to a set of intents, entities, and dialog flows. Want me to expand any specific domain into full intent trees or slot definitions?
+
+---
+
+yes
