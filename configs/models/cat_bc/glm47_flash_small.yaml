@@ -1,11 +1,11 @@
 model:
-  name: "THUDM/glm-4-9b-chat"
+  name: "zai-org/GLM-4.7-Flash"
   family: "glm"
   architecture: "dense_mla_transformer"
-  params_total: 9_000_000_000
+  params_total: 30_000_000_000
   context_length: 131072
   precision: "bfloat16"
-  vram_estimate_gb: 18
+  vram_estimate_gb: 60
 
 serving:
   engine: "vllm"
