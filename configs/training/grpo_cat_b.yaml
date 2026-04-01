@@ -18,8 +18,11 @@ grpo:
 
 reward:
   function: "reward_subagent"
-  # Weights: tool_call_f1 0.40, slot_extraction_acc 0.30,
-  #          state_sequence_match 0.20, format_compliance 0.10
+  weights:
+    tool_call_f1: 0.40
+    slot_extraction_acc: 0.30
+    state_sequence_match: 0.20
+    format_compliance: 0.10
 
 data:
   source: "data/output/task_b"

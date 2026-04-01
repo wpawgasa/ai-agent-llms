@@ -18,8 +18,12 @@ grpo:
 
 reward:
   function: "reward_business_logic"
-  # Weights: state_transition 0.30, tool_call_f1 0.30, chain_propagation 0.20,
-  #          format_compliance 0.10, task_completion 0.10
+  weights:
+    state_transition: 0.30
+    tool_call_f1: 0.30
+    chain_propagation: 0.20
+    format_compliance: 0.10
+    task_completion: 0.10
 
 data:
   source: "data/output/task_a"

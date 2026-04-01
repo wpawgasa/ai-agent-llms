@@ -1,5 +1,5 @@
 model:
-  name: "nvidia/Nemotron-3-Nano-30B"
+  name: "nvidia/Nemotron-Research-Crossover-0.3-30B"
   family: "nemotron"
   architecture: "mamba_hybrid_transformer"
   params_total: 30_000_000_000

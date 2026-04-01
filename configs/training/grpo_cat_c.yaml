@@ -19,9 +19,12 @@ grpo:
 
 reward:
   function: "reward_graph_extraction"
-  # Weights: json_validity_bonus 0.10 (early exit → 0.0 if invalid),
-  #          node_f1 0.35, edge_f1 0.35, structural_validity 0.10,
-  #          1 - normalized_GED 0.10
+  weights:
+    json_validity_bonus: 0.10  # early exit → 0.0 if JSON invalid
+    node_f1: 0.35
+    edge_f1: 0.35
+    structural_validity: 0.10
+    normalized_ged_complement: 0.10  # 1 - normalized_GED
 
 data:
   source: "data/output/task_c"

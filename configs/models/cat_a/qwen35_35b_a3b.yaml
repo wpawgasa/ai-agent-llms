@@ -10,7 +10,7 @@ model:
 
 serving:
   engine: "vllm"
-  tool_call_parser: "qwen3_coder"
+  tool_call_parser: "hermes"
   chat_template: "chatml"
   gpu_memory_utilization: 0.90
   max_model_len: 8192

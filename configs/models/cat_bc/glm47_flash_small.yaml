@@ -1,12 +1,11 @@
 model:
-  name: "THUDM/glm-4.7b-flash"
+  name: "THUDM/glm-4-9b-chat"
   family: "glm"
-  architecture: "moe_mla_transformer"
-  params_total: 30_000_000_000
-  params_active: 3_600_000_000
+  architecture: "dense_mla_transformer"
+  params_total: 9_000_000_000
   context_length: 131072
   precision: "bfloat16"
-  vram_estimate_gb: 60
+  vram_estimate_gb: 18
 
 serving:
   engine: "vllm"
