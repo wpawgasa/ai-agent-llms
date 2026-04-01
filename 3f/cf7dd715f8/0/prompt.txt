@@ -11,3 +11,7 @@ Update checklist in @.claude/rules/02-data-generation.md
 ---
 
 Implement chat_template_converter.py for all model families
+
+---
+
+Commit change and create PR
