@@ -1,0 +1,21 @@
+Use /code-implementation skill to implement what left in phase 1: foundation. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules @.claude/rules/01-configs.md
+
+---
+
+<task-notification>
+<task-id>b0ky7fqvx</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/117ccc11-5925-48cd-841d-bcd0c2543822/tasks/b0ky7fqvx.output</output-file>
+<status>completed</status>
+<summary>Background command "Install package editable with fixed build backend" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bfv5lgrk6</task-id>
+<tool-use-id>toolu_01CogDa2WSR92Tn1BtfcEwk1</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/117ccc11-5925-48cd-841d-bcd0c2543822/tasks/bfv5lgrk6.output</output-file>
+<status>completed</status>
+<summary>Background command "Run tests from project root with uv" completed (exit code 0)</summary>
+</task-notification>

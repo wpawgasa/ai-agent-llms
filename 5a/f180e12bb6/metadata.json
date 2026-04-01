@@ -1,0 +1,52 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5af180e12bb6",
+  "strategy": "manual-commit",
+  "branch": "feature/phase1-foundation-configs",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "configs/benchmark/phase1_matrix.yaml",
+    "configs/benchmark/selection_weights.yaml",
+    "configs/models/cat_a/gemma3_27b.yaml",
+    "configs/models/cat_a/glm47_flash.yaml",
+    "configs/models/cat_a/mistral_small_24b.yaml",
+    "configs/models/cat_a/nemotron_30b.yaml",
+    "configs/models/cat_a/qwen35_35b_a3b.yaml",
+    "configs/models/cat_a/qwen3_32b.yaml",
+    "configs/models/cat_bc/gemma3_4b.yaml",
+    "configs/models/cat_bc/gemma_2b.yaml",
+    "configs/models/cat_bc/glm47_flash_small.yaml",
+    "configs/models/cat_bc/qwen25_3b.yaml",
+    "configs/models/cat_bc/qwen35_4b.yaml",
+    "configs/quantization/awq_fp8.yaml",
+    "configs/quantization/kivi.yaml",
+    "configs/serving/benchmark_e2e.yaml",
+    "configs/serving/multi_agent.yaml",
+    "configs/serving/single_model.yaml",
+    "configs/training/grpo_cat_a.yaml",
+    "configs/training/grpo_cat_b.yaml",
+    "configs/training/grpo_cat_c.yaml",
+    "configs/training/sft_cat_a.yaml",
+    "configs/training/sft_cat_b.yaml",
+    "configs/training/sft_cat_c.yaml",
+    "pyproject.toml",
+    "src/llm_workflow_agents/config/loader.py",
+    "src/llm_workflow_agents/config/schema.py",
+    "tests/unit/test_config.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5a/f180e12bb6/0/metadata.json",
+      "transcript": "/5a/f180e12bb6/0/full.jsonl",
+      "content_hash": "/5a/f180e12bb6/0/content_hash.txt",
+      "prompt": "/5a/f180e12bb6/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 54,
+    "cache_creation_tokens": 67638,
+    "cache_read_tokens": 2949262,
+    "output_tokens": 20811,
+    "api_call_count": 48
+  }
+}
