@@ -4,6 +4,19 @@ from __future__ import annotations
 
 import pytest
 
+from llm_workflow_agents.eval.composite_score import (
+    CompositeResult,
+    compute_weighted_workflow_score,
+    full_workflow_success_rate,
+)
+from llm_workflow_agents.eval.quant_benchmark import (
+    CellResult,
+    QuantBenchmarkMatrix,
+    QualityMetrics,
+    RunResult,
+    _aggregate_quality,
+    _compute_mean_std,
+)
 from llm_workflow_agents.eval.state_accuracy import (
     ConversationGroundTruth,
     ConversationPrediction,
@@ -557,3 +570,146 @@ class TestEvaluateWorkflowQuality:
         assert metrics.latency_per_turn_median_ms == 150
         assert metrics.state_metrics is state
         assert metrics.tool_metrics is tool
+
+
+# --- Composite Score Tests ---
+
+
+class TestCompositeScore:
+
+    def test_weighted_workflow_score_formula(self) -> None:
+        state = StateMachineMetrics(
+            state_transition_accuracy=1.0,
+            task_completion_rate=1.0,
+        )
+        tool = ToolCallMetrics(tool_call_f1=1.0)
+        score = compute_weighted_workflow_score(state, tool)
+        assert abs(score - 1.0) < 1e-9
+
+    def test_weighted_workflow_score_zero(self) -> None:
+        state = StateMachineMetrics()
+        tool = ToolCallMetrics()
+        score = compute_weighted_workflow_score(state, tool)
+        assert score == 0.0
+
+    def test_weighted_workflow_score_partial(self) -> None:
+        state = StateMachineMetrics(
+            state_transition_accuracy=0.8,
+            task_completion_rate=0.6,
+        )
+        tool = ToolCallMetrics(tool_call_f1=0.9)
+        score = compute_weighted_workflow_score(state, tool)
+        expected = 0.4 * 0.8 + 0.4 * 0.9 + 0.2 * 0.6
+        assert abs(score - expected) < 1e-9
+
+    def test_full_workflow_success_rate_empty(self) -> None:
+        assert full_workflow_success_rate([], []) == 0.0
+
+    def test_full_workflow_success_rate_perfect(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "[STATE: INIT → DONE]"},
+        ]
+        pred = [ConversationPrediction(
+            conversation_id="c1",
+            messages=msgs,
+        )]
+        gt = [ConversationGroundTruth(
+            conversation_id="c1",
+            messages=msgs,
+            terminal_states=["DONE"],
+        )]
+        rate = full_workflow_success_rate(pred, gt)
+        assert rate == 1.0
+
+    def test_full_workflow_success_rate_wrong_transition(self) -> None:
+        pred_msgs = [
+            {"role": "assistant", "content": "[STATE: INIT → WRONG]"},
+        ]
+        gt_msgs = [
+            {"role": "assistant", "content": "[STATE: INIT → DONE]"},
+        ]
+        pred = [ConversationPrediction(conversation_id="c1", messages=pred_msgs)]
+        gt = [ConversationGroundTruth(
+            conversation_id="c1", messages=gt_msgs, terminal_states=["DONE"]
+        )]
+        rate = full_workflow_success_rate(pred, gt)
+        assert rate == 0.0
+
+    def test_composite_result_to_dict(self) -> None:
+        r = CompositeResult(
+            model_name="test", category="A",
+            weighted_workflow_score=0.8,
+            full_workflow_success_rate=0.6,
+            num_conversations=100,
+        )
+        d = r.to_dict()
+        assert d["model_name"] == "test"
+        assert d["weighted_workflow_score"] == 0.8
+
+
+# --- Quant Benchmark Tests ---
+
+
+class TestQuantBenchmark:
+
+    def test_compute_mean_std_basic(self) -> None:
+        mean, std = _compute_mean_std([10.0, 10.0, 10.0])
+        assert mean == 10.0
+        assert std == 0.0
+
+    def test_compute_mean_std_empty(self) -> None:
+        mean, std = _compute_mean_std([])
+        assert mean == 0.0
+        assert std == 0.0
+
+    def test_compute_mean_std_single(self) -> None:
+        mean, std = _compute_mean_std([5.0])
+        assert mean == 5.0
+        assert std == 0.0
+
+    def test_compute_mean_std_nonzero(self) -> None:
+        mean, std = _compute_mean_std([1.0, 3.0])
+        assert abs(mean - 2.0) < 1e-9
+        assert std > 0
+
+    def test_aggregate_quality(self) -> None:
+        runs = [
+            RunResult(run_id=0, quality=QualityMetrics(wikitext2_ppl=10.0, c4_ppl=20.0)),
+            RunResult(run_id=1, quality=QualityMetrics(wikitext2_ppl=12.0, c4_ppl=22.0)),
+        ]
+        mean, std = _aggregate_quality(runs)
+        assert abs(mean.wikitext2_ppl - 11.0) < 1e-9
+        assert abs(mean.c4_ppl - 21.0) < 1e-9
+        assert std.wikitext2_ppl > 0
+
+    def test_aggregate_quality_empty(self) -> None:
+        mean, std = _aggregate_quality([])
+        assert mean.wikitext2_ppl == 0.0
+
+    def test_matrix_get_cell(self) -> None:
+        matrix = QuantBenchmarkMatrix(
+            models=["m1"], methods=["fp8"],
+            results={"m1::fp8": CellResult(model="m1", method="fp8")},
+        )
+        cell = matrix.get_cell("m1", "fp8")
+        assert cell is not None
+        assert cell.model == "m1"
+        assert matrix.get_cell("m1", "kivi") is None
+
+    def test_matrix_to_dict(self) -> None:
+        matrix = QuantBenchmarkMatrix(
+            models=["m1"], methods=["fp8"],
+            results={"m1::fp8": CellResult(model="m1", method="fp8")},
+            total_runs=5,
+        )
+        d = matrix.to_dict()
+        assert d["models"] == ["m1"]
+        assert d["total_runs"] == 5
+        assert "m1::fp8" in d["results"]
+
+    def test_quality_metrics_to_dict(self) -> None:
+        q = QualityMetrics(wikitext2_ppl=5.5, c4_ppl=6.6)
+        d = q.to_dict()
+        assert d["wikitext2_ppl"] == 5.5
+        assert d["c4_ppl"] == 6.6

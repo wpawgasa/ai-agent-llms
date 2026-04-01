@@ -5,6 +5,15 @@ from llm_workflow_agents.eval.agent_benchmark import (
     compute_weighted_score,
     evaluate_workflow_quality,
 )
+from llm_workflow_agents.eval.composite_score import (
+    CompositeResult,
+    compute_weighted_workflow_score,
+    full_workflow_success_rate,
+)
+from llm_workflow_agents.eval.quant_benchmark import (
+    QuantBenchmarkMatrix,
+    run_quant_benchmark,
+)
 from llm_workflow_agents.eval.state_accuracy import (
     StateMachineMetrics,
     evaluate_state_machine,
@@ -72,4 +81,9 @@ __all__ = [
     "GraphExtractionMetrics",
     "evaluate_graph_extraction",
     "WORKFLOW_GRAPH_SCHEMA",
+    "CompositeResult",
+    "compute_weighted_workflow_score",
+    "full_workflow_success_rate",
+    "QuantBenchmarkMatrix",
+    "run_quant_benchmark",
 ]
