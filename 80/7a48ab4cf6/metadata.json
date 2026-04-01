@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "807a48ab4cf6",
+  "strategy": "manual-commit",
+  "branch": "feature/orchestrator-training-data",
+  "checkpoints_count": 4,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/80/7a48ab4cf6/0/metadata.json",
+      "transcript": "/80/7a48ab4cf6/0/full.jsonl",
+      "content_hash": "/80/7a48ab4cf6/0/content_hash.txt",
+      "prompt": "/80/7a48ab4cf6/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 307,
+    "cache_creation_tokens": 366403,
+    "cache_read_tokens": 42299909,
+    "output_tokens": 134879,
+    "api_call_count": 247
+  }
+}

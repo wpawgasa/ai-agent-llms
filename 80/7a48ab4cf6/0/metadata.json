@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "807a48ab4cf6",
+  "session_id": "117ccc11-5925-48cd-841d-bcd0c2543822",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-01T10:07:04.489808173Z",
+  "branch": "feature/orchestrator-training-data",
+  "checkpoints_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "2a9700795e44",
+  "token_usage": {
+    "input_tokens": 307,
+    "cache_creation_tokens": 366403,
+    "cache_read_tokens": 42299909,
+    "output_tokens": 134879,
+    "api_call_count": 247
+  },
+  "session_metrics": {
+    "turn_count": 22
+  }
+}
