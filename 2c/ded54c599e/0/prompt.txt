@@ -1,0 +1,21 @@
+Create PR
+
+---
+
+Update checklist in @.claude/rules/01-configs.md
+
+---
+
+Update checklist in @.claude/rules/02-data-generation.md
+
+---
+
+Implement chat_template_converter.py for all model families
+
+---
+
+Commit change and create PR
+
+---
+
+Use /code-implementation skill to implement what left in phase 2: training. Some code implementation were already done but may not be complied with the new code spec. Investigate carefully by verifying the actual codebase with the implementation rules @.claude/rules/03-training.md. Update checklist in CLAUDE.md and 03-training.md when done.

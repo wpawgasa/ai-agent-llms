@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "2cded54c599e",
+  "strategy": "manual-commit",
+  "branch": "feature/phase3-eval-completion",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "CLAUDE.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/2c/ded54c599e/0/metadata.json",
+      "transcript": "/2c/ded54c599e/0/full.jsonl",
+      "content_hash": "/2c/ded54c599e/0/content_hash.txt",
+      "prompt": "/2c/ded54c599e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 170,
+    "cache_creation_tokens": 255797,
+    "cache_read_tokens": 15921794,
+    "output_tokens": 66775,
+    "api_call_count": 142
+  }
+}
