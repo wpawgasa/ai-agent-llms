@@ -88,10 +88,10 @@ Detailed specs for each module are in `.claude/rules/`:
 - [x] State machine accuracy eval (`eval/state_accuracy.py`)
 - [x] Tool-call F1 eval (`eval/tool_call_f1.py`)
 - [x] Tool chain propagation eval (`eval/tool_chain_propagation.py`)
-- [x] Agent benchmark composite (`eval/agent_benchmark.py` → v3: `eval/composite_score.py`)
+- [x] Agent benchmark composite (`eval/agent_benchmark.py`)
 - [x] vLLM launch script (`serving/launch_vllm.sh`)
-- [ ] Composite score module (`eval/composite_score.py`)
-- [ ] Quantization benchmark harness (`eval/quant_benchmark.py`)
+- [x] Composite score module (`eval/composite_score.py`)
+- [x] Quantization benchmark harness (`eval/quant_benchmark.py`)
 
 ### Phase 4: Quantization (KV Cache)
 - [x] TurboQuant codebook + rotation (`quantization/turboquant/`)
