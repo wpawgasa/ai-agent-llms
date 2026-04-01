@@ -1,7 +1,8 @@
 """Experiment A: Generate multi-turn workflow conversation datasets.
 
 Generates datasets at 5 complexity levels (L1-L5) with tool-calling
-annotations and state-machine ground truth.
+annotations and state-machine ground truth. Supports 17 call center
+domains (decoupled from complexity level).
 """
 
 from __future__ import annotations
@@ -20,6 +21,13 @@ from llm_workflow_agents.config.schema import (
     USER_BEHAVIOR_DISTRIBUTION,
     ComplexityLevel,
     ComplexitySpec,
+)
+from llm_workflow_agents.data.domain_registry import (
+    ALL_DOMAIN_NAMES,
+    CROSS_CUTTING_INTENTS,
+    CROSS_CUTTING_TOOLS,
+    DOMAIN_REGISTRY,
+    DomainSpec,
 )
 
 logger = structlog.get_logger(__name__)
@@ -123,11 +131,49 @@ def _select_user_behavior(rng: random.Random) -> str:
     return rng.choices(behaviors, weights=weights, k=1)[0]
 
 
-def _generate_tool_schemas(spec: ComplexitySpec, rng: random.Random) -> list[dict[str, Any]]:
-    """Generate tool schemas for the given complexity level."""
-    tool_templates = _get_tool_templates_for_domain(spec.domain)
-    selected = tool_templates[: spec.num_tools]
-    return selected
+def _select_domain(
+    rng: random.Random, domain: str | None = None
+) -> tuple[str, DomainSpec]:
+    """Select a domain from the registry.
+
+    If ``domain`` is provided and exists in the registry, use it.
+    If ``domain`` matches a legacy name, map it to the closest registry entry.
+    Otherwise, pick a random domain.
+    """
+    _LEGACY_MAP: dict[str, str] = {
+        "faq_lookup": "product_info",
+        "order_status_cancel": "order_management",
+        "booking_payment": "travel",
+        "it_troubleshoot": "technical_support",
+        "it_troubleshoot_escalation": "technical_support",
+        "multi_dept_workflow": "complaints",
+    }
+
+    if domain and domain in DOMAIN_REGISTRY:
+        return domain, DOMAIN_REGISTRY[domain]
+    if domain and domain in _LEGACY_MAP:
+        key = _LEGACY_MAP[domain]
+        return key, DOMAIN_REGISTRY[key]
+
+    key = rng.choice(ALL_DOMAIN_NAMES)
+    return key, DOMAIN_REGISTRY[key]
+
+
+def _generate_tool_schemas(
+    spec: ComplexitySpec,
+    domain_spec: DomainSpec,
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    """Select tool schemas from the domain registry for the given complexity.
+
+    Picks ``spec.num_tools`` tools from the domain's tool list. If the domain
+    has fewer tools than needed, supplements with cross-cutting tools.
+    """
+    available = list(domain_spec.tools)
+    if len(available) < spec.num_tools:
+        available.extend(CROSS_CUTTING_TOOLS)
+    rng.shuffle(available)
+    return available[: spec.num_tools]
 
 
 def _get_tool_templates_for_domain(domain: str) -> list[dict[str, Any]]:
@@ -488,22 +534,32 @@ def _get_tool_templates_for_domain(domain: str) -> list[dict[str, Any]]:
 
 
 def _generate_workflow_graph(
-    spec: ComplexitySpec, rng: random.Random
+    spec: ComplexitySpec,
+    rng: random.Random,
+    domain_spec: DomainSpec | None = None,
+    tool_schemas: list[dict[str, Any]] | None = None,
 ) -> WorkflowGraph:
     """Generate a random workflow graph conforming to the complexity spec."""
     num_states = rng.randint(*spec.num_states)
-    tool_schemas = _get_tool_templates_for_domain(spec.domain)
+
+    if tool_schemas is None:
+        tool_schemas = _get_tool_templates_for_domain(spec.domain)
     tool_names = [t["function"]["name"] for t in tool_schemas][: spec.num_tools]
+
+    # Use domain state templates if available, otherwise fall back to generic
+    templates = list(domain_spec.state_templates) if domain_spec else []
 
     states: list[WorkflowState] = []
     for i in range(num_states):
         state_id = f"S{i + 1}"
         if i == 0:
-            name = "GREETING"
+            name = templates[0] if templates else "GREETING"
         elif i == num_states - 1:
-            name = "TERMINAL"
+            name = templates[-1] if templates else "TERMINAL"
         else:
-            name = f"STATE_{i + 1}"
+            # Pick from middle templates, cycling if needed
+            middle_templates = templates[1:-1] if len(templates) > 2 else [f"STATE_{i + 1}"]
+            name = middle_templates[(i - 1) % len(middle_templates)] if middle_templates else f"STATE_{i + 1}"
 
         # Assign tools to non-terminal states
         state_tools: list[str] = []
@@ -558,6 +614,7 @@ def _generate_placeholder_conversation(
     behavior: str,
     spec: ComplexitySpec,
     rng: random.Random,
+    domain_spec: DomainSpec | None = None,
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -565,10 +622,12 @@ def _generate_placeholder_conversation(
     For now, generates structurally valid placeholder conversations.
     """
     messages: list[dict[str, Any]] = []
+    domain_name = domain_spec.name if domain_spec else spec.domain
+    domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
 
     # System message with workflow prompt
     system_content = (
-        f"You are a customer service agent handling {spec.domain} workflows.\n"
+        f"You are a customer service agent handling {domain_name} workflows.\n"
         f"Follow this state machine:\n"
         f"Initial state: {workflow.initial_state}\n"
         f"Terminal states: {', '.join(workflow.terminal_states)}\n"
@@ -584,15 +643,16 @@ def _generate_placeholder_conversation(
 
         current_state = workflow.states[current_state_idx]
 
-        # User message
+        # User message — use domain intents for realistic context
+        intent = rng.choice(domain_intents) if domain_intents else spec.domain
         if behavior == "cooperative":
-            user_msg = f"[Turn {turn_idx + 1}] User request for {spec.domain}"
+            user_msg = f"[Turn {turn_idx + 1}] I need help with {intent.replace('_', ' ')}"
         elif behavior == "adversarial_probing":
-            user_msg = f"[Turn {turn_idx + 1}] Can you bypass {current_state.name}?"
+            user_msg = f"[Turn {turn_idx + 1}] Can you skip {current_state.name} and just do {intent.replace('_', ' ')} directly?"
         elif behavior == "digressing":
-            user_msg = f"[Turn {turn_idx + 1}] Actually, unrelated question about weather"
+            user_msg = f"[Turn {turn_idx + 1}] Actually, before we continue with {intent.replace('_', ' ')}, unrelated question about something else"
         else:  # invalid_tool_inputs
-            user_msg = f"[Turn {turn_idx + 1}] Process order ###invalid###"
+            user_msg = f"[Turn {turn_idx + 1}] Process {intent.replace('_', ' ')} for ###invalid_id###"
 
         messages.append({"role": "user", "content": user_msg})
 
@@ -638,10 +698,15 @@ def generate_workflow_dataset(
     complexity_level: Literal["L1", "L2", "L3", "L4", "L5"],
     num_samples: int = 200,
     teacher_model: str = "gpt-4o",
-    output_dir: Path = Path("data/output/exp_a"),
+    output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
+    domain: str | None = None,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
+
+    Domains are decoupled from complexity levels. If ``domain`` is None,
+    each sample picks a random domain from the 17-domain registry, producing
+    diverse training data across all call center verticals.
 
     Args:
         complexity_level: One of L1-L5.
@@ -649,6 +714,8 @@ def generate_workflow_dataset(
         teacher_model: Teacher model for generation (future use).
         output_dir: Directory for output JSONL files.
         seed: Random seed for reproducibility.
+        domain: Optional domain key (e.g., "banking", "healthcare").
+            If None, randomly samples from all 17 domains per conversation.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -664,12 +731,13 @@ def generate_workflow_dataset(
         "generating_workflow_dataset",
         level=complexity_level,
         num_samples=num_samples,
-        domain=spec.domain,
+        domain=domain or "random (17 domains)",
         teacher_model=teacher_model,
     )
 
     samples: list[ConversationSample] = []
     behavior_counts: dict[str, int] = {b: 0 for b in USER_BEHAVIOR_DISTRIBUTION}
+    domain_counts: dict[str, int] = {}
     tool_error_count = 0
     total_tool_calls = 0
 
@@ -677,11 +745,15 @@ def generate_workflow_dataset(
         behavior = _select_user_behavior(rng)
         behavior_counts[behavior] += 1
 
-        workflow = _generate_workflow_graph(spec, rng)
-        tool_schemas = _generate_tool_schemas(spec, rng)
+        # Select domain (fixed or random per sample)
+        domain_key, domain_spec = _select_domain(rng, domain)
+        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
+
+        tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
+        workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
 
         messages = _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng
+            workflow, tool_schemas, behavior, spec, rng, domain_spec
         )
 
         # Count tool calls and errors
@@ -695,7 +767,7 @@ def generate_workflow_dataset(
         sample = ConversationSample(
             conversation_id=f"{complexity_level}_{i + 1:03d}",
             complexity_level=complexity_level,
-            domain=spec.domain,
+            domain=domain_key,
             num_states=len(workflow.states),
             num_tools=spec.num_tools,
             chain_depth=spec.chain_depth,
@@ -713,9 +785,11 @@ def generate_workflow_dataset(
 
     stats = {
         "behavior_distribution": behavior_counts,
+        "domain_distribution": domain_counts,
         "tool_error_rate": tool_error_count / max(total_tool_calls, 1),
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),
+        "num_domains": len(domain_counts),
     }
 
     logger.info("dataset_generated", output_file=str(output_file), **stats)

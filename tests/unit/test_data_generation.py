@@ -20,6 +20,12 @@ from llm_workflow_agents.data.generate_workflows import (
     WorkflowState,
     WorkflowTransition,
     generate_workflow_dataset,
+    _select_domain,
+)
+from llm_workflow_agents.data.domain_registry import (
+    ALL_DOMAIN_NAMES,
+    DOMAIN_REGISTRY,
+    DomainSpec,
 )
 from llm_workflow_agents.data.generate_tool_call_data import (
     DatasetSplits,
@@ -202,6 +208,84 @@ class TestGraphPairGeneration:
         assert len(d["edges"]) == 1
         assert d["initial_state"] == "S1"
         assert d["terminal_states"] == ["S2"]
+
+
+class TestDomainRegistry:
+    """Tests for expanded domain registry."""
+
+    def test_registry_has_17_domains(self) -> None:
+        assert len(DOMAIN_REGISTRY) == 17
+        assert len(ALL_DOMAIN_NAMES) == 17
+
+    def test_all_domains_have_tools(self) -> None:
+        for name, spec in DOMAIN_REGISTRY.items():
+            assert len(spec.tools) >= 4, f"{name} has fewer than 4 tools"
+
+    def test_all_domains_have_state_templates(self) -> None:
+        for name, spec in DOMAIN_REGISTRY.items():
+            assert len(spec.state_templates) >= 7, f"{name} has fewer than 7 state templates"
+            assert spec.state_templates[-1] in ("TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW"), (
+                f"{name} last state template is {spec.state_templates[-1]}"
+            )
+
+    def test_all_domains_have_intents(self) -> None:
+        for name, spec in DOMAIN_REGISTRY.items():
+            assert len(spec.intents) >= 4, f"{name} has fewer than 4 intents"
+
+    def test_domain_categories(self) -> None:
+        categories = {spec.category for spec in DOMAIN_REGISTRY.values()}
+        assert "core_business" in categories
+        assert "industry" in categories
+        assert "operational" in categories
+
+    def test_tool_schemas_valid_format(self) -> None:
+        for name, spec in DOMAIN_REGISTRY.items():
+            for tool in spec.tools:
+                assert tool["type"] == "function", f"{name}: tool missing type=function"
+                func = tool["function"]
+                assert "name" in func, f"{name}: tool missing function.name"
+                assert "parameters" in func, f"{name}: tool missing function.parameters"
+
+    def test_select_domain_explicit(self) -> None:
+        import random
+        rng = random.Random(42)
+        key, spec = _select_domain(rng, "banking")
+        assert key == "banking"
+        assert spec.name == "Banking & Financial Services"
+
+    def test_select_domain_legacy_mapping(self) -> None:
+        import random
+        rng = random.Random(42)
+        key, spec = _select_domain(rng, "faq_lookup")
+        assert key == "product_info"
+
+    def test_select_domain_random(self) -> None:
+        import random
+        rng = random.Random(42)
+        key, spec = _select_domain(rng, None)
+        assert key in ALL_DOMAIN_NAMES
+
+    def test_generate_with_specific_domain(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=5,
+            output_dir=tmp_output_dir,
+            seed=42,
+            domain="healthcare",
+        )
+        assert result.stats["num_domains"] == 1
+        assert "healthcare" in result.stats["domain_distribution"]
+
+    def test_generate_with_random_domains(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=50,
+            output_dir=tmp_output_dir,
+            seed=42,
+            domain=None,
+        )
+        # With 50 samples across 17 domains, should see multiple domains
+        assert result.stats["num_domains"] > 1
 
 
 class TestWorkflowGraphModel:
