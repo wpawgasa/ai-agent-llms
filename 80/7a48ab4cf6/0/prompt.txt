@@ -234,3 +234,7 @@ Do we have data generator for intent classification?
 ---
 
 What about orchestrator+sub-agents scenarios? Do we need to fine-tune orchestrator model to route accurately?
+
+---
+
+Let's go with Option B. Does this mean that Cat A models can work as orchestrator in multi-agent scenarios?
