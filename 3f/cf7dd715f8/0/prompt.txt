@@ -1,0 +1,13 @@
+Create PR
+
+---
+
+Update checklist in @.claude/rules/01-configs.md
+
+---
+
+Update checklist in @.claude/rules/02-data-generation.md
+
+---
+
+Implement chat_template_converter.py for all model families

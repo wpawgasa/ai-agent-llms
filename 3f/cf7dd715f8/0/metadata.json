@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "3fcf7dd715f8",
+  "session_id": "117ccc11-5925-48cd-841d-bcd0c2543822",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-01T05:55:32.155481517Z",
+  "branch": "feature/qwen35-chat-template",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "src/llm_workflow_agents/data/chat_template_converter.py",
+    "tests/unit/test_chat_templates.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "4ee2f06f8ea7",
+  "checkpoint_transcript_start": 220,
+  "transcript_lines_at_start": 220,
+  "token_usage": {
+    "input_tokens": 37,
+    "cache_creation_tokens": 91475,
+    "cache_read_tokens": 2371663,
+    "output_tokens": 6913,
+    "api_call_count": 27
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-01T05:55:31.675445745Z",
+    "agent_lines": 60,
+    "human_added": 39,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 99,
+    "agent_percentage": 60.60606060606061
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "3fcf7dd715f8",
+  "strategy": "manual-commit",
+  "branch": "feature/qwen35-chat-template",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "src/llm_workflow_agents/data/chat_template_converter.py",
+    "tests/unit/test_chat_templates.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3f/cf7dd715f8/0/metadata.json",
+      "transcript": "/3f/cf7dd715f8/0/full.jsonl",
+      "content_hash": "/3f/cf7dd715f8/0/content_hash.txt",
+      "prompt": "/3f/cf7dd715f8/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 37,
+    "cache_creation_tokens": 91475,
+    "cache_read_tokens": 2371663,
+    "output_tokens": 6913,
+    "api_call_count": 27
+  }
+}
