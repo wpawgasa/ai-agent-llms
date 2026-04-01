@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b42bc96aea0c",
+  "strategy": "manual-commit",
+  "branch": "feature/intent-classification-benchmark",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "src/llm_workflow_agents/eval/__init__.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b4/2bc96aea0c/0/metadata.json",
+      "transcript": "/b4/2bc96aea0c/0/full.jsonl",
+      "content_hash": "/b4/2bc96aea0c/0/content_hash.txt",
+      "prompt": "/b4/2bc96aea0c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 290,
+    "cache_creation_tokens": 354349,
+    "cache_read_tokens": 39020942,
+    "output_tokens": 125021,
+    "api_call_count": 236
+  }
+}
