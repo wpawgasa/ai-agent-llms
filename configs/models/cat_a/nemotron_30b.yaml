@@ -1,0 +1,23 @@
+model:
+  name: "nvidia/Nemotron-3-Nano-30B"
+  family: "nemotron"
+  architecture: "mamba_hybrid_transformer"
+  params_total: 30_000_000_000
+  params_active: 3_600_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 60
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "nemotron"
+  chat_template: "nemotron"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# Risk R6: Nemotron Mamba + vLLM incompatibility → HF generate() fallback

@@ -1,0 +1,56 @@
+description: "Phase 1 benchmark evaluation matrix — pre-trained model selection"
+
+# Execution matrix:
+#   Task A: 6 Cat A models × L1–L5 (200 conv/level) = 6,000 evaluations
+#   Task B: 5 Cat B–C models × L2–L3 (400 conv)    = 2,000 evaluations
+#   Task C: 5 Cat B–C models × 500 pairs × {0-shot, 3-shot} = 5,000 evaluations
+
+task_a:
+  models:
+    - "configs/models/cat_a/gemma3_27b.yaml"
+    - "configs/models/cat_a/qwen3_32b.yaml"
+    - "configs/models/cat_a/qwen35_35b_a3b.yaml"
+    - "configs/models/cat_a/mistral_small_24b.yaml"
+    - "configs/models/cat_a/nemotron_30b.yaml"
+    - "configs/models/cat_a/glm47_flash.yaml"
+  complexity_levels:
+    - "L1"
+    - "L2"
+    - "L3"
+    - "L4"
+    - "L5"
+  samples_per_level: 200
+  total_evaluations: 6000
+
+task_b:
+  models:
+    - "configs/models/cat_bc/qwen25_3b.yaml"
+    - "configs/models/cat_bc/qwen35_4b.yaml"
+    - "configs/models/cat_bc/glm47_flash_small.yaml"
+    - "configs/models/cat_bc/gemma_2b.yaml"
+    - "configs/models/cat_bc/gemma3_4b.yaml"
+  complexity_levels:
+    - "L2"
+    - "L3"
+  samples_per_level: 200
+  total_evaluations: 2000
+
+task_c:
+  models:
+    - "configs/models/cat_bc/qwen25_3b.yaml"
+    - "configs/models/cat_bc/qwen35_4b.yaml"
+    - "configs/models/cat_bc/glm47_flash_small.yaml"
+    - "configs/models/cat_bc/gemma_2b.yaml"
+    - "configs/models/cat_bc/gemma3_4b.yaml"
+  num_pairs: 500
+  shot_settings:
+    - "zero_shot"
+    - "three_shot"
+  total_evaluations: 5000
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
+  seed: 42

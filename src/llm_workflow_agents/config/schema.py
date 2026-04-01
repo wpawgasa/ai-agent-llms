@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 class ModelFamily(StrEnum):
     QWEN = "qwen"
+    QWEN35 = "qwen35"
     GEMMA = "gemma"
     MISTRAL = "mistral"
     NEMOTRON = "nemotron"
@@ -22,9 +23,9 @@ class ModelFamily(StrEnum):
 class KVCacheDtype(StrEnum):
     AUTO = "auto"
     FP8 = "fp8"
-    KIVI_2BIT = "kivi_2bit"
-    KIVI_4BIT = "kivi_4bit"
+    KIVI = "kivi"
     KVQUANT = "kvquant"
+    AWQ_FP8 = "awq_fp8"
     TURBOQUANT = "turboquant"
     ROTORQUANT = "rotorquant"
 
@@ -61,7 +62,7 @@ class InferenceConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    """Model configuration for Experiment A or B/C."""
+    """Model configuration for Phase 1 benchmarking."""
 
     name: str
     family: ModelFamily
@@ -74,6 +75,8 @@ class ModelConfig(BaseModel):
 
     serving: ServingConfig = Field(default_factory=ServingConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
+    category: str | None = None
+    benchmark_tasks: list[str] = Field(default_factory=list)
 
 
 class LoRAConfig(BaseModel):
@@ -178,7 +181,7 @@ class ComplexitySpec(BaseModel):
 class ServingDeploymentConfig(BaseModel):
     """Serving deployment configuration."""
 
-    mode: str = "single_lora"
+    mode: str = "single_model"
     kv_cache_dtype: str = "auto"
     port: int = 8000
     models: list[str] = Field(default_factory=list)

@@ -1,0 +1,39 @@
+stage: "sft"
+framework: "unsloth"
+
+model:
+  # Populated at runtime from Phase 1 winner (Cat B)
+  # Expected winner: one of configs/models/cat_bc/*.yaml
+  config_path: null
+
+lora:
+  rank: 64
+  alpha: 128
+  dropout: 0.05
+  target_modules: "auto"
+  freeze_router: true
+
+training:
+  precision: "qlora_4bit"
+  learning_rate: 1.0e-4
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.05
+  effective_batch_size: 16
+  num_epochs: 3
+  max_seq_length: 4096
+  gradient_checkpointing: true
+  packing: true
+
+data:
+  source: "data/output/task_b"
+  format: "hermes"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+logging:
+  wandb_project: "llm-workflow-agents-sft"
+  save_steps: 500
+  eval_steps: 500
+  metric_for_best_model: "eval_loss"

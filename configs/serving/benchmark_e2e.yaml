@@ -1,0 +1,37 @@
+mode: "benchmark_e2e"
+description: "Full E2E benchmark sweep across all models and quantization methods"
+
+models:
+  cat_a:
+    - "configs/models/cat_a/gemma3_27b.yaml"
+    - "configs/models/cat_a/qwen3_32b.yaml"
+    - "configs/models/cat_a/qwen35_35b_a3b.yaml"
+    - "configs/models/cat_a/mistral_small_24b.yaml"
+    - "configs/models/cat_a/nemotron_30b.yaml"
+    - "configs/models/cat_a/glm47_flash.yaml"
+  cat_bc:
+    - "configs/models/cat_bc/qwen25_3b.yaml"
+    - "configs/models/cat_bc/qwen35_4b.yaml"
+    - "configs/models/cat_bc/glm47_flash_small.yaml"
+    - "configs/models/cat_bc/gemma_2b.yaml"
+    - "configs/models/cat_bc/gemma3_4b.yaml"
+
+quantization_methods:
+  - "configs/quantization/fp8.yaml"
+  - "configs/quantization/kivi.yaml"
+  - "configs/quantization/kvquant.yaml"
+  - "configs/quantization/awq_fp8.yaml"
+  - "configs/quantization/turboquant.yaml"
+  - "configs/quantization/rotorquant.yaml"
+
+benchmark:
+  context_length: 4096
+  runs_per_config: 5
+  prompts_per_run: 500
+  seed: 42
+
+pareto:
+  axes:
+    - "task_completion"
+    - "peak_vram_gb"
+    - "p95_latency_ms"

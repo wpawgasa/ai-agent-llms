@@ -1,0 +1,15 @@
+mode: "single_model"
+description: "Single model serving via vLLM OpenAI-compatible API"
+
+# model_config is populated at runtime, e.g.:
+#   configs/models/cat_a/qwen3_32b.yaml
+model_config: null
+
+kv_cache_dtype: "auto"
+port: 8000
+
+vllm:
+  dtype: "bfloat16"
+  gpu_memory_utilization: 0.90
+  enable_auto_tool_choice: true
+  max_model_len: 8192

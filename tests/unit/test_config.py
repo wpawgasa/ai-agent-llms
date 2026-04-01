@@ -112,21 +112,23 @@ class TestConfigLoader:
     """Tests for YAML config loading."""
 
     def test_load_model_config(self, configs_dir: Path) -> None:
-        config_path = configs_dir / "models_exp_a" / "gemma3_27b.yaml"
+        config_path = configs_dir / "models" / "cat_a" / "gemma3_27b.yaml"
         if config_path.exists():
             cfg = load_model_config(config_path)
             assert cfg.family == ModelFamily.GEMMA
             assert cfg.params_total == 27_000_000_000
+            assert cfg.category == "A"
+            assert "task_a" in cfg.benchmark_tasks
 
     def test_load_all_model_configs(self, configs_dir: Path) -> None:
-        model_dir = configs_dir / "models_exp_a"
+        model_dir = configs_dir / "models" / "cat_a"
         if model_dir.exists():
             configs = load_all_model_configs(model_dir)
-            assert len(configs) == 5
+            assert len(configs) == 6
             assert "gemma3_27b" in configs
 
-    def test_load_exp_bc_configs(self, configs_dir: Path) -> None:
-        model_dir = configs_dir / "models_exp_bc"
+    def test_load_cat_bc_configs(self, configs_dir: Path) -> None:
+        model_dir = configs_dir / "models" / "cat_bc"
         if model_dir.exists():
             configs = load_all_model_configs(model_dir)
             assert len(configs) == 5
