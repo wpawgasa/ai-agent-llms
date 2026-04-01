@@ -72,11 +72,51 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
             "gate_proj", "up_proj", "down_proj",
         ),
     ),
+    # --- Cat A models ---
+    "qwen3_32b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
+    "qwen35_35b_a3b": LoRATargetSpec(
+        target_modules=(
+            # Standard attention
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            # DeltaNet layers
+            "in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj",
+            # MLP
+            "gate_proj", "up_proj", "down_proj",
+        ),
+        modules_to_freeze=("mlp.gate",),
+        warnings=("QLoRA 4-bit required (~17.5GB). DeltaNet hybrid architecture.",),
+    ),
+    "nemotron_30b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+        modules_to_freeze=("mlp.gate",),
+        warnings=("Mamba layers: Unsloth auto-detect. vLLM compat uncertain (R6).",),
+    ),
+    "mistral_24b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
+    "gemma3_27b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
 }
 
 # Model family to default target modules (fallback when specific model not in registry)
 _FAMILY_DEFAULTS: dict[ModelFamily, tuple[str, ...]] = {
     ModelFamily.QWEN: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
+    ModelFamily.QWEN35: ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj", "gate_proj", "up_proj", "down_proj"),
     ModelFamily.GEMMA: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
     ModelFamily.MISTRAL: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
     ModelFamily.NEMOTRON: ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"),
@@ -85,11 +125,17 @@ _FAMILY_DEFAULTS: dict[ModelFamily, tuple[str, ...]] = {
 
 # Model name pattern matching (HF model ID substring -> registry key)
 _MODEL_NAME_PATTERNS: dict[str, str] = {
-    "qwen2.5-3b": "qwen25_3b",
+    # More specific patterns first (order matters for substring matching)
+    "qwen3.5-35b": "qwen35_35b_a3b",
     "qwen3.5-4b": "qwen35_4b",
-    "glm-4": "glm47_flash",
-    "gemma-2b": "gemma_2b",
+    "qwen3-32b": "qwen3_32b",
+    "qwen2.5-3b": "qwen25_3b",
+    "gemma-3-27b": "gemma3_27b",
     "gemma-3-4b": "gemma3_4b",
+    "gemma-2b": "gemma_2b",
+    "mistral-small": "mistral_24b",
+    "nemotron": "nemotron_30b",
+    "glm-4": "glm47_flash",
 }
 
 
