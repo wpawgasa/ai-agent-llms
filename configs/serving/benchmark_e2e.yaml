@@ -19,7 +19,10 @@ models:
 quantization_methods:
   - "configs/quantization/kivi.yaml"
   - "configs/quantization/awq_fp8.yaml"
-  # fp8.yaml, kvquant.yaml, turboquant.yaml, rotorquant.yaml added in Phase 4
+  - "configs/quantization/fp8.yaml"
+  - "configs/quantization/kvquant.yaml"
+  - "configs/quantization/turboquant.yaml"
+  - "configs/quantization/rotorquant.yaml"
 
 benchmark:
   context_length: 4096
