@@ -3,7 +3,7 @@
   "checkpoint_id": "5af180e12bb6",
   "strategy": "manual-commit",
   "branch": "feature/phase1-foundation-configs",
-  "checkpoints_count": 0,
+  "checkpoints_count": 1,
   "files_touched": [
     "configs/benchmark/phase1_matrix.yaml",
     "configs/benchmark/selection_weights.yaml",
@@ -40,13 +40,19 @@
       "transcript": "/5a/f180e12bb6/0/full.jsonl",
       "content_hash": "/5a/f180e12bb6/0/content_hash.txt",
       "prompt": "/5a/f180e12bb6/0/prompt.txt"
+    },
+    {
+      "metadata": "/5a/f180e12bb6/1/metadata.json",
+      "transcript": "/5a/f180e12bb6/1/full.jsonl",
+      "content_hash": "/5a/f180e12bb6/1/content_hash.txt",
+      "prompt": "/5a/f180e12bb6/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 54,
-    "cache_creation_tokens": 67638,
-    "cache_read_tokens": 2949262,
-    "output_tokens": 20811,
-    "api_call_count": 48
+    "input_tokens": 1946,
+    "cache_creation_tokens": 497095,
+    "cache_read_tokens": 37712629,
+    "output_tokens": 189934,
+    "api_call_count": 280
   }
 }
