@@ -1,0 +1,34 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "e71d594703cb",
+  "session_id": "117ccc11-5925-48cd-841d-bcd0c2543822",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-01T08:11:10.210400425Z",
+  "branch": "feature/phase7-benchmark-integration-analysis",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "CLAUDE.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "e88ed9759f72",
+  "token_usage": {
+    "input_tokens": 227,
+    "cache_creation_tokens": 301060,
+    "cache_read_tokens": 26246056,
+    "output_tokens": 90669,
+    "api_call_count": 189
+  },
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-01T08:11:08.376531551Z",
+    "agent_lines": 0,
+    "human_added": 1518,
+    "human_modified": 3,
+    "human_removed": 0,
+    "total_committed": 1518,
+    "agent_percentage": 0
+  }
+}
