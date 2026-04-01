@@ -222,3 +222,7 @@ Is there any intent classification benchmark?
 ---
 
 Would we need intent classification on Cat A models? since it is one model that execute an entire workflow.
+
+---
+
+So will we need intent classification benchmark for orchestrator routing? If we will, let's include intent classification benchmark for Cat B/C models.
