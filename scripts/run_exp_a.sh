@@ -43,6 +43,7 @@ mkdir -p "$RESULTS_DIR"
 MODEL_CONFIGS=(
     "configs/models_exp_a/gemma3_27b.yaml"
     "configs/models_exp_a/qwen3_32b.yaml"
+    "configs/models_exp_a/qwen35_35b_a3b.yaml"
     "configs/models_exp_a/mistral_24b.yaml"
     "configs/models_exp_a/nemotron_30b.yaml"
     "configs/models_exp_a/glm47_flash.yaml"
