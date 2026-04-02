@@ -27,3 +27,7 @@ commit change and push
 ---
 
 Our models will handle Thai as well. Data generation should include Thai.
+
+---
+
+Should we edit @scripts/generate_data.sh to support generation langauge?
