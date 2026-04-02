@@ -60,3 +60,7 @@ error: Failed to initialize cache at `/home/shadeform/.cache/uv`
 ---
 
 Where does @scripts/run_exp_a.sh look for data for running a benchmark?
+
+---
+
+yes
