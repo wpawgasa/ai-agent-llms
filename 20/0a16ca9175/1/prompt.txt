@@ -1,0 +1,21 @@
+How would you name the workflow data generation method?
+
+---
+
+I mean the name of method that generates workflows.
+
+---
+
+What are current workflow domains?
+
+---
+
+Are the processes of local data generation and teacher models generation separated?
+
+---
+
+Edit data generation codes to support using teacher model
+
+---
+
+Apply teacher model to other data generation codes as well.

@@ -3,9 +3,13 @@
   "checkpoint_id": "200a16ca9175",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 2,
+  "checkpoints_count": 8,
   "files_touched": [
-    "pyproject.toml"
+    "pyproject.toml",
+    "src/llm_workflow_agents/data/_teacher_client.py",
+    "src/llm_workflow_agents/data/generate_graph_pairs.py",
+    "src/llm_workflow_agents/data/generate_tool_call_data.py",
+    "src/llm_workflow_agents/data/generate_workflows.py"
   ],
   "sessions": [
     {
@@ -13,13 +17,19 @@
       "transcript": "/20/0a16ca9175/0/full.jsonl",
       "content_hash": "/20/0a16ca9175/0/content_hash.txt",
       "prompt": "/20/0a16ca9175/0/prompt.txt"
+    },
+    {
+      "metadata": "/20/0a16ca9175/1/metadata.json",
+      "transcript": "/20/0a16ca9175/1/full.jsonl",
+      "content_hash": "/20/0a16ca9175/1/content_hash.txt",
+      "prompt": "/20/0a16ca9175/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 310,
-    "cache_creation_tokens": 367823,
-    "cache_read_tokens": 43219773,
-    "output_tokens": 135467,
-    "api_call_count": 250
+    "input_tokens": 380,
+    "cache_creation_tokens": 438997,
+    "cache_read_tokens": 46333245,
+    "output_tokens": 160148,
+    "api_call_count": 305
   }
 }
