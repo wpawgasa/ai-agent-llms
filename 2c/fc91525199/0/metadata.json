@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "2cfc91525199",
+  "session_id": "8569ddb2-2ba7-48fc-b3c2-1706687798bd",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-02T04:35:37.806105573Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "pyproject.toml",
+    "src/llm_workflow_agents/data/_teacher_client.py",
+    "uv.lock"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "2d839373ef59",
+  "token_usage": {
+    "input_tokens": 9,
+    "cache_creation_tokens": 22393,
+    "cache_read_tokens": 172387,
+    "output_tokens": 789,
+    "api_call_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-02T04:35:37.727730884Z",
+    "agent_lines": 7,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 7,
+    "agent_percentage": 100
+  }
+}
