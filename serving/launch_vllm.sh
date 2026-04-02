@@ -59,6 +59,7 @@ TOOL_PARSER=$(parse_yaml "serving.tool_call_parser" "hermes")
 GPU_UTIL=$(parse_yaml "serving.gpu_memory_utilization" "0.90")
 MAX_LEN=$(parse_yaml "serving.max_model_len" "8192")
 ENFORCE_EAGER=$(parse_yaml "serving.enforce_eager" "false")
+HF_OVERRIDES=$(parse_yaml "serving.hf_overrides" "")
 PORT=$(parse_yaml "serving.port" "8000")
 
 if [ -z "$MODEL_NAME" ]; then
@@ -69,6 +70,7 @@ fi
 # Build optional arguments
 KV_CACHE_ARGS=""
 EAGER_ARGS=""
+HF_OVERRIDE_ARGS=""
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
@@ -92,6 +94,10 @@ if [ "$ENFORCE_EAGER" = "true" ] || [ "$ENFORCE_EAGER" = "True" ]; then
     EAGER_ARGS="--enforce-eager"
 fi
 
+if [ -n "$HF_OVERRIDES" ]; then
+    HF_OVERRIDE_ARGS="--hf-overrides $HF_OVERRIDES"
+fi
+
 echo "=== Launching vLLM Server ==="
 echo "Model:       $MODEL_NAME"
 echo "Tool Parser: $TOOL_PARSER"
@@ -111,4 +117,5 @@ exec python -m vllm.entrypoints.openai.api_server \
     --enable-auto-tool-choice \
     $EAGER_ARGS \
     $KV_CACHE_ARGS \
+    $HF_OVERRIDE_ARGS \
     --port "$PORT"

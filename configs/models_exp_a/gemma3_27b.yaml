@@ -15,6 +15,8 @@ serving:
   gpu_memory_utilization: 0.90
   max_model_len: 8192
   enforce_eager: false
+  # Gemma 3 config.json omits rope_type; inject it so vLLM ModelConfig validates.
+  hf_overrides: '{"rope_scaling": {"rope_type": "linear", "factor": 8.0}}'
 
 inference:
   temperature_deterministic: 0.0
