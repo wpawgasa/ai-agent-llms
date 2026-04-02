@@ -168,6 +168,7 @@ class ConversationSample:
     tool_schemas: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     user_behavior: str
+    language: str = "en"
     ground_truth: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,6 +183,7 @@ class ConversationSample:
             "tool_schemas": self.tool_schemas,
             "messages": self.messages,
             "user_behavior": self.user_behavior,
+            "language": self.language,
             "ground_truth": self.ground_truth,
         }
 
@@ -677,6 +679,7 @@ def _generate_placeholder_conversation(
     spec: ComplexitySpec,
     rng: random.Random,
     domain_spec: DomainSpec | None = None,
+    language: str = "en",
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -697,6 +700,22 @@ def _generate_placeholder_conversation(
     )
     messages.append({"role": "system", "content": system_content})
 
+    # Placeholder text templates per language
+    _user_templates: dict[str, dict[str, str]] = {
+        "en": {
+            "cooperative": "[Turn {t}] I need help with {intent}",
+            "adversarial_probing": "[Turn {t}] Can you skip {state} and just do {intent} directly?",
+            "digressing": "[Turn {t}] Actually, before we continue with {intent}, unrelated question about something else",
+            "invalid_tool_inputs": "[Turn {t}] Process {intent} for ###invalid_id###",
+        },
+        "th": {
+            "cooperative": "[ตา {t}] ฉันต้องการความช่วยเหลือเรื่อง{intent}",
+            "adversarial_probing": "[ตา {t}] ข้ามขั้นตอน {state} แล้วทำ{intent}เลยได้ไหม?",
+            "digressing": "[ตา {t}] จริงๆ ก่อนจะไปต่อเรื่อง{intent} ขอถามเรื่องอื่นก่อน",
+            "invalid_tool_inputs": "[ตา {t}] ดำเนินการ{intent}สำหรับ ###invalid_id###",
+        },
+    }
+
     # Generate turns following the workflow
     current_state_idx = 0
     for turn_idx in range(min(len(workflow.states) * 2, 20)):
@@ -707,14 +726,10 @@ def _generate_placeholder_conversation(
 
         # User message — use domain intents for realistic context
         intent = rng.choice(domain_intents) if domain_intents else spec.domain
-        if behavior == "cooperative":
-            user_msg = f"[Turn {turn_idx + 1}] I need help with {intent.replace('_', ' ')}"
-        elif behavior == "adversarial_probing":
-            user_msg = f"[Turn {turn_idx + 1}] Can you skip {current_state.name} and just do {intent.replace('_', ' ')} directly?"
-        elif behavior == "digressing":
-            user_msg = f"[Turn {turn_idx + 1}] Actually, before we continue with {intent.replace('_', ' ')}, unrelated question about something else"
-        else:  # invalid_tool_inputs
-            user_msg = f"[Turn {turn_idx + 1}] Process {intent.replace('_', ' ')} for ###invalid_id###"
+        intent_text = intent.replace("_", " ")
+        templates = _user_templates.get(language or "en", _user_templates["en"])
+        tmpl = templates.get(behavior, templates["cooperative"])
+        user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=current_state.name)
 
         messages.append({"role": "user", "content": user_msg})
 
@@ -789,20 +804,33 @@ RULES:
 """
 
 
+_LANGUAGE_INSTRUCTIONS: dict[str, str] = {
+    "en": "Language: English — generate the entire conversation in English.",
+    "th": (
+        "Language: Thai (th-TH) — generate the entire conversation in Thai. "
+        "Keep [STATE: X → Y] annotations, tool call JSON, and tool response JSON in English/ASCII. "
+        "All user and assistant dialogue must be in Thai."
+    ),
+}
+
+
 def _build_teacher_prompt(
     workflow: WorkflowGraph,
     tool_schemas: list[dict[str, Any]],
     behavior: str,
     spec: ComplexitySpec,
     domain_spec: DomainSpec | None,
+    language: str = "en",
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
+    lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
         f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
-        f"User behavior: {behavior}\n\n"
+        f"User behavior: {behavior}\n"
+        f"{lang_instruction}\n\n"
         f"Workflow graph:\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
@@ -826,12 +854,13 @@ def _generate_teacher_conversation(
     rng: random.Random,
     domain_spec: DomainSpec | None,
     teacher_model: str,
+    language: str = "en",
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
     Falls back to placeholder generation if the API call fails.
     """
-    user_prompt = _build_teacher_prompt(workflow, tool_schemas, behavior, spec, domain_spec)
+    user_prompt = _build_teacher_prompt(workflow, tool_schemas, behavior, spec, domain_spec, language)
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
         messages = _parse_messages_response(raw)
@@ -845,7 +874,7 @@ def _generate_teacher_conversation(
             error=str(exc),
         )
         return _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec
+            workflow, tool_schemas, behavior, spec, rng, domain_spec, language
         )
 
 
@@ -856,6 +885,7 @@ def generate_workflow_dataset(
     output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
     domain: str | None = None,
+    language: Literal["en", "th"] | None = None,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -874,6 +904,8 @@ def generate_workflow_dataset(
         seed: Random seed for reproducibility.
         domain: Optional domain key (e.g., "banking", "healthcare").
             If None, randomly samples from all 17 domains per conversation.
+        language: Conversation language. ``"en"`` for English, ``"th"`` for Thai,
+            or ``None`` to mix 50 % English / 50 % Thai per sample.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -892,17 +924,23 @@ def generate_workflow_dataset(
         num_samples=num_samples,
         domain=domain or "random (17 domains)",
         teacher_model=teacher_model or "placeholder",
+        language=language or "mixed (en/th)",
     )
 
     samples: list[ConversationSample] = []
     behavior_counts: dict[str, int] = {b: 0 for b in USER_BEHAVIOR_DISTRIBUTION}
     domain_counts: dict[str, int] = {}
+    language_counts: dict[str, int] = {}
     tool_error_count = 0
     total_tool_calls = 0
 
     for i in range(num_samples):
         behavior = _select_user_behavior(rng)
         behavior_counts[behavior] += 1
+
+        # Select language (fixed or 50/50 mix per sample)
+        sample_language = language if language is not None else rng.choice(["en", "th"])
+        language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
         # Select domain (fixed or random per sample)
         domain_key, domain_spec = _select_domain(rng, domain)
@@ -913,11 +951,11 @@ def generate_workflow_dataset(
 
         if teacher_model:
             messages = _generate_teacher_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model, sample_language
             )
         else:
             messages = _generate_placeholder_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language
             )
 
         # Count tool calls and errors
@@ -939,6 +977,7 @@ def generate_workflow_dataset(
             tool_schemas=tool_schemas,
             messages=messages,
             user_behavior=behavior,
+            language=sample_language,
             ground_truth=_extract_ground_truth(messages, workflow),
         )
         samples.append(sample)
@@ -951,6 +990,7 @@ def generate_workflow_dataset(
     stats = {
         "behavior_distribution": behavior_counts,
         "domain_distribution": domain_counts,
+        "language_distribution": language_counts,
         "tool_error_rate": tool_error_count / max(total_tool_calls, 1),
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),
