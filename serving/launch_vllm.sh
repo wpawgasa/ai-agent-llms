@@ -67,22 +67,14 @@ if [ -z "$MODEL_NAME" ]; then
     exit 1
 fi
 
-# Build optional arguments
-KV_CACHE_ARGS=""
-EAGER_ARGS=""
-HF_OVERRIDE_ARGS=""
+# Build vLLM argument array (array avoids word-splitting on JSON values with spaces)
+KV_CACHE_DTYPE=""
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype)
-            KV_CACHE_ARGS="--kv-cache-dtype $2"
-            shift 2
-            ;;
-        --port)
-            PORT="$2"
-            shift 2
-            ;;
+        --kv-cache-dtype) KV_CACHE_DTYPE="$2"; shift 2 ;;
+        --port)           PORT="$2";            shift 2 ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -90,12 +82,26 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+VLLM_ARGS=(
+    --model                  "$MODEL_NAME"
+    --dtype                  bfloat16
+    --tool-call-parser       "$TOOL_PARSER"
+    --gpu-memory-utilization "$GPU_UTIL"
+    --max-model-len          "$MAX_LEN"
+    --enable-auto-tool-choice
+    --port                   "$PORT"
+)
+
 if [ "$ENFORCE_EAGER" = "true" ] || [ "$ENFORCE_EAGER" = "True" ]; then
-    EAGER_ARGS="--enforce-eager"
+    VLLM_ARGS+=(--enforce-eager)
+fi
+
+if [ -n "$KV_CACHE_DTYPE" ]; then
+    VLLM_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
 fi
 
 if [ -n "$HF_OVERRIDES" ]; then
-    HF_OVERRIDE_ARGS="--hf-overrides $HF_OVERRIDES"
+    VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
 fi
 
 echo "=== Launching vLLM Server ==="
@@ -104,18 +110,8 @@ echo "Tool Parser: $TOOL_PARSER"
 echo "GPU Util:    $GPU_UTIL"
 echo "Max Len:     $MAX_LEN"
 echo "Port:        $PORT"
-echo "KV Cache:    ${KV_CACHE_ARGS:-auto}"
+echo "KV Cache:    ${KV_CACHE_DTYPE:-auto}"
+echo "HF Overrides:${HF_OVERRIDES:- (none)}"
 echo "============================="
 
-# shellcheck disable=SC2086
-exec python -m vllm.entrypoints.openai.api_server \
-    --model "$MODEL_NAME" \
-    --dtype bfloat16 \
-    --tool-call-parser "$TOOL_PARSER" \
-    --gpu-memory-utilization "$GPU_UTIL" \
-    --max-model-len "$MAX_LEN" \
-    --enable-auto-tool-choice \
-    $EAGER_ARGS \
-    $KV_CACHE_ARGS \
-    $HF_OVERRIDE_ARGS \
-    --port "$PORT"
+exec python -m vllm.entrypoints.openai.api_server "${VLLM_ARGS[@]}"
