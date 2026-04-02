@@ -43,3 +43,7 @@ commit and push changes
 ---
 
 The @scripts/run_exp_a.sh script doesn't include Qwen3.5-35B-A3B for benchmark.
+
+---
+
+commit and push change
