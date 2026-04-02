@@ -153,3 +153,7 @@ say: "<S>ได้เลยค่ะ</S> <S>ขออนุญาตโอนส
 
 ### [finish]
 say: "<S>หากคุณ{CUSTOMER_NAME}ต้องการสอบถามข้อมูลเพิ่มเติม</S> <S>กรุณาติดต่อศูนย์ลูกค้าสัมพันธ์โทร 1503</S> <S>ขอบคุณที่ไว้วางใจในการบริการโอเชี่ยนไลฟ์ไทยสมุทร</S> <S>สวัสดีค่ะ</S>[END_CONVERSATION]"
+
+---
+
+Practically, we would want a combination of both. Natural language script is what a user uses to describe conversation flow, but structured graph provides clearer context of the flow to LLMs.
