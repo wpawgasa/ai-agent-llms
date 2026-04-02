@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def call_teacher_model(teacher_model: str, system_prompt: str, user_prompt: str) -> str:
     """Call a teacher model and return the raw text response.
