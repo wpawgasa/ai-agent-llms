@@ -59,7 +59,6 @@ TOOL_PARSER=$(parse_yaml "serving.tool_call_parser" "hermes")
 GPU_UTIL=$(parse_yaml "serving.gpu_memory_utilization" "0.90")
 MAX_LEN=$(parse_yaml "serving.max_model_len" "8192")
 ENFORCE_EAGER=$(parse_yaml "serving.enforce_eager" "false")
-HF_OVERRIDES=$(parse_yaml "serving.hf_overrides" "")
 PORT=$(parse_yaml "serving.port" "8000")
 
 if [ -z "$MODEL_NAME" ]; then
@@ -67,14 +66,16 @@ if [ -z "$MODEL_NAME" ]; then
     exit 1
 fi
 
-# Build vLLM argument array (array avoids word-splitting on JSON values with spaces)
+# Build vLLM argument array (array avoids word-splitting on values with spaces)
 KV_CACHE_DTYPE=""
+MODEL_OVERRIDE=""   # optional local path to use instead of MODEL_NAME (e.g. patched config)
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype) KV_CACHE_DTYPE="$2"; shift 2 ;;
-        --port)           PORT="$2";            shift 2 ;;
+        --kv-cache-dtype) KV_CACHE_DTYPE="$2";  shift 2 ;;
+        --port)           PORT="$2";             shift 2 ;;
+        --model-override) MODEL_OVERRIDE="$2";  shift 2 ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -82,8 +83,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Use patched local path if provided, otherwise use model name from config
+EFFECTIVE_MODEL="${MODEL_OVERRIDE:-$MODEL_NAME}"
+
 VLLM_ARGS=(
-    --model                  "$MODEL_NAME"
+    --model                  "$EFFECTIVE_MODEL"
     --dtype                  bfloat16
     --tool-call-parser       "$TOOL_PARSER"
     --gpu-memory-utilization "$GPU_UTIL"
@@ -100,18 +104,13 @@ if [ -n "$KV_CACHE_DTYPE" ]; then
     VLLM_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
 fi
 
-if [ -n "$HF_OVERRIDES" ]; then
-    VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
-fi
-
 echo "=== Launching vLLM Server ==="
-echo "Model:       $MODEL_NAME"
+echo "Model:       $EFFECTIVE_MODEL"
 echo "Tool Parser: $TOOL_PARSER"
 echo "GPU Util:    $GPU_UTIL"
 echo "Max Len:     $MAX_LEN"
 echo "Port:        $PORT"
 echo "KV Cache:    ${KV_CACHE_DTYPE:-auto}"
-echo "HF Overrides:${HF_OVERRIDES:- (none)}"
 echo "============================="
 
 exec python -m vllm.entrypoints.openai.api_server "${VLLM_ARGS[@]}"

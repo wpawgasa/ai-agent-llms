@@ -68,14 +68,24 @@ print(c['model']['name'])
     echo ""
     echo "--- Model: $MODEL_NAME ---"
 
+    # Patch config.json locally if needed (e.g. Gemma 3 rope_scaling missing rope_type)
+    MODEL_OVERRIDE_ARG=""
+    PATCH_OUTPUT=$(python3 "$PROJECT_ROOT/scripts/patch_model_config.py" "$MODEL_NAME" \
+        --cache-dir "$PROJECT_ROOT/.hf_patches" 2>&1)
+    LOCAL_MODEL_DIR=$(echo "$PATCH_OUTPUT" | grep '^LOCAL_MODEL_DIR=' | cut -d= -f2-)
+    if [ -n "$LOCAL_MODEL_DIR" ]; then
+        MODEL_OVERRIDE_ARG="--model-override $LOCAL_MODEL_DIR"
+    fi
+
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE"
+        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE $MODEL_OVERRIDE_ARG"
         echo "[DRY RUN] Would run eval for $MODEL_NAME"
         continue
     fi
 
     # Launch vLLM server in background
-    bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" --kv-cache-dtype "$KV_CACHE_DTYPE" &
+    # shellcheck disable=SC2086
+    bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" --kv-cache-dtype "$KV_CACHE_DTYPE" $MODEL_OVERRIDE_ARG &
     VLLM_PID=$!
 
     # Wait for server to be ready (poll health endpoint)
