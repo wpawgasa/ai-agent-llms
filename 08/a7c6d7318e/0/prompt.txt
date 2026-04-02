@@ -73,3 +73,19 @@ yes
 (APIServer pid=12807) 
 (APIServer pid=12807) Cannot access gated repo for url https://huggingface.co/google/gemma-3-27b-it/resolve/main/config.json.
 (APIServer pid=12807) Access to model google/gemma-3-27b-it is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+---
+
+(APIServer pid=12995)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=12995)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 1142, in create_engine_config
+(APIServer pid=12995)     model_config = self.create_model_config()
+(APIServer pid=12995)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 994, in create_model_config
+(APIServer pid=12995)     return ModelConfig(
+(APIServer pid=12995)            ^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=12995)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=12995) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=12995)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=12995)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
