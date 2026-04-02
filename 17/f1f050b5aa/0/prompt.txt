@@ -23,3 +23,7 @@ yes
 ---
 
 commit change and push
+
+---
+
+Our models will handle Thai as well. Data generation should include Thai.
