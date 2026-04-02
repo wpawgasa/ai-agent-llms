@@ -1,0 +1,30 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c85d1f643241",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "docs/data_generation_recipes.md",
+    "scripts/generate_data.sh",
+    "scripts/generate_eval_data.sh",
+    "scripts/generate_grpo_data.sh",
+    "scripts/generate_sft_data.sh",
+    "src/llm_workflow_agents/data/generate_workflows.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c8/5d1f643241/0/metadata.json",
+      "transcript": "/c8/5d1f643241/0/full.jsonl",
+      "content_hash": "/c8/5d1f643241/0/content_hash.txt",
+      "prompt": "/c8/5d1f643241/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 64,
+    "cache_creation_tokens": 68918,
+    "cache_read_tokens": 2377969,
+    "output_tokens": 22682,
+    "api_call_count": 42
+  }
+}
