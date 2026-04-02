@@ -93,3 +93,17 @@ yes
 ---
 
 api_server.py: error: unrecognized arguments: "linear", "factor": 8.0}}
+
+---
+
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 1142, in create_engine_config
+(APIServer pid=13483)     model_config = self.create_model_config()
+(APIServer pid=13483)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 994, in create_model_config
+(APIServer pid=13483)     return ModelConfig(
+(APIServer pid=13483)            ^^^^^^^^^^^^
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=13483)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=13483) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=13483)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=13483)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
