@@ -10,7 +10,7 @@
 #   --samples <n>            Samples per complexity level for Task A (default: 200)
 #   --synthetic-size <n>     Synthetic samples for Task B (default: 15000)
 #   --teacher-model <name>   Teacher model for live API generation, e.g. gemini-2.0-flash,
-#                            gpt-4o, claude-sonnet-4-6. Omit to use placeholder generator.
+#                            gpt-5.4-nano-2026-03-17, gemini-3-flash-preview. Omit to use placeholder generator.
 #   --output-dir <path>      Base output directory (default: data/output)
 #   --seed <n>               Random seed (default: 42)
 #   --language <en|th>       Conversation language for Task A (default: mixed 50/50)

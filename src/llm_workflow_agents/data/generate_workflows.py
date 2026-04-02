@@ -43,6 +43,27 @@ from llm_workflow_agents.data.domain_registry import (
 
 logger = structlog.get_logger(__name__)
 
+BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
+    "default": {
+        "cooperative": 0.60,
+        "adversarial_probing": 0.15,
+        "digressing": 0.10,
+        "invalid_tool_inputs": 0.15,
+    },
+    "adversarial": {
+        "cooperative": 0.45,
+        "adversarial_probing": 0.25,
+        "digressing": 0.15,
+        "invalid_tool_inputs": 0.15,
+    },
+    "balanced": {
+        "cooperative": 0.25,
+        "adversarial_probing": 0.25,
+        "digressing": 0.25,
+        "invalid_tool_inputs": 0.25,
+    },
+}
+
 
 @dataclass
 class DatasetMetadata:
@@ -290,10 +311,14 @@ class ConversationSample:
         }
 
 
-def _select_user_behavior(rng: random.Random) -> str:
+def _select_user_behavior(
+    rng: random.Random,
+    distribution: dict[str, float] | None = None,
+) -> str:
     """Select a user behavior type based on the configured distribution."""
-    behaviors = list(USER_BEHAVIOR_DISTRIBUTION.keys())
-    weights = list(USER_BEHAVIOR_DISTRIBUTION.values())
+    dist = distribution if distribution is not None else USER_BEHAVIOR_DISTRIBUTION
+    behaviors = list(dist.keys())
+    weights = list(dist.values())
     return rng.choices(behaviors, weights=weights, k=1)[0]
 
 
@@ -818,6 +843,13 @@ def _generate_placeholder_conversation(
             "digressing": "[ตา {t}] จริงๆ ก่อนจะไปต่อเรื่อง{intent} ขอถามเรื่องอื่นก่อน",
             "invalid_tool_inputs": "[ตา {t}] ดำเนินการ{intent}สำหรับ ###invalid_id###",
         },
+        # Thai-English code-switching: Thai sentence structure with embedded English terms
+        "code_switch": {
+            "cooperative": "[ตา {t}] ขอ help เรื่อง {intent} หน่อยนะคะ",
+            "adversarial_probing": "[ตา {t}] ข้าม {state} step แล้ว proceed กับ {intent} เลยได้ไหมคะ?",
+            "digressing": "[ตา {t}] ก่อนจะ continue เรื่อง {intent} ขอถาม unrelated เรื่องนึงก่อนนะคะ",
+            "invalid_tool_inputs": "[ตา {t}] ช่วย process {intent} for ###invalid_id### ด้วยนะคะ",
+        },
     }
 
     # Generate turns following the workflow
@@ -915,6 +947,14 @@ _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
         "Keep [STATE: X → Y] annotations, tool call JSON, and tool response JSON in English/ASCII. "
         "All user and assistant dialogue must be in Thai."
     ),
+    "code_switch": (
+        "Language: Thai-English code-switching (th-TH / en) — the conversation naturally mixes "
+        "Thai and English within and across turns, as is common in Thai call-centre interactions. "
+        "User messages may start in Thai and embed English terms (e.g. product names, status words, "
+        "technical jargon) or switch to English mid-sentence. Assistant responses should mirror this "
+        "register. Keep [STATE: X → Y] annotations, tool call JSON, and tool response JSON in "
+        "English/ASCII."
+    ),
 }
 
 
@@ -991,7 +1031,8 @@ def generate_workflow_dataset(
     output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
     domain: str | None = None,
-    language: Literal["en", "th"] | None = None,
+    language: Literal["en", "th", "code_switch"] | None = None,
+    behavior_preset: str = "default",
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1011,11 +1052,22 @@ def generate_workflow_dataset(
         domain: Optional domain key (e.g., "banking", "healthcare").
             If None, randomly samples from all 17 domains per conversation.
         language: Conversation language. ``"en"`` for English, ``"th"`` for Thai,
-            or ``None`` to mix 50 % English / 50 % Thai per sample.
+            ``"code_switch"`` for Thai-English code-switching within each conversation,
+            or ``None`` to randomly assign ``"en"`` or ``"th"`` per sample (50/50).
+        behavior_preset: User behavior distribution preset. One of
+            ``"default"`` (60/15/10/15), ``"adversarial"`` (45/25/15/15),
+            or ``"balanced"`` (25/25/25/25).
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
     """
+    if behavior_preset not in BEHAVIOR_PRESETS:
+        raise ValueError(
+            f"Unknown behavior_preset {behavior_preset!r}. "
+            f"Valid options: {list(BEHAVIOR_PRESETS)}"
+        )
+    active_distribution = BEHAVIOR_PRESETS[behavior_preset]
+
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
     rng = random.Random(seed)
@@ -1024,7 +1076,8 @@ def generate_workflow_dataset(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     lang_tag = language or "mixed"
     model_tag = teacher_model.replace("/", "-").replace(".", "-") if teacher_model else "placeholder"
-    output_file = output_dir / f"{complexity_level.lower()}_conversations_{lang_tag}_{model_tag}_{timestamp}.jsonl"
+    preset_tag = f"_{behavior_preset}" if behavior_preset != "default" else ""
+    output_file = output_dir / f"{complexity_level.lower()}_conversations_{lang_tag}_{model_tag}{preset_tag}_{timestamp}.jsonl"
 
     logger.info(
         "generating_workflow_dataset",
@@ -1033,17 +1086,18 @@ def generate_workflow_dataset(
         domain=domain or "random (17 domains)",
         teacher_model=teacher_model or "placeholder",
         language=language or "mixed (en/th)",
+        behavior_preset=behavior_preset,
     )
 
     samples: list[ConversationSample] = []
-    behavior_counts: dict[str, int] = {b: 0 for b in USER_BEHAVIOR_DISTRIBUTION}
+    behavior_counts: dict[str, int] = {b: 0 for b in active_distribution}
     domain_counts: dict[str, int] = {}
     language_counts: dict[str, int] = {}
     tool_error_count = 0
     total_tool_calls = 0
 
     for i in range(num_samples):
-        behavior = _select_user_behavior(rng)
+        behavior = _select_user_behavior(rng, active_distribution)
         behavior_counts[behavior] += 1
 
         # Select language (fixed or 50/50 mix per sample)
