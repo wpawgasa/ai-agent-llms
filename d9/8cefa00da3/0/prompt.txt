@@ -1,0 +1,29 @@
+The data generation output is overwritten by newer file. Add timestamp to the filename to prevent files being overwritten.
+
+---
+
+commit change
+
+---
+
+push the commit
+
+---
+
+Do the genenerated workflows contain entire flow description?
+
+---
+
+Should we include state_sequence, tool_chain_dependencies, terminal_state in ground_truth?
+
+---
+
+yes
+
+---
+
+commit change and push
+
+---
+
+Our models will handle Thai as well. Data generation should include Thai.
