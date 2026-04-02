@@ -5,10 +5,12 @@
 # and saves results to results/exp_a/.
 #
 # Usage:
-#   ./scripts/run_exp_a.sh [--kv-cache-dtype <dtype>] [--dry-run]
+#   ./scripts/run_exp_a.sh [OPTIONS]
 #
 # Options:
 #   --kv-cache-dtype  KV cache quantization dtype (default: auto)
+#   --data <path>     Benchmark data directory (default: data/output/benchmark/task_a)
+#   --max-samples <n> Limit to first N samples per level, 0=all (default: 0)
 #   --dry-run         Print commands without executing
 
 set -euo pipefail
@@ -19,18 +21,16 @@ RESULTS_DIR="$PROJECT_ROOT/results/exp_a"
 LAUNCH_SCRIPT="$PROJECT_ROOT/serving/launch_vllm.sh"
 
 KV_CACHE_DTYPE="auto"
+DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
+MAX_SAMPLES=0
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --kv-cache-dtype)
-            KV_CACHE_DTYPE="$2"
-            shift 2
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
+        --kv-cache-dtype) KV_CACHE_DTYPE="$2"; shift 2 ;;
+        --data)           DATA_DIR="$2";        shift 2 ;;
+        --max-samples)    MAX_SAMPLES="$2";     shift 2 ;;
+        --dry-run)        DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -51,7 +51,9 @@ MODEL_CONFIGS=(
 
 echo "=== Experiment A: Prompt-Encoded Business Logic ==="
 echo "KV cache dtype: $KV_CACHE_DTYPE"
+echo "Data dir:       $DATA_DIR"
 echo "Results dir:    $RESULTS_DIR"
+echo "Max samples:    ${MAX_SAMPLES} (0=all)"
 echo "=================================================="
 
 for CONFIG in "${MODEL_CONFIGS[@]}"; do
@@ -94,8 +96,11 @@ print(c['model']['name'])
     # Run evaluation
     RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}.json"
     python3 -m llm_workflow_agents.eval.agent_benchmark \
-        --model "$MODEL_NAME" \
-        --output "$RESULT_FILE" 2>&1 | tee "${RESULT_FILE%.json}.log" || true
+        --model       "$MODEL_NAME" \
+        --output      "$RESULT_FILE" \
+        --data        "$DATA_DIR" \
+        --max-samples "$MAX_SAMPLES" \
+        2>&1 | tee "${RESULT_FILE%.json}.log" || true
 
     # Shut down vLLM
     kill "$VLLM_PID" 2>/dev/null || true
