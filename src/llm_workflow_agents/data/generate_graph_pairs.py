@@ -2,6 +2,13 @@
 
 Constructs 5,000 pairs from workflow prompts with gold annotations,
 teacher-generated pairs, and paraphrase augmentation.
+
+Teacher model generation:
+  Set ``teacher_model`` in ``generate_graph_pairs`` to use a live API for
+  both the teacher-generated pairs and paraphrase augmentation instead of
+  the placeholder implementations.
+  Supported prefixes: ``gemini-*``, ``gpt-*``, ``claude-*``.
+  Falls back to placeholder on API error.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from typing import Any
 
 import structlog
 
+from llm_workflow_agents.data._teacher_client import call_teacher_model
 from llm_workflow_agents.data.generate_tool_call_data import DatasetSplits
 
 logger = structlog.get_logger(__name__)
@@ -155,47 +163,132 @@ def _create_graph_pair(
     }
 
 
+_GRAPH_PAIR_SYSTEM_PROMPT = """\
+You are a dataset generation expert creating graph-extraction training data.
+Given a workflow description prompt and its corresponding graph, produce a
+paraphrased version of the prompt that preserves all workflow semantics.
+
+OUTPUT FORMAT — return a JSON object:
+{"paraphrased_prompt": "<rewritten prompt text>"}
+
+RULES:
+- Keep all state names, tool names, and transition conditions intact.
+- Change sentence structure, vocabulary, and ordering only.
+- Output ONLY the JSON object — no markdown fences.
+"""
+
+_TEACHER_GRAPH_SYSTEM_PROMPT = """\
+You are a dataset generation expert creating graph-extraction training data.
+Given a workflow description, extract and output the workflow graph as JSON.
+
+OUTPUT FORMAT — return a JSON object:
+{
+  "prompt": "<clear natural-language description of the workflow>",
+  "graph": {
+    "nodes": [{"id": "S1", "name": "...", "tools": [...], "entry_actions": [...]}],
+    "edges": [{"from_state": "S1", "to_state": "S2", "condition": "...", "priority": 0}],
+    "initial_state": "S1",
+    "terminal_states": ["SN"]
+  }
+}
+
+RULES:
+- Nodes must include at least one initial and one terminal state.
+- Every node (except terminal) must have at least one outgoing edge.
+- Output ONLY the JSON object — no markdown fences.
+"""
+
+
 def _augment_with_paraphrases(
     pairs: list[dict[str, Any]],
     target_size: int,
     rng: random.Random,
+    teacher_model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Augment pairs via paraphrasing to reach target size.
 
-    In production, uses teacher model for paraphrasing.
-    For now, creates variants with minor prompt modifications.
+    Uses the teacher model for paraphrasing when ``teacher_model`` is set,
+    otherwise creates variants with minor prefix modifications.
     """
     augmented = list(pairs)
+    _prefixes = [
+        "Please process: ",
+        "Handle the following workflow: ",
+        "Given this workflow description: ",
+        "Extract the graph for: ",
+        "",
+    ]
 
     while len(augmented) < target_size:
         base = rng.choice(pairs)
         user_msg = base["messages"][1]["content"]
-
-        # Simple augmentation: add prefix/suffix variations
-        prefixes = [
-            "Please process: ",
-            "Handle the following workflow: ",
-            "Given this workflow description: ",
-            "Extract the graph for: ",
-            "",
-        ]
-        prefix = rng.choice(prefixes)
         new_id = f"aug_{len(augmented):05d}"
-
-        new_pair = _create_graph_pair(
-            prompt_text=prefix + user_msg,
-            graph=WorkflowGraphOutput(
-                nodes=[GraphNode(**n) for n in base["graph"]["nodes"]],
-                edges=[GraphEdge(**e) for e in base["graph"]["edges"]],
-                initial_state=base["graph"]["initial_state"],
-                terminal_states=base["graph"]["terminal_states"],
-            ),
-            pair_id=new_id,
-            source="augmented",
+        graph = WorkflowGraphOutput(
+            nodes=[GraphNode(**n) for n in base["graph"]["nodes"]],
+            edges=[GraphEdge(**e) for e in base["graph"]["edges"]],
+            initial_state=base["graph"]["initial_state"],
+            terminal_states=base["graph"]["terminal_states"],
         )
-        augmented.append(new_pair)
+
+        if teacher_model:
+            paraphrased_prompt = _paraphrase_prompt(user_msg, teacher_model, user_msg)
+        else:
+            paraphrased_prompt = rng.choice(_prefixes) + user_msg
+
+        augmented.append(
+            _create_graph_pair(paraphrased_prompt, graph, new_id, "augmented")
+        )
 
     return augmented[:target_size]
+
+
+def _paraphrase_prompt(original: str, teacher_model: str, fallback: str) -> str:
+    """Return a paraphrased version of ``original`` via the teacher model."""
+    try:
+        raw = call_teacher_model(
+            teacher_model,
+            _GRAPH_PAIR_SYSTEM_PROMPT,
+            f"Paraphrase this workflow prompt:\n\n{original}",
+        )
+        data = json.loads(raw)
+        return data.get("paraphrased_prompt", fallback)
+    except Exception as exc:
+        logger.warning("paraphrase_fallback", error=str(exc))
+        return fallback
+
+
+def _generate_teacher_graph_pair(
+    pair_id: str,
+    teacher_model: str,
+    domain_hint: str = "customer service",
+) -> dict[str, Any] | None:
+    """Ask the teacher model to generate a novel (prompt, graph) pair.
+
+    Returns ``None`` on failure so the caller can fall back to placeholder data.
+    """
+    user_prompt = (
+        f"Generate a {domain_hint} workflow with 3–7 states and 2–5 tools. "
+        "Produce a natural-language description and the corresponding graph."
+    )
+    try:
+        raw = call_teacher_model(teacher_model, _TEACHER_GRAPH_SYSTEM_PROMPT, user_prompt)
+        data = json.loads(raw)
+        prompt_text = data.get("prompt", "")
+        g = data.get("graph", {})
+        if not prompt_text or not g:
+            return None
+        nodes = [GraphNode(**n) for n in g.get("nodes", [])]
+        edges = [GraphEdge(**e) for e in g.get("edges", [])]
+        graph = WorkflowGraphOutput(
+            nodes=nodes,
+            edges=edges,
+            initial_state=g.get("initial_state", nodes[0].id if nodes else "S1"),
+            terminal_states=g.get("terminal_states", [nodes[-1].id] if nodes else ["S1"]),
+        )
+        return _create_graph_pair(prompt_text, graph, pair_id, "teacher")
+    except Exception as exc:
+        logger.warning("teacher_graph_pair_failed", pair_id=pair_id, error=str(exc))
+        return None
 
 
 def generate_graph_pairs(
@@ -203,6 +296,7 @@ def generate_graph_pairs(
     gold_annotations: int = 200,
     teacher_generated: int = 800,
     augmentation_target: int = 5000,
+    teacher_model: str | None = None,
     output_dir: Path = Path("data/output/exp_c"),
     seed: int = 42,
 ) -> DatasetSplits:
@@ -213,6 +307,10 @@ def generate_graph_pairs(
         gold_annotations: Number of gold-standard annotated pairs.
         teacher_generated: Number of teacher-model generated pairs.
         augmentation_target: Total target size after augmentation.
+        teacher_model: Teacher model name for live API generation of
+            teacher pairs and paraphrase augmentation.
+            Supported prefixes: ``gemini-*``, ``gpt-*``, ``claude-*``.
+            If ``None``, uses placeholder generation throughout.
         output_dir: Output directory.
         seed: Random seed.
 
@@ -228,6 +326,7 @@ def generate_graph_pairs(
         gold=gold_annotations,
         teacher=teacher_generated,
         target=augmentation_target,
+        teacher_model=teacher_model or "placeholder",
     )
 
     # Load workflow prompts from Exp A
@@ -249,12 +348,22 @@ def generate_graph_pairs(
         for i, sample in enumerate(
             prompts[gold_annotations : gold_annotations + teacher_generated]
         ):
-            graph = _extract_graph_from_workflow(sample)
-            system_msg = next(
-                (m["content"] for m in sample.get("messages", []) if m["role"] == "system"),
-                f"Workflow for {sample.get('domain', 'unknown')}",
-            )
-            pair = _create_graph_pair(system_msg, graph, f"teacher_{i:04d}", "teacher")
+            pair_id = f"teacher_{i:04d}"
+            if teacher_model:
+                pair = _generate_teacher_graph_pair(
+                    pair_id,
+                    teacher_model,
+                    domain_hint=sample.get("domain", "customer service"),
+                )
+            else:
+                pair = None
+            if pair is None:
+                graph = _extract_graph_from_workflow(sample)
+                system_msg = next(
+                    (m["content"] for m in sample.get("messages", []) if m["role"] == "system"),
+                    f"Workflow for {sample.get('domain', 'unknown')}",
+                )
+                pair = _create_graph_pair(system_msg, graph, pair_id, "teacher")
             pairs.append(pair)
     else:
         # Generate placeholder pairs if no prompts available
@@ -279,7 +388,7 @@ def generate_graph_pairs(
             pairs.append(pair)
 
     # Augment to target size
-    all_pairs = _augment_with_paraphrases(pairs, augmentation_target, rng)
+    all_pairs = _augment_with_paraphrases(pairs, augmentation_target, rng, teacher_model)
     rng.shuffle(all_pairs)
 
     # Split: 4000 train / 500 val / 500 test

@@ -2,6 +2,12 @@
 
 Merges external datasets (xlam-60k, ToolBench) with custom synthetic data
 into a unified fine-tuning JSONL.
+
+Teacher model generation:
+  Set ``teacher_model`` in ``generate_tool_call_dataset`` to a model name to
+  call a live API for synthetic sample generation instead of the placeholder
+  generator.  Supported prefixes: ``gemini-*``, ``gpt-*``, ``claude-*``.
+  Falls back to placeholder on API error.
 """
 
 from __future__ import annotations
@@ -13,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+
+from llm_workflow_agents.data._teacher_client import call_teacher_model
 
 logger = structlog.get_logger(__name__)
 
@@ -63,81 +71,149 @@ def _load_external_dataset(source: str) -> list[dict[str, Any]]:
     return []
 
 
+_SYNTHETIC_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "name": "get_weather",
+        "description": "Get current weather for a location",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"},
+                "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["location"],
+        },
+    },
+    {
+        "name": "search_products",
+        "description": "Search product catalog",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "category": {"type": "string"},
+                "max_price": {"type": "number"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "send_email",
+        "description": "Send an email message",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+]
+
+_TOOL_CALL_SYSTEM_PROMPT = """\
+You are a dataset generation expert creating tool-call training data for LLM fine-tuning.
+Given a set of tool schemas, generate a realistic single-turn conversation where a user
+requests an action and the assistant responds with the correct tool call.
+
+OUTPUT FORMAT — return a JSON object:
+{
+  "messages": [
+    {"role": "system", "content": "You have access to the following tools: ..."},
+    {"role": "user", "content": "<realistic user request>"},
+    {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\": \"...\", \"arguments\": {...}}</tool_call>",
+      "tool_calls": [{"name": "...", "arguments": {...}}]
+    }
+  ],
+  "tools": [<tool schemas>]
+}
+
+RULES:
+- The user request must be natural and realistic, not a template.
+- Arguments must be plausible values, not placeholders.
+- Select the single most appropriate tool.
+- Output ONLY the JSON object — no markdown fences.
+"""
+
+
+def _generate_placeholder_sample(
+    sample_id: str,
+    tool_schemas: list[dict[str, Any]],
+    rng: random.Random,
+) -> dict[str, Any]:
+    """Generate one structurally valid placeholder sample."""
+    tool = rng.choice(tool_schemas)
+    return {
+        "id": sample_id,
+        "source": "custom_synthetic",
+        "messages": [
+            {
+                "role": "system",
+                "content": f"You have access to: {json.dumps([t['name'] for t in tool_schemas])}",
+            },
+            {"role": "user", "content": f"Placeholder request for {tool['name']}"},
+            {
+                "role": "assistant",
+                "content": f'<tool_call>{json.dumps({"name": tool["name"], "arguments": {}})}</tool_call>',
+                "tool_calls": [{"name": tool["name"], "arguments": {}}],
+            },
+        ],
+        "tools": tool_schemas,
+    }
+
+
+def _generate_teacher_sample(
+    sample_id: str,
+    tool_schemas: list[dict[str, Any]],
+    teacher_model: str,
+    rng: random.Random,
+) -> dict[str, Any]:
+    """Generate one sample via the teacher model API, with placeholder fallback."""
+    user_prompt = (
+        f"Generate a tool-call training sample using these tool schemas:\n"
+        f"{json.dumps(tool_schemas, indent=2)}\n\n"
+        f"Pick one tool and write a realistic user request that requires it."
+    )
+    try:
+        raw = call_teacher_model(teacher_model, _TOOL_CALL_SYSTEM_PROMPT, user_prompt)
+        data = json.loads(raw)
+        messages = data.get("messages", [])
+        tools = data.get("tools", tool_schemas)
+        if not messages:
+            raise ValueError("Empty messages from teacher model")
+        return {
+            "id": sample_id,
+            "source": "custom_synthetic",
+            "messages": messages,
+            "tools": tools,
+        }
+    except Exception as exc:
+        logger.warning("teacher_sample_fallback", sample_id=sample_id, error=str(exc))
+        return _generate_placeholder_sample(sample_id, tool_schemas, rng)
+
+
 def _generate_synthetic_samples(
     num_samples: int,
-    teacher_model: str,
+    teacher_model: str | None,
     rng: random.Random,
 ) -> list[dict[str, Any]]:
     """Generate synthetic tool-call training samples.
 
-    In production, this calls the teacher model. For now, generates
-    structurally valid placeholder samples.
+    Uses the teacher model API when ``teacher_model`` is set, otherwise
+    generates structurally valid placeholder samples.
     """
+    tool_schemas = _SYNTHETIC_TOOL_SCHEMAS
     samples: list[dict[str, Any]] = []
 
-    tool_schemas = [
-        {
-            "name": "get_weather",
-            "description": "Get current weather for a location",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string"},
-                    "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
-                },
-                "required": ["location"],
-            },
-        },
-        {
-            "name": "search_products",
-            "description": "Search product catalog",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "category": {"type": "string"},
-                    "max_price": {"type": "number"},
-                },
-                "required": ["query"],
-            },
-        },
-        {
-            "name": "send_email",
-            "description": "Send an email message",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "to": {"type": "string"},
-                    "subject": {"type": "string"},
-                    "body": {"type": "string"},
-                },
-                "required": ["to", "subject", "body"],
-            },
-        },
-    ]
-
     for i in range(num_samples):
-        tool = rng.choice(tool_schemas)
-        sample = {
-            "id": f"synthetic_{i:05d}",
-            "source": "custom_synthetic",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": f"You have access to: {json.dumps([t['name'] for t in tool_schemas])}",
-                },
-                {
-                    "role": "user",
-                    "content": f"Placeholder request for {tool['name']}",
-                },
-                {
-                    "role": "assistant",
-                    "content": f'<tool_call>{json.dumps({"name": tool["name"], "arguments": dict()})}</tool_call>',
-                    "tool_calls": [{"name": tool["name"], "arguments": {}}],
-                },
-            ],
-            "tools": tool_schemas,
-        }
+        sample_id = f"synthetic_{i:05d}"
+        if teacher_model:
+            sample = _generate_teacher_sample(sample_id, tool_schemas, teacher_model, rng)
+        else:
+            sample = _generate_placeholder_sample(sample_id, tool_schemas, rng)
         samples.append(sample)
 
     return samples
@@ -203,7 +279,7 @@ def _split_dataset(
 def generate_tool_call_dataset(
     external_sources: list[str] | None = None,
     custom_synthetic_size: int = 15000,
-    teacher_model: str = "gpt-4o",
+    teacher_model: str | None = None,
     negative_ratio: float = 0.15,
     output_dir: Path = Path("data/output/exp_b"),
     seed: int = 42,
@@ -213,7 +289,9 @@ def generate_tool_call_dataset(
     Args:
         external_sources: HuggingFace dataset IDs to merge.
         custom_synthetic_size: Number of synthetic samples to generate.
-        teacher_model: Teacher model for synthetic generation.
+        teacher_model: Teacher model name for live API generation.
+            Supported prefixes: ``gemini-*``, ``gpt-*``, ``claude-*``.
+            If ``None``, uses the local placeholder generator.
         negative_ratio: Fraction of negative examples (0.15 = 15%).
         output_dir: Output directory for JSONL files.
         seed: Random seed.
@@ -231,6 +309,7 @@ def generate_tool_call_dataset(
         "generating_tool_call_dataset",
         external_sources=external_sources,
         custom_synthetic_size=custom_synthetic_size,
+        teacher_model=teacher_model or "placeholder",
         negative_ratio=negative_ratio,
     )
 

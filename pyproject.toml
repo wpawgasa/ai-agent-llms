@@ -18,32 +18,28 @@ dependencies = [
     "peft>=0.14.0",
     "trl>=0.15.0",
     "accelerate>=0.34.0",
-
     # Inference
     "vllm>=0.8.0",
-
     # Quantization
     "triton>=3.0.0",
-
     # Data & evaluation
     "datasets>=2.19.0",
     "networkx>=3.2",
     "jsonschema>=4.21.0",
-
     # Analysis & visualization
     "numpy>=1.26.0",
     "scipy>=1.12.0",
     "matplotlib>=3.8.0",
     "seaborn>=0.13.0",
-
     # Config & logging
     "pydantic>=2.9.0",
     "pyyaml>=6.0",
     "structlog>=24.0.0",
     "wandb>=0.17.0",
-
     # Constrained decoding
     "outlines>=0.0.40",
+    "google-genai>=1.70.0",
+    "anthropic>=0.88.0",
 ]
 
 [project.optional-dependencies]

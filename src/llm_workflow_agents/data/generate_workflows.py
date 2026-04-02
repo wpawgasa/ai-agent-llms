@@ -3,6 +3,15 @@
 Generates datasets at 5 complexity levels (L1-L5) with tool-calling
 annotations and state-machine ground truth. Supports 17 call center
 domains (decoupled from complexity level).
+
+Teacher model generation:
+  Set ``teacher_model`` in ``generate_workflow_dataset`` to a model name to
+  call a live API instead of the placeholder generator.
+  Supported prefixes:
+    - ``gemini-*``  → Google GenAI  (requires GEMINI_API_KEY env var)
+    - ``gpt-*``     → OpenAI        (requires OPENAI_API_KEY env var)
+    - ``claude-*``  → Anthropic     (requires ANTHROPIC_API_KEY env var)
+  Falls back to placeholder on API error.
 """
 
 from __future__ import annotations
@@ -15,6 +24,7 @@ from typing import Any, Literal
 
 import structlog
 
+from llm_workflow_agents.data._teacher_client import call_teacher_model
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
     TOOL_ERROR_RATE,
@@ -694,10 +704,103 @@ def _generate_placeholder_conversation(
     return messages
 
 
+_TEACHER_SYSTEM_PROMPT = """\
+You are a dataset generation expert creating training data for LLM workflow agents.
+Generate a realistic multi-turn customer service conversation that strictly follows
+the provided workflow graph, tool schemas, and user behavior pattern.
+
+OUTPUT FORMAT — return a JSON object with a single key "messages" containing an array:
+{
+  "messages": [
+    {"role": "system", "content": "..."},
+    {"role": "user", "content": "..."},
+    {
+      "role": "assistant",
+      "content": "[STATE: CURRENT → NEXT]\\n<tool_call>{...}</tool_call>",
+      "annotations": {
+        "state_transition": {"from": "CURRENT", "to": "NEXT"},
+        "tool_calls": [{"name": "...", "arguments": {...}}]
+      }
+    },
+    {"role": "tool", "content": "{...}"},
+    ...
+  ]
+}
+
+RULES:
+- Every assistant message MUST include a [STATE: X → Y] annotation in the content.
+- When invoking a tool include <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
+- Follow the user behavior pattern exactly (cooperative / adversarial_probing / digressing / invalid_tool_inputs).
+- The conversation MUST reach one of the terminal states before ending.
+- ~20 % of tool responses should be errors: {"error": "Service temporarily unavailable"}.
+- Output ONLY the JSON object — no markdown fences, no extra keys.
+"""
+
+
+def _build_teacher_prompt(
+    workflow: WorkflowGraph,
+    tool_schemas: list[dict[str, Any]],
+    behavior: str,
+    spec: ComplexitySpec,
+    domain_spec: DomainSpec | None,
+) -> str:
+    domain_name = domain_spec.name if domain_spec else spec.domain
+    tool_names = [t["function"]["name"] for t in tool_schemas]
+    return (
+        f"Domain: {domain_name}\n"
+        f"Complexity level: {spec.level} "
+        f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
+        f"User behavior: {behavior}\n\n"
+        f"Workflow graph:\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
+        f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
+        f"Tool names in scope: {tool_names}\n\n"
+        "Generate the conversation now."
+    )
+
+
+def _parse_messages_response(raw: str) -> list[dict[str, Any]]:
+    """Parse a JSON response into a list of messages."""
+    data = json.loads(raw)
+    if isinstance(data, dict) and "messages" in data:
+        return data["messages"]
+    return data  # assume it's already a list
+
+
+def _generate_teacher_conversation(
+    workflow: WorkflowGraph,
+    tool_schemas: list[dict[str, Any]],
+    behavior: str,
+    spec: ComplexitySpec,
+    rng: random.Random,
+    domain_spec: DomainSpec | None,
+    teacher_model: str,
+) -> list[dict[str, Any]]:
+    """Call a teacher model API to generate a conversation.
+
+    Falls back to placeholder generation if the API call fails.
+    """
+    user_prompt = _build_teacher_prompt(workflow, tool_schemas, behavior, spec, domain_spec)
+    try:
+        raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
+        messages = _parse_messages_response(raw)
+        if not messages:
+            raise ValueError("Teacher model returned empty messages")
+        return messages
+    except Exception as exc:
+        logger.warning(
+            "teacher_model_fallback",
+            teacher_model=teacher_model,
+            error=str(exc),
+        )
+        return _generate_placeholder_conversation(
+            workflow, tool_schemas, behavior, spec, rng, domain_spec
+        )
+
+
 def generate_workflow_dataset(
     complexity_level: Literal["L1", "L2", "L3", "L4", "L5"],
     num_samples: int = 200,
-    teacher_model: str = "gpt-4o",
+    teacher_model: str | None = None,
     output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
     domain: str | None = None,
@@ -711,7 +814,10 @@ def generate_workflow_dataset(
     Args:
         complexity_level: One of L1-L5.
         num_samples: Number of conversations to generate.
-        teacher_model: Teacher model for generation (future use).
+        teacher_model: Teacher model name for live API generation.
+            Supported prefixes: ``gemini-*`` (GEMINI_API_KEY),
+            ``gpt-*`` (OPENAI_API_KEY), ``claude-*`` (ANTHROPIC_API_KEY).
+            If ``None``, uses the local placeholder generator.
         output_dir: Directory for output JSONL files.
         seed: Random seed for reproducibility.
         domain: Optional domain key (e.g., "banking", "healthcare").
@@ -732,7 +838,7 @@ def generate_workflow_dataset(
         level=complexity_level,
         num_samples=num_samples,
         domain=domain or "random (17 domains)",
-        teacher_model=teacher_model,
+        teacher_model=teacher_model or "placeholder",
     )
 
     samples: list[ConversationSample] = []
@@ -752,9 +858,14 @@ def generate_workflow_dataset(
         tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
         workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
 
-        messages = _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec
-        )
+        if teacher_model:
+            messages = _generate_teacher_conversation(
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model
+            )
+        else:
+            messages = _generate_placeholder_conversation(
+                workflow, tool_schemas, behavior, spec, rng, domain_spec
+            )
 
         # Count tool calls and errors
         for msg in messages:
