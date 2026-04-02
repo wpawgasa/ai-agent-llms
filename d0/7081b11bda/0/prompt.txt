@@ -1,0 +1,62 @@
+You crashed the last time. Do you remember what you did in the last session?
+
+---
+
+Scripts for generating data based on your recommended recipe.
+
+---
+
+You recommended using language code-switching but it's not yet implemented.
+
+---
+
+Is there "code-switch" use in data generation scripts?
+
+---
+
+yes
+
+---
+
+In the scripts, replace gpt-4o with gpt-5.4-nano-2026-03-17 and claude-sonnet-4-6 with gemini-3-flash-preview
+
+---
+
+Document workflow generation recipes based on the generation scripts. Put the documentation in `docs` directory.
+
+---
+
+Estimate cost for generating benchmark data.
+
+---
+
+What generating SFT data?
+
+---
+
+input_rate_nano=0.2, output_rate_nano=1.25, input_rate_gemini=0.5, output_rate_gemini=3.00
+
+---
+
+commit and push changes
+
+---
+
+The @scripts/run_exp_a.sh script doesn't include Qwen3.5-35B-A3B for benchmark.
+
+---
+
+commit and push change
+
+---
+
+Write comprehensive README.md
+
+---
+
+error: Failed to initialize cache at `/home/shadeform/.cache/uv`
+  Caused by: failed to open file `/home/shadeform/.cache/uv/sdists-v9/.git`: Permission denied (os error 13)
+
+---
+
+Where does @scripts/run_exp_a.sh look for data for running a benchmark?
