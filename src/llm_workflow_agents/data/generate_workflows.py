@@ -105,6 +105,55 @@ class WorkflowGraph:
         }
 
 
+def _extract_ground_truth(
+    messages: list[dict[str, Any]],
+    workflow: "WorkflowGraph",
+) -> dict[str, Any]:
+    """Extract ground-truth labels from annotated messages.
+
+    Returns a dict with:
+    - ``state_sequence``: list of {from, to} transition dicts in order
+    - ``tool_calls``: flat list of all tool-call dicts across the conversation
+    - ``tool_chain_dependencies``: per-turn list of tool calls (preserves turn order)
+    - ``terminal_state``: the last terminal state reached, or empty string
+    """
+    # Build a set of both IDs and names that count as terminal
+    terminal_ids = set(workflow.terminal_states)
+    terminal_names = {s.name for s in workflow.states if s.id in terminal_ids}
+    terminal_set = terminal_ids | terminal_names
+
+    state_sequence: list[dict[str, str]] = []
+    tool_calls: list[dict[str, Any]] = []
+    tool_chain_dependencies: list[list[dict[str, Any]]] = []
+
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        annotations = msg.get("annotations", {})
+
+        transition = annotations.get("state_transition", {})
+        if transition.get("from") and transition.get("to"):
+            state_sequence.append({"from": transition["from"], "to": transition["to"]})
+
+        turn_tools = annotations.get("tool_calls", [])
+        tool_calls.extend(turn_tools)
+        if turn_tools:
+            tool_chain_dependencies.append(turn_tools)
+
+    terminal_state = ""
+    if state_sequence:
+        last_to = state_sequence[-1]["to"]
+        if last_to in terminal_set:
+            terminal_state = last_to
+
+    return {
+        "state_sequence": state_sequence,
+        "tool_calls": tool_calls,
+        "tool_chain_dependencies": tool_chain_dependencies,
+        "terminal_state": terminal_state,
+    }
+
+
 @dataclass
 class ConversationSample:
     """A single generated conversation sample."""
@@ -119,6 +168,7 @@ class ConversationSample:
     tool_schemas: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     user_behavior: str
+    ground_truth: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +182,7 @@ class ConversationSample:
             "tool_schemas": self.tool_schemas,
             "messages": self.messages,
             "user_behavior": self.user_behavior,
+            "ground_truth": self.ground_truth,
         }
 
 
@@ -888,6 +939,7 @@ def generate_workflow_dataset(
             tool_schemas=tool_schemas,
             messages=messages,
             user_behavior=behavior,
+            ground_truth=_extract_ground_truth(messages, workflow),
         )
         samples.append(sample)
 
