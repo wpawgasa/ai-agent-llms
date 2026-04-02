@@ -22,11 +22,12 @@ from pathlib import Path
 # Use a callable for a key if you need read-modify-write on the existing value.
 _PATCHES: dict[str, dict] = {
     "google/gemma-3-27b-it": {
-        # vLLM 0.11 requires rope_scaling to carry a rope_type key.
-        # Gemma 3 uses local/global interleaved attention with standard RoPE
-        # for local windows — "default" satisfies the validator without
-        # altering the model's actual position encoding behaviour.
-        "rope_scaling": lambda v: {**(v or {}), "rope_type": "default"},
+        # vLLM 0.11 requires rope_scaling to carry a rope_type key, but
+        # Gemma 3's config.json ships without one. Injecting rope_type then
+        # triggers transformers demanding rope_theta inside the dict too.
+        # Safest fix: null out rope_scaling entirely so transformers falls
+        # back to standard RoPE using the top-level rope_theta in the config.
+        "rope_scaling": None,
     },
 }
 
