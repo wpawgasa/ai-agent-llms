@@ -105,6 +105,106 @@ class WorkflowGraph:
         }
 
 
+_SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
+    "en": {
+        "header": "### [{section}]",
+        "initial_marker": "(initial state)",
+        "terminal_marker": "This is the terminal state — end the conversation here.",
+        "tools_intro": "Available tools: {tools}",
+        "no_tools": "No tools available in this state.",
+        "primary_branch": "- On success: proceed to [{to}]",
+        "alt_branch": "- If {condition}: go to [{to}]",
+        "condition_fallback": "alternative condition met",
+    },
+    "th": {
+        "header": "### [{section}]",
+        "initial_marker": "(สถานะเริ่มต้น)",
+        "terminal_marker": "นี่คือสถานะสิ้นสุด — จบการสนทนาที่นี่",
+        "tools_intro": "เครื่องมือที่ใช้ได้: {tools}",
+        "no_tools": "ไม่มีเครื่องมือในสถานะนี้",
+        "primary_branch": "- เมื่อสำเร็จ: ดำเนินการต่อที่ [{to}]",
+        "alt_branch": "- หาก{condition}: ไปที่ [{to}]",
+        "condition_fallback": "เงื่อนไขอื่น",
+    },
+}
+
+
+def _humanise_condition(condition: str) -> str:
+    """Convert a snake_case condition name to a readable phrase."""
+    import re
+    cleaned = condition.replace("proceed_from_", "").replace("branch_", "")
+    cleaned = cleaned.replace("_", " ")                      # underscores → spaces first
+    cleaned = re.sub(r"\b[Ss]\d+\b", "", cleaned)           # remove S1, S2 … (now word-bounded)
+    cleaned = re.sub(r"\bto\b", "", cleaned)                 # remove bare "to" connector
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _graph_to_script(
+    workflow: "WorkflowGraph",
+    tool_schemas: list[dict[str, Any]],
+    language: str = "en",
+) -> str:
+    """Convert a WorkflowGraph to a natural language script.
+
+    Produces a section-per-state script that mirrors the style of real
+    voicebot/workflow scripts, with conditional branch instructions written
+    in plain language alongside the structured graph data.
+    """
+    t = _SCRIPT_TEMPLATES.get(language, _SCRIPT_TEMPLATES["en"])
+
+    # Index outgoing transitions per state and tool schemas by name
+    outgoing: dict[str, list[WorkflowTransition]] = {s.id: [] for s in workflow.states}
+    for tr in workflow.transitions:
+        outgoing.setdefault(tr.from_state, []).append(tr)
+
+    tool_desc: dict[str, str] = {}
+    for schema in tool_schemas:
+        fn = schema.get("function", {})
+        tool_desc[fn.get("name", "")] = fn.get("description", "")
+
+    state_name: dict[str, str] = {s.id: s.name for s in workflow.states}
+
+    lines: list[str] = []
+    for state in workflow.states:
+        is_initial = state.id == workflow.initial_state
+        is_terminal = state.id in workflow.terminal_states
+
+        header = t["header"].format(section=state.name)
+        if is_initial:
+            header += f"  {t['initial_marker']}"
+        lines.append(header)
+
+        if is_terminal:
+            lines.append(t["terminal_marker"])
+            lines.append("")
+            continue
+
+        # Tools
+        if state.tools:
+            tool_list = ", ".join(
+                f"{name} ({tool_desc.get(name, '')})" if tool_desc.get(name) else name
+                for name in state.tools
+            )
+            lines.append(t["tools_intro"].format(tools=tool_list))
+        else:
+            lines.append(t["no_tools"])
+
+        # Transitions — sort so priority-0 (primary) comes first
+        branches = sorted(outgoing.get(state.id, []), key=lambda x: x.priority)
+        for tr in branches:
+            to_name = state_name.get(tr.to_state, tr.to_state)
+            if tr.priority == 0:
+                lines.append(t["primary_branch"].format(to=to_name))
+            else:
+                cond = _humanise_condition(tr.condition) or t["condition_fallback"]
+                lines.append(t["alt_branch"].format(condition=cond, to=to_name))
+
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 def _extract_ground_truth(
     messages: list[dict[str, Any]],
     workflow: "WorkflowGraph",
@@ -165,6 +265,7 @@ class ConversationSample:
     num_tools: int
     chain_depth: int
     workflow_graph: dict[str, Any]
+    workflow_script: str
     tool_schemas: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     user_behavior: str
@@ -180,6 +281,7 @@ class ConversationSample:
             "num_tools": self.num_tools,
             "chain_depth": self.chain_depth,
             "workflow_graph": self.workflow_graph,
+            "workflow_script": self.workflow_script,
             "tool_schemas": self.tool_schemas,
             "messages": self.messages,
             "user_behavior": self.user_behavior,
@@ -690,13 +792,15 @@ def _generate_placeholder_conversation(
     domain_name = domain_spec.name if domain_spec else spec.domain
     domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
 
-    # System message with workflow prompt
+    # System message with both natural language script and structured graph
+    script = _graph_to_script(workflow, tool_schemas, language)
     system_content = (
-        f"You are a customer service agent handling {domain_name} workflows.\n"
-        f"Follow this state machine:\n"
-        f"Initial state: {workflow.initial_state}\n"
-        f"Terminal states: {', '.join(workflow.terminal_states)}\n"
-        f"Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n"
+        f"You are a customer service agent handling {domain_name} workflows.\n\n"
+        f"Workflow script (follow this for conversation flow):\n{script}\n\n"
+        f"Structured reference:\n"
+        f"  Initial state: {workflow.initial_state}\n"
+        f"  Terminal states: {', '.join(workflow.terminal_states)}\n"
+        f"  Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n"
     )
     messages.append({"role": "system", "content": system_content})
 
@@ -825,13 +929,15 @@ def _build_teacher_prompt(
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
     lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
+    script = _graph_to_script(workflow, tool_schemas, language)
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
         f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
         f"{lang_instruction}\n\n"
-        f"Workflow graph:\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
+        f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
+        f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
         "Generate the conversation now."
@@ -976,6 +1082,7 @@ def generate_workflow_dataset(
             num_tools=spec.num_tools,
             chain_depth=spec.chain_depth,
             workflow_graph=workflow.to_dict(),
+            workflow_script=_graph_to_script(workflow, tool_schemas, sample_language),
             tool_schemas=tool_schemas,
             messages=messages,
             user_behavior=behavior,
