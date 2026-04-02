@@ -916,7 +916,9 @@ def generate_workflow_dataset(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = output_dir / f"{complexity_level.lower()}_conversations_{timestamp}.jsonl"
+    lang_tag = language or "mixed"
+    model_tag = teacher_model.replace("/", "-").replace(".", "-") if teacher_model else "placeholder"
+    output_file = output_dir / f"{complexity_level.lower()}_conversations_{lang_tag}_{model_tag}_{timestamp}.jsonl"
 
     logger.info(
         "generating_workflow_dataset",
