@@ -1,0 +1,48 @@
+The data generation output is overwritten by newer file. Add timestamp to the filename to prevent files being overwritten.
+
+---
+
+commit change
+
+---
+
+push the commit
+
+---
+
+Do the genenerated workflows contain entire flow description?
+
+---
+
+Should we include state_sequence, tool_chain_dependencies, terminal_state in ground_truth?
+
+---
+
+yes
+
+---
+
+commit change and push
+
+---
+
+Our models will handle Thai as well. Data generation should include Thai.
+
+---
+
+Should we edit @scripts/generate_data.sh to support generation langauge?
+
+---
+
+Should we include teacher model and language in output filename?
+
+---
+
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+  File "/workspaces/ai-agent-llms/src/llm_workflow_agents/data/generate_workflows.py", line 983, in generate_workflow_dataset
+    ground_truth=_extract_ground_truth(messages, workflow),
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/ai-agent-llms/src/llm_workflow_agents/data/generate_workflows.py", line 139, in _extract_ground_truth
+    tool_calls.extend(turn_tools)
+TypeError: 'NoneType' object is not iterable when use teacher model.
