@@ -46,3 +46,7 @@ Traceback (most recent call last):
   File "/workspaces/ai-agent-llms/src/llm_workflow_agents/data/generate_workflows.py", line 139, in _extract_ground_truth
     tool_calls.extend(turn_tools)
 TypeError: 'NoneType' object is not iterable when use teacher model.
+
+---
+
+Is it practical to use unicode encoding for Thai characters in JSONL for NLP and LLM training tasks?
