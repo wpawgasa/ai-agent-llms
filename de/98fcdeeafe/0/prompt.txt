@@ -31,3 +31,7 @@ Our models will handle Thai as well. Data generation should include Thai.
 ---
 
 Should we edit @scripts/generate_data.sh to support generation langauge?
+
+---
+
+Should we include teacher model and language in output filename?
