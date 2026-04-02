@@ -135,7 +135,7 @@ def _extract_ground_truth(
         if transition.get("from") and transition.get("to"):
             state_sequence.append({"from": transition["from"], "to": transition["to"]})
 
-        turn_tools = annotations.get("tool_calls", [])
+        turn_tools = annotations.get("tool_calls") or []
         tool_calls.extend(turn_tools)
         if turn_tools:
             tool_chain_dependencies.append(turn_tools)
