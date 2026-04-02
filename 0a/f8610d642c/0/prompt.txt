@@ -89,3 +89,7 @@ yes
 (APIServer pid=12995) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
 (APIServer pid=12995)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
 (APIServer pid=12995)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+api_server.py: error: unrecognized arguments: "linear", "factor": 8.0}}
