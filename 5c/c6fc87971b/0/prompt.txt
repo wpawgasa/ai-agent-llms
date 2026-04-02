@@ -107,3 +107,9 @@ api_server.py: error: unrecognized arguments: "linear", "factor": 8.0}}
 (APIServer pid=13483) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
 (APIServer pid=13483)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
 (APIServer pid=13483)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+(APIServer pid=13990)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/modeling_rope_utils.py", line 923, in _check_received_keys
+(APIServer pid=13990)     raise KeyError(f"Missing required keys in `rope_parameters` for 'rope_type'='{rope_type}': {missing_keys}")
+(APIServer pid=13990) KeyError: "Missing required keys in `rope_parameters` for 'rope_type'='default': {'rope_theta'}"
