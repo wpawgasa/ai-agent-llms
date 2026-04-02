@@ -35,3 +35,7 @@ What generating SFT data?
 ---
 
 input_rate_nano=0.2, output_rate_nano=1.25, input_rate_gemini=0.5, output_rate_gemini=3.00
+
+---
+
+commit and push changes
