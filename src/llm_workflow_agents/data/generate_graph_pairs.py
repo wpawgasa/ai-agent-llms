@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -397,13 +398,14 @@ def generate_graph_pairs(
     test_data = all_pairs[4500:5000]
 
     # Write JSONL
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     paths: dict[str, Path] = {}
     for split_name, split_data in [
         ("train", train_data),
         ("val", val_data),
         ("test", test_data),
     ]:
-        path = output_dir / f"{split_name}.jsonl"
+        path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for pair in split_data:
                 f.write(json.dumps(pair) + "\n")

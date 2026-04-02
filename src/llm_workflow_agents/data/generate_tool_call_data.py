@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -334,10 +335,11 @@ def generate_tool_call_dataset(
     splits = _split_dataset(all_samples, {"train": 0.85, "val": 0.10, "test": 0.05}, rng)
 
     # Write JSONL files
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     paths: dict[str, Path] = {}
     sizes: dict[str, int] = {}
     for split_name, split_data in splits.items():
-        path = output_dir / f"{split_name}.jsonl"
+        path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for sample in split_data:
                 f.write(json.dumps(sample) + "\n")

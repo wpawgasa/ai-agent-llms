@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -466,13 +467,14 @@ def generate_orchestrator_dataset(
     test_samples = samples[n_train + n_val :]
 
     # Write JSONL files
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_files: list[Path] = []
     for split_name, split_samples in [
         ("train", train_samples),
         ("val", val_samples),
         ("test", test_samples),
     ]:
-        path = output_dir / f"{split_name}.jsonl"
+        path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for sample in split_samples:
                 f.write(json.dumps(sample.to_dict()) + "\n")

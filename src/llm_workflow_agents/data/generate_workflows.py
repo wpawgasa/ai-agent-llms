@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import random
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -831,7 +832,8 @@ def generate_workflow_dataset(
     rng = random.Random(seed)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"{complexity_level.lower()}_conversations.jsonl"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = output_dir / f"{complexity_level.lower()}_conversations_{timestamp}.jsonl"
 
     logger.info(
         "generating_workflow_dataset",
