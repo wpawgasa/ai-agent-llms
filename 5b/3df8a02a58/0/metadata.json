@@ -1,0 +1,35 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5b3df8a02a58",
+  "session_id": "4d0694cb-187b-4a87-b84d-5fbf75ab5b1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-02T09:12:26.324839165Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "configs/models_exp_a/qwen35_35b_a3b.yaml",
+    "scripts/run_exp_a.sh"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "13a6937e6c87",
+  "token_usage": {
+    "input_tokens": 83,
+    "cache_creation_tokens": 76003,
+    "cache_read_tokens": 3626037,
+    "output_tokens": 25573,
+    "api_call_count": 57
+  },
+  "session_metrics": {
+    "turn_count": 12
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-02T09:12:25.515304474Z",
+    "agent_lines": 24,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 24,
+    "agent_percentage": 100
+  }
+}
