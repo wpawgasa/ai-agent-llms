@@ -477,7 +477,7 @@ def generate_orchestrator_dataset(
         path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for sample in split_samples:
-                f.write(json.dumps(sample.to_dict()) + "\n")
+                f.write(json.dumps(sample.to_dict(), ensure_ascii=False) + "\n")
         output_files.append(path)
 
     stats = {

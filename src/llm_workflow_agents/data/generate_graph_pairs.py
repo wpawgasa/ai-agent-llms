@@ -408,7 +408,7 @@ def generate_graph_pairs(
         path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for pair in split_data:
-                f.write(json.dumps(pair) + "\n")
+                f.write(json.dumps(pair, ensure_ascii=False) + "\n")
         paths[split_name] = path
 
     logger.info(

@@ -987,7 +987,7 @@ def generate_workflow_dataset(
     # Write JSONL
     with open(output_file, "w") as f:
         for sample in samples:
-            f.write(json.dumps(sample.to_dict()) + "\n")
+            f.write(json.dumps(sample.to_dict(), ensure_ascii=False) + "\n")
 
     stats = {
         "behavior_distribution": behavior_counts,

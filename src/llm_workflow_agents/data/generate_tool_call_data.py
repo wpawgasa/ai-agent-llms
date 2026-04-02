@@ -342,7 +342,7 @@ def generate_tool_call_dataset(
         path = output_dir / f"{split_name}_{timestamp}.jsonl"
         with open(path, "w") as f:
             for sample in split_data:
-                f.write(json.dumps(sample) + "\n")
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
         paths[split_name] = path
         sizes[split_name] = len(split_data)
 
