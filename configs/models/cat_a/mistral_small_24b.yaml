@@ -1,5 +1,6 @@
 model:
-  name: "mistralai/Mistral-Small-3.1-24B"
+  name: "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+  revision: "68faf511d618ef198fef186659617cfd2eb8e33a"
   family: "mistral"
   architecture: "dense_gqa_transformer"
   params_total: 24_000_000_000

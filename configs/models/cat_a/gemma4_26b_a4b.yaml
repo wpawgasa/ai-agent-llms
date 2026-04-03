@@ -1,5 +1,6 @@
 model:
   name: "google/gemma-4-26B-A4B-it"
+  revision: "47b6801b24d15ff9bcd8c96dfaea0be9ed3a0301"
   family: "gemma"
   architecture: "moe_gqa_transformer"
   params_total: 26_000_000_000

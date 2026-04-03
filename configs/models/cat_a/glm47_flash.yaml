@@ -1,5 +1,6 @@
 model:
   name: "zai-org/GLM-4.7-Flash"
+  revision: "7dd20894a642a0aa287e9827cb1a1f7f91386b67"
   family: "glm"
   architecture: "dense_mla_transformer"
   params_total: 30_000_000_000

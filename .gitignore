@@ -20,8 +20,8 @@ env/
 # Data outputs — managed by DVC, not git
 results/raw/
 
-# Model checkpoints
-checkpoints/
+# Model checkpoints — subdirs tracked individually by DVC after each training run
+# checkpoints/ itself is committed (contains .gitignore + .gitkeep)
 *.safetensors
 *.bin
 *.pt

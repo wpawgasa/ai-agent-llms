@@ -1,5 +1,6 @@
 model:
   name: "google/gemma-2b"
+  revision: "9cf48e52b224239de00d483ec8eb84fb8d0f3a3a"
   family: "gemma"
   architecture: "dense_mqa_transformer"
   params_total: 2_500_000_000

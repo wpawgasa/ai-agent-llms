@@ -1,5 +1,6 @@
 model:
   name: "Qwen/Qwen3.5-35B-A3B"
+  revision: "ec2d4ece1ffb563322cbee9a48fe0e3fcbce0307"
   family: "qwen35"
   architecture: "moe_deltanet_transformer"
   params_total: 35_000_000_000

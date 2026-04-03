@@ -1,5 +1,6 @@
 model:
-  name: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+  name: "nvidia/Nemotron-3-Nano-30B-Instruct"
+  revision: "pending"  # gated model — run: huggingface-cli login, then pin SHA
   family: "nemotron"
   architecture: "mamba_hybrid_transformer"
   params_total: 30_000_000_000

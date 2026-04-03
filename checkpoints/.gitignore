@@ -1,0 +1,12 @@
+# Managed by DVC — do not edit manually.
+# Fine-tuned checkpoint directories are tracked via .dvc pointer files
+# created after each training run:
+#   dvc add checkpoints/cat_a_sft
+#   dvc add checkpoints/cat_a_grpo
+#   dvc add checkpoints/cat_b_sft  etc.
+/cat_a_sft
+/cat_a_grpo
+/cat_b_sft
+/cat_b_grpo
+/cat_c_sft
+/cat_c_grpo

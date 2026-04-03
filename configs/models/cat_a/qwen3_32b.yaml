@@ -1,5 +1,6 @@
 model:
   name: "Qwen/Qwen3-32B"
+  revision: "9216db5781bf21249d130ec9da846c4624c16137"
   family: "qwen"
   architecture: "dense_gqa_transformer"
   params_total: 32_000_000_000

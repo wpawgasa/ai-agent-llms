@@ -1,5 +1,6 @@
 model:
   name: "google/gemma-3-27b-it"
+  revision: "005ad3404e59d6023443cb575daa05336842228a"
   family: "gemma"
   architecture: "dense_gqa_transformer"
   params_total: 27_000_000_000
