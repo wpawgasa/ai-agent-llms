@@ -10,7 +10,7 @@
 
 | Phase | Scope | Output |
 |-------|-------|--------|
-| **Phase 1** | Benchmark 11 pre-trained candidates across 3 task categories | Rankings + 3 category winners |
+| **Phase 1** | Benchmark 15 pre-trained candidates across 3 task categories | Rankings + 3 category winners |
 | **Phase 2** | SFT then GRPO RL fine-tune only the 3 winners | 3 fine-tuned specialist models |
 | **Phase 3** | KV cache quantization benchmark (models × 6 methods) | Quality/performance matrix |
 | **Phase 4** | Multi-agent integration + Pareto analysis | Optimal deployment config |
@@ -18,10 +18,10 @@
 ### Task Categories & Model Inventory
 
 **Category A — Prompt-Encoded Business Logic (15–35B):**
-- Gemma 3 27B-IT, Qwen3-32B, Qwen3.5-35B-A3B, Mistral Small 3.1 24B, Nemotron-3-Nano 30B, GLM-4.7-Flash
+- Gemma 3 27B-IT, Qwen3-32B, Qwen3.5-35B-A3B, Mistral Small 3.1 24B, Nemotron-3-Nano 30B, GLM-4.7-Flash, Gemma 4 26B-A4B-IT, Gemma 4 31B-IT
 
 **Category B–C — Specialist Subagent & Graph Extraction (2–5B):**
-- Qwen2.5-3B-Instruct, Qwen3.5-4B, GLM-4.7-Flash, Gemma-2B, Gemma-3-4B-it
+- Qwen2.5-3B-Instruct, Qwen3.5-4B, GLM-4.7-Flash, Gemma-2B, Gemma-3-4B-it, Gemma-4-E4B-it, Gemma-4-E2B-it
 
 ## Reference Repository
 
@@ -70,11 +70,13 @@ Detailed specs for each module are in `.claude/rules/`:
 ### Phase 1: Foundation — Data & Configs
 - [x] Project scaffolding (pyproject.toml, requirements.txt, directory structure)
 - [x] Configuration schema and YAML files (`configs/`)
+- [x] Add Gemma 4 model YAML configs (`configs/models/cat_a/gemma4_26b_a4b.yaml`, `gemma4_31b.yaml`; `configs/models/cat_bc/gemma4_e4b.yaml`, `gemma4_e2b.yaml`)
 - [x] Data generation module (`data/`)
 - [x] Data validation and chat template converter
 
 ### Phase 2: Training
 - [x] LoRA target module registry (`training/lora_targets.py`) — 10 models incl. qwen35_35b_a3b, nemotron_30b
+- [x] Add Gemma 4 model entries to `training/lora_targets.py` (gemma4_26b_a4b, gemma4_31b, gemma4_e4b, gemma4_e2b)
 - [x] Unified SFTTrainer entry point (`training/train_specialist.py` — v2 backward-compat)
 - [x] Graph extraction trainer (`training/train_graph_extractor.py` — v2 backward-compat)
 - [x] Adapter merge utility (`training/merge_adapter.py`) — with quantize_merged param
@@ -121,7 +123,7 @@ Detailed specs for each module are in `.claude/rules/`:
 
 ## Key Architecture Decisions
 
-- **ADR-001**: Benchmark-first model selection (evaluate all 11 pre-trained first, fine-tune only 3 winners)
+- **ADR-001**: Benchmark-first model selection (evaluate all 15 pre-trained first, fine-tune only 3 winners)
 - **ADR-002**: Unsloth over standard PEFT/TRL (2x speed, 70% less VRAM, GRPO + MoE kernels)
 - **ADR-003**: SFT then GRPO two-stage training (SFT for format/domain, GRPO for task metric optimization)
 - **ADR-004**: Shared SFT base for dual-category winners (diverge at GRPO stage)
