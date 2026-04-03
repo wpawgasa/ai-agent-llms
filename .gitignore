@@ -17,8 +17,7 @@ env/
 *.swp
 *.swo
 
-# Data outputs (generated, not tracked)
-data/output/
+# Data outputs — managed by DVC, not git
 results/raw/
 
 # Model checkpoints
@@ -39,3 +38,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# GCP service account credentials (never commit)
+*.json

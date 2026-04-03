@@ -1,0 +1,6 @@
+[core]
+    remote = gcs
+['remote "gcs"']
+    url = gs://looloo-voicebot-llm-weights-and-data/llm-workflow-agents
+    projectname = looloo-ocr
+    credentialpath = ../looloo-ocr-9e0b69945c03.json

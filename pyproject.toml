@@ -50,6 +50,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6.0",
     "mypy>=1.11",
+    "dvc[gs]>=3.0",
 ]
 
 [tool.setuptools.packages.find]

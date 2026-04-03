@@ -1,0 +1,38 @@
+stages:
+  generate_task_a:
+    cmd: >-
+      python data/generate_workflows.py
+      --output-dir data/output/task_a
+      --seed 42
+    deps:
+      - data/generate_workflows.py
+      - data/templates/workflow_prompt_template.txt
+      - data/templates/tool_schemas_L1_to_L5.json
+    params:
+      - configs/benchmark/phase1_matrix.yaml:
+          - task_a
+    outs:
+      - data/output/task_a
+
+  generate_task_b:
+    cmd: >-
+      python data/generate_tool_call_data.py
+      --output-dir data/output/task_b
+      --seed 42
+    deps:
+      - data/generate_tool_call_data.py
+    outs:
+      - data/output/task_b
+
+  generate_task_c:
+    cmd: >-
+      python data/generate_graph_pairs.py
+      --workflow-prompts-dir data/output/task_a
+      --output-dir data/output/task_c
+      --seed 42
+    deps:
+      - data/generate_graph_pairs.py
+      - data/output/task_a
+      - data/templates/graph_output_schema.json
+    outs:
+      - data/output/task_c
