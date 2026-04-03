@@ -1,0 +1,39 @@
+The new opensource and open-weight "Gemma4" models (https://huggingface.co/google) are availble and worth including in our research. Let's edit @docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md and CLAUDE.md accrdingly to include `google/gemma-4-26B-A4B-it` and `google/gemma-4-31B-it` to Cat A models as well as `google/gemma-4-E4B-it` and `google/gemma-4-E2B-it` to Cat B&C models.
+
+---
+
+Use /code-implementation skill to implement the newly added tasks
+
+---
+
+commit change in a new branch and create PR
+
+---
+
+verify the PR
+
+---
+
+CI failed on test step: E   ModuleNotFoundError: No module named 'dotenv'
+=========================== short test summary info ============================
+ERROR tests/unit/test_chat_templates.py
+ERROR tests/unit/test_data_generation.py
+ERROR tests/unit/test_data_validator.py
+ERROR tests/unit/test_orchestrator_data.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!!
+============================== 4 errors in 1.30s ===============================
+Error: Process completed with exit code 2.
+
+---
+
+How should we store generated data? Git LFS or DVC?
+
+---
+
+Let's set up DVC with google cloud storage.
+
+---
+
+Bucket name=looloo-voicebot-llm-weights-and-data
+Project Id=looloo-ocr
+Service account credential=looloo-ocr-9e0b69945c03.json
