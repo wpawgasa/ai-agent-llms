@@ -1,1 +1,7 @@
-/benchmark
+# Managed by DVC — do not edit manually.
+# All subdirectories are stage outputs defined in dvc.yaml.
+/benchmark/task_a
+/sft/task_a
+/grpo/task_a
+/val/task_a
+/test/task_a

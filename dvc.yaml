@@ -1,38 +1,71 @@
 stages:
-  generate_task_a:
-    cmd: >-
-      python data/generate_workflows.py
-      --output-dir data/output/task_a
-      --seed 42
+  # ---------------------------------------------------------------------------
+  # Task A — Multi-turn workflow conversations
+  # See docs/data_generation_recipes.md for full rationale.
+  # ---------------------------------------------------------------------------
+
+  task_a_benchmark:
+    desc: >-
+      1 000 placeholder conversations for Phase 1 model ranking.
+      No teacher model or API key required.
+    cmd: ./scripts/generate_benchmark_data.sh
     deps:
-      - data/generate_workflows.py
+      - scripts/generate_benchmark_data.sh
+      - src/llm_workflow_agents/data/generate_workflows.py
       - data/templates/workflow_prompt_template.txt
       - data/templates/tool_schemas_L1_to_L5.json
     params:
       - configs/benchmark/phase1_matrix.yaml:
           - task_a
     outs:
-      - data/output/task_a
+      - data/output/benchmark/task_a
+    # Levels L1–L5, 200 samples/level, seed=100, lang=mixed, behavior=default
 
-  generate_task_b:
-    cmd: >-
-      python data/generate_tool_call_data.py
-      --output-dir data/output/task_b
-      --seed 42
+  task_a_sft:
+    desc: >-
+      12 504 adversarial curriculum conversations for SFT.
+      Requires OPENAI_API_KEY and GEMINI_API_KEY.
+    cmd: ./scripts/generate_sft_data.sh
     deps:
-      - data/generate_tool_call_data.py
+      - scripts/generate_sft_data.sh
+      - src/llm_workflow_agents/data/generate_workflows.py
+      - data/templates/workflow_prompt_template.txt
+      - data/templates/tool_schemas_L1_to_L5.json
     outs:
-      - data/output/task_b
+      - data/output/sft/task_a
+    # Levels L1–L5, seed=42, behavior=adversarial
+    # Legs: en/gpt-5.4-nano, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
 
-  generate_task_c:
-    cmd: >-
-      python data/generate_graph_pairs.py
-      --workflow-prompts-dir data/output/task_a
-      --output-dir data/output/task_c
-      --seed 42
+  task_a_grpo:
+    desc: >-
+      2 250 balanced prompts for GRPO reward fine-tuning (L3–L5 only).
+      Requires OPENAI_API_KEY and GEMINI_API_KEY.
+    cmd: ./scripts/generate_grpo_data.sh
     deps:
-      - data/generate_graph_pairs.py
-      - data/output/task_a
-      - data/templates/graph_output_schema.json
+      - scripts/generate_grpo_data.sh
+      - src/llm_workflow_agents/data/generate_workflows.py
+      - data/templates/workflow_prompt_template.txt
+      - data/templates/tool_schemas_L1_to_L5.json
     outs:
-      - data/output/task_c
+      - data/output/grpo/task_a
+    # Levels L3–L5, 750 samples/level (3 × 250), seed=200, behavior=balanced
+
+  task_a_eval:
+    desc: >-
+      500 validation + 500 test held-out conversations.
+      Requires OPENAI_API_KEY.
+    cmd: ./scripts/generate_eval_data.sh
+    deps:
+      - scripts/generate_eval_data.sh
+      - src/llm_workflow_agents/data/generate_workflows.py
+      - data/templates/workflow_prompt_template.txt
+      - data/templates/tool_schemas_L1_to_L5.json
+    outs:
+      - data/output/val/task_a    # seed=300
+      - data/output/test/task_a   # seed=400
+    # Levels L1–L5, 100 samples/level/split, lang=mixed, behavior=default
+    # test split must NOT be used during training or hyperparameter selection
+
+  # ---------------------------------------------------------------------------
+  # Task B and Task C stages will be added once recipes are defined.
+  # ---------------------------------------------------------------------------
