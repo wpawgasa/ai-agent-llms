@@ -31,3 +31,9 @@ How should we store generated data? Git LFS or DVC?
 ---
 
 Let's set up DVC with google cloud storage.
+
+---
+
+Bucket name=looloo-voicebot-llm-weights-and-data
+Project Id=looloo-ocr
+Service account credential=looloo-ocr-9e0b69945c03.json
