@@ -1,5 +1,5 @@
 model:
-  name: "THUDM/glm-4-9b-chat"
+  name: "zai-org/GLM-4.7-Flash"
   family: "glm"
   params_total: 4_700_000_000
   precision: "bfloat16"

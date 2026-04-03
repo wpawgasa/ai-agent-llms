@@ -1,5 +1,5 @@
 model:
-  name: "THUDM/GLM-4-9B-Chat"
+  name: "zai-org/GLM-4.7-Flash"
   family: "glm"
   architecture: "moe_mla_transformer"
   params_total: 4_700_000_000

@@ -73,7 +73,7 @@ def qwen_training_config() -> TrainingModelConfig:
 def glm_training_config() -> TrainingModelConfig:
     return TrainingModelConfig(
         model=ModelConfig(
-            name="THUDM/glm-4-9b-chat",
+            name="zai-org/GLM-4.7-Flash",
             family=ModelFamily.GLM,
             params_total=4_700_000_000,
         ),
@@ -168,7 +168,7 @@ class TestDetectModelKey:
         assert detect_model_key("Qwen/Qwen3.5-4B") == "qwen35_4b"
 
     def test_detect_glm(self) -> None:
-        assert detect_model_key("THUDM/glm-4-9b-chat") == "glm47_flash"
+        assert detect_model_key("zai-org/GLM-4.7-Flash") == "glm47_flash"
 
     def test_detect_gemma_2b(self) -> None:
         assert detect_model_key("google/gemma-2b") == "gemma_2b"
@@ -222,7 +222,7 @@ class TestGetLoRATargetSpec:
         assert spec.target_modules == ()
 
     def test_glm_returns_warnings(self) -> None:
-        spec = get_lora_target_spec(model_name="THUDM/glm-4-9b-chat")
+        spec = get_lora_target_spec(model_name="zai-org/GLM-4.7-Flash")
         assert len(spec.warnings) > 0
         assert "mlp.gate" in spec.modules_to_freeze
 
