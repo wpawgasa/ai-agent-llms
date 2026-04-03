@@ -11,3 +11,15 @@ commit change in a new branch and create PR
 ---
 
 verify the PR
+
+---
+
+CI failed on test step: E   ModuleNotFoundError: No module named 'dotenv'
+=========================== short test summary info ============================
+ERROR tests/unit/test_chat_templates.py
+ERROR tests/unit/test_data_generation.py
+ERROR tests/unit/test_data_validator.py
+ERROR tests/unit/test_orchestrator_data.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!!
+============================== 4 errors in 1.30s ===============================
+Error: Process completed with exit code 2.
