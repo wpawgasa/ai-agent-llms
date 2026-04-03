@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "edbc3e496719",
+  "strategy": "manual-commit",
+  "branch": "feature/add-gemma4-models",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "tests/unit/test_config.py",
+    "tests/unit/test_training.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ed/bc3e496719/0/metadata.json",
+      "transcript": "/ed/bc3e496719/0/full.jsonl",
+      "content_hash": "/ed/bc3e496719/0/content_hash.txt",
+      "prompt": "/ed/bc3e496719/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 111,
+    "cache_creation_tokens": 58035,
+    "cache_read_tokens": 2487270,
+    "output_tokens": 15419,
+    "api_call_count": 47
+  }
+}
