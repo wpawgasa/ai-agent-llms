@@ -1,0 +1,115 @@
+You crashed the last time. Do you remember what you did in the last session?
+
+---
+
+Scripts for generating data based on your recommended recipe.
+
+---
+
+You recommended using language code-switching but it's not yet implemented.
+
+---
+
+Is there "code-switch" use in data generation scripts?
+
+---
+
+yes
+
+---
+
+In the scripts, replace gpt-4o with gpt-5.4-nano-2026-03-17 and claude-sonnet-4-6 with gemini-3-flash-preview
+
+---
+
+Document workflow generation recipes based on the generation scripts. Put the documentation in `docs` directory.
+
+---
+
+Estimate cost for generating benchmark data.
+
+---
+
+What generating SFT data?
+
+---
+
+input_rate_nano=0.2, output_rate_nano=1.25, input_rate_gemini=0.5, output_rate_gemini=3.00
+
+---
+
+commit and push changes
+
+---
+
+The @scripts/run_exp_a.sh script doesn't include Qwen3.5-35B-A3B for benchmark.
+
+---
+
+commit and push change
+
+---
+
+Write comprehensive README.md
+
+---
+
+error: Failed to initialize cache at `/home/shadeform/.cache/uv`
+  Caused by: failed to open file `/home/shadeform/.cache/uv/sdists-v9/.git`: Permission denied (os error 13)
+
+---
+
+Where does @scripts/run_exp_a.sh look for data for running a benchmark?
+
+---
+
+yes
+
+---
+
+(APIServer pid=12807) OSError: You are trying to access a gated repo.
+(APIServer pid=12807) Make sure to have access to it at https://huggingface.co/google/gemma-3-27b-it.
+(APIServer pid=12807) 401 Client Error. (Request ID: Root=1-69ce38cf-0901cec14b8e47f06f228c05;f2399efe-7134-4cac-8978-cd06fb174bbc)
+(APIServer pid=12807) 
+(APIServer pid=12807) Cannot access gated repo for url https://huggingface.co/google/gemma-3-27b-it/resolve/main/config.json.
+(APIServer pid=12807) Access to model google/gemma-3-27b-it is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+---
+
+(APIServer pid=12995)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=12995)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 1142, in create_engine_config
+(APIServer pid=12995)     model_config = self.create_model_config()
+(APIServer pid=12995)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 994, in create_model_config
+(APIServer pid=12995)     return ModelConfig(
+(APIServer pid=12995)            ^^^^^^^^^^^^
+(APIServer pid=12995)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=12995)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=12995) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=12995)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=12995)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+api_server.py: error: unrecognized arguments: "linear", "factor": 8.0}}
+
+---
+
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 1142, in create_engine_config
+(APIServer pid=13483)     model_config = self.create_model_config()
+(APIServer pid=13483)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 994, in create_model_config
+(APIServer pid=13483)     return ModelConfig(
+(APIServer pid=13483)            ^^^^^^^^^^^^
+(APIServer pid=13483)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=13483)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=13483) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=13483)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=13483)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+(APIServer pid=13990)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/modeling_rope_utils.py", line 923, in _check_received_keys
+(APIServer pid=13990)     raise KeyError(f"Missing required keys in `rope_parameters` for 'rope_type'='{rope_type}': {missing_keys}")
+(APIServer pid=13990) KeyError: "Missing required keys in `rope_parameters` for 'rope_type'='default': {'rope_theta'}"
