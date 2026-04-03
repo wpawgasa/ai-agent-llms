@@ -61,3 +61,7 @@ What's next? Should I run `task_a_benchmark` data pipeline and `dvc push`?
 ---
 
 The models are downloaded to default directory set by Huggingface. So they are tracked yet.
+
+---
+
+Do as you recommend.
