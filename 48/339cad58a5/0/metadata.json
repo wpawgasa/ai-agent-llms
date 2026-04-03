@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "48339cad58a5",
+  "session_id": "10a20a2d-561c-4fe1-b550-3a4266176e8f",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-03T05:06:59.951083865Z",
+  "branch": "feature/add-gemma4-models",
+  "checkpoints_count": 2,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "addd0c81f8c2",
+  "token_usage": {
+    "input_tokens": 128,
+    "cache_creation_tokens": 66168,
+    "cache_read_tokens": 3570676,
+    "output_tokens": 18163,
+    "api_call_count": 62
+  },
+  "session_metrics": {
+    "turn_count": 4
+  }
+}
