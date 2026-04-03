@@ -111,6 +111,33 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
             "gate_proj", "up_proj", "down_proj",
         ),
     ),
+    # --- Gemma 4 models ---
+    "gemma4_26b_a4b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+        modules_to_freeze=("mlp.gate",),
+        warnings=("MoE variant: freeze mlp.gate to avoid router destabilisation.",),
+    ),
+    "gemma4_31b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
+    "gemma4_e4b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
+    "gemma4_e2b": LoRATargetSpec(
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
 }
 
 # Model family to default target modules (fallback when specific model not in registry)
@@ -130,6 +157,10 @@ _MODEL_NAME_PATTERNS: dict[str, str] = {
     "qwen3.5-4b": "qwen35_4b",
     "qwen3-32b": "qwen3_32b",
     "qwen2.5-3b": "qwen25_3b",
+    "gemma-4-26b": "gemma4_26b_a4b",
+    "gemma-4-31b": "gemma4_31b",
+    "gemma-4-e4b": "gemma4_e4b",
+    "gemma-4-e2b": "gemma4_e2b",
     "gemma-3-27b": "gemma3_27b",
     "gemma-3-4b": "gemma3_4b",
     "gemma-2b": "gemma_2b",

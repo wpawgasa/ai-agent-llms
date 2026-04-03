@@ -1,0 +1,21 @@
+model:
+  name: "google/gemma-4-31B-it"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 31_000_000_000
+  params_active: 31_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 62
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"

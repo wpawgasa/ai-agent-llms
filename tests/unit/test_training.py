@@ -109,6 +109,7 @@ class TestLoRATargetRegistry:
         expected = {
             "qwen25_3b", "qwen35_4b", "glm47_flash", "gemma_2b", "gemma3_4b",
             "qwen3_32b", "qwen35_35b_a3b", "nemotron_30b", "mistral_24b", "gemma3_27b",
+            "gemma4_26b_a4b", "gemma4_31b", "gemma4_e4b", "gemma4_e2b",
         }
         assert set(LORA_TARGET_MODULES.keys()) == expected
 
@@ -697,7 +698,7 @@ class TestModuleImports:
 
     def test_import_lora_targets(self) -> None:
         from llm_workflow_agents.training.lora_targets import LORA_TARGET_MODULES
-        assert len(LORA_TARGET_MODULES) == 10
+        assert len(LORA_TARGET_MODULES) == 14
 
     def test_import_training_result(self) -> None:
         from llm_workflow_agents.training.train_specialist import TrainingResult
