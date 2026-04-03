@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9c4ee649483f",
+  "session_id": "10a20a2d-561c-4fe1-b550-3a4266176e8f",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-03T06:45:55.761331384Z",
+  "branch": "main",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "data/output/.gitignore",
+    "data/output/benchmark.dvc",
+    "dvc.yaml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "05827f60ecd1",
+  "token_usage": {
+    "input_tokens": 180,
+    "cache_creation_tokens": 87178,
+    "cache_read_tokens": 6814848,
+    "output_tokens": 31417,
+    "api_call_count": 100
+  },
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-03T06:45:54.966475767Z",
+    "agent_lines": 57,
+    "human_added": 7,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 64,
+    "agent_percentage": 89.0625
+  }
+}
