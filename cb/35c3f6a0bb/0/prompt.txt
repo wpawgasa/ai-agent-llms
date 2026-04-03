@@ -65,3 +65,7 @@ The models are downloaded to default directory set by Huggingface. So they are t
 ---
 
 Do as you recommend.
+
+---
+
+You still have wrong name for GLM-4.7-flash in many locations.
