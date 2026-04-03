@@ -1,0 +1,31 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "09ff994b8e37",
+  "strategy": "manual-commit",
+  "branch": "feature/add-gemma4-models",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "CLAUDE.md",
+    "configs/models/cat_a/gemma4_26b_a4b.yaml",
+    "configs/models/cat_a/gemma4_31b.yaml",
+    "configs/models/cat_bc/gemma4_e2b.yaml",
+    "configs/models/cat_bc/gemma4_e4b.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "src/llm_workflow_agents/training/lora_targets.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/09/ff994b8e37/0/metadata.json",
+      "transcript": "/09/ff994b8e37/0/full.jsonl",
+      "content_hash": "/09/ff994b8e37/0/content_hash.txt",
+      "prompt": "/09/ff994b8e37/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 102,
+    "cache_creation_tokens": 53418,
+    "cache_read_tokens": 2024377,
+    "output_tokens": 13250,
+    "api_call_count": 40
+  }
+}
