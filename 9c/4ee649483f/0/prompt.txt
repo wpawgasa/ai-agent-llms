@@ -49,3 +49,7 @@ What @dvc.yaml for?
 ---
 
 I see. You should read @docs/data_generation_recipes.md and edit @dvc.yaml in accordance to the data generation recipe. We only have a recipe for Task A. The recipes for other tasks will be included later on.
+
+---
+
+yes
