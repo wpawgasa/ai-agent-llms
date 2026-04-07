@@ -1,0 +1,28 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "97b2a9ab9f2c",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/benchmark/phase1_matrix.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b.yaml",
+    "configs/models_exp_a/gemma4_31b.yaml",
+    "scripts/run_exp_a.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/97/b2a9ab9f2c/0/metadata.json",
+      "transcript": "/97/b2a9ab9f2c/0/full.jsonl",
+      "content_hash": "/97/b2a9ab9f2c/0/content_hash.txt",
+      "prompt": "/97/b2a9ab9f2c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23,
+    "cache_creation_tokens": 32849,
+    "cache_read_tokens": 593243,
+    "output_tokens": 4962,
+    "api_call_count": 16
+  }
+}

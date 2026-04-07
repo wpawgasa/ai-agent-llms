@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "97b2a9ab9f2c",
+  "session_id": "0a94aa3e-998f-4f95-a659-7eba103a543c",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-07T02:55:50.367725269Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/benchmark/phase1_matrix.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b.yaml",
+    "configs/models_exp_a/gemma4_31b.yaml",
+    "scripts/run_exp_a.sh"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "7b00232b10e3",
+  "token_usage": {
+    "input_tokens": 23,
+    "cache_creation_tokens": 32849,
+    "cache_read_tokens": 593243,
+    "output_tokens": 4962,
+    "api_call_count": 16
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-07T02:55:50.25003209Z",
+    "agent_lines": 53,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 53,
+    "agent_percentage": 100
+  }
+}
