@@ -102,6 +102,7 @@ print(c['model']['name'])
         --output      "$RESULT_FILE" \
         --data        "$DATA_DIR" \
         --max-samples "$MAX_SAMPLES" \
+        --log-level   DEBUG \
         2>&1 | tee "${RESULT_FILE%.json}.log" || true
 
     # Shut down vLLM
