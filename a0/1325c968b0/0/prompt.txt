@@ -1,0 +1,53 @@
+(APIServer pid=14617)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=14617)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+(APIServer pid=14962) INFO 04-07 04:58:04 [api_server.py:1839] vLLM API server version 0.11.0
+(APIServer pid=14962) INFO 04-07 04:58:04 [utils.py:233] non-default args: {'enable_auto_tool_choice': True, 'tool_call_parser': 'pythonic', 'model': '/home/shadeform/workspace/ai-agent-llms/.hf_patches/google--gemma-4-31B-it', 'dtype': 'bfloat16', 'max_model_len': 8192}
+(APIServer pid=14962) Traceback (most recent call last):
+(APIServer pid=14962)   File "<frozen runpy>", line 198, in _run_module_as_main
+(APIServer pid=14962)   File "<frozen runpy>", line 88, in _run_code
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/entrypoints/openai/api_server.py", line 1953, in <module>
+(APIServer pid=14962)     uvloop.run(run_server(args))
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/uvloop/__init__.py", line 96, in run
+(APIServer pid=14962)     return __asyncio.run(
+(APIServer pid=14962)            ^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 195, in run
+(APIServer pid=14962)     return runner.run(main)
+(APIServer pid=14962)            ^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 118, in run
+(APIServer pid=14962)     return self._loop.run_until_complete(task)
+(APIServer pid=14962)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/uvloop/__init__.py", line 48, in wrapper
+(APIServer pid=14962)     return await main
+(APIServer pid=14962)            ^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/entrypoints/openai/api_server.py", line 1884, in run_server
+(APIServer pid=14962)     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/entrypoints/openai/api_server.py", line 1902, in run_server_worker
+(APIServer pid=14962)     async with build_async_engine_client(
+(APIServer pid=14962)                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=14962)     return await anext(self.gen)
+(APIServer pid=14962)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/entrypoints/openai/api_server.py", line 180, in build_async_engine_client
+(APIServer pid=14962)     async with build_async_engine_client_from_engine_args(
+(APIServer pid=14962)                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=14962)     return await anext(self.gen)
+(APIServer pid=14962)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/entrypoints/openai/api_server.py", line 206, in build_async_engine_client_from_engine_args
+(APIServer pid=14962)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=14962)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 1142, in create_engine_config
+(APIServer pid=14962)     model_config = self.create_model_config()
+(APIServer pid=14962)                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/engine/arg_utils.py", line 994, in create_model_config
+(APIServer pid=14962)     return ModelConfig(
+(APIServer pid=14962)            ^^^^^^^^^^^^
+(APIServer pid=14962)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+(APIServer pid=14962)     s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+(APIServer pid=14962) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=14962)   Value error, rope_scaling should have a 'rope_type' key [type=value_error, input_value=ArgsKwargs((), {'model': ...rocessor_plugin': None}), input_type=ArgsKwargs]
+(APIServer pid=14962)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
