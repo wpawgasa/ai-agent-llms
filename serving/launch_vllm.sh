@@ -81,14 +81,12 @@ fi
 
 # Build vLLM argument array (array avoids word-splitting on values with spaces)
 KV_CACHE_DTYPE=""
-MODEL_OVERRIDE=""   # optional local path to use instead of MODEL_NAME (e.g. patched config)
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
     case "$1" in
         --kv-cache-dtype) KV_CACHE_DTYPE="$2";  shift 2 ;;
         --port)           PORT="$2";             shift 2 ;;
-        --model-override) MODEL_OVERRIDE="$2";  shift 2 ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -96,11 +94,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Use patched local path if provided, otherwise use model name from config
-EFFECTIVE_MODEL="${MODEL_OVERRIDE:-$MODEL_NAME}"
-
 VLLM_ARGS=(
-    --model                  "$EFFECTIVE_MODEL"
+    --model                  "$MODEL_NAME"
     --dtype                  bfloat16
     --tool-call-parser       "$TOOL_PARSER"
     --gpu-memory-utilization "$GPU_UTIL"
@@ -108,13 +103,6 @@ VLLM_ARGS=(
     --enable-auto-tool-choice
     --port                   "$PORT"
 )
-
-# When using a patched local directory (--model-override), it only contains
-# config.json — not the tokenizer files. Tell vLLM to load the tokenizer
-# from the original HF model ID instead.
-if [ -n "$MODEL_OVERRIDE" ]; then
-    VLLM_ARGS+=(--tokenizer "$MODEL_NAME")
-fi
 
 if [ "$ENFORCE_EAGER" = "true" ] || [ "$ENFORCE_EAGER" = "True" ]; then
     VLLM_ARGS+=(--enforce-eager)
@@ -129,7 +117,7 @@ if [ -n "$HF_OVERRIDES" ]; then
 fi
 
 echo "=== Launching vLLM Server ==="
-echo "Model:        $EFFECTIVE_MODEL"
+echo "Model:        $MODEL_NAME"
 echo "Tool Parser:  $TOOL_PARSER"
 echo "GPU Util:     $GPU_UTIL"
 echo "Max Len:      $MAX_LEN"

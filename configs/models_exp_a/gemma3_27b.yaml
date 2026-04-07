@@ -15,8 +15,10 @@ serving:
   gpu_memory_utilization: 0.90
   max_model_len: 8192
   enforce_eager: false
-  # rope_scaling patch applied at launch time via scripts/patch_model_config.py
-  # (vLLM 0.11 requires rope_type key; Gemma 3 config.json omits it)
+  # Gemma 3 config.json has a legacy rope_scaling dict without rope_type,
+  # which fails vLLM ModelConfig validation. Null it via --hf-overrides.
+  hf_overrides:
+    rope_scaling: null
 
 inference:
   temperature_deterministic: 0.0
