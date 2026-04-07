@@ -15,6 +15,10 @@ serving:
   gpu_memory_utilization: 0.90
   max_model_len: 8192
   enforce_eager: false
+  # Fallback for vLLM versions where patch_model_config.py symlink fix is
+  # insufficient: pass rope_scaling=null via --hf-overrides at serve time.
+  hf_overrides:
+    rope_scaling: null
 
 inference:
   temperature_deterministic: 0.0

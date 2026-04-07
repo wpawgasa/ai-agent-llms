@@ -16,6 +16,10 @@ serving:
   max_model_len: 8192
   enforce_eager: false
   # MoE variant: ~4B active out of 26B total. freeze mlp.gate during LoRA.
+  # Fallback for vLLM versions where patch_model_config.py symlink fix is
+  # insufficient: pass rope_scaling=null via --hf-overrides at serve time.
+  hf_overrides:
+    rope_scaling: null
 
 inference:
   temperature_deterministic: 0.0

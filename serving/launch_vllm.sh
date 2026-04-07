@@ -61,6 +61,19 @@ MAX_LEN=$(parse_yaml "serving.max_model_len" "8192")
 ENFORCE_EAGER=$(parse_yaml "serving.enforce_eager" "false")
 PORT=$(parse_yaml "serving.port" "8000")
 
+# Read serving.hf_overrides as a JSON string (empty if not set).
+# This is the vLLM 0.11.1+ replacement for --rope-scaling / --rope-theta CLI
+# flags, which were removed in PR #28006. Use it to pass per-model config
+# overrides (e.g. rope_scaling: null) without patching config.json on disk.
+HF_OVERRIDES=$(python3 - "$CONFIG_FILE" <<'PYEOF'
+import yaml, json, sys
+with open(sys.argv[1]) as f:
+    cfg = yaml.safe_load(f)
+val = cfg.get("serving", {}).get("hf_overrides")
+print(json.dumps(val) if val is not None else "", end="")
+PYEOF
+)
+
 if [ -z "$MODEL_NAME" ]; then
     echo "Error: model.name not found in config"
     exit 1
@@ -104,13 +117,18 @@ if [ -n "$KV_CACHE_DTYPE" ]; then
     VLLM_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
 fi
 
+if [ -n "$HF_OVERRIDES" ]; then
+    VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
+fi
+
 echo "=== Launching vLLM Server ==="
-echo "Model:       $EFFECTIVE_MODEL"
-echo "Tool Parser: $TOOL_PARSER"
-echo "GPU Util:    $GPU_UTIL"
-echo "Max Len:     $MAX_LEN"
-echo "Port:        $PORT"
-echo "KV Cache:    ${KV_CACHE_DTYPE:-auto}"
+echo "Model:        $EFFECTIVE_MODEL"
+echo "Tool Parser:  $TOOL_PARSER"
+echo "GPU Util:     $GPU_UTIL"
+echo "Max Len:      $MAX_LEN"
+echo "Port:         $PORT"
+echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
+echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
 echo "============================="
 
 exec python -m vllm.entrypoints.openai.api_server "${VLLM_ARGS[@]}"
