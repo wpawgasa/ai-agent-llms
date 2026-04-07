@@ -17,6 +17,7 @@ Teacher model generation:
 from __future__ import annotations
 
 import json
+import re
 import random
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -237,11 +238,23 @@ def _graph_to_script(
     return "\n".join(lines).strip()
 
 
+_STATE_ANNOTATION_RE = re.compile(
+    r"\[STATE:\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:→|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]"
+)
+_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL
+)
+
+
 def _extract_ground_truth(
     messages: list[dict[str, Any]],
     workflow: "WorkflowGraph",
 ) -> dict[str, Any]:
     """Extract ground-truth labels from annotated messages.
+
+    Reads from the ``annotations`` metadata dict if present (placeholder
+    generator). Falls back to parsing ``[STATE: X → Y]`` and
+    ``<tool_call>`` from message content (teacher-model generator).
 
     Returns a dict with:
     - ``state_sequence``: list of {from, to} transition dicts in order
@@ -261,13 +274,33 @@ def _extract_ground_truth(
     for msg in messages:
         if msg.get("role") != "assistant":
             continue
-        annotations = msg.get("annotations", {})
 
+        annotations = msg.get("annotations", {})
+        content = msg.get("content", "")
+
+        # --- State transitions ---
         transition = annotations.get("state_transition", {})
         if transition.get("from") and transition.get("to"):
             state_sequence.append({"from": transition["from"], "to": transition["to"]})
+        else:
+            # Fallback: parse [STATE: X → Y] from content
+            m = _STATE_ANNOTATION_RE.search(content)
+            if m:
+                state_sequence.append({"from": m.group(1), "to": m.group(2)})
 
+        # --- Tool calls ---
         turn_tools = annotations.get("tool_calls") or []
+        if not turn_tools:
+            # Fallback: parse <tool_call>{JSON}</tool_call> from content
+            for tc_match in _TOOL_CALL_RE.finditer(content):
+                try:
+                    parsed = json.loads(tc_match.group(1))
+                    name = parsed.get("name", "")
+                    args = parsed.get("arguments", {})
+                    if name:
+                        turn_tools.append({"name": name, "arguments": args})
+                except json.JSONDecodeError:
+                    continue
         tool_calls.extend(turn_tools)
         if turn_tools:
             tool_chain_dependencies.append(turn_tools)
