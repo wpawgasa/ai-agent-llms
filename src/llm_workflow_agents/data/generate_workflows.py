@@ -126,6 +126,16 @@ class WorkflowGraph:
         }
 
 
+_FORMAT_RULES = """\
+Rules:
+1. Always annotate every state transition using [STATE: CURRENT → NEXT] at the start of your response.
+2. When calling a tool, emit it as <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>.
+3. Only use tools available in the current state.
+4. Follow transition conditions to move between states.
+5. If a tool returns an error, attempt recovery before escalating.
+6. Reach a terminal state to complete the workflow.
+7. Never skip states or make invalid transitions."""
+
 _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
     "en": {
         "header": "### [{section}]",
@@ -825,7 +835,8 @@ def _generate_placeholder_conversation(
         f"Structured reference:\n"
         f"  Initial state: {workflow.initial_state}\n"
         f"  Terminal states: {', '.join(workflow.terminal_states)}\n"
-        f"  Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n"
+        f"  Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n\n"
+        f"{_FORMAT_RULES}"
     )
     messages.append({"role": "system", "content": system_content})
 
@@ -980,6 +991,7 @@ def _build_teacher_prompt(
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
+        f"{_FORMAT_RULES}\n\n"
         "Generate the conversation now."
     )
 
