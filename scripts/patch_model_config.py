@@ -29,6 +29,14 @@ _PATCHES: dict[str, dict] = {
         # back to standard RoPE using the top-level rope_theta in the config.
         "rope_scaling": None,
     },
+    "google/gemma-4-26B-A4B-it": {
+        # Same rope_scaling / rope_type issue as Gemma 3 (applies to Gemma 4
+        # family across all variants). Null out so vLLM uses standard RoPE.
+        "rope_scaling": None,
+    },
+    "google/gemma-4-31B-it": {
+        "rope_scaling": None,
+    },
 }
 
 
