@@ -1,0 +1,23 @@
+Read this fix https://github.com/vllm-project/vllm/issues/29026 in vllm 0.11.1 that may be applied to vllm 0.19.0
+
+---
+
+yes
+
+---
+
+HF Gemma4 configuration is defined in https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma4/configuration_gemma4.py
+
+---
+
+Also read this https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma3/configuration_gemma3.py for Gemma3
+
+---
+
+No solution found when resolving dependencies:
+  ╰─▶ Because vllm==0.19.0 depends on transformers>=4.56.0,<5 and only vllm<=0.19.0 is available, we can conclude that
+      vllm>=0.19.0 depends on transformers>=4.56.0,<5.
+      And because llm-workflow-agents==0.1.0 depends on transformers>=5.0.0 and vllm>=0.19.0, we can conclude that
+      llm-workflow-agents==0.1.0 cannot be used.
+      And because only llm-workflow-agents[dev]==0.1.0 is available and you require llm-workflow-agents[dev], we can
+      conclude that your requirements are unsatisfiable.
