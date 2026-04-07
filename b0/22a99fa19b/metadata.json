@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b022a99fa19b",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "scripts/patch_model_config.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b0/22a99fa19b/0/metadata.json",
+      "transcript": "/b0/22a99fa19b/0/full.jsonl",
+      "content_hash": "/b0/22a99fa19b/0/content_hash.txt",
+      "prompt": "/b0/22a99fa19b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 57016,
+    "cache_read_tokens": 2268985,
+    "output_tokens": 14379,
+    "api_call_count": 47
+  }
+}
