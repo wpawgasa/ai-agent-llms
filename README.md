@@ -103,6 +103,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Create environment and install dependencies
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
+
+# If uv reports a cache permission error (e.g. on shared Shadeform / cloud nodes):
+UV_CACHE_DIR=/tmp/uv-cache uv pip install -e ".[dev]"
 ```
 
 Copy `.env.example` to `.env` and fill in your API keys:
