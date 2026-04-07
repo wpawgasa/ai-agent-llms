@@ -134,3 +134,36 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
 ---
 
 how to load from .env
+
+---
+
+The result shows 0 in all metrics. Let's log the response from the model.
+{
+  "model": "google/gemma-4-31B-it",
+  "data_dir": "data/output/benchmark/task_a",
+  "num_samples": 2,
+  "stochastic_trials": 5,
+  "metrics": {
+    "full_workflow_success": 0.0,
+    "weighted_workflow_score": 0.0,
+    "latency_per_turn_median_ms": 1546.0079169997698,
+    "state_metrics": {
+      "state_transition_accuracy": 0.0,
+      "task_completion_rate": 0.0,
+      "invalid_transition_rate": 0.0,
+      "recovery_rate": 0.0,
+      "consistency_pass5": 0.0
+    },
+    "tool_metrics": {
+      "tool_name_accuracy": 0.0,
+      "argument_exact_match": 0.0,
+      "tool_call_f1": 0.0,
+      "hallucinated_tool_rate": 0.0
+    },
+    "chain_metrics": {
+      "chain_propagation_accuracy": 0.0,
+      "per_depth_accuracy": {},
+      "total_chains": 0
+    }
+  }
+}
