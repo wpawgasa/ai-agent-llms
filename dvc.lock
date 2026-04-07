@@ -9,8 +9,8 @@ stages:
       size: 10197
     - path: data/templates/workflow_prompt_template.txt
       hash: md5
-      md5: 37db5fae3c5b2c3e950aeeca8ebb611a
-      size: 631
+      md5: a04ee8e972e0bdcfde570216f2f85010
+      size: 757
     - path: scripts/generate_benchmark_data.sh
       hash: md5
       md5: 152977d9d3df3c2fa1389115f8cb3d3e
@@ -18,8 +18,8 @@ stages:
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: f90fdcb74eb40795e0ee41581156f4c9
-      size: 46149
+      md5: c40219eb589661c6fb5602f235a78ff0
+      size: 46722
     params:
       configs/benchmark/phase1_matrix.yaml:
         task_a:
@@ -43,6 +43,6 @@ stages:
     outs:
     - path: data/output/benchmark/task_a
       hash: md5
-      md5: 3e0ced1649d23ca3fecf5c1d06833d1f.dir
-      size: 37160980
-      nfiles: 10
+      md5: 8c622e45032cc8b607d0eb375c80b1a8.dir
+      size: 19082490
+      nfiles: 5
