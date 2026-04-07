@@ -1,0 +1,48 @@
+schema: '2.0'
+stages:
+  task_a_benchmark:
+    cmd: ./scripts/generate_benchmark_data.sh
+    deps:
+    - path: data/templates/tool_schemas_L1_to_L5.json
+      hash: md5
+      md5: 7e2c332fee106031da5a5262858ed1c1
+      size: 10197
+    - path: data/templates/workflow_prompt_template.txt
+      hash: md5
+      md5: 37db5fae3c5b2c3e950aeeca8ebb611a
+      size: 631
+    - path: scripts/generate_benchmark_data.sh
+      hash: md5
+      md5: 152977d9d3df3c2fa1389115f8cb3d3e
+      size: 2066
+      isexec: true
+    - path: src/llm_workflow_agents/data/generate_workflows.py
+      hash: md5
+      md5: f90fdcb74eb40795e0ee41581156f4c9
+      size: 46149
+    params:
+      configs/benchmark/phase1_matrix.yaml:
+        task_a:
+          models:
+          - configs/models/cat_a/gemma3_27b.yaml
+          - configs/models/cat_a/qwen3_32b.yaml
+          - configs/models/cat_a/qwen35_35b_a3b.yaml
+          - configs/models/cat_a/mistral_small_24b.yaml
+          - configs/models/cat_a/nemotron_30b.yaml
+          - configs/models/cat_a/glm47_flash.yaml
+          - configs/models/cat_a/gemma4_26b_a4b.yaml
+          - configs/models/cat_a/gemma4_31b.yaml
+          complexity_levels:
+          - L1
+          - L2
+          - L3
+          - L4
+          - L5
+          samples_per_level: 200
+          total_evaluations: 8000
+    outs:
+    - path: data/output/benchmark/task_a
+      hash: md5
+      md5: 3e0ced1649d23ca3fecf5c1d06833d1f.dir
+      size: 37160980
+      nfiles: 10
