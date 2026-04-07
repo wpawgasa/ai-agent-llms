@@ -278,6 +278,10 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     from llm_workflow_agents.eval.state_accuracy import (
         ConversationGroundTruth,
         ConversationPrediction,
