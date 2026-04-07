@@ -19,17 +19,6 @@ import sys
 from pathlib import Path
 
 
-def _inject_rope_type(rope_type: str):
-    """Return a callable that injects rope_type into rope_scaling if missing."""
-    def _apply(current):
-        if current is None:
-            return current
-        if isinstance(current, dict) and "rope_type" not in current:
-            return {**current, "rope_type": rope_type}
-        return current
-    return _apply
-
-
 # Patches keyed by model id (or prefix).
 # Each entry is a dict of top-level config keys to set / merge.
 # Use a callable for a key if you need read-modify-write on the existing value.
@@ -43,13 +32,16 @@ _PATCHES: dict[str, dict] = {
         "rope_scaling": None,
     },
     "google/gemma-4-26B-A4B-it": {
-        # Gemma 4 ships rope_scaling without rope_type. Inject "gemma3" (the
-        # rope_type used by the Gemma 3/4 family) to satisfy vLLM 0.11
-        # ModelConfig validation while preserving the scaling parameters.
-        "rope_scaling": _inject_rope_type("gemma3"),
+        # Gemma 4 does NOT use rope_scaling — it uses rope_parameters
+        # (per-attention-type: sliding="default", full="proportional").
+        # The rope_scaling key in config.json is a legacy artifact that
+        # lacks rope_type, causing vLLM 0.11 ModelConfig validation to fail.
+        # Null it out so vLLM ignores it and reads rope_parameters instead.
+        "rope_scaling": None,
     },
     "google/gemma-4-31B-it": {
-        "rope_scaling": _inject_rope_type("gemma3"),
+        # Same as gemma-4-26B-A4B-it above.
+        "rope_scaling": None,
     },
 }
 
