@@ -1,0 +1,24 @@
+model:
+  name: "google/gemma-4-26B-A4B-it"
+  family: "gemma"
+  architecture: "moe_gqa_transformer"
+  params_total: 26_000_000_000
+  params_active: 4_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 52
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "pythonic"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enforce_eager: false
+  # MoE variant: ~4B active out of 26B total. freeze mlp.gate during LoRA.
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
