@@ -106,23 +106,24 @@ class WorkflowGraph:
     terminal_states: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        name_of: dict[str, str] = {s.id: s.name for s in self.states}
         return {
-            "states": [s.id for s in self.states],
+            "states": [s.name for s in self.states],
             "state_details": [
-                {"id": s.id, "name": s.name, "tools": s.tools, "entry_actions": s.entry_actions}
+                {"name": s.name, "tools": s.tools, "entry_actions": s.entry_actions}
                 for s in self.states
             ],
             "transitions": [
                 {
-                    "from": t.from_state,
-                    "to": t.to_state,
+                    "from": name_of.get(t.from_state, t.from_state),
+                    "to": name_of.get(t.to_state, t.to_state),
                     "condition": t.condition,
                     "priority": t.priority,
                 }
                 for t in self.transitions
             ],
-            "initial": self.initial_state,
-            "terminal": self.terminal_states,
+            "initial": name_of.get(self.initial_state, self.initial_state),
+            "terminal": [name_of.get(t, t) for t in self.terminal_states],
         }
 
 
