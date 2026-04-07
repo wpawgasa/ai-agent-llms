@@ -13,9 +13,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
+
+
+def _inject_rope_type(rope_type: str):
+    """Return a callable that injects rope_type into rope_scaling if missing."""
+    def _apply(current):
+        if current is None:
+            return current
+        if isinstance(current, dict) and "rope_type" not in current:
+            return {**current, "rope_type": rope_type}
+        return current
+    return _apply
+
 
 # Patches keyed by model id (or prefix).
 # Each entry is a dict of top-level config keys to set / merge.
@@ -30,12 +43,13 @@ _PATCHES: dict[str, dict] = {
         "rope_scaling": None,
     },
     "google/gemma-4-26B-A4B-it": {
-        # Same rope_scaling / rope_type issue as Gemma 3 (applies to Gemma 4
-        # family across all variants). Null out so vLLM uses standard RoPE.
-        "rope_scaling": None,
+        # Gemma 4 ships rope_scaling without rope_type. Inject "gemma3" (the
+        # rope_type used by the Gemma 3/4 family) to satisfy vLLM 0.11
+        # ModelConfig validation while preserving the scaling parameters.
+        "rope_scaling": _inject_rope_type("gemma3"),
     },
     "google/gemma-4-31B-it": {
-        "rope_scaling": None,
+        "rope_scaling": _inject_rope_type("gemma3"),
     },
 }
 
@@ -48,6 +62,17 @@ def _find_patch(model_id: str) -> dict:
         if model_id.startswith(key):
             return patch
     return {}
+
+
+def _real_writeable_path(path: Path) -> Path:
+    """Resolve symlinks so we always write a plain file, not through a symlink
+    into the read-only HuggingFace hub cache."""
+    if path.is_symlink():
+        # Unlink the symlink and replace with a real copy of the target.
+        target = path.resolve()
+        path.unlink()
+        shutil.copy2(target, path)
+    return path
 
 
 def patch_config(model_id: str, cache_dir: Path) -> Path:
@@ -63,7 +88,8 @@ def patch_config(model_id: str, cache_dir: Path) -> Path:
 
     config_path = local_dir / "config.json"
 
-    # Re-use cached copy if it already exists
+    # Download if not already present (following symlinks — exists() returns
+    # True even for symlinks that point to a valid target).
     if not config_path.exists():
         print(f"Downloading config.json for {model_id} ...")
         downloaded = hf_hub_download(
@@ -73,6 +99,10 @@ def patch_config(model_id: str, cache_dir: Path) -> Path:
         )
         if Path(downloaded) != config_path:
             shutil.copy(downloaded, config_path)
+
+    # Ensure config_path is a real file, not a symlink into the HF cache.
+    # hf_hub_download may create symlinks in older huggingface_hub versions.
+    config_path = _real_writeable_path(config_path)
 
     with open(config_path) as f:
         cfg: dict = json.load(f)
@@ -91,8 +121,12 @@ def patch_config(model_id: str, cache_dir: Path) -> Path:
             changed = True
 
     if changed:
-        with open(config_path, "w") as f:
+        # Write atomically: dump to a temp file then rename to avoid a partial
+        # write leaving a corrupt config.json if the process is interrupted.
+        tmp_path = config_path.with_suffix(".json.tmp")
+        with open(tmp_path, "w") as f:
             json.dump(cfg, f, indent=2)
+        tmp_path.replace(config_path)
         print(f"Patched config written to {config_path}")
     else:
         print("Config already satisfies all patches — no changes written.")
