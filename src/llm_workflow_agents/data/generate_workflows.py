@@ -829,12 +829,15 @@ def _generate_placeholder_conversation(
 
     # System message with both natural language script and structured graph
     script = _graph_to_script(workflow, tool_schemas, language)
+    state_name: dict[str, str] = {s.id: s.name for s in workflow.states}
+    initial_name = state_name.get(workflow.initial_state, workflow.initial_state)
+    terminal_names = [state_name.get(t, t) for t in workflow.terminal_states]
     system_content = (
         f"You are a customer service agent handling {domain_name} workflows.\n\n"
         f"Workflow script (follow this for conversation flow):\n{script}\n\n"
         f"Structured reference:\n"
-        f"  Initial state: {workflow.initial_state}\n"
-        f"  Terminal states: {', '.join(workflow.terminal_states)}\n"
+        f"  Initial state: {initial_name}\n"
+        f"  Terminal states: {', '.join(terminal_names)}\n"
         f"  Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n\n"
         f"{_FORMAT_RULES}"
     )
