@@ -19,7 +19,7 @@ dependencies = [
     "trl>=0.15.0",
     "accelerate>=0.34.0",
     # Inference
-    "vllm>=0.8.0",
+    "vllm>=0.19.0",
     # Quantization
     "triton>=3.0.0",
     # Data & evaluation
