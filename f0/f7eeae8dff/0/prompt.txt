@@ -1,0 +1,177 @@
+Read this fix https://github.com/vllm-project/vllm/issues/29026 in vllm 0.11.1 that may be applied to vllm 0.19.0
+
+---
+
+yes
+
+---
+
+HF Gemma4 configuration is defined in https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma4/configuration_gemma4.py
+
+---
+
+Also read this https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma3/configuration_gemma3.py for Gemma3
+
+---
+
+No solution found when resolving dependencies:
+  ╰─▶ Because vllm==0.19.0 depends on transformers>=4.56.0,<5 and only vllm<=0.19.0 is available, we can conclude that
+      vllm>=0.19.0 depends on transformers>=4.56.0,<5.
+      And because llm-workflow-agents==0.1.0 depends on transformers>=5.0.0 and vllm>=0.19.0, we can conclude that
+      llm-workflow-agents==0.1.0 cannot be used.
+      And because only llm-workflow-agents[dev]==0.1.0 is available and you require llm-workflow-agents[dev], we can
+      conclude that your requirements are unsatisfiable.
+
+---
+
+(APIServer pid=16961) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=16961)   Value error, The checkpoint you are trying to load has model type `gemma4` but Transformers does not recognize this architecture. This could be because of an issue with the checkpoint, or because your version of Transformers is out of date.
+(APIServer pid=16961) 
+(APIServer pid=16961) You can update Transformers with the command `pip install --upgrade transformers`. If this does not work, and the checkpoint is very new, then there may not be a release version that supports this model yet. In this case, you can get the most up-to-date code by installing Transformers from source with the command `pip install git+https://github.com/huggingface/transformers.git` [type=value_error, input_value=ArgsKwargs((), {'model': ...nderer_num_workers': 1}), input_type=ArgsKwargs]
+(APIServer pid=16961)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
+
+---
+
+(APIServer pid=17528)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tokenizers/hf.py", line 85, in from_pretrained
+(APIServer pid=17528)     tokenizer = AutoTokenizer.from_pretrained(
+(APIServer pid=17528)                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=17528)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/models/auto/tokenization_auto.py", line 817, in from_pretrained
+(APIServer pid=17528)     return tokenizer_class.from_pretrained(pretrained_model_name_or_path, *inputs, **kwargs)
+(APIServer pid=17528)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=17528)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 1721, in from_pretrained
+(APIServer pid=17528)     return cls._from_pretrained(
+(APIServer pid=17528)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=17528)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 1910, in _from_pretrained
+(APIServer pid=17528)     tokenizer = cls(*init_inputs, **init_kwargs)
+(APIServer pid=17528)                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=17528)   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_tokenizers.py", line 376, in __init__
+(APIServer pid=17528)     raise ValueError(
+(APIServer pid=17528) ValueError: Couldn't instantiate the backend tokenizer from one of: 
+(APIServer pid=17528) (1) a `tokenizers` library serialization file, 
+(APIServer pid=17528) (2) a slow tokenizer instance to convert or 
+(APIServer pid=17528) (3) an equivalent slow tokenizer class to instantiate and convert. 
+(APIServer pid=17528) You need to have sentencepiece or tiktoken installed to convert a slow tokenizer to a fast one
+
+---
+
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108] EngineCore failed to start.
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108] Traceback (most recent call last):
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/engine/core.py", line 1082, in run_engine_core
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     engine_core = EngineCoreProc(*args, engine_index=dp_rank, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return func(*args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/engine/core.py", line 848, in __init__
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     super().__init__(
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/engine/core.py", line 114, in __init__
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self.model_executor = executor_class(vllm_config)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return func(*args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/executor/abstract.py", line 103, in __init__
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self._init_executor()
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py", line 52, in _init_executor
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self.driver_worker.load_model()
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/worker/gpu_worker.py", line 323, in load_model
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return func(*args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/v1/worker/gpu_model_runner.py", line 4751, in load_model
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self.model = model_loader.load_model(
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                  ^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return func(*args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/base_loader.py", line 64, in load_model
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     self.load_weights(model, model_config)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return func(*args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/default_loader.py", line 381, in load_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     loaded_weights = model.load_weights(self.get_all_weights(model_config, model))
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/gemma4_mm.py", line 1319, in load_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/reload/torchao_decorator.py", line 50, in patched_model_load_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     return original_load_weights(self, weights, *args, **kwargs)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 355, in load_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     autoloaded_weights = set(self._load_module("", self.module, weights))
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 293, in _load_module
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     for child_prefix, child_weights in self._groupby_prefix(weights):
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 170, in _groupby_prefix
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     for prefix, group in itertools.groupby(weights_by_parts, key=lambda x: x[0][0]):
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 167, in <genexpr>
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     for weight_name, weight_data in weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                                     ^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 352, in <genexpr>
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     (name, weight) for name, weight in weights if not self._can_skip(name)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                                        ^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/models/utils.py", line 98, in <genexpr>
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     for name, data in weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                       ^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/default_loader.py", line 286, in get_all_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     yield from self._get_weights_iterator(primary_weights)
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/default_loader.py", line 208, in _get_weights_iterator
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]                                                    ^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]   File "/home/shadeform/workspace/ai-agent-llms/.venv/lib/python3.12/site-packages/vllm/model_executor/model_loader/default_loader.py", line 197, in _prepare_weights
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108]     raise RuntimeError(
+(EngineCore pid=18806) ERROR 04-07 05:51:36 [core.py:1108] RuntimeError: Cannot find any model weights with `/home/shadeform/workspace/ai-agent-llms/.hf_patches/google--gemma-4-31B-it`
+
+---
+
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+---
+
+how to load from .env
+
+---
+
+The result shows 0 in all metrics. Let's log the response from the model.
+{
+  "model": "google/gemma-4-31B-it",
+  "data_dir": "data/output/benchmark/task_a",
+  "num_samples": 2,
+  "stochastic_trials": 5,
+  "metrics": {
+    "full_workflow_success": 0.0,
+    "weighted_workflow_score": 0.0,
+    "latency_per_turn_median_ms": 1546.0079169997698,
+    "state_metrics": {
+      "state_transition_accuracy": 0.0,
+      "task_completion_rate": 0.0,
+      "invalid_transition_rate": 0.0,
+      "recovery_rate": 0.0,
+      "consistency_pass5": 0.0
+    },
+    "tool_metrics": {
+      "tool_name_accuracy": 0.0,
+      "argument_exact_match": 0.0,
+      "tool_call_f1": 0.0,
+      "hallucinated_tool_rate": 0.0
+    },
+    "chain_metrics": {
+      "chain_propagation_accuracy": 0.0,
+      "per_depth_accuracy": {},
+      "total_chains": 0
+    }
+  }
+}
+
+---
+
+Let's add log while running the script.
+
+---
+
+Let's load .env with `load_dotenv`.
