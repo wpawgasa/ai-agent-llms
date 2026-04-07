@@ -254,6 +254,12 @@ def _replay_conversation(
         elif role == "assistant":
             content, latency = _call_vllm(endpoint, model, context, temperature)
             latencies_ms.append(latency)
+            logger.debug(
+                "model_response",
+                turn=len(predicted),
+                latency_ms=round(latency, 1),
+                content=content[:2000],  # truncate to avoid flooding logs
+            )
             pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
             context.append(pred_msg)
             predicted.append(pred_msg)
@@ -309,7 +315,21 @@ if __name__ == "__main__":
         default=5,
         help="Number of temperature=0.7 trials for pass^k consistency (default: 5)",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: INFO). Use DEBUG to see raw model responses.",
+    )
     args = parser.parse_args()
+
+    import logging
+
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(logging, args.log_level)
+        ),
+    )
 
     data_dir = Path(args.data)
     if not data_dir.exists():
