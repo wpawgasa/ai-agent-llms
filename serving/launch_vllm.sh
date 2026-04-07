@@ -109,6 +109,13 @@ VLLM_ARGS=(
     --port                   "$PORT"
 )
 
+# When using a patched local directory (--model-override), it only contains
+# config.json — not the tokenizer files. Tell vLLM to load the tokenizer
+# from the original HF model ID instead.
+if [ -n "$MODEL_OVERRIDE" ]; then
+    VLLM_ARGS+=(--tokenizer "$MODEL_NAME")
+fi
+
 if [ "$ENFORCE_EAGER" = "true" ] || [ "$ENFORCE_EAGER" = "True" ]; then
     VLLM_ARGS+=(--enforce-eager)
 fi
