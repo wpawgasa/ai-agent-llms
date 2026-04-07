@@ -1,0 +1,31 @@
+Read this fix https://github.com/vllm-project/vllm/issues/29026 in vllm 0.11.1 that may be applied to vllm 0.19.0
+
+---
+
+yes
+
+---
+
+HF Gemma4 configuration is defined in https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma4/configuration_gemma4.py
+
+---
+
+Also read this https://github.com/huggingface/transformers/blob/main/src/transformers/models/gemma3/configuration_gemma3.py for Gemma3
+
+---
+
+No solution found when resolving dependencies:
+  ╰─▶ Because vllm==0.19.0 depends on transformers>=4.56.0,<5 and only vllm<=0.19.0 is available, we can conclude that
+      vllm>=0.19.0 depends on transformers>=4.56.0,<5.
+      And because llm-workflow-agents==0.1.0 depends on transformers>=5.0.0 and vllm>=0.19.0, we can conclude that
+      llm-workflow-agents==0.1.0 cannot be used.
+      And because only llm-workflow-agents[dev]==0.1.0 is available and you require llm-workflow-agents[dev], we can
+      conclude that your requirements are unsatisfiable.
+
+---
+
+(APIServer pid=16961) pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig
+(APIServer pid=16961)   Value error, The checkpoint you are trying to load has model type `gemma4` but Transformers does not recognize this architecture. This could be because of an issue with the checkpoint, or because your version of Transformers is out of date.
+(APIServer pid=16961) 
+(APIServer pid=16961) You can update Transformers with the command `pip install --upgrade transformers`. If this does not work, and the checkpoint is very new, then there may not be a release version that supports this model yet. In this case, you can get the most up-to-date code by installing Transformers from source with the command `pip install git+https://github.com/huggingface/transformers.git` [type=value_error, input_value=ArgsKwargs((), {'model': ...nderer_num_workers': 1}), input_type=ArgsKwargs]
+(APIServer pid=16961)     For further information visit https://errors.pydantic.dev/2.12/v/value_error
