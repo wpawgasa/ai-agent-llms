@@ -162,6 +162,68 @@ Each script accepts `--dry-run` to preview commands without executing, and `--ou
 
 ---
 
+## DVC Data Pipeline
+
+Data outputs are versioned with [DVC](https://dvc.org) and stored on GCS. Use `dvc pull` to restore any cached dataset without re-running generation scripts.
+
+**Remote:** `gs://looloo-voicebot-llm-weights-and-data/llm-workflow-agents`
+
+### Authentication
+
+The remote uses a GCP service account key. Place the JSON key one level above the project root:
+
+```
+/workspaces/looloo-ocr-9e0b69945c03.json   ← expected default path
+```
+
+Or override at runtime:
+
+```bash
+# Option A: override in DVC config
+dvc remote modify gcs credentialpath /path/to/key.json
+
+# Option B: standard GCP env var
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+```
+
+### Pulling data
+
+```bash
+# Pull all tracked outputs
+dvc pull
+
+# Pull a specific stage output
+dvc pull data/output/benchmark/task_a
+```
+
+### Pipeline stages
+
+| Stage | Output | Samples | API key needed |
+|-------|--------|---------|----------------|
+| `task_a_benchmark` | `data/output/benchmark/task_a` | 1 000 | No |
+| `task_a_sft` | `data/output/sft/task_a` | ~12 504 | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
+| `task_a_grpo` | `data/output/grpo/task_a` | 2 250 | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
+| `task_a_eval` | `data/output/val/task_a`, `data/output/test/task_a` | 500 + 500 | `OPENAI_API_KEY` |
+
+### Reproducing a stage
+
+`dvc repro` re-runs a stage only if its dependencies (scripts, templates, config params) have changed, then caches the result:
+
+```bash
+dvc repro task_a_benchmark   # no API key required
+dvc repro task_a_sft         # requires API keys in .env
+dvc repro                    # run all out-of-date stages
+```
+
+Check pipeline status without running anything:
+
+```bash
+dvc status     # compares local cache vs remote + dep hashes
+dvc dag        # print the dependency graph
+```
+
+---
+
 ## Running Experiments
 
 ### Experiment A — Category A Benchmark
