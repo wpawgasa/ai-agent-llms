@@ -1173,9 +1173,12 @@ def generate_workflow_dataset(
         for msg in messages:
             if msg["role"] == "tool":
                 total_tool_calls += 1
-                content = json.loads(msg["content"])
-                if "error" in content:
-                    tool_error_count += 1
+                try:
+                    content = json.loads(msg["content"])
+                    if "error" in content:
+                        tool_error_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
         sample = ConversationSample(
             conversation_id=f"{complexity_level}_{i + 1:03d}",
