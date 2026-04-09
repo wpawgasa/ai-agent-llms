@@ -28,6 +28,49 @@ from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetr
 
 logger = structlog.get_logger(__name__)
 
+_FORMAT_RULES = """\
+Rules:
+1. Always annotate every state transition using [STATE: CURRENT → NEXT] at the start of your response.
+2. When calling a tool, emit it as <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>.
+3. Only use tools available in the current state.
+4. Follow transition conditions to move between states.
+5. If a tool returns an error, attempt recovery before escalating.
+6. Reach a terminal state to complete the workflow.
+7. Never skip states or make invalid transitions."""
+
+
+def _build_system_prompt(sample: dict[str, Any], original_content: str) -> str:
+    """Enrich the system prompt with workflow context and format rules.
+
+    The teacher-generated data stores the workflow graph, script, and tool
+    schemas alongside a bare role-description system message.  The model
+    needs all of this context to produce state transitions and tool calls.
+    """
+    import json as _json
+
+    parts: list[str] = [original_content]
+
+    script = sample.get("workflow_script")
+    if script:
+        parts.append(f"\nWorkflow script (follow this for conversation flow):\n{script}")
+
+    graph = sample.get("workflow_graph", {})
+    initial = graph.get("initial", "")
+    terminal = graph.get("terminal", [])
+    tool_schemas = sample.get("tool_schemas") or []
+    tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
+
+    if initial or terminal or tool_names:
+        parts.append(
+            f"\nStructured reference:\n"
+            f"  Initial state: {initial}\n"
+            f"  Terminal states: {', '.join(terminal)}\n"
+            f"  Available tools: {_json.dumps(tool_names)}"
+        )
+
+    parts.append(f"\n{_FORMAT_RULES}")
+    return "\n".join(parts)
+
 
 @dataclass
 class WorkflowQualityMetrics:
@@ -188,22 +231,38 @@ def _call_vllm(
     messages: list[dict[str, Any]],
     temperature: float = 0.0,
     max_tokens: int = 1024,
-) -> tuple[str, float]:
+    tools: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[dict[str, Any]], float]:
     """Call the vLLM OpenAI-compatible chat completions endpoint.
 
+    When *tools* are provided they are included in the request so that
+    vLLM can use its ``--tool-call-parser`` to emit structured tool
+    calls.
+
     Returns:
-        (content, latency_ms)
+        (content, raw_tool_calls, latency_ms)
+
+    *content* has any structured tool calls serialised as
+    ``<tool_call>{JSON}</tool_call>`` tags appended so that
+    ``tool_call_f1.parse_tool_calls`` can extract them.
+
+    *raw_tool_calls* is the list straight from the API response so the
+    caller can build a well-formed assistant message for the context
+    (with ``tool_calls`` field and matching ``tool_call_id``).
     """
     import json
     import time
     import urllib.request
 
-    payload = json.dumps({
+    request_body: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-    }).encode()
+    }
+    if tools:
+        request_body["tools"] = tools
+    payload = json.dumps(request_body).encode()
 
     req = urllib.request.Request(
         f"{endpoint.rstrip('/')}/v1/chat/completions",
@@ -217,8 +276,24 @@ def _call_vllm(
         body = json.loads(resp.read())
     latency_ms = (time.monotonic() - t0) * 1000.0
 
-    content: str = body["choices"][0]["message"]["content"] or ""
-    return content, latency_ms
+    message = body["choices"][0]["message"]
+    content: str = message.get("content") or ""
+    raw_tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
+
+    # Append any structured tool calls as <tool_call> tags so that
+    # parse_tool_calls() can extract them.
+    for tc in raw_tool_calls:
+        fn = tc.get("function", {})
+        call_obj = {"name": fn.get("name", ""), "arguments": fn.get("arguments", {})}
+        # arguments may arrive as a JSON string — parse it
+        if isinstance(call_obj["arguments"], str):
+            try:
+                call_obj["arguments"] = json.loads(call_obj["arguments"])
+            except json.JSONDecodeError:
+                pass
+        content += f"\n<tool_call>{json.dumps(call_obj)}</tool_call>"
+
+    return content, raw_tool_calls, latency_ms
 
 
 def _replay_conversation(
@@ -236,23 +311,28 @@ def _replay_conversation(
     Returns:
         (predicted_messages, latencies_ms_per_assistant_turn)
     """
+    tools = sample.get("tool_schemas") or []
     predicted: list[dict[str, Any]] = []
     latencies_ms: list[float] = []
     context: list[dict[str, Any]] = []  # sliding context sent to the model
+    pending_tool_call_ids: list[str] = []  # ids from the latest assistant tool_calls
 
     for msg in sample.get("messages", []):
         role = msg["role"]
 
         if role == "system":
-            context.append({"role": "system", "content": msg["content"]})
-            predicted.append(msg)
+            enriched = _build_system_prompt(sample, msg["content"])
+            context.append({"role": "system", "content": enriched})
+            predicted.append(msg)  # keep original in predictions for eval
 
         elif role == "user":
             context.append({"role": "user", "content": msg["content"]})
             predicted.append(msg)
 
         elif role == "assistant":
-            content, latency = _call_vllm(endpoint, model, context, temperature)
+            content, raw_tool_calls, latency = _call_vllm(
+                endpoint, model, context, temperature, tools=tools,
+            )
             latencies_ms.append(latency)
             logger.debug(
                 "model_response",
@@ -260,13 +340,39 @@ def _replay_conversation(
                 latency_ms=round(latency, 1),
                 content=content[:2000],  # truncate to avoid flooding logs
             )
+
+            # Build a well-formed assistant message for the context so
+            # that subsequent tool-role messages have matching tool_call_ids.
+            # Use content *without* appended <tool_call> tags for the API context
+            text_content = content.split("\n<tool_call>")[0] if raw_tool_calls else content
+            ctx_msg: dict[str, Any] = {"role": "assistant", "content": text_content}
+            if raw_tool_calls:
+                ctx_msg["tool_calls"] = raw_tool_calls
+                # Store the ids so the next tool message(s) can reference them
+                pending_tool_call_ids.clear()
+                for tc in raw_tool_calls:
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        pending_tool_call_ids.append(tc_id)
+            context.append(ctx_msg)
+
+            # For eval, store the full content with <tool_call> tags
             pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
-            context.append(pred_msg)
             predicted.append(pred_msg)
 
         elif role == "tool":
-            # Use ground-truth tool response to avoid cascading failures
-            context.append({"role": "tool", "content": msg["content"]})
+            # Use ground-truth tool response to avoid cascading failures.
+            # Assign tool_call_id from the model's preceding tool call so
+            # the OpenAI-format conversation stays well-formed.
+            tool_msg: dict[str, Any] = {
+                "role": "tool",
+                "content": msg["content"],
+            }
+            if pending_tool_call_ids:
+                tool_msg["tool_call_id"] = pending_tool_call_ids.pop(0)
+            elif msg.get("tool_call_id"):
+                tool_msg["tool_call_id"] = msg["tool_call_id"]
+            context.append(tool_msg)
             predicted.append(msg)
 
     return predicted, latencies_ms
