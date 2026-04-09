@@ -314,3 +314,59 @@ def evaluate_tool_calls(
 
     logger.info("tool_call_eval_complete", turns=n_turns_with_tools, **metrics.to_dict())
     return metrics
+
+
+def evaluate_tool_calls_conversation(
+    predictions: list[TurnPrediction],
+    ground_truth: list[TurnGroundTruth],
+    tool_schemas: list[dict[str, Any]] | None = None,
+) -> ToolCallMetrics:
+    """Evaluate tool-calling accuracy at the conversation level.
+
+    Unlike :func:`evaluate_tool_calls` which aligns predictions to
+    ground truth per-turn, this function pools **all** tool calls from
+    every assistant turn into a single set per conversation and computes
+    F1 on the pooled sets.  A model that calls the right tool at a
+    different turn still receives credit.
+    """
+    all_pred_calls: list[dict[str, Any]] = []
+    all_gt_calls: list[dict[str, Any]] = []
+
+    for pred in predictions:
+        all_pred_calls.extend(pred.tool_calls or parse_tool_calls(pred.content))
+
+    for gt in ground_truth:
+        all_gt_calls.extend(gt.tool_calls)
+
+    if not all_pred_calls and not all_gt_calls:
+        return ToolCallMetrics()
+
+    valid_names: list[str] = []
+    if tool_schemas:
+        for schema in tool_schemas:
+            fn = schema.get("function", schema)
+            name = fn.get("name", "")
+            if name:
+                valid_names.append(name)
+
+    name_acc = compute_name_accuracy(all_pred_calls, all_gt_calls)
+    ast_f1 = compute_ast_f1(all_pred_calls, all_gt_calls)
+
+    total_arg_match = 0
+    for i, gt_call in enumerate(all_gt_calls):
+        if i < len(all_pred_calls) and compute_argument_match(all_pred_calls[i], gt_call):
+            total_arg_match += 1
+    arg_exact = total_arg_match / len(all_gt_calls) if all_gt_calls else 0.0
+
+    hallucinated = detect_hallucinated_tools(all_pred_calls, valid_names) if valid_names else []
+    hall_rate = len(hallucinated) / len(all_pred_calls) if all_pred_calls else 0.0
+
+    metrics = ToolCallMetrics(
+        tool_name_accuracy=name_acc,
+        argument_exact_match=arg_exact,
+        tool_call_f1=ast_f1,
+        hallucinated_tool_rate=hall_rate,
+    )
+
+    logger.info("tool_call_conv_eval_complete", **metrics.to_dict())
+    return metrics

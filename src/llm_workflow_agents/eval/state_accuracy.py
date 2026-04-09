@@ -43,7 +43,8 @@ class ConversationGroundTruth:
 class StateMachineMetrics:
     """Metrics for state machine adherence evaluation."""
 
-    state_transition_accuracy: float = 0.0  # Target: >=85%
+    state_transition_accuracy: float = 0.0  # Target: >=85% (per-turn)
+    state_sequence_accuracy: float = 0.0  # Conversation-level (LCS recall)
     task_completion_rate: float = 0.0  # Target: >=70%
     invalid_transition_rate: float = 0.0  # Target: <=5%
     recovery_rate: float = 0.0  # Target: >=60%
@@ -52,6 +53,7 @@ class StateMachineMetrics:
     def to_dict(self) -> dict[str, float]:
         return {
             "state_transition_accuracy": self.state_transition_accuracy,
+            "state_sequence_accuracy": self.state_sequence_accuracy,
             "task_completion_rate": self.task_completion_rate,
             "invalid_transition_rate": self.invalid_transition_rate,
             "recovery_rate": self.recovery_rate,
@@ -102,7 +104,7 @@ def compute_transition_accuracy(
     predicted: list[tuple[str, str]],
     ground_truth: list[tuple[str, str]],
 ) -> tuple[float, int]:
-    """Compute accuracy of predicted transitions vs ground truth.
+    """Compute accuracy of predicted transitions vs ground truth (per-turn).
 
     Returns:
         (accuracy, num_invalid) — accuracy as fraction, count of invalid transitions.
@@ -122,6 +124,60 @@ def compute_transition_accuracy(
 
     accuracy = correct / len(ground_truth) if ground_truth else 0.0
     return accuracy, invalid
+
+
+def _transitions_to_sequence(transitions: list[tuple[str, str]]) -> list[str]:
+    """Convert a list of (from, to) transitions into a state visit sequence.
+
+    Example: [(A,B), (B,C), (C,C)] → [A, B, C]  (consecutive dupes collapsed)
+    """
+    if not transitions:
+        return []
+    seq = [transitions[0][0]]
+    for _, to_state in transitions:
+        if to_state != seq[-1]:
+            seq.append(to_state)
+    return seq
+
+
+def compute_sequence_accuracy(
+    predicted: list[tuple[str, str]],
+    ground_truth: list[tuple[str, str]],
+    workflow_graph: dict[str, Any] | None = None,
+) -> float:
+    """Conversation-level state accuracy based on visited state sequences.
+
+    Extracts the ordered sequence of *distinct* states visited (collapsing
+    consecutive self-loops) from both predicted and ground-truth transitions,
+    then scores using longest-common-subsequence (LCS) recall against the
+    ground-truth sequence.
+
+    If *workflow_graph* is provided, predicted transitions that are not
+    present in the graph's edges are **not** penalised here (that is
+    already captured by ``invalid_transition_rate``), but the sequence
+    still has to cover the GT states in the right order.
+
+    Returns:
+        LCS-recall score between 0.0 and 1.0.
+    """
+    pred_seq = _transitions_to_sequence(predicted)
+    gt_seq = _transitions_to_sequence(ground_truth)
+
+    if not gt_seq:
+        return 1.0 if not pred_seq else 0.0
+
+    # LCS length via standard DP
+    m, n = len(pred_seq), len(gt_seq)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if pred_seq[i - 1] == gt_seq[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
+    lcs_len = dp[m][n]
+    return lcs_len / len(gt_seq)
 
 
 def check_task_completion(
@@ -207,6 +263,7 @@ def evaluate_state_machine(
     gt_map = {gt.conversation_id: gt for gt in ground_truth}
 
     total_accuracy = 0.0
+    total_seq_accuracy = 0.0
     total_completions = 0
     total_invalid = 0
     total_transitions = 0
@@ -225,11 +282,14 @@ def evaluate_state_machine(
         pred_transitions = parse_state_transitions(pred.messages)
         gt_transitions = extract_ground_truth_transitions(gt.messages)
 
-        # Transition accuracy
+        # Per-turn transition accuracy
         accuracy, invalid = compute_transition_accuracy(pred_transitions, gt_transitions)
         total_accuracy += accuracy
         total_invalid += invalid
         total_transitions += max(len(gt_transitions), len(pred_transitions))
+
+        # Conversation-level sequence accuracy (LCS recall)
+        total_seq_accuracy += compute_sequence_accuracy(pred_transitions, gt_transitions)
 
         # Task completion
         if check_task_completion(pred_transitions, gt.terminal_states):
@@ -250,6 +310,7 @@ def evaluate_state_machine(
 
     metrics = StateMachineMetrics(
         state_transition_accuracy=total_accuracy / n,
+        state_sequence_accuracy=total_seq_accuracy / n,
         task_completion_rate=total_completions / n,
         invalid_transition_rate=total_invalid / max(total_transitions, 1),
         recovery_rate=total_recoveries / max(total_errors, 1),
