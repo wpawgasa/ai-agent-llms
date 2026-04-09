@@ -13,7 +13,7 @@ authors = [{ name = "wpawgasa" }]
 
 dependencies = [
     # Core ML
-    "torch>=2.4.0",
+    "torch>=2.11.0",
     "transformers>=4.56.0",  # vllm 0.19.0 caps <5; override post-install: uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
     "peft>=0.14.0",
     "trl>=0.15.0",
@@ -52,6 +52,15 @@ dev = [
     "mypy>=1.11",
     "dvc[gs]>=3.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
