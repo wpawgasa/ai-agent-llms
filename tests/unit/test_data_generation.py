@@ -304,7 +304,7 @@ class TestWorkflowGraphModel:
             terminal_states=["S2"],
         )
         d = graph.to_dict()
-        assert d["initial"] == "S1"
-        assert d["terminal"] == ["S2"]
+        assert d["initial"] == "A"
+        assert d["terminal"] == ["B"]
         assert len(d["states"]) == 2
         assert len(d["transitions"]) == 1

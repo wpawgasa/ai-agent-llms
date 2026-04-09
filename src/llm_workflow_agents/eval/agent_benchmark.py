@@ -79,6 +79,8 @@ class WorkflowQualityMetrics:
     full_workflow_success: float = 0.0  # Target: >=55%
     weighted_workflow_score: float = 0.0  # Target: >=0.75
     latency_per_turn_median_ms: float = 0.0  # Target: <=2000 (L1-L3), <=5000 (L4-L5)
+    latency_per_turn_avg_ms: float = 0.0
+    ttft_avg_ms: float = 0.0
 
     state_metrics: StateMachineMetrics = field(default_factory=StateMachineMetrics)
     tool_metrics: ToolCallMetrics = field(default_factory=ToolCallMetrics)
@@ -90,6 +92,8 @@ class WorkflowQualityMetrics:
             "full_workflow_success": self.full_workflow_success,
             "weighted_workflow_score": self.weighted_workflow_score,
             "latency_per_turn_median_ms": self.latency_per_turn_median_ms,
+            "latency_per_turn_avg_ms": self.latency_per_turn_avg_ms,
+            "ttft_avg_ms": self.ttft_avg_ms,
             "state_metrics": self.state_metrics.to_dict(),
             "tool_metrics": self.tool_metrics.to_dict(),
             "tool_metrics_conversation": self.tool_metrics_conversation.to_dict(),
@@ -166,11 +170,19 @@ def compute_latency_median(latencies_ms: list[float]) -> float:
     return sorted_lat[n // 2]
 
 
+def compute_average(values: list[float]) -> float:
+    """Compute arithmetic mean from a list of values."""
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
 def evaluate_workflow_quality(
     state_metrics: StateMachineMetrics,
     tool_metrics: ToolCallMetrics,
     chain_metrics: ChainPropagationMetrics,
     latencies_ms: list[float] | None = None,
+    ttfts_ms: list[float] | None = None,
     tool_metrics_turn: ToolCallMetrics | None = None,
     tool_metrics_conversation: ToolCallMetrics | None = None,
 ) -> WorkflowQualityMetrics:
@@ -182,6 +194,7 @@ def evaluate_workflow_quality(
             (typically the better of per-turn and conversation-level).
         chain_metrics: Tool chain propagation results.
         latencies_ms: Optional per-turn latency measurements.
+        ttfts_ms: Optional per-turn TTFT measurements.
         tool_metrics_turn: Per-turn tool metrics (for reporting).
         tool_metrics_conversation: Conversation-level tool metrics (for reporting).
 
@@ -200,12 +213,18 @@ def evaluate_workflow_quality(
         chain_metrics,
     )
 
-    median_latency = compute_latency_median(latencies_ms or [])
+    latencies = latencies_ms or []
+    ttfts = ttfts_ms or []
+    median_latency = compute_latency_median(latencies)
+    avg_latency = compute_average(latencies)
+    avg_ttft = compute_average(ttfts)
 
     metrics = WorkflowQualityMetrics(
         full_workflow_success=full_success,
         weighted_workflow_score=weighted,
         latency_per_turn_median_ms=median_latency,
+        latency_per_turn_avg_ms=avg_latency,
+        ttft_avg_ms=avg_ttft,
         state_metrics=state_metrics,
         tool_metrics=tool_metrics,
         tool_metrics_conversation=tool_metrics_conversation or tool_metrics,
@@ -217,6 +236,8 @@ def evaluate_workflow_quality(
         weighted_score=weighted,
         full_success=full_success,
         median_latency_ms=median_latency,
+        avg_latency_ms=avg_latency,
+        avg_ttft_ms=avg_ttft,
     )
 
     return metrics
@@ -248,15 +269,17 @@ def _call_vllm(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     tools: list[dict[str, Any]] | None = None,
-) -> tuple[str, list[dict[str, Any]], float]:
+) -> tuple[str, list[dict[str, Any]], float, float]:
     """Call the vLLM OpenAI-compatible chat completions endpoint.
 
     When *tools* are provided they are included in the request so that
     vLLM can use its ``--tool-call-parser`` to emit structured tool
     calls.
 
+    Uses streaming to measure TTFT (Time To First Token).
+
     Returns:
-        (content, raw_tool_calls, latency_ms)
+        (content, raw_tool_calls, latency_ms, ttft_ms)
 
     *content* has any structured tool calls serialised as
     ``<tool_call>{JSON}</tool_call>`` tags appended so that
@@ -275,6 +298,7 @@ def _call_vllm(
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "stream": True,
     }
     if tools:
         request_body["tools"] = tools
@@ -288,13 +312,60 @@ def _call_vllm(
     )
 
     t0 = time.monotonic()
+    ttft_ms = 0.0
+    first_token_received = False
+    content_parts: list[str] = []
+    raw_tool_calls: list[dict[str, Any]] = []
+    # Track tool call deltas keyed by index
+    tool_call_accum: dict[int, dict[str, Any]] = {}
+
     with urllib.request.urlopen(req, timeout=120) as resp:
-        body = json.loads(resp.read())
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data_str = line[len("data:"):].strip()
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+
+            # Measure TTFT on first content or tool_call delta
+            if not first_token_received and (delta.get("content") or delta.get("tool_calls")):
+                ttft_ms = (time.monotonic() - t0) * 1000.0
+                first_token_received = True
+
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+
+            # Accumulate streamed tool call deltas
+            for tc_delta in delta.get("tool_calls", []):
+                tc_idx = tc_delta.get("index", 0)
+                if tc_idx not in tool_call_accum:
+                    tool_call_accum[tc_idx] = {
+                        "id": tc_delta.get("id", ""),
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                entry = tool_call_accum[tc_idx]
+                if tc_delta.get("id"):
+                    entry["id"] = tc_delta["id"]
+                fn_delta = tc_delta.get("function", {})
+                if fn_delta.get("name"):
+                    entry["function"]["name"] += fn_delta["name"]
+                if fn_delta.get("arguments"):
+                    entry["function"]["arguments"] += fn_delta["arguments"]
+
     latency_ms = (time.monotonic() - t0) * 1000.0
 
-    message = body["choices"][0]["message"]
-    content: str = message.get("content") or ""
-    raw_tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
+    # Build raw_tool_calls from accumulated deltas
+    for idx in sorted(tool_call_accum):
+        raw_tool_calls.append(tool_call_accum[idx])
+
+    content = "".join(content_parts)
 
     # Append any structured tool calls as <tool_call> tags so that
     # parse_tool_calls() can extract them.
@@ -309,7 +380,7 @@ def _call_vllm(
                 pass
         content += f"\n<tool_call>{json.dumps(call_obj)}</tool_call>"
 
-    return content, raw_tool_calls, latency_ms
+    return content, raw_tool_calls, latency_ms, ttft_ms
 
 
 def _replay_conversation(
@@ -317,7 +388,7 @@ def _replay_conversation(
     model: str,
     sample: dict[str, Any],
     temperature: float = 0.0,
-) -> tuple[list[dict[str, Any]], list[float]]:
+) -> tuple[list[dict[str, Any]], list[float], list[float]]:
     """Replay a conversation, substituting model completions at assistant turns.
 
     Ground-truth tool responses are kept as-is so the conversation stays on
@@ -325,11 +396,12 @@ def _replay_conversation(
     isolates state-transition and tool-call quality from cascading failures.
 
     Returns:
-        (predicted_messages, latencies_ms_per_assistant_turn)
+        (predicted_messages, latencies_ms_per_assistant_turn, ttfts_ms_per_assistant_turn)
     """
     tools = sample.get("tool_schemas") or []
     predicted: list[dict[str, Any]] = []
     latencies_ms: list[float] = []
+    ttfts_ms: list[float] = []
     context: list[dict[str, Any]] = []  # sliding context sent to the model
     pending_tool_call_ids: list[str] = []  # ids from the latest assistant tool_calls
 
@@ -346,14 +418,16 @@ def _replay_conversation(
             predicted.append(msg)
 
         elif role == "assistant":
-            content, raw_tool_calls, latency = _call_vllm(
+            content, raw_tool_calls, latency, ttft = _call_vllm(
                 endpoint, model, context, temperature, tools=tools,
             )
             latencies_ms.append(latency)
+            ttfts_ms.append(ttft)
             logger.debug(
                 "model_response",
                 turn=len(predicted),
                 latency_ms=round(latency, 1),
+                ttft_ms=round(ttft, 1),
                 content=content[:2000],  # truncate to avoid flooding logs
             )
 
@@ -391,7 +465,7 @@ def _replay_conversation(
             context.append(tool_msg)
             predicted.append(msg)
 
-    return predicted, latencies_ms
+    return predicted, latencies_ms, ttfts_ms
 
 
 if __name__ == "__main__":
@@ -495,6 +569,7 @@ if __name__ == "__main__":
     chain_predictions: list[dict[str, Any]] = []
     chain_ground_truths: list[dict[str, Any]] = []
     all_latencies_ms: list[float] = []
+    all_ttfts_ms: list[float] = []
 
     for idx, sample in enumerate(samples):
         conv_id = sample.get("conversation_id", f"sample_{idx}")
@@ -504,10 +579,11 @@ if __name__ == "__main__":
 
         logger.info("evaluating_sample", idx=idx + 1, total=len(samples), conversation_id=conv_id)
 
-        pred_messages, latencies = _replay_conversation(
+        pred_messages, latencies, ttfts = _replay_conversation(
             args.endpoint, args.model, sample, temperature=0.0
         )
         all_latencies_ms.extend(latencies)
+        all_ttfts_ms.extend(ttfts)
 
         # State machine inputs
         state_predictions.append(ConversationPrediction(
@@ -556,7 +632,7 @@ if __name__ == "__main__":
         logger.info("stochastic_trial", trial=trial_num + 1, total=args.stochastic_trials)
         for idx, sample in enumerate(samples):
             conv_id = sample.get("conversation_id", f"sample_{idx}")
-            trial_messages, _ = _replay_conversation(
+            trial_messages, _, _ = _replay_conversation(
                 args.endpoint, args.model, sample, temperature=0.7
             )
             stochastic_map[conv_id].append(trial_messages)
@@ -580,6 +656,7 @@ if __name__ == "__main__":
     )
     quality = evaluate_workflow_quality(
         state_metrics, tool_metrics_best, chain_metrics, all_latencies_ms,
+        ttfts_ms=all_ttfts_ms,
         tool_metrics_turn=tool_metrics_turn,
         tool_metrics_conversation=tool_metrics_conv,
     )
@@ -607,3 +684,5 @@ if __name__ == "__main__":
     print(f"  state_seq_acc (conv)    : {quality.state_metrics.state_sequence_accuracy:.3f}")
     print(f"  tool_call_f1 (turn)     : {quality.tool_metrics.tool_call_f1:.3f}  (target >=0.85)")
     print(f"  tool_call_f1 (conv)     : {quality.tool_metrics_conversation.tool_call_f1:.3f}")
+    print(f"  latency_per_turn_avg_ms : {quality.latency_per_turn_avg_ms:.1f}")
+    print(f"  ttft_avg_ms             : {quality.ttft_avg_ms:.1f}")
