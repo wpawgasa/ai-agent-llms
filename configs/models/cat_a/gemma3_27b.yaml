@@ -11,7 +11,7 @@ model:
 
 serving:
   engine: "vllm"
-  tool_call_parser: "gemma"
+  tool_call_parser: "pythonic"
   chat_template: "gemma"
   gpu_memory_utilization: 0.90
   max_model_len: 8192
