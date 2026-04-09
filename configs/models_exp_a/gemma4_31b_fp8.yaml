@@ -1,0 +1,27 @@
+model:
+  name: "RedHatAI/gemma-4-31B-it-FP8-block"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 31_000_000_000
+  params_active: 31_000_000_000
+  context_length: 131072
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 32
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
+
+# FP8 block-quantized: weights + activations in transformer blocks,
+# vision tower / embedding / output head remain BF16.

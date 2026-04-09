@@ -1,0 +1,28 @@
+model:
+  name: "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+  family: "gemma"
+  architecture: "moe_gqa_transformer"
+  params_total: 26_000_000_000
+  params_active: 4_000_000_000
+  context_length: 131072
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 26
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
+
+# FP8 dynamic-quantized MoE: 26B total / ~4B active parameters.
+# Requires vLLM with PR #39045 merged (2D quantized weight support for MoE experts).
+# freeze mlp.gate during LoRA.
