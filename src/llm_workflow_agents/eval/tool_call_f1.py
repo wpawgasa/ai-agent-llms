@@ -317,30 +317,23 @@ def evaluate_tool_calls(
 
 
 def evaluate_tool_calls_conversation(
-    predictions: list[TurnPrediction],
-    ground_truth: list[TurnGroundTruth],
+    conversations_pred: list[list[TurnPrediction]],
+    conversations_gt: list[list[TurnGroundTruth]],
     tool_schemas: list[dict[str, Any]] | None = None,
 ) -> ToolCallMetrics:
     """Evaluate tool-calling accuracy at the conversation level.
 
     Unlike :func:`evaluate_tool_calls` which aligns predictions to
-    ground truth per-turn, this function pools **all** tool calls from
-    every assistant turn into a single set per conversation and computes
-    F1 on the pooled sets.  A model that calls the right tool at a
-    different turn still receives credit.
+    ground truth per-turn, this function pools all tool calls within
+    each conversation and computes metrics on the pooled sets, then
+    averages across conversations.  A model that calls the right tool
+    at a different turn still receives credit.
+
+    Args:
+        conversations_pred: Per-conversation lists of turn predictions.
+        conversations_gt: Per-conversation lists of turn ground truths.
+        tool_schemas: Optional tool schemas for hallucination detection.
     """
-    all_pred_calls: list[dict[str, Any]] = []
-    all_gt_calls: list[dict[str, Any]] = []
-
-    for pred in predictions:
-        all_pred_calls.extend(pred.tool_calls or parse_tool_calls(pred.content))
-
-    for gt in ground_truth:
-        all_gt_calls.extend(gt.tool_calls)
-
-    if not all_pred_calls and not all_gt_calls:
-        return ToolCallMetrics()
-
     valid_names: list[str] = []
     if tool_schemas:
         for schema in tool_schemas:
@@ -349,24 +342,53 @@ def evaluate_tool_calls_conversation(
             if name:
                 valid_names.append(name)
 
-    name_acc = compute_name_accuracy(all_pred_calls, all_gt_calls)
-    ast_f1 = compute_ast_f1(all_pred_calls, all_gt_calls)
-
+    total_name_acc = 0.0
+    total_f1 = 0.0
     total_arg_match = 0
-    for i, gt_call in enumerate(all_gt_calls):
-        if i < len(all_pred_calls) and compute_argument_match(all_pred_calls[i], gt_call):
-            total_arg_match += 1
-    arg_exact = total_arg_match / len(all_gt_calls) if all_gt_calls else 0.0
+    total_arg_comparisons = 0
+    total_hallucinated = 0
+    total_predicted = 0
+    n_convs = 0
 
-    hallucinated = detect_hallucinated_tools(all_pred_calls, valid_names) if valid_names else []
-    hall_rate = len(hallucinated) / len(all_pred_calls) if all_pred_calls else 0.0
+    for preds, gts in zip(conversations_pred, conversations_gt):
+        conv_pred_calls: list[dict[str, Any]] = []
+        conv_gt_calls: list[dict[str, Any]] = []
+
+        for pred in preds:
+            conv_pred_calls.extend(pred.tool_calls or parse_tool_calls(pred.content))
+        for gt in gts:
+            conv_gt_calls.extend(gt.tool_calls)
+
+        if not conv_pred_calls and not conv_gt_calls:
+            continue
+
+        n_convs += 1
+        total_predicted += len(conv_pred_calls)
+
+        total_name_acc += compute_name_accuracy(conv_pred_calls, conv_gt_calls)
+        total_f1 += compute_ast_f1(conv_pred_calls, conv_gt_calls)
+
+        for i, gt_call in enumerate(conv_gt_calls):
+            total_arg_comparisons += 1
+            if i < len(conv_pred_calls) and compute_argument_match(conv_pred_calls[i], gt_call):
+                total_arg_match += 1
+
+        if valid_names:
+            total_hallucinated += len(detect_hallucinated_tools(conv_pred_calls, valid_names))
+
+    if n_convs == 0:
+        return ToolCallMetrics()
 
     metrics = ToolCallMetrics(
-        tool_name_accuracy=name_acc,
-        argument_exact_match=arg_exact,
-        tool_call_f1=ast_f1,
-        hallucinated_tool_rate=hall_rate,
+        tool_name_accuracy=total_name_acc / n_convs,
+        argument_exact_match=(
+            total_arg_match / total_arg_comparisons if total_arg_comparisons > 0 else 0.0
+        ),
+        tool_call_f1=total_f1 / n_convs,
+        hallucinated_tool_rate=(
+            total_hallucinated / total_predicted if total_predicted > 0 else 0.0
+        ),
     )
 
-    logger.info("tool_call_conv_eval_complete", **metrics.to_dict())
+    logger.info("tool_call_conv_eval_complete", conversations=n_convs, **metrics.to_dict())
     return metrics

@@ -489,6 +489,9 @@ if __name__ == "__main__":
     state_ground_truths: list[ConversationGroundTruth] = []
     tool_predictions: list[TurnPrediction] = []
     tool_ground_truths: list[TurnGroundTruth] = []
+    # Per-conversation tool call lists for conversation-level eval
+    conv_tool_preds: list[list[TurnPrediction]] = []
+    conv_tool_gts: list[list[TurnGroundTruth]] = []
     chain_predictions: list[dict[str, Any]] = []
     chain_ground_truths: list[dict[str, Any]] = []
     all_latencies_ms: list[float] = []
@@ -518,20 +521,28 @@ if __name__ == "__main__":
         ))
 
         # Tool-call inputs — one TurnPrediction/GroundTruth per assistant turn
+        this_conv_preds: list[TurnPrediction] = []
+        this_conv_gts: list[TurnGroundTruth] = []
         for turn_idx, (pred_msg, gt_msg) in enumerate(
             zip(pred_messages, sample.get("messages", []))
         ):
             if gt_msg.get("role") != "assistant":
                 continue
-            tool_predictions.append(TurnPrediction(
+            tp = TurnPrediction(
                 turn_id=turn_idx,
                 content=pred_msg.get("content", ""),
-            ))
+            )
             gt_tool_calls = (gt_msg.get("annotations") or {}).get("tool_calls") or []
-            tool_ground_truths.append(TurnGroundTruth(
+            tg = TurnGroundTruth(
                 turn_id=turn_idx,
                 tool_calls=gt_tool_calls,
-            ))
+            )
+            tool_predictions.append(tp)
+            tool_ground_truths.append(tg)
+            this_conv_preds.append(tp)
+            this_conv_gts.append(tg)
+        conv_tool_preds.append(this_conv_preds)
+        conv_tool_gts.append(this_conv_gts)
 
         # Chain propagation inputs
         chain_predictions.append({"messages": pred_messages})
@@ -556,7 +567,7 @@ if __name__ == "__main__":
     # --- Compute metrics ---
     state_metrics = evaluate_state_machine(state_predictions, state_ground_truths)
     tool_metrics_turn = evaluate_tool_calls(tool_predictions, tool_ground_truths)
-    tool_metrics_conv = evaluate_tool_calls_conversation(tool_predictions, tool_ground_truths)
+    tool_metrics_conv = evaluate_tool_calls_conversation(conv_tool_preds, conv_tool_gts)
     chain_metrics = evaluate_chain_propagation(chain_predictions, chain_ground_truths)
 
     # Use the better of per-turn and conversation-level tool metrics for the
