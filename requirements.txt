@@ -2,7 +2,7 @@
 torch>=2.4.0
 # vllm 0.19.0 caps transformers<5, so we declare >=4.56.0 here to satisfy the resolver.
 # After install, override with transformers>=5.0 from source for Gemma 4 support:
-#   uv pip install --no-deps "transformers @ git+https://github.com/huggingface/transformers.git"
+#   uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
 transformers>=4.56.0
 peft>=0.14.0
 trl>=0.15.0

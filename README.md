@@ -104,6 +104,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
+# vllm 0.19.0 caps transformers<5. Override with transformers from source
+# (includes compatible huggingface_hub) for Gemma 4 support:
+uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
+
 # If uv reports a cache permission error (e.g. on shared Shadeform / cloud nodes):
 UV_CACHE_DIR=/tmp/uv-cache uv pip install -e ".[dev]"
 ```
