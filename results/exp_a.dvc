@@ -1,0 +1,6 @@
+outs:
+- md5: 0e0fa64fca53f8f5188125cc64e2249a.dir
+  size: 250819
+  nfiles: 8
+  hash: md5
+  path: exp_a
