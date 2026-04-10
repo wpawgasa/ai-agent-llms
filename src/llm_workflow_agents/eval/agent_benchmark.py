@@ -22,7 +22,7 @@ from typing import Any
 
 import structlog
 
-from llm_workflow_agents.eval.state_accuracy import StateMachineMetrics
+from llm_workflow_agents.eval.state_accuracy import StateMachineMetrics, parse_state_transitions
 from llm_workflow_agents.eval.tool_call_f1 import ToolCallMetrics
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
 
@@ -399,6 +399,7 @@ def _replay_conversation(
         (predicted_messages, latencies_ms_per_assistant_turn, ttfts_ms_per_assistant_turn)
     """
     tools = sample.get("tool_schemas") or []
+    terminal_states = set(sample.get("workflow_graph", {}).get("terminal", []))
     predicted: list[dict[str, Any]] = []
     latencies_ms: list[float] = []
     ttfts_ms: list[float] = []
@@ -449,6 +450,17 @@ def _replay_conversation(
             # For eval, store the full content with <tool_call> tags
             pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
             predicted.append(pred_msg)
+
+            # Stop if the model reached a terminal state
+            if terminal_states:
+                transitions = parse_state_transitions([pred_msg])
+                if transitions and transitions[-1][1] in terminal_states:
+                    logger.info(
+                        "terminal_state_reached",
+                        state=transitions[-1][1],
+                        turn=len(latencies_ms),
+                    )
+                    break
 
         elif role == "tool":
             # Use ground-truth tool response to avoid cascading failures.
