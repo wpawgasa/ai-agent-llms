@@ -1,0 +1,36 @@
+{
+  "name": "ai-agent-llms",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "runArgs": [
+    "--gpus",
+    "all",
+    "--network",
+    "host",
+    "--ipc",
+    "host",
+    "--ulimit",
+    "memlock=-1:-1",
+    "--env-file",
+    ".env"
+  ],
+  "mounts": [
+    "source=/ephemeral/cache,target=/root/.cache,type=bind,consistency=cached"
+  ],
+  "containerEnv": {
+    "HF_HOME": "/root/.cache/huggingface",
+    "VLLM_CACHE_ROOT": "/root/.cache/vllm",
+    "UV_CACHE_DIR": "/root/.cache/uv",
+    "NVIDIA_VISIBLE_DEVICES": "all"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  }
+}

@@ -104,8 +104,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
-# vllm 0.19.0 caps transformers<5. Override with transformers from source
-# (includes compatible huggingface_hub) for Gemma 4 support:
+# Install vllm and transformers from source (not in pyproject.toml due to
+# version conflicts between vllm's torch pin and our torch>=2.11.0 requirement):
+uv pip install "vllm @ git+https://github.com/vllm-project/vllm.git"
 uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
 
 # If uv reports a cache permission error (e.g. on shared Shadeform / cloud nodes):
