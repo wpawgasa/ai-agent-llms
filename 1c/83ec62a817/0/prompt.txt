@@ -1,0 +1,9 @@
+how to run vllm with TurboQuant and RotorQuant?
+
+---
+
+Maybe the @.claude/rules/04-quantization.md is outdated. The quantization codes exist. Check the codebase.
+
+---
+
+yes

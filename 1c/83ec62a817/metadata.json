@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1c83ec62a817",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/llm_workflow_agents/quantization/turboquant/vllm_integration.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1c/83ec62a817/0/metadata.json",
+      "transcript": "/1c/83ec62a817/0/full.jsonl",
+      "content_hash": "/1c/83ec62a817/0/content_hash.txt",
+      "prompt": "/1c/83ec62a817/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 47886,
+    "cache_read_tokens": 745203,
+    "output_tokens": 6208,
+    "api_call_count": 19
+  }
+}

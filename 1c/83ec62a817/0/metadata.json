@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1c83ec62a817",
+  "session_id": "d1c657fb-80c8-4c5a-bcbc-2c046c8141dd",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-15T11:56:26.35216193Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/llm_workflow_agents/quantization/turboquant/vllm_integration.py"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "d86e1bfd49eb",
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 47886,
+    "cache_read_tokens": 745203,
+    "output_tokens": 6208,
+    "api_call_count": 19
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-15T11:56:26.135616253Z",
+    "agent_lines": 157,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 157,
+    "agent_percentage": 100
+  }
+}
