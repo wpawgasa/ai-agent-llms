@@ -1,0 +1,9 @@
+Based on current data and code, what do the prompt and context sent to LLM look like?
+
+---
+
+How does LLM know the entire workflow?
+
+---
+
+Why do we have 2 benchmark paths?
