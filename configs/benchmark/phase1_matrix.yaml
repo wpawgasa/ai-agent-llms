@@ -1,7 +1,7 @@
 description: "Phase 1 benchmark evaluation matrix — pre-trained model selection"
 
 # Execution matrix:
-#   Task A: 10 Cat A models × L1–L5 (200 conv/level) = 10,000 evaluations
+#   Task A: 12 Cat A models × L1–L5 (200 conv/level) = 12,000 evaluations
 #   Task B: 5 Cat B–C models × L2–L3 (400 conv)    = 2,000 evaluations
 #   Task C: 5 Cat B–C models × 500 pairs × {0-shot, 3-shot} = 5,000 evaluations
 
@@ -17,6 +17,8 @@ task_a:
     - "configs/models/cat_a/gemma4_26b_a4b_fp8.yaml"
     - "configs/models/cat_a/gemma4_31b.yaml"
     - "configs/models/cat_a/gemma4_31b_fp8.yaml"
+    - "configs/models/cat_a/qwen36_35b_a3b.yaml"
+    - "configs/models/cat_a/qwen36_35b_a3b_fp8.yaml"
   complexity_levels:
     - "L1"
     - "L2"
@@ -24,7 +26,7 @@ task_a:
     - "L4"
     - "L5"
   samples_per_level: 200
-  total_evaluations: 10000
+  total_evaluations: 12000
 
 task_b:
   models:

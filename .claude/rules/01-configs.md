@@ -7,7 +7,7 @@ All YAML configuration files live in `configs/`. Five subdirectories organize co
 ```
 configs/
   models/
-    cat_a/              # Category A model configs (6 × 15–35B)
+    cat_a/              # Category A model configs (12 × 15–35B)
     cat_bc/             # Category B–C model configs (5 × 2–5B)
   training/             # SFT + GRPO RL hyperparameter configs
   quantization/         # KV cache quantization method configs
@@ -31,6 +31,8 @@ Each model YAML has three sections:
 | mistral_small_24b.yaml | mistralai/Mistral-Small-3.1-24B | 24B | `mistral` | ~48 GB |
 | nemotron_30b.yaml | nvidia/Nemotron-3-Nano-30B | 30B (3.6B active) | `nemotron` | ~60 GB |
 | glm47_flash.yaml | zai-org/GLM-4.7-Flash | 30B (3.6B active) | `glm4` | ~60 GB |
+| qwen36_35b_a3b.yaml | Qwen/Qwen3.6-35B-A3B | 35B (3B active) | `qwen3_coder` | ~70 GB |
+| qwen36_35b_a3b_fp8.yaml | Qwen/Qwen3.6-35B-A3B-FP8 | 35B (3B active) | `qwen3_coder` | ~35 GB |
 
 ### Category B–C Models (`configs/models/cat_bc/`)
 | Config | Model | Params | VRAM |

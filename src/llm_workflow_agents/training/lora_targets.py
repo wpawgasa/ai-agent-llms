@@ -91,6 +91,18 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
         modules_to_freeze=("mlp.gate",),
         warnings=("QLoRA 4-bit required (~17.5GB). DeltaNet hybrid architecture.",),
     ),
+    "qwen36_35b_a3b": LoRATargetSpec(
+        target_modules=(
+            # Standard attention
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            # DeltaNet layers
+            "in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj",
+            # MLP
+            "gate_proj", "up_proj", "down_proj",
+        ),
+        modules_to_freeze=("mlp.gate",),
+        warnings=("QLoRA 4-bit required (~17.5GB). Same arch as Qwen3.5-35B-A3B.",),
+    ),
     "nemotron_30b": LoRATargetSpec(
         target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
@@ -153,6 +165,7 @@ _FAMILY_DEFAULTS: dict[ModelFamily, tuple[str, ...]] = {
 # Model name pattern matching (HF model ID substring -> registry key)
 _MODEL_NAME_PATTERNS: dict[str, str] = {
     # More specific patterns first (order matters for substring matching)
+    "qwen3.6-35b": "qwen36_35b_a3b",
     "qwen3.5-35b": "qwen35_35b_a3b",
     "qwen3.5-4b": "qwen35_4b",
     "qwen3-32b": "qwen3_32b",

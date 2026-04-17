@@ -57,6 +57,8 @@ The final deliverable is **three fine-tuned specialist models** — one per task
 | GLM-4.7-Flash | 30B | 3.6B | MoE + MLA | 200K | `glm4` | ~60 GB |
 | Gemma 4 26B-A4B-IT | 26B | 4B | MoE GQA | 128K | `gemma` | ~52 GB |
 | Gemma 4 31B-IT | 31B | 31B | Dense GQA | 128K | `gemma` | ~62 GB |
+| Qwen3.6-35B-A3B | 35B | 3B | DeltaNet + MoE | 262K | `qwen3_coder` | ~70 GB |
+| Qwen3.6-35B-A3B-FP8 | 35B | 3B | DeltaNet + MoE | 262K | `qwen3_coder` | ~35 GB |
 
 **Category B–C — Specialist Subagent & Graph Extraction (2–5B):**
 
@@ -79,7 +81,7 @@ llm-workflow-agents-v3/
 │
 ├── configs/                              # All YAML configuration (§3)
 │   ├── models/
-│   │   ├── cat_a/                        # 8 Category A model configs
+│   │   ├── cat_a/                        # 12 Category A model configs
 │   │   │   ├── gemma3_27b.yaml
 │   │   │   ├── qwen3_32b.yaml
 │   │   │   ├── qwen35_35b_a3b.yaml
@@ -87,7 +89,9 @@ llm-workflow-agents-v3/
 │   │   │   ├── nemotron_30b.yaml
 │   │   │   ├── glm47_flash.yaml
 │   │   │   ├── gemma4_26b_a4b.yaml
-│   │   │   └── gemma4_31b.yaml
+│   │   │   ├── gemma4_31b.yaml
+│   │   │   ├── qwen36_35b_a3b.yaml
+│   │   │   └── qwen36_35b_a3b_fp8.yaml
 │   │   └── cat_bc/                       # 7 Category B–C model configs
 │   │       ├── qwen25_3b.yaml
 │   │       ├── qwen35_4b.yaml
@@ -865,6 +869,13 @@ LORA_TARGET_MODULES = {
         "mlp":       ["gate_proj", "up_proj", "down_proj"],
         "freeze":    ["mlp.gate"],
         "notes":     "256 total experts, 8 routed + 1 shared active. QLoRA 4-bit → ~17.5GB.",
+    },
+    "qwen36_35b_a3b": {
+        "attention": ["q_proj", "k_proj", "v_proj", "o_proj"],
+        "deltanet":  ["in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj"],
+        "mlp":       ["gate_proj", "up_proj", "down_proj"],
+        "freeze":    ["mlp.gate"],
+        "notes":     "Same arch as Qwen3.5-35B-A3B. QLoRA 4-bit → ~17.5GB.",
     },
 
     # MoE + MLA — GLM-specific projections
