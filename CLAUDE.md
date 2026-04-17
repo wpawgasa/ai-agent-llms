@@ -144,6 +144,15 @@ To make the custom implementations actually compress KV cache at inference time:
 
 Decision for now (Phase 3): benchmark matrix uses upstream `turboquant_3bit_nc` (+ other upstream variants) and FP8/KIVI/KVQuant baselines. RotorQuant remains experimental and is deferred until a v1 backend port is written.
 
+### Known Model × TurboQuant Incompatibilities
+
+| Model | Reason | Workaround |
+|-------|--------|------------|
+| Gemma4 26B-A4B, Gemma4 31B | vLLM auto-forces `TRITON_ATTN` at `vllm/model_executor/models/config.py:100` when a Gemma4 model has heterogeneous head dimensions (head_dim ≠ global_head_dim, max > 256), to prevent mixed-backend numerical divergence. `TRITON_ATTN` does not support `turboquant_*`. | Use FP8/KIVI/KVQuant for Gemma4 cells in the Phase 3 matrix. |
+| Nemotron-3-Nano 30B (any Mamba + attention hybrid) | `arg_utils.py:1650` raises `NotImplementedError` — TurboQuant boundary-layer protection requires uniform attention layers. | Use FP8 / native KV path; covered by Risk R6. |
+
+Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B (+ FP8 variant), Mistral-Small-3.1-24B, Gemma-3-27B, GLM-4.7-Flash.
+
 ## Known Risks
 
 - R1: Qwen3.5-35B-A3B BF16 ~70GB → Unsloth QLoRA 4-bit (~17.5GB) + FP8 RL
@@ -153,3 +162,4 @@ Decision for now (Phase 3): benchmark matrix uses upstream `turboquant_3bit_nc` 
 - R5: GRPO reward hacking → held-out eval every 50 steps, KL monitoring, auto-stop
 - R6: Nemotron Mamba + vLLM incompatibility → HF `generate()` fallback
 - R7: GLM LoRA VRAM overflow → auto-reduce rank 64→32 or inference-only
+- R8: Gemma4 + TurboQuant incompatible → vLLM forces TRITON_ATTN for heterogeneous head dims; fall back to FP8/KIVI for Gemma4 cells
