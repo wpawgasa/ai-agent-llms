@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "796d72fe4514",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/models/cat_a/qwen35_35b_a3b.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/79/6d72fe4514/0/metadata.json",
+      "transcript": "/79/6d72fe4514/0/full.jsonl",
+      "content_hash": "/79/6d72fe4514/0/content_hash.txt",
+      "prompt": "/79/6d72fe4514/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 113,
+    "cache_creation_tokens": 137891,
+    "cache_read_tokens": 7258220,
+    "output_tokens": 41768,
+    "api_call_count": 78
+  }
+}
