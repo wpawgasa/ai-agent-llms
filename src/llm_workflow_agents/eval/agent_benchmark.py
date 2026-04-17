@@ -269,6 +269,7 @@ def _call_vllm(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     tools: list[dict[str, Any]] | None = None,
+    enable_thinking: bool = False,
 ) -> tuple[str, list[dict[str, Any]], float, float]:
     """Call the vLLM OpenAI-compatible chat completions endpoint.
 
@@ -299,6 +300,11 @@ def _call_vllm(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
+        # Qwen3-family thinking toggle. Ignored by tokenizer chat templates
+        # that don't reference enable_thinking (Gemma, Mistral, etc.), so it's
+        # safe to always send. Default False for fair latency comparison
+        # against non-thinking models in Phase 1.
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
     }
     if tools:
         request_body["tools"] = tools
@@ -388,6 +394,7 @@ def _replay_conversation(
     model: str,
     sample: dict[str, Any],
     temperature: float = 0.0,
+    enable_thinking: bool = False,
 ) -> tuple[list[dict[str, Any]], list[float], list[float]]:
     """Replay a conversation, substituting model completions at assistant turns.
 
@@ -421,6 +428,7 @@ def _replay_conversation(
         elif role == "assistant":
             content, raw_tool_calls, latency, ttft = _call_vllm(
                 endpoint, model, context, temperature, tools=tools,
+                enable_thinking=enable_thinking,
             )
             latencies_ms.append(latency)
             ttfts_ms.append(ttft)
@@ -539,6 +547,16 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level (default: INFO). Use DEBUG to see raw model responses.",
     )
+    parser.add_argument(
+        "--enable-thinking",
+        action="store_true",
+        help=(
+            "Enable Qwen3-family reasoning/thinking mode during the benchmark. "
+            "Default OFF for fair latency comparison against non-thinking models. "
+            "Sends chat_template_kwargs={enable_thinking: True} on every request; "
+            "ignored by tokenizer templates that don't reference the flag."
+        ),
+    )
     args = parser.parse_args()
 
     import logging
@@ -597,7 +615,8 @@ if __name__ == "__main__":
         logger.info("evaluating_sample", idx=idx + 1, total=len(samples), conversation_id=conv_id)
 
         pred_messages, latencies, ttfts = _replay_conversation(
-            args.endpoint, args.model, sample, temperature=0.0
+            args.endpoint, args.model, sample, temperature=0.0,
+            enable_thinking=args.enable_thinking,
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
@@ -650,7 +669,8 @@ if __name__ == "__main__":
         for idx, sample in enumerate(samples):
             conv_id = sample.get("conversation_id", f"sample_{idx}")
             trial_messages, _, _ = _replay_conversation(
-                args.endpoint, args.model, sample, temperature=0.7
+                args.endpoint, args.model, sample, temperature=0.7,
+                enable_thinking=args.enable_thinking,
             )
             stochastic_map[conv_id].append(trial_messages)
 
