@@ -112,17 +112,12 @@ if [ -n "$KV_CACHE_DTYPE" ]; then
     VLLM_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
 fi
 
-# Upstream turboquant_* variants are only supported by the TURBOQUANT
-# attention backend. vLLM's auto-selector defaults to TRITON_ATTN / FLASH_ATTN
-# for most models, which reject these dtypes with "kv_cache_dtype not supported".
-# Force the TURBOQUANT backend so the compressed cache layout is honored.
-ATTN_BACKEND=""
-case "$KV_CACHE_DTYPE" in
-    turboquant_*) ATTN_BACKEND="TURBOQUANT" ;;
-esac
-if [ -n "$ATTN_BACKEND" ]; then
-    VLLM_ARGS+=(--attention-backend "$ATTN_BACKEND")
-fi
+# NOTE: Do NOT force --attention-backend TURBOQUANT for turboquant_* dtypes.
+# vLLM's CUDA platform auto-routes per-layer (cuda.py:260): non-boundary
+# layers get TURBOQUANT, boundary-skip layers (first/last 2, auto-added by
+# TurboQuantConfig.get_boundary_skip_layers) use kv_cache_dtype=auto on
+# FlashAttention 2 for quality protection. Forcing TURBOQUANT globally
+# breaks the boundary path because TURBOQUANT rejects "auto".
 
 if [ -n "$HF_OVERRIDES" ]; then
     VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
@@ -135,7 +130,6 @@ echo "GPU Util:     $GPU_UTIL"
 echo "Max Len:      $MAX_LEN"
 echo "Port:         $PORT"
 echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
-echo "Attn Backend: ${ATTN_BACKEND:-auto}"
 echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
 echo "============================="
 
