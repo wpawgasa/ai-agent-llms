@@ -112,11 +112,12 @@ fi
 # Run evaluation
 RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}.json"
 python3 -m llm_workflow_agents.eval.agent_benchmark \
-    --model       "$MODEL_NAME" \
-    --output      "$RESULT_FILE" \
-    --data        "$DATA_DIR" \
-    --max-samples "$MAX_SAMPLES" \
-    --log-level   DEBUG \
+    --model           "$MODEL_NAME" \
+    --kv-cache-dtype  "$KV_CACHE_DTYPE" \
+    --output          "$RESULT_FILE" \
+    --data            "$DATA_DIR" \
+    --max-samples     "$MAX_SAMPLES" \
+    --log-level       DEBUG \
     2>&1 | tee "${RESULT_FILE%.json}.log" || true
 
 echo ""

@@ -529,6 +529,11 @@ if __name__ == "__main__":
         help="Number of temperature=0.7 trials for pass^k consistency (default: 5)",
     )
     parser.add_argument(
+        "--kv-cache-dtype",
+        default="auto",
+        help="KV cache quantization dtype (default: auto). Recorded in result JSON.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -679,6 +684,7 @@ if __name__ == "__main__":
 
     result = {
         "model": args.model,
+        "kv_cache_dtype": args.kv_cache_dtype,
         "data_dir": str(data_dir),
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
