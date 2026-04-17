@@ -1,0 +1,31 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9efc68685c5e",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".claude/rules/01-configs.md",
+    "CLAUDE.md",
+    "configs/benchmark/phase1_matrix.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "src/llm_workflow_agents/training/lora_targets.py",
+    "tests/unit/test_config.py",
+    "tests/unit/test_training.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9e/fc68685c5e/0/metadata.json",
+      "transcript": "/9e/fc68685c5e/0/full.jsonl",
+      "content_hash": "/9e/fc68685c5e/0/content_hash.txt",
+      "prompt": "/9e/fc68685c5e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 106,
+    "cache_creation_tokens": 136680,
+    "cache_read_tokens": 6974013,
+    "output_tokens": 41008,
+    "api_call_count": 76
+  }
+}

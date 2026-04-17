@@ -1,0 +1,40 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9efc68685c5e",
+  "session_id": "0aa7192f-3364-4a0e-a590-14d79d072299",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-17T03:34:51.099001678Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".claude/rules/01-configs.md",
+    "CLAUDE.md",
+    "configs/benchmark/phase1_matrix.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "src/llm_workflow_agents/training/lora_targets.py",
+    "tests/unit/test_config.py",
+    "tests/unit/test_training.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "356c828c7d4b",
+  "token_usage": {
+    "input_tokens": 106,
+    "cache_creation_tokens": 136680,
+    "cache_read_tokens": 6974013,
+    "output_tokens": 41008,
+    "api_call_count": 76
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-17T03:34:50.70533967Z",
+    "agent_lines": 40,
+    "human_added": 60,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 100,
+    "agent_percentage": 40
+  }
+}
