@@ -11,10 +11,14 @@ model:
 
 serving:
   engine: "vllm"
-  tool_call_parser: "hermes"
+  tool_call_parser: "qwen3_coder"
+  reasoning_parser: "qwen3"
   chat_template: "chatml"
   gpu_memory_utilization: 0.90
   max_model_len: 8192
+  extra_flags:
+    - "--enable-auto-tool-choice"
+    - "--language-model-only"
 
 category: "A"
 
