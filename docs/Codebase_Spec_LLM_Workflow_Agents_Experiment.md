@@ -38,8 +38,8 @@ The final deliverable is **three fine-tuned specialist models** — one per task
 
 | RQ | Description | Primary Code Path |
 |----|-------------|-------------------|
-| RQ1 | Best 15–35B for prompt-encoded logic; SFT+RL improvement | `benchmark/run_phase1.py` → `training/sft.py` → `training/grpo.py` → `eval/` |
-| RQ2 | Best 2–5B specialist; GRPO vs SFT-only on tool F1 | `benchmark/run_phase1.py` → `training/sft.py` → `training/grpo.py` → `eval/tool_call_f1.py` |
+| RQ1 | Best 15–35B for prompt-encoded logic; SFT+RL improvement | `eval/agent_benchmark.py` → `training/sft.py` → `training/grpo.py` → `eval/` |
+| RQ2 | Best 2–5B specialist; GRPO vs SFT-only on tool F1 | `eval/agent_benchmark.py` → `training/sft.py` → `training/grpo.py` → `eval/tool_call_f1.py` |
 | RQ3 | Graph extraction with ≥85% Node F1 / ≥75% Edge F1 | `data/generate_graph_pairs.py` → `training/sft.py` → `training/grpo.py` → `eval/graph_extraction_eval.py` |
 | RQ4 | TurboQuant/RotorQuant vs FP8/KIVI/KVQuant for multi-agent concurrency | `quantization/` → `eval/quant_benchmark.py` → `integration/pareto.py` |
 
@@ -129,13 +129,6 @@ llm-workflow-agents-v3/
 │       ├── tool_schemas_L1_to_L5.json
 │       └── graph_output_schema.json
 │
-├── benchmark/                            # Phase 1: Pre-trained benchmarking (§5)
-│   ├── run_phase1.py                     # Orchestrate all Phase 1 evaluations
-│   ├── task_runner.py                    # Run single (model, task) evaluation
-│   ├── model_selector.py                 # Compute composite scores → pick winners
-│   ├── latency_profiler.py              # TTFT, TPOT, ITL measurement
-│   └── results_aggregator.py            # Collect and format ranking tables
-│
 ├── training/                             # Phase 2: SFT + GRPO RL (§6)
 │   ├── sft.py                            # Unsloth SFT training entry point
 │   ├── grpo.py                           # Unsloth GRPO RL training entry point
@@ -188,7 +181,7 @@ llm-workflow-agents-v3/
 │   └── plot_pareto.py                    # 2D Pareto frontier projections
 │
 ├── scripts/                              # Top-level experiment runners
-│   ├── run_phase1.sh                     # Phase 1: benchmark all pre-trained
+│   ├── run_exp_a.sh                      # Phase 1: benchmark all pre-trained (Experiment A)
 │   ├── run_phase2_sft.sh                 # Phase 2a: SFT for 3 winners
 │   ├── run_phase2_grpo.sh                # Phase 2b: GRPO RL for 3 winners
 │   ├── run_phase3.sh                     # Phase 3: quantization benchmark
@@ -604,103 +597,9 @@ def convert_to_model_format(
 
 ---
 
-## 5. Phase 1: Pre-Trained Benchmarking (`benchmark/`)
+## 5. Phase 1: Pre-Trained Benchmarking
 
-### 5.1 `run_phase1.py` — Orchestrator
-
-```python
-class Phase1Orchestrator:
-    """
-    Run all pre-trained candidates on all benchmark tasks.
-
-    Execution matrix:
-      - Task A: 6 Cat A models × L1–L5 (200 conv/level) = 6,000 evaluations
-      - Task B: 5 Cat B–C models × L2–L3 (400 conv) = 2,000 evaluations
-      - Task C: 5 Cat B–C models × 500 test pairs × {0-shot, 3-shot} = 5,000 evaluations
-    """
-
-    def __init__(self, config_path: Path = Path("configs/benchmark/phase1_matrix.yaml")):
-        self.matrix = load_config(config_path)
-
-    def run_all(self) -> Phase1Results:
-        """
-        1. Launch vLLM for each model sequentially (one at a time on H100)
-        2. Run all applicable tasks via task_runner.py
-        3. Collect latency via latency_profiler.py
-        4. Aggregate into ranking tables via results_aggregator.py
-        5. Compute composite scores via model_selector.py
-        6. Return Phase1Results with winners + full ranking
-        """
-
-    def run_single(self, model_config: Path, task: str) -> TaskResult:
-        """Run a single (model, task) pair. Returns quality + performance metrics."""
-```
-
-### 5.2 `model_selector.py` — Composite Scoring & Winner Selection
-
-```python
-@dataclass
-class CompositeScore:
-    model_name: str
-    category: str
-    quality_score: float          # Normalized 0–1
-    latency_score: float          # Normalized 0–1 (lower is better)
-    throughput_score: float       # Normalized 0–1
-    memory_score: float           # Normalized 0–1 (lower VRAM is better)
-    weighted_composite: float     # Final score
-
-def compute_composite_scores(
-    task_results: list[TaskResult],
-    weights: dict,                # From selection_weights.yaml
-    category: Literal["A", "B", "C"],
-) -> list[CompositeScore]:
-    """
-    Normalize each dimension across all candidates in the category.
-    Compute weighted sum. Return sorted list (best first).
-
-    Quality metric mapping:
-      Cat A: 0.5 × state_transition_accuracy + 0.5 × tool_call_f1
-      Cat B: 0.6 × tool_call_f1 + 0.4 × slot_accuracy
-      Cat C: 0.5 × node_f1 + 0.5 × edge_f1
-    """
-
-def select_winners(
-    all_scores: dict[str, list[CompositeScore]],
-) -> dict[str, str]:
-    """
-    Returns: {"A": "Qwen3.5-35B-A3B", "B": "Qwen3.5-4B", "C": "Qwen3.5-4B"}
-
-    NOTE: If same model wins both B and C, both entries point to same model.
-    Phase 2 will fine-tune it twice with different data + reward functions.
-    The SFT base can be shared, diverging only at the GRPO RL stage (Risk R2).
-    """
-```
-
-### 5.3 `latency_profiler.py`
-
-```python
-@dataclass
-class LatencyProfile:
-    ttft_ms: PercentileStats       # Time to first token
-    tpot_ms: PercentileStats       # Time per output token
-    itl_ms: PercentileStats        # Inter-token latency
-    throughput_prefill_tok_s: float
-    throughput_decode_tok_s: float
-    peak_vram_gb: float
-
-@dataclass
-class PercentileStats:
-    p50: float
-    p95: float
-    p99: float
-
-def profile_model_latency(
-    vllm_endpoint: str,
-    prompts: list[str],
-    num_runs: int = 3,
-) -> LatencyProfile:
-    """Measure latency over multiple runs, return percentile stats."""
-```
+Phase 1 evaluation is implemented in `eval/agent_benchmark.py` and invoked by `scripts/run_exp_a*.sh`. A separate `benchmark/` package previously existed but duplicated the evaluation path with reduced prompt fidelity and has been removed.
 
 ---
 
@@ -1309,7 +1208,7 @@ def plot_pareto_projections(
                     │       └────────────┼────────────┘               │
                     │                    ▼                             │
                     │         ┌──────────────────┐                    │
-                    │         │ model_selector.py │                    │
+                    │         │ agent_benchmark  │                    │
                     │         │ composite scores  │                    │
                     │         └────────┬─────────┘                    │
                     └─────────────────┼───────────────────────────────┘
@@ -1458,7 +1357,7 @@ For each of the 3 winners, the eval layer produces:
 | R3 | Phase 1 winner doesn't respond to fine-tuning | Low | `training/pilot_check.py` | 100-step pilot SFT on top-2. Auto-fallback to #2 in `scripts/run_phase2_sft.sh`. |
 | R4 | TurboQuant PR not merged | High | `quantization/turboquant/vllm_integration.py` | `0xSero/turboquant` fork. Standalone benchmark path outside vLLM. |
 | R5 | GRPO reward hacking | Medium | `training/grpo.py`, `training/rewards/` | Multiple orthogonal reward components. Held-out eval every 50 steps. KL divergence monitoring. Auto-stop if held-out metric drops while reward increases. |
-| R6 | Nemotron Mamba + vLLM incompatibility | Medium | `benchmark/task_runner.py`, `serving/launch_vllm.sh` | HF `generate()` fallback for quality eval. Report vLLM compatibility separately. |
+| R6 | Nemotron Mamba + vLLM incompatibility | Medium | `eval/agent_benchmark.py`, `serving/launch_vllm.sh` | HF `generate()` fallback for quality eval. Report vLLM compatibility separately. |
 | R7 | GLM LoRA exceeds 80GB even with Unsloth | Medium | `training/sft.py` | Auto-reduce rank to 32. Fallback: inference-only evaluation with strong prompting. |
 
 ---
@@ -1523,7 +1422,7 @@ pyyaml>=6.0
 | GRPO smoke | 10 steps with mock reward → verify reward logging + policy update |
 | Reward hacking detector | Synthetic scenario: reward ↑ + held-out ↓ → verify alert fires |
 | Quant round-trip | BF16 → TurboQuant encode → decode → PPL delta within tolerance |
-| E2E pipeline | `run_phase1.sh` on 1 model × 1 task × 10 samples → verify full output |
+| E2E pipeline | `run_exp_a.sh` on 1 model × 1 task × 10 samples → verify full output |
 
 ### 14.3 Reproducibility
 

@@ -40,7 +40,6 @@
 ```
 configs/          - YAML configs (models/cat_a/, models/cat_bc/, training/, quantization/, benchmark/, serving/)
 data/             - Data generation and templates (output: task_a/, task_b/, task_c/)
-benchmark/        - Phase 1: pre-trained benchmarking (run_phase1.py, model_selector.py, latency_profiler.py)
 training/         - Phase 2: SFT + GRPO RL (sft.py, grpo.py, rewards/, lora_targets.py, pilot_check.py)
 quantization/     - Phase 3: KV cache quantization (turboquant/, rotorquant/, baselines/)
 eval/             - Evaluation modules (state accuracy, tool F1, graph, PPL, composite_score.py, quant_benchmark.py)
@@ -62,8 +61,9 @@ Detailed specs for each module are in `.claude/rules/`:
 - `06-serving.md` - vLLM serving utilities
 - `07-analysis.md` - Result analysis and visualization
 - `08-testing.md` - Testing strategy
-- `09-benchmark.md` - Phase 1 pre-trained benchmarking
 - `10-integration.md` - Phase 4 multi-agent integration and Pareto
+
+Phase 1 benchmarking runs through `eval/agent_benchmark.py` (invoked by `scripts/run_exp_a*.sh`). The separate `benchmark/` package was removed; see git history.
 
 ## Implementation Progress
 
@@ -117,7 +117,6 @@ Detailed specs for each module are in `.claude/rules/`:
 - [x] Pareto frontier analysis (`analysis/pareto.py` → v3: `integration/pareto.py`)
 - [x] Visualization (`analysis/plot_results.py` → v3: split into `analysis/plot_*.py`)
 - [x] Experiment runner scripts
-- [x] Phase 1 benchmark module (`benchmark/`)
 - [x] v3 integration module (`integration/`)
 - [x] v3 analysis plots (plot_phase1_rankings.py, plot_sft_vs_rl.py, plot_quant_matrix.py, plot_pareto.py)
 
