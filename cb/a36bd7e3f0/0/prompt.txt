@@ -1,0 +1,5 @@
+Let's get back to this question. "How does LLM know the entire workflow?"
+
+---
+
+We probably need to track @.claude/rules/ and @.claude/skills/ for working on another machine.

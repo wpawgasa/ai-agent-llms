@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cba36bd7e3f0",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".claude/rules/02-data-generation.md",
+    ".claude/rules/03-training.md",
+    ".claude/rules/04-quantization.md",
+    ".claude/rules/05-eval.md",
+    ".claude/rules/06-serving.md",
+    ".claude/rules/07-analysis.md",
+    ".claude/rules/08-testing.md",
+    ".claude/rules/10-integration.md",
+    ".claude/skills/code-implementation/SKILL.md",
+    ".claude/skills/code-implementation/references/documentation-templates.md",
+    ".claude/skills/code-implementation/references/testing-patterns.md",
+    ".claude/skills/git-commit/SKILL.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cb/a36bd7e3f0/0/metadata.json",
+      "transcript": "/cb/a36bd7e3f0/0/full.jsonl",
+      "content_hash": "/cb/a36bd7e3f0/0/content_hash.txt",
+      "prompt": "/cb/a36bd7e3f0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 8612,
+    "cache_read_tokens": 1469673,
+    "output_tokens": 4660,
+    "api_call_count": 10
+  }
+}
