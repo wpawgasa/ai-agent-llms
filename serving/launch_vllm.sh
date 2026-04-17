@@ -126,4 +126,17 @@ echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
 echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
 echo "============================="
 
+# Plain "turboquant"/"rotorquant" are not vLLM upstream choices — route through
+# the project's custom launchers that install the hooks + argparse patch before
+# vLLM parses argv. Upstream variants (turboquant_3bit_nc, etc.) and every
+# other dtype use the stock entrypoint.
+case "$KV_CACHE_DTYPE" in
+    turboquant)
+        exec python -m llm_workflow_agents.serving.launch_vllm_turboquant "${VLLM_ARGS[@]}"
+        ;;
+    rotorquant)
+        exec python -m llm_workflow_agents.serving.launch_vllm_rotorquant "${VLLM_ARGS[@]}"
+        ;;
+esac
+
 exec python -m vllm.entrypoints.openai.api_server "${VLLM_ARGS[@]}"

@@ -1,7 +1,7 @@
 method:
   name: "rotorquant"
   paper: "Novel — Cl(3,0) geometric algebra rotor rotation"
-  status: "experimental (no vLLM integration)"
+  status: "experimental (no upstream vLLM backend; custom v1 AttentionBackend port pending — see CLAUDE.md Pending Work)"
   kv_cache_dtype: "rotorquant"
   requires_calibration: false
 

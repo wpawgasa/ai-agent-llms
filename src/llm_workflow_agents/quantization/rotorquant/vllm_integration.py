@@ -1,16 +1,16 @@
-"""vLLM hook registration for TurboQuant KV cache quantization.
+"""vLLM hook registration for RotorQuant KV cache quantization.
 
-Registers the "turboquant" kv_cache_dtype with vLLM's configuration
+Registers the "rotorquant" kv_cache_dtype with vLLM's configuration
 system and hooks the encode/decode kernels into the cache write/read paths.
 
 Integration points:
-  1. Register kv_cache_dtype="turboquant" in vllm.config.cache
+  1. Register kv_cache_dtype="rotorquant" in vllm.config.cache
   2. Modify block size in gpu_model_runner (3-bit: 52 bytes per 128-value vector)
   3. Hook encode kernel into cache write path
   4. Hook decode kernel into cache read path
 
-Reference: Zandieh et al., ICLR 2026.
-Status: PR #38280 (community fork: 0xSero/turboquant)
+Uses Cl(3,0) rotor sandwich rotation instead of a dense orthogonal matrix
+(~10–19× fewer FMAs per rotation).
 """
 
 from __future__ import annotations
@@ -36,13 +36,12 @@ BLOCK_SIZES: dict[int, int] = {
 
 
 @dataclass
-class TurboQuantConfig:
-    """Configuration for TurboQuant vLLM integration."""
+class RotorQuantConfig:
+    """Configuration for RotorQuant vLLM integration."""
 
     bit_width: int = 3
     head_dimension: int = 128
-    codebook_path: str | None = None
-    rotation_seed: int = 42
+    rotor_seed: int = 42
 
     @property
     def block_size_bytes(self) -> int:
@@ -53,26 +52,26 @@ class TurboQuantConfig:
         return BLOCK_SIZE_FP16 / self.block_size_bytes
 
 
-def register_turboquant_backend(config: TurboQuantConfig | None = None) -> dict[str, Any]:
-    """Register TurboQuant as a vLLM KV cache dtype backend.
+def register_rotorquant_backend(config: RotorQuantConfig | None = None) -> dict[str, Any]:
+    """Register RotorQuant as a vLLM KV cache dtype backend.
 
     In production, this modifies vLLM internals:
-      1. Registers kv_cache_dtype="turboquant" in vllm.config.cache
+      1. Registers kv_cache_dtype="rotorquant" in vllm.config.cache
       2. Modifies block size in gpu_model_runner.py
       3. Hooks encode kernel into cache write path
       4. Hooks decode kernel into cache read path
 
     Args:
-        config: TurboQuant configuration. Uses defaults if None.
+        config: RotorQuant configuration. Uses defaults if None.
 
     Returns:
         Registration info dict with config details and hook status.
     """
     if config is None:
-        config = TurboQuantConfig()
+        config = RotorQuantConfig()
 
     logger.info(
-        "registering_turboquant",
+        "registering_rotorquant",
         bit_width=config.bit_width,
         head_dim=config.head_dimension,
         block_size=config.block_size_bytes,
@@ -80,20 +79,19 @@ def register_turboquant_backend(config: TurboQuantConfig | None = None) -> dict[
     )
 
     registration = {
-        "kv_cache_dtype": "turboquant",
+        "kv_cache_dtype": "rotorquant",
         "bit_width": config.bit_width,
         "block_size_bytes": config.block_size_bytes,
         "compression_ratio": config.compression_ratio,
         "config_module": "vllm.config.cache",
         "runner_module": "vllm.worker.gpu_model_runner",
         "hooks": {
-            "cache_write": "turboquant_encode_kernel",
-            "cache_read": "turboquant_decode_kernel",
+            "cache_write": "rotorquant_encode",
+            "cache_read": "rotorquant_decode",
         },
         "status": "registered",
     }
 
-    # Attempt actual vLLM registration (will fail gracefully without vLLM)
     try:
         _hook_vllm_cache(config)
         registration["status"] = "hooked"
@@ -105,8 +103,8 @@ def register_turboquant_backend(config: TurboQuantConfig | None = None) -> dict[
     return registration
 
 
-def _hook_vllm_cache(config: TurboQuantConfig) -> None:
-    """Hook TurboQuant into vLLM's cache system.
+def _hook_vllm_cache(config: RotorQuantConfig) -> None:
+    """Hook RotorQuant into vLLM's cache system.
 
     Only step 1 (Pydantic widening) is implementable against current vLLM v1.
     Steps 2 and 3 require a full ``AttentionBackend`` subclass and registration
@@ -118,7 +116,7 @@ def _hook_vllm_cache(config: TurboQuantConfig) -> None:
 
     logger.info("hooking_vllm_cache", version=getattr(vllm, "__version__", "unknown"))
 
-    # 1. Widen CacheConfig.cache_dtype so Pydantic accepts "turboquant".
+    # 1. Widen CacheConfig.cache_dtype so Pydantic accepts "rotorquant".
     _patch_cache_config(CacheConfig)
 
     # 2. Block-size override — v1 declares this per-backend; cannot patch.
@@ -129,42 +127,32 @@ def _hook_vllm_cache(config: TurboQuantConfig) -> None:
     _patch_paged_attention()
 
     logger.info(
-        "turboquant_hooks_installed",
+        "rotorquant_hooks_installed",
         bit_width=config.bit_width,
         head_dim=config.head_dimension,
         compression=f"{config.compression_ratio:.1f}x",
     )
 
 
-def _patch_cache_config(cache_config_cls: type, dtype_name: str = "turboquant") -> None:
+def _patch_cache_config(cache_config_cls: type, dtype_name: str = "rotorquant") -> None:
     """Make ``CacheConfig`` accept *dtype_name* despite the Literal constraint.
 
-    Current vLLM declares ``cache_dtype`` as a Pydantic-validated
-    ``Literal[...]`` on a ``@pydantic.dataclasses.dataclass`` class. The
-    Literal members are baked into the model's core schema at class
-    creation and cannot be extended by mutating annotations and calling
-    ``rebuild_dataclass`` — the validator keeps its original schema.
+    See ``llm_workflow_agents.quantization.turboquant.vllm_integration.
+    _patch_cache_config`` for the full explanation; this is the same
+    approach parameterised for *dtype_name*.
 
-    The reliable handle is ``CacheConfig.__pydantic_validator__``. We wrap
-    its ``validate_python`` method so that when the input's ``cache_dtype``
-    is one of our registered custom names, we temporarily substitute a
-    Literal-allowed placeholder (``"auto"``), let validation succeed, and
-    then restore the original custom string on the resulting instance. All
-    other inputs — including genuinely invalid values — flow through
-    unchanged and keep their normal rejection behaviour.
-
-    The wrapper is idempotent: a class-level ``_CUSTOM_KV_CACHE_DTYPES``
-    set accumulates registrations so calling this helper once per custom
-    dtype does not double-wrap the validator.
-
-    Falls back to legacy v0 class-level attribute mutation for older
-    vLLM builds that predate the Pydantic dataclass form.
+    Summary: vLLM defines ``cache_dtype`` as a Pydantic-validated
+    ``Literal[...]`` whose members are baked into the core schema at class
+    creation. We wrap ``__pydantic_validator__.validate_python`` to
+    substitute a Literal-allowed placeholder for our custom dtype during
+    validation and restore the original string on the resulting instance.
+    The wrapper is idempotent across multiple custom dtypes via a
+    ``_CUSTOM_KV_CACHE_DTYPES`` class-level set.
     """
     if hasattr(cache_config_cls, "__pydantic_validator__"):
         _install_validator_wrapper(cache_config_cls, dtype_name)
         return
 
-    # Legacy v0 path: mutate a class-level set/list of valid dtypes.
     for attr in ("_VALID_KV_CACHE_DTYPES", "VALID_KV_CACHE_DTYPES", "_valid_kv_cache_dtypes"):
         if hasattr(cache_config_cls, attr):
             valid = getattr(cache_config_cls, attr)
@@ -231,43 +219,40 @@ def _install_validator_wrapper(cache_config_cls: type, dtype_name: str) -> None:
     )
 
 
-def _patch_block_size(config: TurboQuantConfig) -> None:
+def _patch_block_size(config: RotorQuantConfig) -> None:
     """No-op on vLLM v1 — block size is per-backend.
 
     In v0 this patched ``vllm.worker.gpu_model_runner.get_cache_block_size``.
     In v1 there is no central function: each ``AttentionBackend`` declares its
-    own cache layout via ``get_kv_cache_shape`` (see
-    ``vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend``
-    for a reference implementation). A proper port requires implementing a
-    full ``AttentionBackend`` subclass.
+    own cache layout via ``get_kv_cache_shape``. A proper port requires
+    implementing a full ``AttentionBackend`` subclass.
     """
     try:
         import vllm.worker.gpu_model_runner as runner_mod  # noqa: F401  # v0 only
 
-        # If we ever run against a v0 build, fall through to the legacy path.
         original = getattr(runner_mod, "get_cache_block_size", None)
         if original is None:
             raise ImportError("v0 function missing; treat as v1")
 
-        _tq_bytes = config.block_size_bytes
+        _rq_bytes = config.block_size_bytes
 
         def _patched(cache_config, model_config, parallel_config):
-            if getattr(cache_config, "kv_cache_dtype", None) == "turboquant":
+            if getattr(cache_config, "kv_cache_dtype", None) == "rotorquant":
                 num_heads = getattr(model_config, "get_num_kv_heads", lambda x: 1)(parallel_config)
                 num_layers = getattr(model_config, "get_num_layers", lambda x: 1)(parallel_config)
-                return _tq_bytes * num_heads * num_layers * 2
+                return _rq_bytes * num_heads * num_layers * 2
             return original(cache_config, model_config, parallel_config)
 
         runner_mod.get_cache_block_size = _patched
-        logger.info("patched_block_size_v0", bytes_per_vector=_tq_bytes)
+        logger.info("patched_block_size_v0", bytes_per_vector=_rq_bytes)
     except ImportError:
         logger.warning(
             "block_size_patch_skipped_v1",
             reason=(
                 "vLLM v1 declares block size per-backend via "
                 "AttentionBackend.get_kv_cache_shape; implement a full "
-                "AttentionBackend subclass (see vllm.v1.attention.backends."
-                "turboquant_attn) and register via register_backend(CUSTOM, ...)"
+                "AttentionBackend subclass and register via "
+                "register_backend(CUSTOM, ...)"
             ),
         )
 
@@ -278,7 +263,7 @@ def _patch_paged_attention() -> None:
     In v0 this spliced ``write_to_paged_cache`` and ``copy_blocks`` module
     functions in ``vllm.attention.backends.flash_attn``. In v1 those
     functions do not exist: each backend's ``forward()`` reads and writes
-    its own paged cache. To add TurboQuant support, implement an
+    its own paged cache. To add RotorQuant support, implement an
     ``AttentionBackend`` subclass and register it.
     """
     try:
@@ -288,9 +273,9 @@ def _patch_paged_attention() -> None:
             "paged_attention_patch_skipped_v1",
             reason=(
                 "vLLM v1 has no module-level write_to_paged_cache/copy_blocks; "
-                "KV I/O is owned by AttentionBackend.forward. See "
-                "vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend "
-                "for the migration target."
+                "KV I/O is owned by AttentionBackend.forward. Implement a "
+                "custom AttentionBackend subclass to wire in the RotorQuant "
+                "encode/decode kernels."
             ),
         )
         return

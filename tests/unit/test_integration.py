@@ -196,7 +196,7 @@ class TestOrchestratorInit:
 
     def test_default_kv_cache_dtype(self) -> None:
         orch = MultiAgentOrchestrator({"model_name": "m"}, [])
-        assert orch.kv_cache_dtype == "turboquant"
+        assert orch.kv_cache_dtype == "turboquant_3bit_nc"
 
     def test_base_url_from_config(self) -> None:
         orch = MultiAgentOrchestrator(

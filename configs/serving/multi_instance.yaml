@@ -1,6 +1,6 @@
 mode: "multi_instance"
 description: "Multi-model deployment for E2E integration"
-kv_cache_dtype: "turboquant"
+kv_cache_dtype: "turboquant_3bit_nc"
 port: 8000
 
 orchestrator:

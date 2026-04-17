@@ -1,8 +1,8 @@
 method:
   name: "turboquant"
   paper: "Zandieh et al., ICLR 2026"
-  status: "PR #38280 (community fork: 0xSero/turboquant)"
-  kv_cache_dtype: "turboquant"
+  status: "upstream vLLM (vllm.v1.attention.backends.turboquant_attn)"
+  kv_cache_dtype: "turboquant_3bit_nc"
   requires_calibration: false
 
 codebook:
@@ -26,10 +26,10 @@ triton_kernels:
     hook_point: "vllm_cache_read"
 
 vllm_integration:
-  kv_cache_dtype: "turboquant"
-  config_module: "vllm.config.cache"
-  runner_module: "vllm.worker.gpu_model_runner"
+  kv_cache_dtype: "turboquant_3bit_nc"
+  backend_class: "vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend"
   block_size_bytes_3bit: 52
+  alternative_variants: ["turboquant_4bit_nc", "turboquant_k3v4_nc", "turboquant_k8v4"]
 
 benchmark:
   quality_tasks:

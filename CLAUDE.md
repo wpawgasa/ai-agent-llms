@@ -129,6 +129,20 @@ Phase 1 benchmarking runs through `eval/agent_benchmark.py` (invoked by `scripts
 - **ADR-003**: SFT then GRPO two-stage training (SFT for format/domain, GRPO for task metric optimization)
 - **ADR-004**: Shared SFT base for dual-category winners (diverge at GRPO stage)
 - **ADR-005**: Triton for custom quantization kernels (TurboQuant, RotorQuant)
+- **ADR-006**: Use upstream vLLM TurboQuant variants (`turboquant_3bit_nc`, `turboquant_4bit_nc`, `turboquant_k3v4_nc`, `turboquant_k8v4`) for Phase 3 benchmarks instead of the project's custom `"turboquant"` string. vLLM v1's plugin architecture requires a full `AttentionBackend` subclass for any new KV compression scheme; monkey-patching module-level cache I/O (the v0 approach) no longer works. Upstream ships `vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend`, so we adopt it directly.
+
+## Pending Work: Custom KV Cache Backends
+
+The project's custom TurboQuant/RotorQuant code (`src/llm_workflow_agents/quantization/{turboquant,rotorquant}/`) is **scaffolding-only** against current vLLM. Launchers (`src/llm_workflow_agents/serving/launch_vllm_{turboquant,rotorquant}.py`) wire plain `"turboquant"` / `"rotorquant"` through argparse and a Pydantic validator wrapper, so `CacheConfig` accepts them and the server starts — but no compression happens because stock attention backends ignore the dtype string.
+
+To make the custom implementations actually compress KV cache at inference time:
+
+- [ ] **Port TurboQuant to a v1 AttentionBackend subclass** — only needed if we want a variant not covered upstream (e.g. 2-bit, or the custom codebook+QJL residual path). Reference: `vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend` (~800 LOC). Must implement `get_kv_cache_shape`, `supports_kv_cache_dtype`, `AttentionImpl.forward` (prefill + decode), and `AttentionMetadataBuilder`. Register via `register_backend(AttentionBackendEnum.CUSTOM, "llm_workflow_agents.quantization.turboquant.attn_backend.TurboQuantAttentionBackend")` inside `launch_vllm_turboquant.py` before `run_server()`.
+- [ ] **Port RotorQuant to a v1 AttentionBackend subclass** — required for any real use of `"rotorquant"`; no upstream variant exists. Same shape as the TurboQuant port but calling the project's Cl(3,0) rotor kernels in `quantization/rotorquant/rotor_kernels.py`. Grade-aware codebooks may need precomputation (no standalone module exists yet).
+- [ ] **Update `configs/quantization/rotorquant.yaml`** to reference the new backend class once the port lands.
+- [ ] **Re-enable `_patch_block_size` / `_patch_paged_attention`** as no-ops in `vllm_integration.py` — currently they log a migration warning. Safe to delete those functions entirely once the AttentionBackend subclasses own cache layout + I/O.
+
+Decision for now (Phase 3): benchmark matrix uses upstream `turboquant_3bit_nc` (+ other upstream variants) and FP8/KIVI/KVQuant baselines. RotorQuant remains experimental and is deferred until a v1 backend port is written.
 
 ## Known Risks
 

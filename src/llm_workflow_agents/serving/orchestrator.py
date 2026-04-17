@@ -54,7 +54,7 @@ class MultiAgentOrchestrator:
         self,
         orchestrator_config: dict[str, Any],
         specialist_configs: list[dict[str, Any]],
-        kv_cache_dtype: str = "turboquant",
+        kv_cache_dtype: str = "turboquant_3bit_nc",
     ) -> None:
         self.orchestrator_config = orchestrator_config
         self.specialist_configs = specialist_configs

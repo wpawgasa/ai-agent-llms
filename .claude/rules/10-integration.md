@@ -27,7 +27,7 @@ class MultiAgentOrchestrator:
         orchestrator_config: Path,
         specialist_config: Path,
         visualizer_config: Path,
-        kv_cache_dtype: str = "turboquant",
+        kv_cache_dtype: str = "turboquant_3bit_nc",
     )
 
     async def run_workflow(self, user_input: str, workflow_graph: dict) -> WorkflowResult

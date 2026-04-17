@@ -1,7 +1,7 @@
 mode: "multi_agent"
 description: "Multi-model deployment: orchestrator (Cat A) + specialist (Cat B) + visualizer (Cat C)"
 
-kv_cache_dtype: "turboquant"
+kv_cache_dtype: "turboquant_3bit_nc"
 port: 8000
 
 # Roles are populated at runtime with Phase 1 winners + best quantization from Phase 3
