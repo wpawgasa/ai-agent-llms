@@ -16,13 +16,23 @@ from llm_workflow_agents.analysis.pareto import (
     ParetoPoint,
     find_pareto_frontier,
 )
+from llm_workflow_agents.eval.concurrency_benchmark import (
+    ConcurrencySweepResult,
+    ContextSweepResult,
+    LevelResult,
+    run_concurrency_sweep,
+)
 
 __all__ = [
     "BenchmarkResult",
+    "ConcurrencySweepResult",
+    "ContextSweepResult",
+    "LevelResult",
     "MultiAgentOrchestrator",
     "ParetoPoint",
     "WorkflowResult",
     "benchmark_concurrency",
     "compute_pareto_frontier",
     "find_pareto_frontier",
+    "run_concurrency_sweep",
 ]

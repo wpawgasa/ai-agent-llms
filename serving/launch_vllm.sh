@@ -81,18 +81,25 @@ fi
 
 # Build vLLM argument array (array avoids word-splitting on values with spaces)
 KV_CACHE_DTYPE=""
+MAX_MODEL_LEN_OVERRIDE=""
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype) KV_CACHE_DTYPE="$2";  shift 2 ;;
-        --port)           PORT="$2";             shift 2 ;;
+        --kv-cache-dtype)  KV_CACHE_DTYPE="$2";          shift 2 ;;
+        --port)            PORT="$2";                     shift 2 ;;
+        --max-model-len)   MAX_MODEL_LEN_OVERRIDE="$2";  shift 2 ;;
         *)
             echo "Unknown argument: $1"
             exit 1
             ;;
     esac
 done
+
+# CLI --max-model-len takes precedence over YAML serving.max_model_len
+if [ -n "$MAX_MODEL_LEN_OVERRIDE" ]; then
+    MAX_LEN="$MAX_MODEL_LEN_OVERRIDE"
+fi
 
 VLLM_ARGS=(
     --model                  "$MODEL_NAME"
