@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5bf0295a949f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/concurrency_latency_analysis.docx",
+    "pyproject.toml",
+    "scripts/build_concurrency_report.py",
+    "scripts/run_concurrency_benchmark.sh",
+    "serving/launch_vllm.sh",
+    "src/llm_workflow_agents/eval/concurrency_benchmark.py",
+    "src/llm_workflow_agents/integration/__init__.py",
+    "tests/unit/test_concurrency_benchmark.py",
+    "uv.lock"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5b/f0295a949f/0/metadata.json",
+      "transcript": "/5b/f0295a949f/0/full.jsonl",
+      "content_hash": "/5b/f0295a949f/0/content_hash.txt",
+      "prompt": "/5b/f0295a949f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 67,
+    "cache_creation_tokens": 230265,
+    "cache_read_tokens": 4921054,
+    "output_tokens": 55860,
+    "api_call_count": 55
+  }
+}
