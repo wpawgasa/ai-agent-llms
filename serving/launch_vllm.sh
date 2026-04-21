@@ -82,6 +82,7 @@ fi
 # Build vLLM argument array (array avoids word-splitting on values with spaces)
 KV_CACHE_DTYPE=""
 MAX_MODEL_LEN_OVERRIDE=""
+MAX_NUM_SEQS_OVERRIDE=""
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
@@ -89,6 +90,7 @@ while [ $# -gt 0 ]; do
         --kv-cache-dtype)  KV_CACHE_DTYPE="$2";          shift 2 ;;
         --port)            PORT="$2";                     shift 2 ;;
         --max-model-len)   MAX_MODEL_LEN_OVERRIDE="$2";  shift 2 ;;
+        --max-num-seqs)    MAX_NUM_SEQS_OVERRIDE="$2";   shift 2 ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -119,6 +121,10 @@ if [ -n "$KV_CACHE_DTYPE" ]; then
     VLLM_ARGS+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
 fi
 
+if [ -n "$MAX_NUM_SEQS_OVERRIDE" ]; then
+    VLLM_ARGS+=(--max-num-seqs "$MAX_NUM_SEQS_OVERRIDE")
+fi
+
 # NOTE: Do NOT force --attention-backend TURBOQUANT for turboquant_* dtypes.
 # vLLM's CUDA platform auto-routes per-layer (cuda.py:260): non-boundary
 # layers get TURBOQUANT, boundary-skip layers (first/last 2, auto-added by
@@ -140,15 +146,18 @@ echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
 echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
 echo "============================="
 
-# Plain "turboquant"/"rotorquant" are not vLLM upstream choices — route through
-# the project's custom launchers that install the hooks + argparse patch before
-# vLLM parses argv. Upstream variants (turboquant_3bit_nc, etc.) and every
-# other dtype use the stock entrypoint.
+# Route any turboquant*/rotorquant* dtype through the project's custom launcher.
+# Bare "turboquant"/"rotorquant" need the argparse + Pydantic patches to be
+# accepted at all. Upstream variants (turboquant_3bit_nc, turboquant_k8v4,
+# etc.) are first-class vLLM dtypes but still need the launcher because our
+# engine-config hook (_install_turboquant_engine_config_hook) patches the
+# hybrid-model guard and auto-injects --enforce-eager on Gemma-4. The custom
+# scaffolding Pydantic patch is gated internally to bare "turboquant" only.
 case "$KV_CACHE_DTYPE" in
-    turboquant)
+    turboquant|turboquant_*)
         exec python -m llm_workflow_agents.serving.launch_vllm_turboquant "${VLLM_ARGS[@]}"
         ;;
-    rotorquant)
+    rotorquant|rotorquant_*)
         exec python -m llm_workflow_agents.serving.launch_vllm_rotorquant "${VLLM_ARGS[@]}"
         ;;
 esac

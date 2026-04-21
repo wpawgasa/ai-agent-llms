@@ -135,23 +135,25 @@ Phase 1 benchmarking runs through `eval/agent_benchmark.py` (invoked by `scripts
 
 The project's custom TurboQuant/RotorQuant code (`src/llm_workflow_agents/quantization/{turboquant,rotorquant}/`) is **scaffolding-only** against current vLLM. Launchers (`src/llm_workflow_agents/serving/launch_vllm_{turboquant,rotorquant}.py`) wire plain `"turboquant"` / `"rotorquant"` through argparse and a Pydantic validator wrapper, so `CacheConfig` accepts them and the server starts — but no compression happens because stock attention backends ignore the dtype string.
 
-To make the custom implementations actually compress KV cache at inference time:
+To make the custom implementations actually compress KV cache at inference time, both would need a full v1 `AttentionBackend` subclass (reference: `vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend`, ~800 LOC). Each port must implement `get_kv_cache_shape`, `supported_kv_cache_dtypes`, `AttentionImpl.forward` (prefill + decode), and `AttentionMetadataBuilder`; register via `register_backend(AttentionBackendEnum.CUSTOM, "...")` and monkey-patch `STR_DTYPE_TO_TORCH_DTYPE` in the launcher for the new dtype string.
 
-- [ ] **Port TurboQuant to a v1 AttentionBackend subclass** — only needed if we want a variant not covered upstream (e.g. 2-bit, or the custom codebook+QJL residual path). Reference: `vllm.v1.attention.backends.turboquant_attn.TurboQuantAttentionBackend` (~800 LOC). Must implement `get_kv_cache_shape`, `supports_kv_cache_dtype`, `AttentionImpl.forward` (prefill + decode), and `AttentionMetadataBuilder`. Register via `register_backend(AttentionBackendEnum.CUSTOM, "llm_workflow_agents.quantization.turboquant.attn_backend.TurboQuantAttentionBackend")` inside `launch_vllm_turboquant.py` before `run_server()`.
-- [ ] **Port RotorQuant to a v1 AttentionBackend subclass** — required for any real use of `"rotorquant"`; no upstream variant exists. Same shape as the TurboQuant port but calling the project's Cl(3,0) rotor kernels in `quantization/rotorquant/rotor_kernels.py`. Grade-aware codebooks may need precomputation (no standalone module exists yet).
-- [ ] **Update `configs/quantization/rotorquant.yaml`** to reference the new backend class once the port lands.
-- [ ] **Re-enable `_patch_block_size` / `_patch_paged_attention`** as no-ops in `vllm_integration.py` — currently they log a migration warning. Safe to delete those functions entirely once the AttentionBackend subclasses own cache layout + I/O.
+**Decision (2026-04-21): neither port will be written for Phase 3.**
 
-Decision for now (Phase 3): benchmark matrix uses upstream `turboquant_3bit_nc` (+ other upstream variants) and FP8/KIVI/KVQuant baselines. RotorQuant remains experimental and is deferred until a v1 backend port is written.
+- **TurboQuant (project variant):** not porting. The only thing the project's version has that upstream's four variants don't is the QJL residual path — a ~1-2 PPL optimization at best. Cost (2-3 days port + 2-3 days validation) is not justified when upstream's `turboquant_3bit_nc` / `_4bit_nc` / `_k3v4_nc` / `_k8v4` already cover the compression/quality curve. Use upstream.
+- **RotorQuant:** porting gated on a standalone microbenchmark. Before investing 1-2 weeks on a v1 backend, validate the Cl(3,0)-rotor-vs-Hadamard quality claim with a PyTorch-eager microbenchmark on Qwen2.5-3B held-out KV tensors. Compare reconstruction error + downstream PPL against Hadamard rotation at matched bit budget. If RotorQuant wins materially, port. If not, drop it from Phase 3 and the research track.
+- **Scaffolding (`launch_vllm_turboquant.py` project-custom path, `launch_vllm_rotorquant.py`, `register_turboquant_backend` Pydantic patch):** keep in-tree but route only exact `"turboquant"` / `"rotorquant"` strings through the custom launchers (`serving/launch_vllm.sh:148-154`). Upstream `turboquant_*` variants bypass the project path entirely and go straight to stock vLLM.
+- **`_patch_block_size` / `_patch_paged_attention` in `vllm_integration.py`:** leave as no-op with migration warnings until a port actually lands (or until RotorQuant is dropped, whichever comes first).
+
+Phase 3 benchmark matrix: upstream `turboquant_*` variants + FP8 + KIVI + KVQuant + AWQ-INT4+FP8 KV. RotorQuant column is **provisionally deferred** pending the microbenchmark result.
 
 ### Known Model × TurboQuant Incompatibilities
 
 | Model | Reason | Workaround |
 |-------|--------|------------|
-| Gemma4 26B-A4B, Gemma4 31B | vLLM auto-forces `TRITON_ATTN` at `vllm/model_executor/models/config.py:100` when a Gemma4 model has heterogeneous head dimensions (head_dim ≠ global_head_dim, max > 256), to prevent mixed-backend numerical divergence. `TRITON_ATTN` does not support `turboquant_*`. | Use FP8/KIVI/KVQuant for Gemma4 cells in the Phase 3 matrix. |
-| Nemotron-3-Nano 30B (any Mamba + attention hybrid) | `arg_utils.py:1650` raises `NotImplementedError` — TurboQuant boundary-layer protection requires uniform attention layers. | Use FP8 / native KV path; covered by Risk R6. |
+| Gemma4 26B-A4B, Gemma4 31B | vLLM v1's KV cache profiler (`gpu_model_runner.py:6598`) fails to `.view()` padded raw tensors across mixed KV cache groups when the sliding:full layer ratio requires padding. | Auto-resolved. `_install_turboquant_engine_config_hook` in `launch_vllm_turboquant.py` detects Gemma-4 via `AutoConfig.architectures` and auto-injects `enforce_eager=True`, which gates out `profile_cudagraph_memory` (`gpu_worker.py:380-385`). Decode throughput drops ~15-25% (no CUDA graphs); numerical correctness unaffected. Restore graph-mode once upstream lands a per-layer-aware profiler. |
+| Nemotron-3-Nano 30B (Mamba hybrid) | `arg_utils.py:1649` raises `NotImplementedError` on any hybrid + `turboquant_*`. Also blocked by separate Mamba+vLLM compat issues (Risk R6). | Use HF `generate()` fallback path; TurboQuant not viable here. |
 
-Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B (+ FP8 variant), Mistral-Small-3.1-24B, Gemma-3-27B, GLM-4.7-Flash.
+Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B (+ FP8), Mistral-Small-3.1-24B, Gemma-3-27B, GLM-4.7-Flash, Gemma4-26B-A4B, Gemma4-31B. Qwen3.5/3.6 unblocked via `_install_turboquant_engine_config_hook` which masks `ModelConfig.is_hybrid` to False during `create_engine_config` — DeltaNet/Mamba layer indices in the boundary-skip list are harmless no-ops since those layers don't construct `Attention()` modules. Gemma-4 unblocked as described in the table.
 
 ## Known Risks
 
@@ -160,6 +162,6 @@ Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6
 - R3: Phase 1 winner doesn't respond to fine-tuning → 100-step pilot SFT on top-2 (`training/pilot_check.py`)
 - R4: TurboQuant PR not merged → use `0xSero/turboquant` fork
 - R5: GRPO reward hacking → held-out eval every 50 steps, KL monitoring, auto-stop
-- R6: Nemotron Mamba + vLLM incompatibility → HF `generate()` fallback
+- R6: Nemotron Mamba + vLLM incompatibility → HF `generate()` fallback. Qwen3.5/3.6 hybrid (DeltaNet) unblocked for `turboquant_*` via `_install_turboquant_engine_config_hook` in `launch_vllm_turboquant.py`; Nemotron-3-Nano remains out of scope (Mamba layers + vLLM compat issues beyond the hybrid guard).
 - R7: GLM LoRA VRAM overflow → auto-reduce rank 64→32 or inference-only
-- R8: Gemma4 + TurboQuant incompatible → vLLM forces TRITON_ATTN for heterogeneous head dims; fall back to FP8/KIVI for Gemma4 cells
+- R8: Gemma4 + TurboQuant → **works with perf caveat**. Two hooks in `launch_vllm_turboquant.py`: (1) `_install_gemma4_mixed_backend_hook` bypasses the TRITON_ATTN global force at `vllm/model_executor/models/config.py:100`; (2) `_install_turboquant_engine_config_hook` auto-injects `enforce_eager=True` for Gemma-4 + `turboquant_*`, skipping vLLM v1's broken mixed-KV profiler (`gpu_model_runner.py:6598`). CUDA graphs off → expect ~15-25% decode throughput penalty vs graph-mode. Numerical correctness unaffected. Restore graph-mode once upstream lands a per-layer-aware profiler.

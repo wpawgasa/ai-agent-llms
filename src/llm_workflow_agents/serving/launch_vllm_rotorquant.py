@@ -48,7 +48,10 @@ def main() -> None:
     register_rotorquant_backend(RotorQuantConfig(bit_width=bit_width))
 
     import vllm.entrypoints.openai.api_server as api_server
-    from vllm.utils import FlexibleArgumentParser
+    try:
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
+    except ImportError:
+        from vllm.utils import FlexibleArgumentParser
 
     parser = FlexibleArgumentParser(description="vLLM + project RotorQuant KV cache")
     parser = api_server.make_arg_parser(parser)

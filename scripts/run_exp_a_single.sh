@@ -12,6 +12,8 @@
 #   --kv-cache-dtype  KV cache quantization dtype (default: auto)
 #   --data <path>     Benchmark data directory (default: data/output/benchmark/task_a)
 #   --max-samples <n> Limit to first N samples per level, 0=all (default: 0)
+#   --max-model-len <n> Override serving.max_model_len from the YAML
+#   --max-num-seqs <n>  Cap max concurrent requests (lowers TurboQuant per-layer buffers)
 #   --dry-run         Print commands without executing
 
 set -euo pipefail
@@ -33,6 +35,8 @@ shift
 KV_CACHE_DTYPE="auto"
 DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
 MAX_SAMPLES=0
+MAX_MODEL_LEN=""
+MAX_NUM_SEQS=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +44,8 @@ while [[ $# -gt 0 ]]; do
         --kv-cache-dtype) KV_CACHE_DTYPE="$2"; shift 2 ;;
         --data)           DATA_DIR="$2";        shift 2 ;;
         --max-samples)    MAX_SAMPLES="$2";     shift 2 ;;
+        --max-model-len)  MAX_MODEL_LEN="$2";   shift 2 ;;
+        --max-num-seqs)   MAX_NUM_SEQS="$2";    shift 2 ;;
         --dry-run)        DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1"
@@ -76,16 +82,26 @@ echo "KV cache dtype: $KV_CACHE_DTYPE"
 echo "Data dir:       $DATA_DIR"
 echo "Results dir:    $RESULTS_DIR"
 echo "Max samples:    ${MAX_SAMPLES} (0=all)"
+echo "Max model len:  ${MAX_MODEL_LEN:-(from YAML)}"
+echo "Max num seqs:   ${MAX_NUM_SEQS:-(vLLM default 128)}"
 echo "=================================================================="
 
+LAUNCH_ARGS=(--kv-cache-dtype "$KV_CACHE_DTYPE")
+if [ -n "$MAX_MODEL_LEN" ]; then
+    LAUNCH_ARGS+=(--max-model-len "$MAX_MODEL_LEN")
+fi
+if [ -n "$MAX_NUM_SEQS" ]; then
+    LAUNCH_ARGS+=(--max-num-seqs "$MAX_NUM_SEQS")
+fi
+
 if [ "$DRY_RUN" = true ]; then
-    echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE"
+    echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG ${LAUNCH_ARGS[*]}"
     echo "[DRY RUN] Would run eval for $MODEL_NAME"
     exit 0
 fi
 
 # Launch vLLM server in background
-bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" --kv-cache-dtype "$KV_CACHE_DTYPE" &
+bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" "${LAUNCH_ARGS[@]}" &
 VLLM_PID=$!
 
 cleanup() {
@@ -96,16 +112,17 @@ cleanup() {
 trap cleanup EXIT
 
 # Wait for server to be ready (poll health endpoint)
+# 900s covers hybrid MoE cold start: weight load + torch.compile + optional JIT.
 echo "Waiting for vLLM server (PID $VLLM_PID)..."
-for i in $(seq 1 60); do
+for i in $(seq 1 180); do
     if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-        echo "Server ready after ${i}s"
+        echo "Server ready after $((i * 5))s"
         break
     fi
     sleep 5
 done
 if ! curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-    echo "ERROR: vLLM server failed to start within 300s for $MODEL_NAME" >&2
+    echo "ERROR: vLLM server failed to start within 900s for $MODEL_NAME" >&2
     exit 1
 fi
 

@@ -52,6 +52,12 @@ dev = [
     "dvc[gs]>=3.0",
 ]
 
+# vLLM plugin entry point. Auto-loaded by vllm.plugins.load_general_plugins()
+# in every vLLM process (APIServer, engine-core, worker). Installs runtime
+# patches for TurboQuant + hybrid-model KV-cache compatibility.
+[project.entry-points."vllm.general_plugins"]
+llm_workflow_agents_turboquant = "llm_workflow_agents.vllm_plugin:register"
+
 [tool.uv]
 index-strategy = "unsafe-best-match"
 

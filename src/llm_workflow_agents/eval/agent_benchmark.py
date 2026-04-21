@@ -325,7 +325,14 @@ def _call_vllm(
     # Track tool call deltas keyed by index
     tool_call_accum: dict[int, dict[str, Any]] = {}
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    # Generous default because hybrid MoE models on enforce_eager (Qwen3.6
+    # with TurboQuant, Gemma-4) may JIT kernels during early inference,
+    # stretching any single socket read past 120 s. Override via env var if
+    # needed for even slower cold starts.
+    import os
+
+    read_timeout_s = float(os.environ.get("VLLM_HTTP_READ_TIMEOUT_S", "600"))
+    with urllib.request.urlopen(req, timeout=read_timeout_s) as resp:
         for raw_line in resp:
             line = raw_line.decode("utf-8", errors="replace").strip()
             if not line or not line.startswith("data:"):
