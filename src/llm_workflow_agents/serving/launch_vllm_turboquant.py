@@ -173,20 +173,22 @@ def _install_turboquant_engine_config_hook() -> None:
             hf_cfg
         )
 
-        # Gemma-4 has heterogeneous head_dims → mixed KV cache groups.
-        # GDN models have Mamba state + attention cache → mixed KV cache groups.
-        # Both trigger vLLM v1's profiler bug: `profile_cudagraph_memory` crashes
-        # when unifying page sizes across heterogeneous specs
-        # (`kv_cache_utils.py:958` TypeError or `gpu_model_runner.py:6598` shape
-        # mismatch). `enforce_eager=True` skips the profiler path entirely
-        # (gated at `gpu_worker.py:380-385` on cudagraph_mode != NONE).
-        if has_mixed_kv_groups and not self.enforce_eager:
+        # GDN hybrid models (Qwen3.5/3.6): Mamba state + attention cache →
+        # mixed KV cache groups. `_dummy_run` and kernel warm-up for Mamba
+        # paths have issues beyond the page-size unification fix, so keep
+        # enforce_eager=True. Gemma-4 no longer needs this: dev vLLM already
+        # iterates per-group in _reshape_kv_cache_tensors, and our LCM unify
+        # patch (_patch_unify_kv_cache_spec_page_size in vllm_plugin.py)
+        # resolves the page-size divisibility issue. CUDA graphs are allowed
+        # for Gemma-4; validate with a live run before claiming gate 2 passed.
+        is_gemma4 = _model_is_gemma4(hf_cfg)
+        has_gdn = _model_has_gdn_layers(hf_cfg)
+        if has_gdn and not self.enforce_eager:
             logger.warning(
                 "mixed_kv_forcing_enforce_eager",
-                reason="v1 mixed-KV profiler bug; skip cudagraph memory profile",
+                reason="GDN hybrid: Mamba warm-up issues beyond page-size fix",
                 model=self.model,
-                is_gemma4=_model_is_gemma4(hf_cfg),
-                has_gdn=_model_has_gdn_layers(hf_cfg),
+                has_gdn=has_gdn,
             )
             self.enforce_eager = True
 
@@ -195,8 +197,7 @@ def _install_turboquant_engine_config_hook() -> None:
         # asserts every group's block_size divides hash_block_size —
         # which doesn't hold after aggressive block-size scaling. Routing
         # to KVCacheCoordinatorNoPrefixCache (enable_caching=False) skips
-        # that assertion. Prefix caching is low value on enforce_eager
-        # anyway; matches the perf-degraded tradeoff we've already taken.
+        # that assertion. Applies to both Gemma-4 and GDN hybrids.
         # Unconditional write: EngineArgs.enable_prefix_caching defaults to
         # None and is auto-resolved to True later; we must pin it to False.
         if has_mixed_kv_groups and self.enable_prefix_caching is not False:

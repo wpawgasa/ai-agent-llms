@@ -375,7 +375,12 @@ def test_hybrid_bypass_suppresses_notimplemented(monkeypatch):
     assert args.enforce_eager is False
 
 
-def test_gemma4_profiler_autoenables_enforce_eager(monkeypatch):
+def test_gemma4_no_longer_forces_enforce_eager(monkeypatch):
+    """Gemma-4 + TurboQuant no longer auto-sets enforce_eager.
+    Dev vLLM already iterates _reshape_kv_cache_tensors per-group, and
+    _patch_unify_kv_cache_spec_page_size resolves the page-size divisibility
+    issue. CUDA graphs are now allowed for Gemma-4.
+    """
     EngineArgsStub, ModelConfigStub, call_log = _install_stub_engine_config(
         monkeypatch
     )
@@ -398,9 +403,9 @@ def test_gemma4_profiler_autoenables_enforce_eager(monkeypatch):
     )
     EngineArgsStub.create_engine_config(args)
 
-    # Hook must have flipped enforce_eager to True before calling orig.
-    assert args.enforce_eager is True
-    assert call_log[0]["enforce_eager"] is True
+    # Hook must NOT flip enforce_eager for Gemma-4 — CUDA graphs are allowed.
+    assert args.enforce_eager is False
+    assert call_log[0]["enforce_eager"] is False
 
 
 def test_non_turboquant_dtype_passes_through(monkeypatch):
@@ -579,7 +584,10 @@ def test_hybrid_dispatcher_not_called_on_non_hybrid(monkeypatch):
 def test_mixed_kv_disables_prefix_caching(monkeypatch):
     """Gemma-4 or GDN hybrid: our LCM scaling produces heterogeneous group
     block_sizes, which HybridKVCacheCoordinator refuses. Disable prefix
-    caching to route to KVCacheCoordinatorNoPrefixCache (no assertion)."""
+    caching to route to KVCacheCoordinatorNoPrefixCache (no assertion).
+    Gemma-4 no longer forces enforce_eager; prefix caching is still disabled
+    because the HybridKVCacheCoordinator block-size assertion is a separate
+    issue unrelated to the profiler fix."""
     EngineArgsStub, ModelConfigStub, _ = _install_stub_engine_config(monkeypatch)
     _install_stub_transformers(
         monkeypatch, architectures=["Gemma4ForCausalLM"], layer_types=[]
@@ -601,7 +609,7 @@ def test_mixed_kv_disables_prefix_caching(monkeypatch):
     )
     EngineArgsStub.create_engine_config(args)
 
-    assert args.enforce_eager is True
+    assert args.enforce_eager is False  # Gemma-4 no longer forced
     assert args.enable_prefix_caching is False
 
 
