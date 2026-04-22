@@ -1,0 +1,21 @@
+What is the current TurboQuant implementation for Gemma-4 and Qwen3.5/3.6 models?
+
+---
+
+Document these pacthes in markdown and save in `docs` directory.
+
+---
+
+What happens to Gemma-4 narrow layers (head dim < 256)? Are they using TRITON_ATTN?
+
+---
+
+I think TurboQuant and Triton/Flash Attention backend are different concept. Or does the upstream has attention backend specifically for TurboQuant?
+
+---
+
+How is our scaffolding TurboQuant (`turboquant`) implemented? What compression level does it archeive?
+
+---
+
+Should we wire them together and make our TurboQuant implementation work independently from upstream TurboQuant? Or should we improve the upstream TurboQuant to acheive 100% decoding throughput?

@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "927dadd6aac7",
+  "session_id": "fbd5d3cb-03f7-4aa8-9ed7-f0b21df0b023",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-22T05:27:13.942798688Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "docs/turboquant_model_patches.md",
+    "src/llm_workflow_agents/serving/launch_vllm_turboquant.py",
+    "tests/unit/test_turboquant_launcher_hooks.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "5ce582099f04",
+  "token_usage": {
+    "input_tokens": 2561,
+    "cache_creation_tokens": 357065,
+    "cache_read_tokens": 5660779,
+    "output_tokens": 53609,
+    "api_call_count": 60
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-22T05:27:13.087793328Z",
+    "agent_lines": 194,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 194,
+    "agent_percentage": 100
+  }
+}
