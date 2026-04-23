@@ -31,6 +31,32 @@ This document describes the four data generation scripts for Task A (multi-turn 
 | `code_switch` | Thai-English code-switching within each conversation — Thai sentence structure with embedded English terms, mirroring real call-centre interactions |
 | *(omitted)* | Each sample randomly assigned `en` or `th` (50/50) |
 
+### System Prompt Contract
+
+Every generated sample's `messages[0]` is a fully enriched system prompt assembled by `data/system_prompt.py::build_enriched_system_prompt`. It contains four blocks, in this order:
+
+1. **Role line** — e.g. `"You are a customer service agent handling account_management workflows."`
+2. **Workflow script** — the same natural-language `### [STATE]` format used in the teacher prompt (produced by `_graph_to_script`)
+3. **Structured reference** — initial state, terminal states, tool names (from `workflow_graph` and `tool_schemas`)
+4. **Format rules** — the 7-rule block (STATE annotations, tool_call wrapping, terminal-state requirement, etc.)
+
+Enrichment is applied uniformly after message generation — for both teacher-generated and placeholder conversations — so training and benchmark eval always see the same prompt shape. The helper is **idempotent**: if `"Workflow script"` is already present in the content (e.g. legacy enriched data), the function returns it unchanged.
+
+The benchmark harness (`eval/agent_benchmark.py`) also calls `build_enriched_system_prompt` as a safety net for old bare-prompt JSONL files. On new data this is a no-op.
+
+### Teacher-authored rich system prompts (30%)
+
+When `teacher_model` is set, **30% of samples** receive a teacher-authored rich natural-language system prompt in place of the bare role line. The authored prompt is structured like a production voicebot handoff document:
+
+- A one-line **persona** sentence naming the agent's role and domain.
+- A `## GOAL` section stating the call's purpose in plain language.
+- One `### [state_name]` section per workflow state, using the exact state names from the graph. Each section contains suggested dialogue lines in quotes, intent-based branching bullets ("If the customer confirms… → follow the [next_state] path"), and tool-call instructions for states that invoke tools.
+- Cross-references between sections using `[state_name]` notation that mirrors the graph transitions.
+
+**Critical invariant:** the `_graph_to_script` workflow script + structured reference (initial/terminal states, tool names) + 7-rule format block are **still appended to every sample** by `build_enriched_system_prompt`, regardless of whether the sample used a rich or bare role line. Rich prompts augment the persona/flow layer; they never replace the structured reference.
+
+On teacher failure (JSON parse error, empty `system_prompt` key), the sample silently falls back to the bare role line — no sample is lost. Dataset metadata includes `rich_prompt_count` and `rich_prompt_rate_effective` so the caller can verify the actual ratio achieved. The rate can be adjusted via the `rich_prompt_rate` kwarg to `generate_workflow_dataset` (`0.0` to disable, `1.0` to force all samples). The placeholder (no-teacher) path ignores `rich_prompt_rate` entirely — benchmark data always uses the bare role line.
+
 ### Seed Allocation
 
 Seeds are assigned per-split to guarantee no sample overlap across datasets:

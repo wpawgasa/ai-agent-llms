@@ -25,51 +25,9 @@ import structlog
 from llm_workflow_agents.eval.state_accuracy import StateMachineMetrics, parse_state_transitions
 from llm_workflow_agents.eval.tool_call_f1 import ToolCallMetrics
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
+from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
-
-_FORMAT_RULES = """\
-Rules:
-1. Always annotate every state transition using [STATE: CURRENT → NEXT] at the start of your response.
-2. When calling a tool, emit it as <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>.
-3. Only use tools available in the current state.
-4. Follow transition conditions to move between states.
-5. If a tool returns an error, attempt recovery before escalating.
-6. Reach a terminal state to complete the workflow.
-7. Never skip states or make invalid transitions."""
-
-
-def _build_system_prompt(sample: dict[str, Any], original_content: str) -> str:
-    """Enrich the system prompt with workflow context and format rules.
-
-    The teacher-generated data stores the workflow graph, script, and tool
-    schemas alongside a bare role-description system message.  The model
-    needs all of this context to produce state transitions and tool calls.
-    """
-    import json as _json
-
-    parts: list[str] = [original_content]
-
-    script = sample.get("workflow_script")
-    if script:
-        parts.append(f"\nWorkflow script (follow this for conversation flow):\n{script}")
-
-    graph = sample.get("workflow_graph", {})
-    initial = graph.get("initial", "")
-    terminal = graph.get("terminal", [])
-    tool_schemas = sample.get("tool_schemas") or []
-    tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
-
-    if initial or terminal or tool_names:
-        parts.append(
-            f"\nStructured reference:\n"
-            f"  Initial state: {initial}\n"
-            f"  Terminal states: {', '.join(terminal)}\n"
-            f"  Available tools: {_json.dumps(tool_names)}"
-        )
-
-    parts.append(f"\n{_FORMAT_RULES}")
-    return "\n".join(parts)
 
 
 @dataclass

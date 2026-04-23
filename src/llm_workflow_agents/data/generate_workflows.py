@@ -27,6 +27,7 @@ from typing import Any, Literal
 import structlog
 
 from llm_workflow_agents.data._teacher_client import call_teacher_model
+from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES, build_enriched_system_prompt
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
     TOOL_ERROR_RATE,
@@ -128,15 +129,7 @@ class WorkflowGraph:
         }
 
 
-_FORMAT_RULES = """\
-Rules:
-1. Always annotate every state transition using [STATE: CURRENT → NEXT] at the start of your response.
-2. When calling a tool, emit it as <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call>.
-3. Only use tools available in the current state.
-4. Follow transition conditions to move between states.
-5. If a tool returns an error, attempt recovery before escalating.
-6. Reach a terminal state to complete the workflow.
-7. Never skip states or make invalid transitions."""
+# _FORMAT_RULES is imported from data.system_prompt (single source of truth)
 
 _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
     "en": {
@@ -862,20 +855,9 @@ def _generate_placeholder_conversation(
     domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
 
     # System message with both natural language script and structured graph
-    script = _graph_to_script(workflow, tool_schemas, language)
-    state_name: dict[str, str] = {s.id: s.name for s in workflow.states}
-    initial_name = state_name.get(workflow.initial_state, workflow.initial_state)
-    terminal_names = [state_name.get(t, t) for t in workflow.terminal_states]
-    system_content = (
-        f"You are a customer service agent handling {domain_name} workflows.\n\n"
-        f"Workflow script (follow this for conversation flow):\n{script}\n\n"
-        f"Structured reference:\n"
-        f"  Initial state: {initial_name}\n"
-        f"  Terminal states: {', '.join(terminal_names)}\n"
-        f"  Available tools: {json.dumps([t['function']['name'] for t in tool_schemas])}\n\n"
-        f"{_FORMAT_RULES}"
-    )
-    messages.append({"role": "system", "content": system_content})
+    # Bare role line — enrichment (script + structured ref + format rules) is
+    # applied uniformly after message generation via build_enriched_system_prompt.
+    messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
     # Placeholder text templates per language
     _user_templates: dict[str, dict[str, str]] = {
@@ -1033,12 +1015,100 @@ def _build_teacher_prompt(
     )
 
 
+_RICH_PROMPT_SYSTEM = """\
+You are an expert at writing realistic voicebot and chatbot system prompts for
+customer-service workflows. Given a workflow graph, tool schemas, and a target
+language, author a rich natural-language system prompt that would guide an agent
+through the conversation end-to-end.
+
+OUTPUT FORMAT — return a JSON object with exactly one key "system_prompt":
+{"system_prompt": "<the authored rich prompt text>"}
+
+The authored prompt MUST contain:
+1. A one-sentence persona / role line for the agent (mention the domain).
+2. A "## GOAL" section stating the purpose of the call in plain language.
+3. One "### [state_name]" section per state in the workflow graph, using the
+   exact state names from the graph.
+4. Inside each section:
+   - One or more suggested dialogue lines in quotes that the agent should say.
+   - Intent-based branching as bullets — "If the customer confirms, say '...'
+     -> follow the [next_section] path"; "If the customer asks to be called
+     back, proceed to [call_later] section"; etc.
+   - Tool-call instructions when a state has tools: "Call <tool>(args) to
+     <purpose>. Then confirm: '...'".
+5. Cross-references between sections using [state_name] that match the
+   transitions in the workflow graph.
+
+RULES:
+- Write the prompt in the requested language (English / Thai / Thai-English mix).
+- Do NOT include TTS or serving markers such as <S>, <F>, [END_CONVERSATION],
+  or [TRANSFER] — those are deployment concerns, not training signal.
+- Use customer-intent language for branches, not schematic state-machine phrasing.
+- Keep tool names and state names verbatim from the inputs.
+- Output ONLY the JSON object — no markdown fences, no extra keys.
+"""
+
+
+def _build_rich_prompt_request(
+    workflow: WorkflowGraph,
+    tool_schemas: list[dict[str, Any]],
+    domain_spec: DomainSpec | None,
+    language: str,
+) -> str:
+    domain_name = domain_spec.name if domain_spec else "customer service"
+    lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
+    return (
+        f"Domain: {domain_name}\n"
+        f"{lang_instruction}\n\n"
+        f"Workflow graph (authoritative — authored sections must match the state names):\n"
+        f"{json.dumps(workflow.to_dict(), indent=2)}\n\n"
+        f"Available tools:\n{json.dumps(tool_schemas, indent=2)}\n\n"
+        f"Author the rich system prompt now."
+    )
+
+
+def _generate_rich_system_prompt(
+    workflow: WorkflowGraph,
+    tool_schemas: list[dict[str, Any]],
+    domain_spec: DomainSpec | None,
+    language: str,
+    teacher_model: str,
+) -> str:
+    """Ask the teacher model to author a natural-language system prompt.
+
+    Returns empty string on any failure; the caller falls back to the bare
+    role line in that case.
+    """
+    user_prompt = _build_rich_prompt_request(workflow, tool_schemas, domain_spec, language)
+    try:
+        raw = call_teacher_model(teacher_model, _RICH_PROMPT_SYSTEM, user_prompt)
+        data = json.loads(raw)
+        text = str(data.get("system_prompt", "")).strip()
+        if not text:
+            raise ValueError("empty system_prompt in teacher response")
+        return text
+    except Exception as exc:
+        logger.warning(
+            "rich_system_prompt_fallback",
+            teacher_model=teacher_model,
+            error=str(exc),
+        )
+        return ""
+
+
 def _parse_messages_response(raw: str) -> list[dict[str, Any]]:
-    """Parse a JSON response into a list of messages."""
+    """Parse a JSON response into a list of messages.
+
+    Filters out any items that are not dicts with a ``role`` key so that
+    malformed teacher responses don't silently propagate invalid messages.
+    Raises ValueError if nothing valid remains (triggers placeholder fallback).
+    """
     data = json.loads(raw)
-    if isinstance(data, dict) and "messages" in data:
-        return data["messages"]
-    return data  # assume it's already a list
+    items: list[Any] = data["messages"] if isinstance(data, dict) and "messages" in data else data
+    valid = [m for m in items if isinstance(m, dict) and "role" in m]
+    if not valid:
+        raise ValueError("Teacher model returned no valid messages (missing 'role' key)")
+    return valid
 
 
 def _generate_teacher_conversation(
@@ -1082,6 +1152,7 @@ def generate_workflow_dataset(
     domain: str | None = None,
     language: Literal["en", "th", "code_switch"] | None = None,
     behavior_preset: str = "default",
+    rich_prompt_rate: float = 0.30,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1106,6 +1177,12 @@ def generate_workflow_dataset(
         behavior_preset: User behavior distribution preset. One of
             ``"default"`` (60/15/10/15), ``"adversarial"`` (45/25/15/15),
             or ``"balanced"`` (25/25/25/25).
+        rich_prompt_rate: Fraction of samples whose ``messages[0]`` is a
+            teacher-authored rich natural-language system prompt (persona +
+            named sections with dialogue hints and intent-based branches).
+            Applied only when ``teacher_model`` is set; otherwise ignored.
+            The workflow script from ``_graph_to_script`` is still appended
+            to every sample regardless of this setting. Default 0.30.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1144,6 +1221,7 @@ def generate_workflow_dataset(
     language_counts: dict[str, int] = {}
     tool_error_count = 0
     total_tool_calls = 0
+    rich_prompt_count = 0
 
     for i in range(num_samples):
         behavior = _select_user_behavior(rng, active_distribution)
@@ -1169,9 +1247,38 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language
             )
 
+        # Optionally replace the bare role line with a teacher-authored rich
+        # natural-language system prompt (persona + named sections + dialogue
+        # + intent-based branches). Applied before enrichment so the workflow
+        # script still gets appended.
+        use_rich_prompt = bool(teacher_model) and rng.random() < rich_prompt_rate
+        if use_rich_prompt:
+            rich_prompt = _generate_rich_system_prompt(
+                workflow, tool_schemas, domain_spec, sample_language, teacher_model
+            )
+            if rich_prompt:
+                rich_prompt_count += 1
+                if messages and messages[0].get("role") == "system":
+                    messages[0] = {"role": "system", "content": rich_prompt}
+                else:
+                    messages.insert(0, {"role": "system", "content": rich_prompt})
+
+        # Enrich system prompt so training and eval see the same prompt shape.
+        # build_enriched_system_prompt is idempotent — safe for placeholder messages
+        # that are already enriched after the simplification above.
+        _enrich_ctx = {
+            "workflow_script": _graph_to_script(workflow, tool_schemas, sample_language),
+            "workflow_graph": workflow.to_dict(),
+            "tool_schemas": tool_schemas,
+        }
+        if messages and messages[0].get("role") == "system":
+            messages[0] = {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, messages[0]["content"])}
+        elif messages:
+            messages.insert(0, {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, "You are a customer service assistant.")})
+
         # Count tool calls and errors
         for msg in messages:
-            if msg["role"] == "tool":
+            if msg.get("role") == "tool":
                 total_tool_calls += 1
                 try:
                     content = json.loads(msg["content"])
@@ -1210,6 +1317,8 @@ def generate_workflow_dataset(
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),
         "num_domains": len(domain_counts),
+        "rich_prompt_count": rich_prompt_count,
+        "rich_prompt_rate_effective": rich_prompt_count / max(len(samples), 1),
     }
 
     logger.info("dataset_generated", output_file=str(output_file), **stats)
