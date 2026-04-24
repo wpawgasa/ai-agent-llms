@@ -6,13 +6,49 @@ This document describes the four data generation scripts for Task A (multi-turn 
 
 ### Complexity Levels
 
-| Level | States | Branching | Tools | Chain depth | Domain |
-|-------|--------|-----------|-------|-------------|--------|
-| L1 | 3–4 | 1–2 | 1 | 0 | faq_lookup |
-| L2 | 5–7 | 2–3 | 2 | 1 | order_status_cancel |
-| L3 | 8–12 | 3–5 | 4 | 2 | booking_payment |
-| L4 | 13–20 | 5–8 | 6 | 3 | it_troubleshoot |
-| L5 | 21–30 | 8+ | 7 | 4 | multi_dept_workflow |
+Complexity controls structure only — domains are assigned separately (see [Domains](#domains)).
+
+| Level | States | Branching | Tools | Chain depth |
+|-------|--------|-----------|-------|-------------|
+| L1 | 3–4 | 1–2 | 1 | 0 |
+| L2 | 5–7 | 2–3 | 2 | 1 |
+| L3 | 8–12 | 3–5 | 4 | 2 |
+| L4 | 13–20 | 5–8 | 6 | 3 |
+| L5 | 21–30 | 8+ | 7 | 4 |
+
+### Domains
+
+The registry (`src/llm_workflow_agents/data/domain_registry.py`) contains **18 domains** decoupled from complexity levels. When `domain=None` (the default), each sample draws a domain uniformly at random. Pass `domain="banking"` (or any key below) to pin all samples to one domain.
+
+| Key | Name | Category |
+|-----|------|----------|
+| `account_management` | Customer Account Management | core_business |
+| `billing_payments` | Billing & Payments | core_business |
+| `order_management` | Order Management | core_business |
+| `technical_support` | Technical Support | core_business |
+| `product_info` | Product & Service Information | core_business |
+| `healthcare` | Healthcare & Insurance | industry |
+| `banking` | Banking & Financial Services | industry |
+| `telecom` | Telecommunications | industry |
+| `utilities` | Utilities (Electric, Water, Gas) | industry |
+| `travel` | Travel & Hospitality | industry |
+| `ecommerce` | E-Commerce & Retail | industry |
+| `government` | Government & Public Services | industry |
+| `insurance` | Insurance | industry |
+| `complaints` | Complaints & Escalations | operational |
+| `scheduling` | Appointment & Scheduling | operational |
+| `sales` | Sales & Lead Generation | operational |
+| `surveys` | Surveys & Feedback | operational |
+| `emergency` | Emergency & Critical Services | operational |
+
+#### Insurance domain
+
+The `insurance` domain covers life, health, auto, and home insurance workflows:
+
+- **Tools:** `file_claim`, `check_claim_status`, `verify_policy`, `update_policy`, `quote_premium`, `renew_policy`, `cancel_policy`, `request_claim_documents`
+- **State flow:** `VERIFY_POLICYHOLDER → REVIEW_POLICY → CLAIM_INTAKE → ASSESS_COVERAGE → REQUEST_DOCUMENTATION → EVALUATE_CLAIM → APPROVE_OR_DENY → PROCESS_PAYOUT → RESOLVE → TERMINAL`
+- **Intents (service):** `file_claim`, `check_claim_status`, `update_beneficiary`, `policy_verification`, `cancel_policy`
+- **Intents (upsell/promo):** `quote_request`, `coverage_upgrade`, `policy_renewal`, `bundle_offer`
 
 ### Behavior Presets
 
@@ -21,6 +57,43 @@ This document describes the four data generation scripts for Task A (multi-turn 
 | `default` | 60% | 15% | 10% | 15% |
 | `adversarial` | 45% | 25% | 15% | 15% |
 | `balanced` | 25% | 25% | 25% | 25% |
+
+### Intent Category Presets
+
+Controls the share of promotion/upsell-focused conversations across **all** domains. The generator selects an intent category per sample, then picks a domain intent matching that category (falling back to any intent if the domain has none tagged as `upsell_promo`).
+
+| Preset | service | upsell_promo |
+|--------|---------|--------------|
+| `default` | 70% | 30% |
+| `service_only` | 100% | 0% |
+| `upsell_heavy` | 50% | 50% |
+
+Intent categories are defined in `INTENT_CATEGORY_TAXONOMY` in `domain_registry.py`. The following intents are tagged `upsell_promo` (all others default to `service`):
+
+| Domain | Upsell/promo intents |
+|--------|----------------------|
+| `account_management` | `subscription_change`, `rewards_inquiry`, `premium_plan_offer` |
+| `billing_payments` | `payment_plan_offer` |
+| `order_management` | `accessory_upsell` |
+| `technical_support` | `extended_warranty_offer` |
+| `product_info` | `promotion_inquiry`, `upgrade_recommendation`, `pricing_inquiry` |
+| `healthcare` | `wellness_program_offer` |
+| `banking` | `loan_inquiry`, `rate_inquiry` |
+| `telecom` | `plan_change`, `roaming_activation` |
+| `utilities` | `green_energy_upgrade`, `green_program_enrollment` |
+| `travel` | `loyalty_redemption` |
+| `ecommerce` | `bundle_promotion`, `recommendation` |
+| `complaints` | `goodwill_upgrade_offer` |
+| `scheduling` | `premium_slot_offer` |
+| `sales` | `upsell_offer`, `quote_request`, `pricing_negotiation`, `contract_renewal` |
+| `insurance` | `coverage_upgrade`, `policy_renewal`, `bundle_offer`, `quote_request` |
+
+Domains `government`, `surveys`, and `emergency` have no tagged upsell intents; the selector falls back to service intents for those domains regardless of preset.
+
+When `teacher_model` is set and a sample is selected as `upsell_promo`, the teacher prompt receives an extra instruction line:
+> *"Conversation focus: naturally weave in promotion, cross-sell, or upsell opportunities relevant to this domain. The workflow must still reach a terminal state; the upsell is a secondary arc, not a hijack."*
+
+The dataset stats dict includes `intent_category_distribution` so you can verify the effective split after generation.
 
 ### Language Options
 
@@ -230,11 +303,13 @@ OPENAI_API_KEY=sk-... ./scripts/generate_eval_data.sh
 
 ## Output File Naming
 
-Each script writes one JSONL file per (level, language, teacher, preset) combination:
+Each script writes one JSONL file per (level, language, teacher, behavior preset) combination:
 
 ```
-{level}_conversations_{lang}_{model}{_preset}_{timestamp}.jsonl
+{level}_conversations_{lang}_{model}{_behavior_preset}_{timestamp}.jsonl
 ```
+
+The `intent_category_preset` is recorded in dataset metadata (`stats["intent_category_distribution"]`) but not in the filename.
 
 Examples:
 ```

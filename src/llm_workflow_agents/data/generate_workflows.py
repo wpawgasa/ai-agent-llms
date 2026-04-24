@@ -1,7 +1,7 @@
 """Experiment A: Generate multi-turn workflow conversation datasets.
 
 Generates datasets at 5 complexity levels (L1-L5) with tool-calling
-annotations and state-machine ground truth. Supports 17 call center
+annotations and state-machine ground truth. Supports 18 call center
 domains (decoupled from complexity level).
 
 Teacher model generation:
@@ -41,6 +41,7 @@ from llm_workflow_agents.data.domain_registry import (
     CROSS_CUTTING_TOOLS,
     DOMAIN_REGISTRY,
     DomainSpec,
+    classify_intent,
 )
 
 logger = structlog.get_logger(__name__)
@@ -64,6 +65,12 @@ BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
         "digressing": 0.25,
         "invalid_tool_inputs": 0.25,
     },
+}
+
+INTENT_CATEGORY_PRESETS: dict[str, dict[str, float]] = {
+    "default":      {"service": 0.70, "upsell_promo": 0.30},
+    "service_only": {"service": 1.00, "upsell_promo": 0.00},
+    "upsell_heavy": {"service": 0.50, "upsell_promo": 0.50},
 }
 
 
@@ -357,6 +364,27 @@ def _select_user_behavior(
     behaviors = list(dist.keys())
     weights = list(dist.values())
     return rng.choices(behaviors, weights=weights, k=1)[0]
+
+
+def _select_intent_category(
+    rng: random.Random,
+    distribution: dict[str, float],
+) -> str:
+    """Select an intent category ('service' or 'upsell_promo') from a weighted distribution."""
+    cats = list(distribution.keys())
+    weights = list(distribution.values())
+    return rng.choices(cats, weights=weights, k=1)[0]
+
+
+def _pick_intent_by_category(
+    rng: random.Random,
+    domain_intents: tuple[str, ...] | list[str],
+    target_category: str,
+) -> str:
+    """Pick a domain intent matching target_category; fall back to any intent if none match."""
+    matching = [i for i in domain_intents if classify_intent(i) == target_category]
+    pool = matching if matching else list(domain_intents)
+    return rng.choice(pool) if pool else ""
 
 
 def _select_domain(
@@ -844,6 +872,7 @@ def _generate_placeholder_conversation(
     rng: random.Random,
     domain_spec: DomainSpec | None = None,
     language: str = "en",
+    intent_category: str = "service",
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -891,7 +920,7 @@ def _generate_placeholder_conversation(
         current_state = workflow.states[current_state_idx]
 
         # User message — use domain intents for realistic context
-        intent = rng.choice(domain_intents) if domain_intents else spec.domain
+        intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else spec.domain
         intent_text = intent.replace("_", " ")
         templates = _user_templates.get(language or "en", _user_templates["en"])
         tmpl = templates.get(behavior, templates["cooperative"])
@@ -995,16 +1024,25 @@ def _build_teacher_prompt(
     spec: ComplexitySpec,
     domain_spec: DomainSpec | None,
     language: str = "en",
+    intent_category: str = "service",
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
     lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
     script = _graph_to_script(workflow, tool_schemas, language)
+    promo_line = (
+        "Conversation focus: naturally weave in promotion, cross-sell, or upsell "
+        "opportunities relevant to this domain. The workflow must still reach a "
+        "terminal state; the upsell is a secondary arc, not a hijack.\n"
+        if intent_category == "upsell_promo"
+        else ""
+    )
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
         f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
+        f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
@@ -1120,12 +1158,15 @@ def _generate_teacher_conversation(
     domain_spec: DomainSpec | None,
     teacher_model: str,
     language: str = "en",
+    intent_category: str = "service",
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
     Falls back to placeholder generation if the API call fails.
     """
-    user_prompt = _build_teacher_prompt(workflow, tool_schemas, behavior, spec, domain_spec, language)
+    user_prompt = _build_teacher_prompt(
+        workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category
+    )
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
         messages = _parse_messages_response(raw)
@@ -1139,7 +1180,7 @@ def _generate_teacher_conversation(
             error=str(exc),
         )
         return _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec, language
+            workflow, tool_schemas, behavior, spec, rng, domain_spec, language, intent_category
         )
 
 
@@ -1153,6 +1194,7 @@ def generate_workflow_dataset(
     language: Literal["en", "th", "code_switch"] | None = None,
     behavior_preset: str = "default",
     rich_prompt_rate: float = 0.30,
+    intent_category_preset: str = "default",
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1183,6 +1225,10 @@ def generate_workflow_dataset(
             Applied only when ``teacher_model`` is set; otherwise ignored.
             The workflow script from ``_graph_to_script`` is still appended
             to every sample regardless of this setting. Default 0.30.
+        intent_category_preset: Controls the share of promo/upsell-focused
+            conversations. ``"default"`` targets 70% service / 30% upsell_promo.
+            ``"service_only"`` disables upsell biasing entirely.
+            ``"upsell_heavy"`` uses a 50/50 split.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1192,7 +1238,13 @@ def generate_workflow_dataset(
             f"Unknown behavior_preset {behavior_preset!r}. "
             f"Valid options: {list(BEHAVIOR_PRESETS)}"
         )
+    if intent_category_preset not in INTENT_CATEGORY_PRESETS:
+        raise ValueError(
+            f"Unknown intent_category_preset {intent_category_preset!r}. "
+            f"Valid options: {list(INTENT_CATEGORY_PRESETS)}"
+        )
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
+    active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
@@ -1209,16 +1261,18 @@ def generate_workflow_dataset(
         "generating_workflow_dataset",
         level=complexity_level,
         num_samples=num_samples,
-        domain=domain or "random (17 domains)",
+        domain=domain or "random (18 domains)",
         teacher_model=teacher_model or "placeholder",
         language=language or "mixed (en/th)",
         behavior_preset=behavior_preset,
+        intent_category_preset=intent_category_preset,
     )
 
     samples: list[ConversationSample] = []
     behavior_counts: dict[str, int] = {b: 0 for b in active_distribution}
     domain_counts: dict[str, int] = {}
     language_counts: dict[str, int] = {}
+    intent_category_counts: dict[str, int] = {c: 0 for c in active_intent_dist}
     tool_error_count = 0
     total_tool_calls = 0
     rich_prompt_count = 0
@@ -1235,16 +1289,22 @@ def generate_workflow_dataset(
         domain_key, domain_spec = _select_domain(rng, domain)
         domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
 
+        # Select intent category (service vs upsell_promo)
+        intent_category = _select_intent_category(rng, active_intent_dist)
+        intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
+
         tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
         workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
 
         if teacher_model:
             messages = _generate_teacher_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model, sample_language
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
+                sample_language, intent_category,
             )
         else:
             messages = _generate_placeholder_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
+                intent_category,
             )
 
         # Optionally replace the bare role line with a teacher-authored rich
@@ -1313,6 +1373,7 @@ def generate_workflow_dataset(
         "behavior_distribution": behavior_counts,
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
+        "intent_category_distribution": intent_category_counts,
         "tool_error_rate": tool_error_count / max(total_tool_calls, 1),
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),

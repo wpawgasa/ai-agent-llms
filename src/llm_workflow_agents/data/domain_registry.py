@@ -1,6 +1,6 @@
 """Domain registry for workflow conversation generation.
 
-17 call center domains with tool schemas, state templates, intent examples,
+18 call center domains with tool schemas, state templates, intent examples,
 and entity slots. Domains are decoupled from complexity levels — any domain
 can appear at any L1–L5 complexity, with the complexity controlling structural
 parameters (states, branching, tools, depth) and the domain controlling
@@ -84,7 +84,7 @@ ACCOUNT_MANAGEMENT = DomainSpec(
     intents=(
         "account_creation", "profile_update", "password_reset",
         "account_closure", "subscription_change", "rewards_inquiry",
-        "verification_request",
+        "verification_request", "premium_plan_offer",
     ),
     entity_slots=("customer_id", "email", "phone", "account_type", "field", "new_value"),
 )
@@ -128,7 +128,7 @@ BILLING_PAYMENTS = DomainSpec(
     intents=(
         "invoice_inquiry", "payment_processing", "refund_request",
         "dispute_charge", "payment_plan", "late_fee_waiver",
-        "receipt_request", "chargeback",
+        "receipt_request", "chargeback", "payment_plan_offer",
     ),
     entity_slots=("invoice_id", "amount", "payment_method", "transaction_id", "customer_id"),
 )
@@ -172,7 +172,7 @@ ORDER_MANAGEMENT = DomainSpec(
     intents=(
         "order_tracking", "order_cancellation", "order_modification",
         "return_request", "exchange_request", "damaged_item_report",
-        "delivery_reschedule", "warranty_claim",
+        "delivery_reschedule", "warranty_claim", "accessory_upsell",
     ),
     entity_slots=("order_id", "tracking_number", "item_id", "return_type"),
 )
@@ -217,6 +217,7 @@ TECHNICAL_SUPPORT = DomainSpec(
     intents=(
         "setup_help", "troubleshoot", "bug_report", "compatibility_check",
         "update_guidance", "remote_assistance", "escalation",
+        "extended_warranty_offer",
     ),
     entity_slots=("system_name", "device_model", "fix_id", "severity", "ticket_id"),
 )
@@ -298,6 +299,7 @@ HEALTHCARE = DomainSpec(
     intents=(
         "appointment_scheduling", "prescription_refill", "claim_status",
         "coverage_verification", "referral_request", "prior_authorization",
+        "wellness_program_offer",
     ),
     entity_slots=("patient_id", "claim_id", "prescription_id", "procedure_code", "provider_id"),
 )
@@ -418,6 +420,7 @@ UTILITIES = DomainSpec(
     intents=(
         "meter_reading", "billing_dispute", "new_connection", "disconnection",
         "outage_report", "usage_analysis", "green_program_enrollment",
+        "green_energy_upgrade",
     ),
     entity_slots=("account_id", "address", "meter_type", "reading_value"),
 )
@@ -500,6 +503,7 @@ ECOMMERCE = DomainSpec(
     intents=(
         "product_search", "stock_check", "coupon_application",
         "price_match_request", "recommendation", "backorder_inquiry",
+        "bundle_promotion",
     ),
     entity_slots=("product_id", "coupon_code", "store_id", "order_id"),
 )
@@ -543,6 +547,59 @@ GOVERNMENT = DomainSpec(
     entity_slots=("citizen_id", "application_id", "document_number", "taxpayer_id"),
 )
 
+INSURANCE = DomainSpec(
+    name="Insurance",
+    category="industry",
+    tools=(
+        _tool("file_claim", "File an insurance claim", {
+            "policy_id": {"type": "string"},
+            "claim_type": {"type": "string", "enum": ["life", "health", "auto", "home"]},
+            "incident_date": {"type": "string", "format": "date"},
+            "description": {"type": "string"},
+        }, ["policy_id", "claim_type", "incident_date"]),
+        _tool("check_claim_status", "Check the status of an existing claim", {
+            "claim_id": {"type": "string"},
+        }, ["claim_id"]),
+        _tool("verify_policy", "Verify policyholder details and active coverage", {
+            "policy_id": {"type": "string"}, "policyholder_id": {"type": "string"},
+        }, ["policy_id", "policyholder_id"]),
+        _tool("update_policy", "Update policy information", {
+            "policy_id": {"type": "string"},
+            "field": {"type": "string", "enum": ["beneficiary", "address", "coverage_level", "payment_method"]},
+            "new_value": {"type": "string"},
+        }, ["policy_id", "field", "new_value"]),
+        _tool("quote_premium", "Get a premium quote for new or upgraded coverage", {
+            "coverage_type": {"type": "string", "enum": ["life", "health", "auto", "home", "bundle"]},
+            "coverage_amount": {"type": "number"},
+            "age": {"type": "integer"},
+            "risk_profile": {"type": "string", "enum": ["low", "medium", "high"]},
+        }, ["coverage_type", "coverage_amount"]),
+        _tool("renew_policy", "Renew an expiring policy", {
+            "policy_id": {"type": "string"}, "duration_months": {"type": "integer"},
+        }, ["policy_id", "duration_months"]),
+        _tool("cancel_policy", "Cancel an active insurance policy", {
+            "policy_id": {"type": "string"}, "reason": {"type": "string"},
+            "effective_date": {"type": "string", "format": "date"},
+        }, ["policy_id", "reason"]),
+        _tool("request_claim_documents", "Request supporting documents for a claim", {
+            "claim_id": {"type": "string"},
+            "doc_type": {"type": "string", "enum": ["police_report", "medical_record", "repair_estimate", "photo"]},
+        }, ["claim_id", "doc_type"]),
+    ),
+    state_templates=(
+        "GREETING", "VERIFY_POLICYHOLDER", "REVIEW_POLICY", "CLAIM_INTAKE",
+        "ASSESS_COVERAGE", "REQUEST_DOCUMENTATION", "EVALUATE_CLAIM",
+        "APPROVE_OR_DENY", "PROCESS_PAYOUT", "RESOLVE", "TERMINAL",
+    ),
+    intents=(
+        "file_claim", "check_claim_status", "update_beneficiary",
+        "policy_verification", "cancel_policy",
+        "quote_request", "coverage_upgrade", "policy_renewal", "bundle_offer",
+    ),
+    entity_slots=("policy_id", "claim_id", "policyholder_id", "coverage_type",
+                  "incident_date", "vin", "beneficiary"),
+)
+
 # ---------------------------------------------------------------------------
 # Operational Domains
 # ---------------------------------------------------------------------------
@@ -578,7 +635,7 @@ COMPLAINTS = DomainSpec(
     ),
     intents=(
         "complaint_registration", "escalation_request", "service_recovery",
-        "sla_inquiry", "case_followup", "case_closure",
+        "sla_inquiry", "case_followup", "case_closure", "goodwill_upgrade_offer",
     ),
     entity_slots=("case_id", "customer_id", "severity", "gesture_type"),
 )
@@ -618,6 +675,7 @@ SCHEDULING = DomainSpec(
     intents=(
         "book_appointment", "reschedule", "cancel_appointment",
         "check_availability", "waitlist_request", "reminder_request",
+        "premium_slot_offer",
     ),
     entity_slots=("appointment_id", "service_type", "date", "time", "location"),
 )
@@ -779,6 +837,7 @@ DOMAIN_REGISTRY: dict[str, DomainSpec] = {
     "travel": TRAVEL,
     "ecommerce": ECOMMERCE,
     "government": GOVERNMENT,
+    "insurance": INSURANCE,
     # Operational
     "complaints": COMPLAINTS,
     "scheduling": SCHEDULING,
@@ -788,3 +847,58 @@ DOMAIN_REGISTRY: dict[str, DomainSpec] = {
 }
 
 ALL_DOMAIN_NAMES: list[str] = list(DOMAIN_REGISTRY.keys())
+
+# ---------------------------------------------------------------------------
+# Intent-category taxonomy for promo/upsell biasing
+# ---------------------------------------------------------------------------
+
+INTENT_CATEGORY_TAXONOMY: dict[str, str] = {
+    # account_management
+    "subscription_change": "upsell_promo",
+    "rewards_inquiry": "upsell_promo",
+    "premium_plan_offer": "upsell_promo",
+    # billing_payments
+    "payment_plan_offer": "upsell_promo",
+    # order_management
+    "accessory_upsell": "upsell_promo",
+    # technical_support
+    "extended_warranty_offer": "upsell_promo",
+    # product_info
+    "promotion_inquiry": "upsell_promo",
+    "upgrade_recommendation": "upsell_promo",
+    "pricing_inquiry": "upsell_promo",
+    # healthcare
+    "wellness_program_offer": "upsell_promo",
+    # banking
+    "loan_inquiry": "upsell_promo",
+    "rate_inquiry": "upsell_promo",
+    # telecom
+    "plan_change": "upsell_promo",
+    "roaming_activation": "upsell_promo",
+    # utilities
+    "green_energy_upgrade": "upsell_promo",
+    "green_program_enrollment": "upsell_promo",
+    # travel
+    "loyalty_redemption": "upsell_promo",
+    # ecommerce
+    "bundle_promotion": "upsell_promo",
+    "recommendation": "upsell_promo",
+    # complaints
+    "goodwill_upgrade_offer": "upsell_promo",
+    # scheduling
+    "premium_slot_offer": "upsell_promo",
+    # sales
+    "upsell_offer": "upsell_promo",
+    "quote_request": "upsell_promo",
+    "pricing_negotiation": "upsell_promo",
+    "contract_renewal": "upsell_promo",
+    # insurance
+    "coverage_upgrade": "upsell_promo",
+    "policy_renewal": "upsell_promo",
+    "bundle_offer": "upsell_promo",
+}
+
+
+def classify_intent(intent: str) -> str:
+    """Return the intent category ('service' or 'upsell_promo') for an intent name."""
+    return INTENT_CATEGORY_TAXONOMY.get(intent, "service")

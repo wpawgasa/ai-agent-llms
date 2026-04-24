@@ -26,7 +26,9 @@ from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     DOMAIN_REGISTRY,
     DomainSpec,
+    classify_intent,
 )
+from llm_workflow_agents.data.generate_workflows import INTENT_CATEGORY_PRESETS
 from llm_workflow_agents.data.generate_tool_call_data import (
     DatasetSplits,
     generate_tool_call_dataset,
@@ -213,9 +215,9 @@ class TestGraphPairGeneration:
 class TestDomainRegistry:
     """Tests for expanded domain registry."""
 
-    def test_registry_has_17_domains(self) -> None:
-        assert len(DOMAIN_REGISTRY) == 17
-        assert len(ALL_DOMAIN_NAMES) == 17
+    def test_registry_has_18_domains(self) -> None:
+        assert len(DOMAIN_REGISTRY) == 18
+        assert len(ALL_DOMAIN_NAMES) == 18
 
     def test_all_domains_have_tools(self) -> None:
         for name, spec in DOMAIN_REGISTRY.items():
@@ -284,8 +286,75 @@ class TestDomainRegistry:
             seed=42,
             domain=None,
         )
-        # With 50 samples across 17 domains, should see multiple domains
+        # With 50 samples across 18 domains, should see multiple domains
         assert result.stats["num_domains"] > 1
+
+
+class TestIntentCategoryPreset:
+    """Tests for intent-category biasing (promo/upsell preset)."""
+
+    def test_classify_intent_known(self) -> None:
+        assert classify_intent("upsell_offer") == "upsell_promo"
+        assert classify_intent("promotion_inquiry") == "upsell_promo"
+        assert classify_intent("policy_renewal") == "upsell_promo"
+
+    def test_classify_intent_fallback(self) -> None:
+        assert classify_intent("unknown_intent_xyz") == "service"
+        assert classify_intent("complaint_registration") == "service"
+
+    def test_presets_defined(self) -> None:
+        for name in ("default", "service_only", "upsell_heavy"):
+            assert name in INTENT_CATEGORY_PRESETS
+            dist = INTENT_CATEGORY_PRESETS[name]
+            assert abs(sum(dist.values()) - 1.0) < 1e-9
+
+    def test_unknown_preset_raises(self, tmp_output_dir: Path) -> None:
+        with pytest.raises(ValueError, match="Unknown intent_category_preset"):
+            generate_workflow_dataset(
+                complexity_level="L1",
+                num_samples=2,
+                output_dir=tmp_output_dir,
+                seed=42,
+                intent_category_preset="nonexistent",
+            )
+
+    def test_service_only_preset_zero_upsell(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L1",
+            num_samples=50,
+            output_dir=tmp_output_dir,
+            seed=42,
+            intent_category_preset="service_only",
+        )
+        dist = result.stats["intent_category_distribution"]
+        assert dist.get("upsell_promo", 0) == 0
+
+    def test_default_preset_biases_upsell(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=200,
+            output_dir=tmp_output_dir,
+            seed=42,
+            domain="sales",
+            intent_category_preset="default",
+        )
+        dist = result.stats["intent_category_distribution"]
+        total = sum(dist.values())
+        upsell_share = dist.get("upsell_promo", 0) / total
+        assert 0.20 <= upsell_share <= 0.45
+
+    def test_upsell_fallback_in_pure_service_domain(self, tmp_output_dir: Path) -> None:
+        # government has no upsell intents; selector must fall back cleanly
+        result = generate_workflow_dataset(
+            complexity_level="L1",
+            num_samples=10,
+            output_dir=tmp_output_dir,
+            seed=42,
+            domain="government",
+            intent_category_preset="upsell_heavy",
+        )
+        assert result.num_samples == 10
+        assert result.stats["num_domains"] == 1
 
 
 class TestWorkflowGraphModel:
