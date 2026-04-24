@@ -1,0 +1,13 @@
+What domains the workflow data generation covers?
+
+---
+
+I mean business domains like finance, insurance, product support, etc.
+
+---
+
+Are insurance (life/health/car) claim, product and service campaign offers  included?
+
+---
+
+Yes, insurance are important domain and in each domain encorage data generation to generate promotion and upsell workflows more often.
