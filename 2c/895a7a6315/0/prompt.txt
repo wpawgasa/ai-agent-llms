@@ -1,0 +1,1 @@
+Add Qwen3.6-27B (https://huggingface.co/Qwen/Qwen3.6-27B) as another candidate for task A benchmark and fine-tuning. Also updated related documents, i.e. @docs/concurrency_latency_analysis.docx and README.md

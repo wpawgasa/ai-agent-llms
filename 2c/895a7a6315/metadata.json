@@ -1,0 +1,40 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "2c895a7a6315",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "CLAUDE.md",
+    "README.md",
+    "configs/benchmark/phase1_matrix.yaml",
+    "configs/models/cat_a/qwen36_27b.yaml",
+    "configs/models/cat_a/qwen36_27b_fp8.yaml",
+    "configs/models_exp_a/qwen36_27b.yaml",
+    "configs/models_exp_a/qwen36_27b_fp8.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "docs/concurrency_latency_analysis.docx",
+    "scripts/build_concurrency_report.py",
+    "scripts/generate_sft_data.sh",
+    "scripts/run_exp_a.sh",
+    "src/llm_workflow_agents/data/generate_workflows.py",
+    "src/llm_workflow_agents/training/lora_targets.py",
+    "tests/unit/test_config.py",
+    "tests/unit/test_training.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/2c/895a7a6315/0/metadata.json",
+      "transcript": "/2c/895a7a6315/0/full.jsonl",
+      "content_hash": "/2c/895a7a6315/0/content_hash.txt",
+      "prompt": "/2c/895a7a6315/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1783,
+    "cache_creation_tokens": 385233,
+    "cache_read_tokens": 2918675,
+    "output_tokens": 33134,
+    "api_call_count": 37
+  }
+}
