@@ -1,0 +1,17 @@
+What hardware should I used for training in SFT and GRPO steps? Single H100 80GB or 2x A100 80GB.
+
+---
+
+How many conversations do we currently have for SFT training?
+
+---
+
+Should I generate more data?
+
+---
+
+How could I generate more cooperative conversations using existing script?
+
+---
+
+Edit @scripts/generate_sft_data.sh to accept behavior preset
