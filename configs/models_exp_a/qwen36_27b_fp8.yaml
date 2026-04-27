@@ -1,0 +1,23 @@
+model:
+  name: "Qwen/Qwen3.6-27B-FP8"
+  family: "qwen35"
+  architecture: "dense_gqa_transformer"
+  params_total: 27_000_000_000
+  params_active: 27_000_000_000
+  context_length: 262144
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 27
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "qwen3_coder"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enforce_eager: false
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

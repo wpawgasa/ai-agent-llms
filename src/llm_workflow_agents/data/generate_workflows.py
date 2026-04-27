@@ -65,6 +65,12 @@ BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
         "digressing": 0.25,
         "invalid_tool_inputs": 0.25,
     },
+    "cooperative_only": {
+        "cooperative": 1.00,
+        "adversarial_probing": 0.00,
+        "digressing": 0.00,
+        "invalid_tool_inputs": 0.00,
+    },
 }
 
 INTENT_CATEGORY_PRESETS: dict[str, dict[str, float]] = {
@@ -275,11 +281,11 @@ def _extract_ground_truth(
         if msg.get("role") != "assistant":
             continue
 
-        annotations = msg.get("annotations", {})
-        content = msg.get("content", "")
+        annotations = msg.get("annotations") or {}
+        content = msg.get("content", "") or ""
 
         # --- State transitions ---
-        transition = annotations.get("state_transition", {})
+        transition = annotations.get("state_transition") or {}
         if transition.get("from") and transition.get("to"):
             state_sequence.append({"from": transition["from"], "to": transition["to"]})
         else:

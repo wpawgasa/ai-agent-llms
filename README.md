@@ -35,6 +35,14 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 | Mistral Small 3.1 24B | 24B | 24B | Dense sliding-window | 128K | `mistral` | ~48 GB |
 | Nemotron-3-Nano 30B | 30B | 3.6B | MoE + Mamba-2 | 1M | `nemotron` | ~60 GB |
 | GLM-4.7-Flash | 30B | 3.6B | MoE + MLA | 200K | `glm4` | ~60 GB |
+| Gemma 4 26B-A4B-IT | 26B | 4B | MoE GQA | 128K | `gemma` | ~52 GB |
+| Gemma 4 26B-A4B-IT (FP8) | 26B | 4B | MoE GQA | 128K | `gemma` | ~26 GB |
+| Gemma 4 31B-IT | 31B | 31B | Dense GQA | 128K | `gemma` | ~62 GB |
+| Gemma 4 31B-IT (FP8) | 31B | 31B | Dense GQA | 128K | `gemma` | ~31 GB |
+| Qwen3.6-35B-A3B | 35B | 3B | DeltaNet MoE | 262K | `qwen3_coder` | ~70 GB |
+| Qwen3.6-35B-A3B (FP8) | 35B | 3B | DeltaNet MoE | 262K | `qwen3_coder` | ~35 GB |
+| Qwen3.6-27B | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~54 GB |
+| Qwen3.6-27B (FP8) | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~27 GB |
 
 ### Category B–C — Specialist Subagent & Graph Extraction (2–5B)
 
@@ -53,7 +61,7 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 ```
 .
 ├── configs/
-│   ├── models/cat_a/          # 6 × Category A model configs
+│   ├── models/cat_a/          # 14 × Category A model configs
 │   ├── models/cat_bc/         # 5 × Category B–C model configs
 │   ├── models_exp_a/          # Experiment A serving configs (with benchmark params)
 │   ├── models_exp_bc/         # Experiment B/C serving configs

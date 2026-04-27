@@ -49,6 +49,8 @@ MODEL_CONFIGS=(
     "configs/models_exp_a/glm47_flash.yaml"
     "configs/models_exp_a/gemma4_26b_a4b.yaml"
     "configs/models_exp_a/gemma4_31b.yaml"
+    "configs/models_exp_a/qwen36_27b.yaml"
+    "configs/models_exp_a/qwen36_27b_fp8.yaml"
 )
 
 echo "=== Experiment A: Prompt-Encoded Business Logic ==="

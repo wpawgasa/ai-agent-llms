@@ -283,6 +283,39 @@ ARCH_SPECS: dict[str, dict] = {
         "confidence": "ESTIMATED",
         "source": "FP8 variant of Qwen3.6-35B-A3B; architecture unchanged from BF16",
     },
+    "Qwen/Qwen3.6-27B": {
+        "display": "Qwen3.6-27B (Dense GQA, BF16)",
+        "arch_type": "Dense GQA Transformer",
+        "attention_detail": "GQA (estimated 8:1 ratio, head_dim 128); 262K context; MTP speculative decoding available.",
+        "num_kv_layers": 64,        # ESTIMATED: same layer count as Qwen3-32B family
+        "num_kv_heads": 8,          # ESTIMATED: standard Qwen3 family GQA ratio
+        "head_dim": 128,
+        "moe": False,
+        "mamba_hybrid": False,
+        "mla": False,
+        "turboquant_compatible": True,
+        "turboquant_notes": "Dense GQA — no DeltaNet/GDN layers. No hooks required; fully compatible.",
+        "precision_notes": "BF16 weights ~54 GB — 18 GB KV cache headroom at GPU util 0.90. "
+                           "Stronger BF16 deployment story than Qwen3-32B (~8 GB headroom).",
+        "confidence": "ESTIMATED",
+        "source": "Qwen3.6 model card; KV layer/head counts estimated from Qwen3 family conventions",
+    },
+    "Qwen/Qwen3.6-27B-FP8": {
+        "display": "Qwen3.6-27B (Dense GQA, FP8 weights)",
+        "arch_type": "Dense GQA Transformer — FP8 quantized weights",
+        "attention_detail": "Same architecture as BF16 variant; FP8 weights halve VRAM to ~27 GB.",
+        "num_kv_layers": 64,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "moe": False,
+        "mamba_hybrid": False,
+        "mla": False,
+        "turboquant_compatible": True,
+        "turboquant_notes": "Dense GQA — fully TurboQuant compatible. FP8 weights free ample KV cache headroom.",
+        "precision_notes": "FP8 weights ~27 GB — ~45 GB KV cache headroom at GPU util 0.90.",
+        "confidence": "ESTIMATED",
+        "source": "FP8 variant of Qwen3.6-27B; architecture unchanged from BF16",
+    },
 }
 
 # ---------------------------------------------------------------------------

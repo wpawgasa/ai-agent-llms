@@ -59,6 +59,8 @@ The final deliverable is **three fine-tuned specialist models** — one per task
 | Gemma 4 31B-IT | 31B | 31B | Dense GQA | 128K | `gemma` | ~62 GB |
 | Qwen3.6-35B-A3B | 35B | 3B | DeltaNet + MoE | 262K | `qwen3_coder` | ~70 GB |
 | Qwen3.6-35B-A3B-FP8 | 35B | 3B | DeltaNet + MoE | 262K | `qwen3_coder` | ~35 GB |
+| Qwen3.6-27B | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~54 GB |
+| Qwen3.6-27B-FP8 | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~27 GB |
 
 **Category B–C — Specialist Subagent & Graph Extraction (2–5B):**
 
@@ -81,7 +83,7 @@ llm-workflow-agents-v3/
 │
 ├── configs/                              # All YAML configuration (§3)
 │   ├── models/
-│   │   ├── cat_a/                        # 12 Category A model configs
+│   │   ├── cat_a/                        # 14 Category A model configs
 │   │   │   ├── gemma3_27b.yaml
 │   │   │   ├── qwen3_32b.yaml
 │   │   │   ├── qwen35_35b_a3b.yaml
@@ -91,7 +93,9 @@ llm-workflow-agents-v3/
 │   │   │   ├── gemma4_26b_a4b.yaml
 │   │   │   ├── gemma4_31b.yaml
 │   │   │   ├── qwen36_35b_a3b.yaml
-│   │   │   └── qwen36_35b_a3b_fp8.yaml
+│   │   │   ├── qwen36_35b_a3b_fp8.yaml
+│   │   │   ├── qwen36_27b.yaml
+│   │   │   └── qwen36_27b_fp8.yaml
 │   │   └── cat_bc/                       # 7 Category B–C model configs
 │   │       ├── qwen25_3b.yaml
 │   │       ├── qwen35_4b.yaml

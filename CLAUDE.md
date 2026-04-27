@@ -18,7 +18,7 @@
 ### Task Categories & Model Inventory
 
 **Category A — Prompt-Encoded Business Logic (15–35B):**
-- Gemma 3 27B-IT, Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B, Mistral Small 3.1 24B, Nemotron-3-Nano 30B, GLM-4.7-Flash, Gemma 4 26B-A4B-IT, Gemma 4 31B-IT
+- Gemma 3 27B-IT, Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B, Qwen3.6-27B, Mistral Small 3.1 24B, Nemotron-3-Nano 30B, GLM-4.7-Flash, Gemma 4 26B-A4B-IT, Gemma 4 31B-IT
 
 **Category B–C — Specialist Subagent & Graph Extraction (2–5B):**
 - Qwen2.5-3B-Instruct, Qwen3.5-4B, GLM-4.7-Flash, Gemma-2B, Gemma-3-4B-it, Gemma-4-E4B-it, Gemma-4-E2B-it
@@ -71,14 +71,14 @@ Phase 1 benchmarking runs through `eval/agent_benchmark.py` (invoked by `scripts
 - [x] Project scaffolding (pyproject.toml, requirements.txt, directory structure)
 - [x] Configuration schema and YAML files (`configs/`)
 - [x] Add Gemma 4 model YAML configs (`configs/models/cat_a/gemma4_26b_a4b.yaml`, `gemma4_31b.yaml`; `configs/models/cat_bc/gemma4_e4b.yaml`, `gemma4_e2b.yaml`)
-- [x] Add Qwen3.6 model YAML configs (`configs/models/cat_a/qwen36_35b_a3b.yaml`, `qwen36_35b_a3b_fp8.yaml`)
+- [x] Add Qwen3.6 model YAML configs (`configs/models/cat_a/qwen36_35b_a3b.yaml`, `qwen36_35b_a3b_fp8.yaml`, `qwen36_27b.yaml`, `qwen36_27b_fp8.yaml`)
 - [x] Data generation module (`data/`)
 - [x] Data validation and chat template converter
 
 ### Phase 2: Training
 - [x] LoRA target module registry (`training/lora_targets.py`) — 10 models incl. qwen35_35b_a3b, nemotron_30b
 - [x] Add Gemma 4 model entries to `training/lora_targets.py` (gemma4_26b_a4b, gemma4_31b, gemma4_e4b, gemma4_e2b)
-- [x] Add Qwen3.6 model entry to `training/lora_targets.py` (qwen36_35b_a3b)
+- [x] Add Qwen3.6 model entries to `training/lora_targets.py` (qwen36_35b_a3b, qwen36_27b)
 - [x] Unified SFTTrainer entry point (`training/train_specialist.py` — v2 backward-compat)
 - [x] Graph extraction trainer (`training/train_graph_extractor.py` — v2 backward-compat)
 - [x] Adapter merge utility (`training/merge_adapter.py`) — with quantize_merged param
@@ -153,7 +153,7 @@ Phase 3 benchmark matrix: upstream `turboquant_*` variants + FP8 + KIVI + KVQuan
 | Gemma4 26B-A4B, Gemma4 31B | vLLM v1's KV cache profiler (`gpu_model_runner.py:6598`) fails to `.view()` padded raw tensors across mixed KV cache groups when the sliding:full layer ratio requires padding. | Auto-resolved. `_install_turboquant_engine_config_hook` in `launch_vllm_turboquant.py` detects Gemma-4 via `AutoConfig.architectures` and auto-injects `enforce_eager=True`, which gates out `profile_cudagraph_memory` (`gpu_worker.py:380-385`). Decode throughput drops ~15-25% (no CUDA graphs); numerical correctness unaffected. Restore graph-mode once upstream lands a per-layer-aware profiler. |
 | Nemotron-3-Nano 30B (Mamba hybrid) | `arg_utils.py:1649` raises `NotImplementedError` on any hybrid + `turboquant_*`. Also blocked by separate Mamba+vLLM compat issues (Risk R6). | Use HF `generate()` fallback path; TurboQuant not viable here. |
 
-Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B (+ FP8), Mistral-Small-3.1-24B, Gemma-3-27B, GLM-4.7-Flash, Gemma4-26B-A4B, Gemma4-31B. Qwen3.5/3.6 unblocked via `_install_turboquant_engine_config_hook` which masks `ModelConfig.is_hybrid` to False during `create_engine_config` — DeltaNet/Mamba layer indices in the boundary-skip list are harmless no-ops since those layers don't construct `Attention()` modules. Gemma-4 unblocked as described in the table.
+Compatible targets for the TurboQuant cells: Qwen3-32B, Qwen3.5-35B-A3B, Qwen3.6-35B-A3B (+ FP8), Qwen3.6-27B (+ FP8), Mistral-Small-3.1-24B, Gemma-3-27B, GLM-4.7-Flash, Gemma4-26B-A4B, Gemma4-31B. Qwen3.5/3.6 unblocked via `_install_turboquant_engine_config_hook` which masks `ModelConfig.is_hybrid` to False during `create_engine_config` — DeltaNet/Mamba layer indices in the boundary-skip list are harmless no-ops since those layers don't construct `Attention()` modules. Gemma-4 unblocked as described in the table.
 
 ## Known Risks
 

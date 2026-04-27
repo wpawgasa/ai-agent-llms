@@ -1,0 +1,30 @@
+model:
+  name: "Qwen/Qwen3.6-27B-FP8"
+  family: "qwen35"
+  architecture: "dense_gqa_transformer"
+  params_total: 27_000_000_000
+  params_active: 27_000_000_000
+  context_length: 262144
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 27
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "qwen3_coder"
+  reasoning_parser: "qwen3"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  extra_flags:
+    - "--enable-auto-tool-choice"
+    - "--language-model-only"
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# Official FP8 quantized variant; architecture unchanged from BF16.
+# FP8 weights ~27 GB — leaves ~45 GB KV cache headroom at gpu_memory_utilization=0.90.
+# TurboQuant fully compatible (standard attention only; no GDN hooks needed).
+# MTP speculative decoding available: --speculative-config '{"method": "mtp", "num_speculative_tokens": 1}'

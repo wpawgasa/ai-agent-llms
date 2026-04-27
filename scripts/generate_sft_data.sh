@@ -3,29 +3,33 @@
 #
 # Curriculum-weighted: L1=3000, L2=3000, L3=2502, L4=2001, L5=2001 (~12504 total).
 # Each level is split evenly across three teacher/language runs:
-#   - 1/3: gpt-5.4-mini-2026-03-17           / English        / adversarial preset
-#   - 1/3: gemini-3-flash-preview / Thai           / adversarial preset
-#   - 1/3: gpt-5.4-nano-2026-03-17           / code-switching  / adversarial preset
+#   - 1/3: gpt-5.4-mini-2026-03-17  / English        / <behavior-preset>
+#   - 1/3: gemini-3-flash-preview    / Thai            / <behavior-preset>
+#   - 1/3: gpt-5.4-nano-2026-03-17  / code-switching  / <behavior-preset>
 #
-# Adversarial preset: cooperative=0.45, adversarial_probing=0.25,
-#                     digressing=0.15, invalid_tool_inputs=0.15
+# Behavior presets (--behavior-preset):
+#   default          cooperative=0.60, adversarial_probing=0.15, digressing=0.10, invalid_tool_inputs=0.15
+#   adversarial      cooperative=0.45, adversarial_probing=0.25, digressing=0.15, invalid_tool_inputs=0.15
+#   balanced         cooperative=0.25, adversarial_probing=0.25, digressing=0.25, invalid_tool_inputs=0.25
+#   cooperative_only cooperative=1.00, adversarial_probing=0.00, digressing=0.00, invalid_tool_inputs=0.00
 #
-# Required env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY
+# Required env vars: OPENAI_API_KEY, GEMINI_API_KEY
 #
 # Usage:
 #   ./scripts/generate_sft_data.sh [OPTIONS]
 #
 # Options:
-#   --output-dir <path>   Base output directory (default: data/output)
-#   --seed <n>            Random seed (default: 42)
-#   --samples-per-leg <n> Override per-leg sample count for all levels
-#   --smoke-test          Shorthand for --samples-per-leg 3 (quick pipeline check)
-#   --dry-run             Print commands without executing
+#   --output-dir <path>        Base output directory (default: data/output)
+#   --seed <n>                 Random seed (default: 42)
+#   --samples-per-leg <n>      Override per-leg sample count for all levels
+#   --smoke-test               Shorthand for --samples-per-leg 3 (quick pipeline check)
+#   --behavior-preset <preset> User behavior distribution (default: adversarial)
+#   --dry-run                  Print commands without executing
 #
 # Examples:
-#   OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-... ./scripts/generate_sft_data.sh
+#   OPENAI_API_KEY=sk-... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
 #   ./scripts/generate_sft_data.sh --smoke-test --dry-run
-#   ./scripts/generate_sft_data.sh --samples-per-leg 50
+#   ./scripts/generate_sft_data.sh --samples-per-leg 270 --behavior-preset cooperative_only
 
 set -euo pipefail
 
@@ -36,6 +40,7 @@ OUTPUT_DIR="$PROJECT_ROOT/data/output"
 SEED=42
 DRY_RUN=false
 SAMPLES_PER_LEG=""  # empty = use curriculum defaults
+BEHAVIOR_PRESET="adversarial"
 
 # Load .env if present (mirrors python-dotenv behaviour in _teacher_client.py)
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
@@ -47,11 +52,12 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --output-dir)      OUTPUT_DIR="$2";      shift 2 ;;
-        --seed)            SEED="$2";             shift 2 ;;
-        --samples-per-leg) SAMPLES_PER_LEG="$2"; shift 2 ;;
-        --smoke-test)      SAMPLES_PER_LEG=3;    shift ;;
-        --dry-run)         DRY_RUN=true;          shift ;;
+        --output-dir)       OUTPUT_DIR="$2";       shift 2 ;;
+        --seed)             SEED="$2";             shift 2 ;;
+        --samples-per-leg)  SAMPLES_PER_LEG="$2"; shift 2 ;;
+        --smoke-test)       SAMPLES_PER_LEG=3;    shift ;;
+        --behavior-preset)  BEHAVIOR_PRESET="$2"; shift 2 ;;
+        --dry-run)          DRY_RUN=true;          shift ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
@@ -91,11 +97,11 @@ else
 fi
 
 echo "=== SFT Data Generation ==="
-echo "Output dir:   $DEST"
-echo "Seed:         $SEED"
-echo "Distribution: adversarial (cooperative=0.45, adversarial_probing=0.25, digressing=0.15, invalid_tool_inputs=0.15)"
-echo "Totals:       $TOTALS_MSG"
-echo "Split:        1/3 gpt-5.4-mini-2026-03-17/en  +  1/3 gemini-3-flash-preview/th  +  1/3 gpt-5.4-nano-2026-03-17/code_switch per level"
+echo "Output dir:    $DEST"
+echo "Seed:          $SEED"
+echo "Behavior:      $BEHAVIOR_PRESET"
+echo "Totals:        $TOTALS_MSG"
+echo "Split:         1/3 gpt-5.4-mini-2026-03-17/en  +  1/3 gemini-3-flash-preview/th  +  1/3 gpt-5.4-nano-2026-03-17/code_switch per level"
 echo "==========================="
 
 for LEVEL in L1 L2 L3 L4 L5; do
@@ -115,7 +121,7 @@ meta = generate_workflow_dataset(
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='en',
-    behavior_preset='adversarial',
+    behavior_preset='$BEHAVIOR_PRESET',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
@@ -131,7 +137,7 @@ meta = generate_workflow_dataset(
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='th',
-    behavior_preset='adversarial',
+    behavior_preset='$BEHAVIOR_PRESET',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
@@ -147,7 +153,7 @@ meta = generate_workflow_dataset(
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='code_switch',
-    behavior_preset='adversarial',
+    behavior_preset='$BEHAVIOR_PRESET',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
