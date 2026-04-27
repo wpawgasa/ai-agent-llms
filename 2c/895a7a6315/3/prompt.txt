@@ -1,0 +1,5 @@
+Review data format and quality and justify generated data in @data/output/sft/task_a whether it's appropriate for fine-tuning LLMs for workflow automation (instruction following) and tool calling. Just sampling 2-3 rows from each file.
+
+---
+
+Document the previous justification
