@@ -23,18 +23,27 @@ stages:
 
   task_a_sft:
     desc: >-
-      12 504 adversarial curriculum conversations for SFT.
+      4 450 raw conversations generated for SFT, then cleaned to 4 445.
       Requires OPENAI_API_KEY and GEMINI_API_KEY.
-    cmd: ./scripts/generate_sft_data.sh
+    cmd: >-
+      ./scripts/generate_sft_data.sh &&
+      python scripts/clean_task_a_sft.py
+        --input-dir data/output/sft/task_a
+        --output-dir data/output/sft/task_a_cleaned
+        --quiet
     deps:
       - scripts/generate_sft_data.sh
+      - scripts/clean_task_a_sft.py
       - src/llm_workflow_agents/data/generate_workflows.py
       - data/templates/workflow_prompt_template.txt
       - data/templates/tool_schemas_L1_to_L5.json
     outs:
       - data/output/sft/task_a
-    # Levels L1–L5, seed=42, behavior=adversarial
-    # Legs: en/gpt-5.4-nano, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
+      - data/output/sft/task_a_cleaned
+    # Levels L1–L5, seed=42, behavior=adversarial (87.5%) + cooperative_only (12.5%)
+    # Legs: en/gpt-5.4-mini, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
+    # Cleanup: drops 5 truncated rows, strips 264 role-confused tool messages,
+    #          flags 476 empty-terminal convs with terminal_reached=false
 
   task_a_grpo:
     desc: >-
