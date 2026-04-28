@@ -73,6 +73,13 @@ with open(sys.argv[1]) as f:
 print(c['model']['name'])
 " "$MODEL_CONFIG")
 
+STOCHASTIC_TRIALS=$(python3 -c "
+import yaml, sys
+with open(sys.argv[1]) as f:
+    c = yaml.safe_load(f)
+print(c.get('inference', {}).get('stochastic_trials', 5))
+" "$MODEL_CONFIG")
+
 mkdir -p "$RESULTS_DIR"
 
 echo "=== Experiment A (single model): Prompt-Encoded Business Logic ==="
@@ -84,6 +91,7 @@ echo "Results dir:    $RESULTS_DIR"
 echo "Max samples:    ${MAX_SAMPLES} (0=all)"
 echo "Max model len:  ${MAX_MODEL_LEN:-(from YAML)}"
 echo "Max num seqs:   ${MAX_NUM_SEQS:-(vLLM default 128)}"
+echo "Stoch trials:   $STOCHASTIC_TRIALS (from YAML inference.stochastic_trials, 0=skip)"
 echo "=================================================================="
 
 LAUNCH_ARGS=(--kv-cache-dtype "$KV_CACHE_DTYPE")
@@ -129,12 +137,13 @@ fi
 # Run evaluation
 RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}.json"
 python3 -m llm_workflow_agents.eval.agent_benchmark \
-    --model           "$MODEL_NAME" \
-    --kv-cache-dtype  "$KV_CACHE_DTYPE" \
-    --output          "$RESULT_FILE" \
-    --data            "$DATA_DIR" \
-    --max-samples     "$MAX_SAMPLES" \
-    --log-level       DEBUG \
+    --model             "$MODEL_NAME" \
+    --kv-cache-dtype    "$KV_CACHE_DTYPE" \
+    --output            "$RESULT_FILE" \
+    --data              "$DATA_DIR" \
+    --max-samples       "$MAX_SAMPLES" \
+    --stochastic-trials "$STOCHASTIC_TRIALS" \
+    --log-level         DEBUG \
     2>&1 | tee "${RESULT_FILE%.json}.log" || true
 
 echo ""

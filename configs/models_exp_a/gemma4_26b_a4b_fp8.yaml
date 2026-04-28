@@ -20,7 +20,7 @@ serving:
 inference:
   temperature_deterministic: 0.0
   temperature_stochastic: 0.7
-  stochastic_trials: 5
+  stochastic_trials: 0
   max_tokens: 2048
 
 # FP8 dynamic-quantized MoE: 26B total / ~4B active parameters.
