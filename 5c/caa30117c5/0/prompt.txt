@@ -1,0 +1,13 @@
+Justify Task A's  SFT data distribution
+
+---
+
+Update @docs/task_a_data_quality_review.md with the actual generated data
+
+---
+
+Is the SFT data enough to fine-tune?
+
+---
+
+Clean up as your suggestions

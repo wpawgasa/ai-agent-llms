@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5ccaa30117c5",
+  "session_id": "4feca7fc-5e19-4105-a057-076f416f2816",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-28T04:46:21.951523417Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/sft_cat_a.yaml",
+    "scripts/clean_task_a_sft.py",
+    "src/llm_workflow_agents/training/rewards/reward_business_logic.py",
+    "tests/unit/test_clean_task_a_sft.py",
+    "tests/unit/test_reward_business_logic_terminal_flag.py"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "ef8b87fff1dd",
+  "token_usage": {
+    "input_tokens": 67,
+    "cache_creation_tokens": 266116,
+    "cache_read_tokens": 3419664,
+    "output_tokens": 31697,
+    "api_call_count": 48
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-28T04:46:21.505590351Z",
+    "agent_lines": 401,
+    "human_added": 138,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 539,
+    "agent_percentage": 74.39703153988869
+  }
+}

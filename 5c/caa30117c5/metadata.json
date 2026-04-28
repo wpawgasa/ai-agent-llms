@@ -1,0 +1,29 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5ccaa30117c5",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/sft_cat_a.yaml",
+    "scripts/clean_task_a_sft.py",
+    "src/llm_workflow_agents/training/rewards/reward_business_logic.py",
+    "tests/unit/test_clean_task_a_sft.py",
+    "tests/unit/test_reward_business_logic_terminal_flag.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5c/caa30117c5/0/metadata.json",
+      "transcript": "/5c/caa30117c5/0/full.jsonl",
+      "content_hash": "/5c/caa30117c5/0/content_hash.txt",
+      "prompt": "/5c/caa30117c5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 67,
+    "cache_creation_tokens": 266116,
+    "cache_read_tokens": 3419664,
+    "output_tokens": 31697,
+    "api_call_count": 48
+  }
+}
