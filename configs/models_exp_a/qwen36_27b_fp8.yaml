@@ -1,7 +1,7 @@
 model:
   name: "Qwen/Qwen3.6-27B-FP8"
   family: "qwen35"
-  architecture: "dense_gqa_transformer"
+  architecture: "hybrid_deltanet_transformer"
   params_total: 27_000_000_000
   params_active: 27_000_000_000
   context_length: 262144
@@ -12,8 +12,9 @@ serving:
   engine: "vllm"
   tool_call_parser: "qwen3_coder"
   chat_template: "chatml"
-  gpu_memory_utilization: 0.90
+  gpu_memory_utilization: 0.95
   max_model_len: 8192
+  max_num_seqs: 256
   enforce_eager: false
 
 inference:

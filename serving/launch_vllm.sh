@@ -14,6 +14,7 @@
 #   serving.tool_call_parser → --tool-call-parser
 #   serving.gpu_memory_utilization → --gpu-memory-utilization
 #   serving.max_model_len  → --max-model-len
+#   serving.max_num_seqs   → --max-num-seqs (optional)
 #   serving.enforce_eager  → --enforce-eager (if true)
 #   serving.port           → --port (default: 8000, overridable via --port CLI arg)
 
@@ -58,6 +59,7 @@ MODEL_NAME=$(parse_yaml "model.name" "")
 TOOL_PARSER=$(parse_yaml "serving.tool_call_parser" "hermes")
 GPU_UTIL=$(parse_yaml "serving.gpu_memory_utilization" "0.90")
 MAX_LEN=$(parse_yaml "serving.max_model_len" "8192")
+MAX_NUM_SEQS=$(parse_yaml "serving.max_num_seqs" "")
 ENFORCE_EAGER=$(parse_yaml "serving.enforce_eager" "false")
 PORT=$(parse_yaml "serving.port" "8000")
 
@@ -123,6 +125,8 @@ fi
 
 if [ -n "$MAX_NUM_SEQS_OVERRIDE" ]; then
     VLLM_ARGS+=(--max-num-seqs "$MAX_NUM_SEQS_OVERRIDE")
+elif [ -n "$MAX_NUM_SEQS" ]; then
+    VLLM_ARGS+=(--max-num-seqs "$MAX_NUM_SEQS")
 fi
 
 # NOTE: Do NOT force --attention-backend TURBOQUANT for turboquant_* dtypes.
