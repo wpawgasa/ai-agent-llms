@@ -13,11 +13,11 @@ serving:
   tool_call_parser: "qwen3_coder"
   chat_template: "chatml"
   gpu_memory_utilization: 0.90
-  max_model_len: 8192
+  max_model_len: 16384
   enforce_eager: false
 
 inference:
   temperature_deterministic: 0.0
   temperature_stochastic: 0.7
-  stochastic_trials: 5
+  stochastic_trials: 0
   max_tokens: 2048
