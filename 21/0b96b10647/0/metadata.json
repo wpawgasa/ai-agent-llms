@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "210b96b10647",
+  "session_id": "4feca7fc-5e19-4105-a057-076f416f2816",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-28T04:51:58.752264886Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "dvc.yaml"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "5e663d324666",
+  "token_usage": {
+    "input_tokens": 75,
+    "cache_creation_tokens": 269380,
+    "cache_read_tokens": 4050619,
+    "output_tokens": 32947,
+    "api_call_count": 54
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-28T04:51:58.251970301Z",
+    "agent_lines": 13,
+    "human_added": 37,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 50,
+    "agent_percentage": 26
+  }
+}

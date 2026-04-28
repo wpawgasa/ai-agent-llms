@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "210b96b10647",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "dvc.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/21/0b96b10647/0/metadata.json",
+      "transcript": "/21/0b96b10647/0/full.jsonl",
+      "content_hash": "/21/0b96b10647/0/content_hash.txt",
+      "prompt": "/21/0b96b10647/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 75,
+    "cache_creation_tokens": 269380,
+    "cache_read_tokens": 4050619,
+    "output_tokens": 32947,
+    "api_call_count": 54
+  }
+}
