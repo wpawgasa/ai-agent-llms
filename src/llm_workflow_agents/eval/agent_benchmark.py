@@ -391,6 +391,34 @@ def _replay_conversation(
             predicted.append(msg)
 
         elif role == "assistant":
+            # Some samples open with a system-initiated assistant greeting
+            # before any user turn (system → assistant → user → ...). Models
+            # can't be asked to predict a preamble issued before any user
+            # input, and Qwen3-family chat templates explicitly reject a
+            # message list with no user query. Use the ground-truth turn
+            # as a fixed preamble: append to context and predictions, no
+            # model call, no recorded latency.
+            if not any(c.get("role") == "user" for c in context):
+                logger.info(
+                    "skip_preamble_assistant_turn",
+                    reason="no_user_in_context",
+                    turn=len(predicted),
+                )
+                preamble: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": msg.get("content", ""),
+                }
+                if msg.get("tool_calls"):
+                    preamble["tool_calls"] = msg["tool_calls"]
+                    pending_tool_call_ids.clear()
+                    for tc in msg["tool_calls"]:
+                        tc_id = tc.get("id", "")
+                        if tc_id:
+                            pending_tool_call_ids.append(tc_id)
+                context.append(preamble)
+                predicted.append(msg)
+                continue
+
             content, raw_tool_calls, latency, ttft = _call_vllm(
                 endpoint, model, context, temperature, tools=tools,
                 enable_thinking=enable_thinking,
