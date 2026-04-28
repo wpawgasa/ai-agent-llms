@@ -66,15 +66,25 @@ def reward_business_logic(
         r_format = format_compliance_check(completion)
 
         terminal = gt.get("terminal_state", "")
-        r_completion = 1.0 if reached_terminal(completion, terminal) else 0.0
-
-        score = (
-            W_STATE_TRANSITION * r_state
-            + W_TOOL_CALL_F1 * r_tool
-            + W_CHAIN_PROPAGATION * r_chain
-            + W_FORMAT_COMPLIANCE * r_format
-            + W_TASK_COMPLETION * r_completion
-        )
+        # terminal_reached=False means the data never reached a terminal state
+        # (e.g. adversarial L4/L5 timeouts). Skip the completion sub-reward and
+        # rescale the remaining weights to sum to 1 to keep scores in [0, 1].
+        if not gt.get("terminal_reached", True):
+            score = (
+                W_STATE_TRANSITION * r_state
+                + W_TOOL_CALL_F1 * r_tool
+                + W_CHAIN_PROPAGATION * r_chain
+                + W_FORMAT_COMPLIANCE * r_format
+            ) / (1.0 - W_TASK_COMPLETION)
+        else:
+            r_completion = 1.0 if reached_terminal(completion, terminal) else 0.0
+            score = (
+                W_STATE_TRANSITION * r_state
+                + W_TOOL_CALL_F1 * r_tool
+                + W_CHAIN_PROPAGATION * r_chain
+                + W_FORMAT_COMPLIANCE * r_format
+                + W_TASK_COMPLETION * r_completion
+            )
         rewards.append(max(0.0, min(1.0, score)))
 
     return rewards

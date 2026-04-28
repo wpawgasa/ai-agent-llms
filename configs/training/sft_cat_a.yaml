@@ -25,7 +25,7 @@ training:
   packing: true
 
 data:
-  source: "data/output/task_a"
+  source: "data/output/sft/task_a_cleaned"
   format: "chatml"
   splits:
     train: 0.85
