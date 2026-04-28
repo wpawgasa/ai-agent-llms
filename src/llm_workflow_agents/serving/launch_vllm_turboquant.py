@@ -53,6 +53,11 @@ def _peek_kv_cache_dtype(argv: list[str]) -> str:
 
 _WIDE_HEAD_DIM_THRESHOLD = 256
 
+# Process-local sentinel for the Fix 3 mm_prefix mask. Tracks whether we have
+# already replaced ``ModelConfig.is_mm_prefix_lm`` with a constant-False
+# property so we don't reinstall on subsequent ``create_engine_config`` calls.
+_MM_PREFIX_LM_MASKED = False
+
 
 def _install_gemma4_mixed_backend_hook() -> None:
     import structlog
@@ -131,25 +136,32 @@ def _model_has_gdn_layers(hf_cfg) -> bool:
 
 
 def _install_turboquant_engine_config_hook() -> None:
-    """Wrap ``EngineArgs.create_engine_config`` to clear two upstream blockers.
+    """Wrap ``EngineArgs.create_engine_config`` to clear upstream blockers.
 
     Verified against vLLM files:
       vllm/engine/arg_utils.py:1645-1668     (hybrid guard)
       vllm/config/model.py:1563-1572         (is_hybrid property)
       vllm/v1/worker/gpu_worker.py:380-385   (profile_cudagraph_memory gate)
       vllm/v1/worker/gpu_model_runner.py:6598 (reshape failure root)
+      vllm/model_executor/layers/attention/attention.py:293 (is_mm_prefix_lm gate)
+      vllm/v1/attention/backend.py:296-299 (mm_prefix backend rejection)
 
     Fix 1 (hybrid): upstream raises NotImplementedError on any hybrid model +
-    turboquant_* dtype. Mamba/DeltaNet layers never hit the skip-layer check
-    (they don't construct ``Attention()``), so absolute-index boundary skips
-    are harmless. We temporarily mask ``ModelConfig.is_hybrid`` to False
-    inside create_engine_config only; downstream hybrid routing is
-    unaffected once the wrapper returns.
+    turboquant_* dtype. Mask ``ModelConfig.is_hybrid`` to False inside
+    create_engine_config only; downstream hybrid routing is unaffected.
 
     Fix 2 (Gemma-4 profiler): mixed KV cache groups break the view() in
     _reshape_kv_cache_tensors during profile_cudagraph_memory. enforce_eager
-    skips that path (gpu_worker.py:382-383 gates on cudagraph_mode != NONE),
-    at a ~15-25% decode throughput cost. Auto-inject for Gemma-4 only.
+    skips that path at a ~15-25% decode throughput cost.
+
+    Fix 3 (Gemma-4 mm_prefix, vLLM 0.20.0+): the per-layer attention selector
+    sets ``use_mm_prefix=True`` from ``model_config.is_mm_prefix_lm``. TURBOQUANT
+    + FLASH_ATTN + FLASHINFER all reject mm_prefix=True; only TRITON_UNIFIED
+    accepts, and it doesn't support ``turboquant_*`` kv_cache_dtype. Result:
+    no valid backend. Workaround: mask ``ModelConfig.is_mm_prefix_lm`` to False
+    for the duration of attention layer construction (held until
+    ``load_model`` finishes). Safe for text-only inputs (Phase 3 benchmark);
+    do NOT use with multimodal requests.
     """
     import structlog
     from vllm.config.model import ModelConfig
@@ -223,6 +235,23 @@ def _install_turboquant_engine_config_hook() -> None:
                 model=self.model,
             )
             self.gdn_prefill_backend = "triton"
+
+        # Fix 3: Gemma-4 (and any future mm-prefix LM) needs is_mm_prefix_lm
+        # masked to False so TURBOQUANT/FLASH_ATTN backend selection can
+        # succeed at Attention.__init__ time (vLLM 0.20.0+ rejects mm_prefix
+        # on every backend except TRITON_UNIFIED, which can't accept
+        # turboquant_* kv_cache_dtype). Mask must persist past
+        # create_engine_config because Attention.__init__ runs during
+        # load_model. Safe only for text-only inputs.
+        global _MM_PREFIX_LM_MASKED
+        if is_gemma4 and not _MM_PREFIX_LM_MASKED:
+            ModelConfig.is_mm_prefix_lm = property(lambda _self: False)
+            _MM_PREFIX_LM_MASKED = True
+            logger.warning(
+                "gemma4_masking_is_mm_prefix_lm",
+                reason="vLLM 0.20.0 mm_prefix gate blocks all turboquant-compatible backends",
+                model=self.model,
+            )
 
         ModelConfig.is_hybrid = property(lambda _self: False)
         try:

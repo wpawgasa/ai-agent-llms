@@ -1,15 +1,18 @@
 # Core ML
 torch>=2.4.0
-# vllm 0.19.0 caps transformers<5, so we declare >=4.56.0 here to satisfy the resolver.
-# After install, override with transformers>=5.0 from source for Gemma 4 support:
-#   uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
-transformers>=4.56.0
+# Pinned: vLLM 0.20.0's per-layer attention selector reads
+# model_config.is_mm_prefix_lm (attention.py:293) and exposes
+# kv_cache_dtype_skip_layers; transformers 5.6.2 ships the Gemma-4 +
+# Qwen3.6 model classes our launcher hooks reference. Bumping either
+# without revalidating launch_vllm_turboquant.py and vllm_plugin.py
+# is a known-foot-gun.
+transformers==5.6.2
 peft>=0.14.0
 trl>=0.15.0
 accelerate>=0.34.0
 
 # Inference
-vllm>=0.19.0
+vllm==0.20.0
 
 # Quantization kernels
 triton>=3.0.0

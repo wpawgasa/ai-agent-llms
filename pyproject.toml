@@ -14,6 +14,10 @@ authors = [{ name = "wpawgasa" }]
 dependencies = [
     # Core ML
     "torch>=2.11.0",
+    # Pinned: see requirements.txt for rationale (vLLM 0.20.0 + Gemma-4
+    # mm_prefix mask + Qwen3.6 hybrid hooks in launch_vllm_turboquant.py).
+    "transformers==5.6.2",
+    "vllm==0.20.0",
     "peft>=0.14.0",
     "trl>=0.15.0",
     "accelerate>=0.34.0",
