@@ -1,0 +1,29 @@
+Do we need hold-out dataset for evaluation?
+
+---
+
+Estimate time for task A's SFT training on a single H100 GPU
+
+---
+
+I think we have ~4,400 conversation flows in @data/output/sft/task_a_cleaned and let's target Gemma4-26B-a4b with UnSloth FP8 fine-tuning framework
+
+---
+
+You should actually check the number of flows in @data/output/sft/task_a_cleaned
+
+---
+
+Would `max_seq_length` of 16384 be fit for Gemma-4?
+
+---
+
+Gemma4's context length is 256k https://ai.google.dev/gemma/docs/core/model_card_4 Should we adjust configs accordingly?
+
+---
+
+Difference between max_seq_length and max_model_len
+
+---
+
+Where should i set max_seq_length?

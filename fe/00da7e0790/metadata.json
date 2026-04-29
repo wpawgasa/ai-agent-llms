@@ -1,0 +1,34 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "fe00da7e0790",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "configs/models/cat_a/gemma4_26b_a4b.yaml",
+    "configs/models/cat_a/gemma4_26b_a4b_fp8.yaml",
+    "configs/models/cat_a/gemma4_31b.yaml",
+    "configs/models/cat_a/gemma4_31b_fp8.yaml",
+    "configs/models/cat_bc/gemma4_e2b.yaml",
+    "configs/models/cat_bc/gemma4_e4b.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b_fp8.yaml",
+    "configs/models_exp_a/gemma4_31b.yaml",
+    "configs/models_exp_a/gemma4_31b_fp8.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fe/00da7e0790/0/metadata.json",
+      "transcript": "/fe/00da7e0790/0/full.jsonl",
+      "content_hash": "/fe/00da7e0790/0/content_hash.txt",
+      "prompt": "/fe/00da7e0790/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 58,
+    "cache_creation_tokens": 136017,
+    "cache_read_tokens": 1192849,
+    "output_tokens": 15835,
+    "api_call_count": 22
+  }
+}
