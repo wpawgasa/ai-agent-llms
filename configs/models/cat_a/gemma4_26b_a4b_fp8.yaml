@@ -4,7 +4,7 @@ model:
   architecture: "moe_gqa_transformer"
   params_total: 26_000_000_000
   params_active: 4_000_000_000
-  context_length: 131072
+  context_length: 262144
   precision: "fp8_e4m3"
   vram_estimate_gb: 26
 

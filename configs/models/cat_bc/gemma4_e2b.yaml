@@ -5,7 +5,7 @@ model:
   architecture: "dense_gqa_transformer"
   params_total: 2_000_000_000
   params_active: 2_000_000_000
-  context_length: 131072
+  context_length: 262144
   precision: "bfloat16"
   vram_estimate_gb: 4
 
