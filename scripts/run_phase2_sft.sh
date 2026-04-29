@@ -42,7 +42,7 @@ done
 
 # ── Environment ───────────────────────────────────────────────────────────────
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
-source .venv/bin/activate
+source .venv-train/bin/activate
 
 # ── Validate inputs ───────────────────────────────────────────────────────────
 [[ -f "$MODEL_CONFIG" ]] || { echo "Error: model config not found: $MODEL_CONFIG" >&2; exit 1; }

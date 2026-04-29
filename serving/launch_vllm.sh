@@ -20,6 +20,16 @@
 
 set -euo pipefail
 
+# Activate the inference venv (.venv-infer) if no venv is currently active.
+# Inference uses vLLM 0.20.0 + transformers 5.6.2; training (.venv-train)
+# pins the older Unsloth-compatible stack and would fail to load 0.20.0.
+LAUNCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAUNCH_PROJECT_ROOT="$(cd "$LAUNCH_SCRIPT_DIR/.." && pwd)"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$LAUNCH_PROJECT_ROOT/.venv-infer/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$LAUNCH_PROJECT_ROOT/.venv-infer/bin/activate"
+fi
+
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <model_config.yaml> [--kv-cache-dtype <dtype>]"
     exit 1

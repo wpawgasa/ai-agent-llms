@@ -1,0 +1,56 @@
+# Inference / serving environment (.venv-infer).
+#
+# Install via:
+#   ./scripts/install_infer.sh
+#
+# vLLM 0.20.0 + transformers 5.6.2 are required for the per-layer
+# attention selector (model_config.is_mm_prefix_lm) and the Gemma-4 +
+# Qwen3.6 model classes referenced by launch_vllm_turboquant.py and
+# vllm_plugin.py.
+#
+# vLLM 0.20.0 has no cu130 wheel published. The cu129 wheel from PyPI
+# runs on CUDA 13 via forward compatibility.
+
+torch>=2.11.0
+transformers==5.6.2
+trl>=0.15.0
+peft>=0.14.0
+accelerate>=0.34.0
+
+# Inference
+vllm==0.20.0
+
+# Quantization kernels
+triton>=3.0.0
+# flash-attn intentionally omitted: build fails on CUDA 13 hosts when
+# uv's build isolation pulls cu129 torch. vLLM ships its own FA path.
+# To install manually:  uv pip install flash-attn --no-build-isolation
+
+# Data & evaluation (eval harness imports same deps as training)
+datasets>=2.19.0
+networkx>=3.2
+jsonschema>=4.21.0
+
+# Analysis & visualization
+numpy>=1.26.0
+scipy>=1.12.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Config & logging
+pydantic>=2.9.0
+pyyaml>=6.0
+structlog>=24.0.0
+wandb>=0.17.0
+
+# Constrained decoding
+outlines>=0.0.40
+xgrammar>=0.1.0
+
+# Teacher-model SDKs (kept for parity with train env)
+google-genai>=1.70.0
+anthropic>=0.88.0
+python-dotenv>=1.2.2
+
+# Report generation
+python-docx>=1.1

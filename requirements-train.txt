@@ -1,0 +1,72 @@
+# Training environment (.venv-train).
+#
+# Install via:
+#   ./scripts/install_train.sh
+#
+# Pins fixed by Unsloth's resolver — Unsloth requires this exact
+# torch / transformers / trl trio. Bumping any of them will likely
+# break the FastLanguageModel patches.
+#
+# vLLM 0.19.1 is the latest version with a published cu130 wheel.
+# The wheel is installed from the GitHub release URL by the install
+# script (PyPI only serves the cu129 build).
+
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
+# transformers is overridden to git HEAD by install_train.sh — newer model
+# classes (e.g. RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic) require v5.7+ dev.
+# If installing manually:
+#   pip install "transformers @ git+https://github.com/huggingface/transformers.git"
+transformers>=4.57.6
+trl==0.24.0
+peft>=0.14.0
+accelerate>=0.34.0
+
+# vLLM (cu130 wheel installed from GitHub release in install_train.sh)
+vllm==0.19.1
+
+# Unsloth + companions
+unsloth==2026.4.8
+unsloth-zoo==2026.4.9
+bitsandbytes>=0.49
+xformers>=0.0.35
+torchao>=0.17
+
+# Quantization kernels
+triton>=3.0.0
+
+# Data & evaluation
+datasets>=2.19.0
+networkx>=3.2
+jsonschema>=4.21.0
+
+# Analysis & visualization
+numpy>=1.26.0
+scipy>=1.12.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Config & logging
+pydantic>=2.9.0
+pyyaml>=6.0
+structlog>=24.0.0
+wandb>=0.17.0
+
+# Constrained decoding
+outlines>=0.0.40
+
+# Teacher-model SDKs (data generation)
+google-genai>=1.70.0
+anthropic>=0.88.0
+python-dotenv>=1.2.2
+
+# Report generation
+python-docx>=1.1
+
+# Dev
+pytest>=8.0
+pytest-cov>=5.0
+pytest-asyncio>=0.23
+ruff>=0.6.0
+mypy>=1.11

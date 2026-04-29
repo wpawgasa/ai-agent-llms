@@ -12,16 +12,12 @@ requires-python = ">=3.11"
 authors = [{ name = "wpawgasa" }]
 
 dependencies = [
-    # Core ML
-    "torch>=2.11.0",
-    # Pinned: see requirements.txt for rationale (vLLM 0.20.0 + Gemma-4
-    # mm_prefix mask + Qwen3.6 hybrid hooks in launch_vllm_turboquant.py).
-    "transformers==5.6.2",
-    "vllm==0.20.0",
+    # Core (shared by train + infer venvs). Torch / transformers / vLLM are
+    # pinned per-venv via the `train` and `infer` extras below — they conflict
+    # and cannot coexist in one environment. See requirements-{train,infer}.txt
+    # and scripts/install_{train,infer}.sh.
     "peft>=0.14.0",
-    "trl>=0.15.0",
     "accelerate>=0.34.0",
-    # Quantization
     "triton>=3.0.0",
     # Data & evaluation
     "datasets>=2.19.0",
@@ -47,6 +43,46 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Training venv (`.venv-train`). Pins set by Unsloth's resolver — Unsloth
+# requires this exact torch/transformers/trl trio. vLLM 0.19.1 is the latest
+# version with a published cu130 wheel (installed via scripts/install_train.sh
+# from the GitHub release URL, since PyPI only serves the cu129 build).
+train = [
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "torchaudio==2.10.0",
+    # transformers is overridden to git HEAD by install_train.sh — Unsloth's
+    # released wheel pins 4.57.6, but loading newer model classes (e.g.
+    # `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic`) requires the v5.7+ dev
+    # branch. Keep the pin permissive so uv doesn't fight the override.
+    "transformers>=4.57.6",
+    "trl==0.24.0",
+    "vllm==0.19.1",
+    "unsloth==2026.4.8",
+    "unsloth-zoo==2026.4.9",
+    "bitsandbytes>=0.49",
+    "xformers>=0.0.35",
+    "torchao>=0.17",
+]
+
+# Inference venv (`.venv-infer`). vLLM 0.20.0 + transformers 5.6.2 are
+# required for the Gemma-4 mm_prefix mask + Qwen3.6 hybrid hooks in
+# launch_vllm_turboquant.py and vllm_plugin.py. vLLM 0.20.0 has no cu130
+# wheel published; the cu129 wheel from PyPI runs on CUDA 13 via forward
+# compatibility.
+infer = [
+    "torch>=2.11.0",
+    "transformers==5.6.2",
+    "trl>=0.15.0",
+    "vllm==0.20.0",
+    # flash-attn intentionally omitted: its sdist build fails when uv's build
+    # isolation pulls cu129 torch into the build env on a CUDA 13 host. vLLM
+    # ships its own FlashAttention path, so this is optional. To install
+    # manually against a matching torch, pre-install torch then:
+    #   uv pip install flash-attn --no-build-isolation
+    "xgrammar>=0.1.0",
+]
+
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -73,6 +109,12 @@ url = "https://download.pytorch.org/whl/cu130"
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 torchaudio = { index = "pytorch-cu130" }
+
+# flash-attn doesn't declare torch as a build dep but its setup.py imports
+# torch at build time. Inject torch into its build env so uv can resolve it
+# without --no-build-isolation.
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

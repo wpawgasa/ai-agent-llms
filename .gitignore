@@ -9,7 +9,15 @@ build/
 # Virtual environments
 venv/
 .venv/
+.venv-train/
+.venv-infer/
 env/
+
+# Unsloth on-disk JIT cache
+unsloth_compiled_cache/
+
+# Local run scratch (patched configs, etc.)
+.runs/
 
 # IDE
 .vscode/

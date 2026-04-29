@@ -102,24 +102,70 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 
 ## Setup
 
-**Requirements:** Python 3.11+, CUDA 12.x, NVIDIA H100 (80 GB recommended)
+**Requirements:** Python 3.11+, CUDA 13.0, NVIDIA H100 (80 GB recommended)
+
+### Two-venv layout
+
+Training and inference pin mutually-incompatible versions of `torch`,
+`transformers`, and `vllm`, so the project ships with **two separate
+virtualenvs**:
+
+| Venv | Purpose | Key pins |
+|------|---------|----------|
+| `.venv-train` | Phase 2 SFT + GRPO (Unsloth) | torch 2.10.0+cu130, vllm 0.19.1+cu130, transformers 4.57.6, trl 0.24.0, unsloth 2026.4.x |
+| `.venv-infer` | Phase 1/3/4 serving + benchmarks (vLLM) | torch 2.11.0+cu130, vllm 0.20.0, transformers 5.6.2 |
+
+Each venv is bootstrapped by its own installer script:
 
 ```bash
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create environment and install dependencies
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Bootstrap the training environment (.venv-train)
+./scripts/install_train.sh
 
-# Install vllm and transformers from source (not in pyproject.toml due to
-# version conflicts between vllm's torch pin and our torch>=2.11.0 requirement):
-uv pip install "vllm @ git+https://github.com/vllm-project/vllm.git"
-uv pip install "transformers @ git+https://github.com/huggingface/transformers.git"
-
-# If uv reports a cache permission error (e.g. on shared Shadeform / cloud nodes):
-UV_CACHE_DIR=/tmp/uv-cache uv pip install -e ".[dev]"
+# Bootstrap the inference / serving environment (.venv-infer)
+./scripts/install_infer.sh
 ```
+
+The installers call `uv venv` + `uv pip install -e ".[train,dev]"` (or
+`".[infer,dev]"`) using the corresponding extras defined in
+`pyproject.toml`. `scripts/install_train.sh` additionally pulls the
+`vllm-0.19.1+cu130` wheel from the GitHub release (PyPI only ships the
+cu129 build).
+
+### Activating
+
+```bash
+# For training, data generation, evaluation runs that import unsloth:
+source .venv-train/bin/activate
+
+# For vLLM-backed serving and the Phase 3 quantization benchmarks:
+source .venv-infer/bin/activate
+```
+
+The runner scripts pick the right venv automatically:
+- `scripts/run_phase2_sft.sh` sources `.venv-train`.
+- `serving/launch_vllm.sh` sources `.venv-infer` if no venv is currently active.
+
+### Locked requirements files
+
+If you prefer plain `pip` over `uv`, `requirements-train.txt` and
+`requirements-infer.txt` mirror the two extras (the cu130 vLLM wheel
+URL still has to be installed manually for training).
+
+### Notes
+
+- **`flash-attn` is not in the `infer` extras.** Its sdist build fails on CUDA 13 hosts under uv's build isolation (cu129 torch gets pulled into the build env). vLLM 0.20.0 ships its own FlashAttention path, so this is optional. To install manually after `install_infer.sh`:
+  ```bash
+  source .venv-infer/bin/activate
+  uv pip install flash-attn --no-build-isolation
+  ```
+- **vLLM 0.20.0 has no published cu130 wheel.** The cu129 build runs on CUDA 13 via forward compatibility.
+- **Cache permission errors** on shared cloud nodes (Shadeform etc.):
+  ```bash
+  UV_CACHE_DIR=/tmp/uv-cache ./scripts/install_train.sh
+  ```
 
 Copy `.env.example` to `.env` and fill in your API keys:
 
