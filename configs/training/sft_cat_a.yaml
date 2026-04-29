@@ -7,22 +7,29 @@ model:
   config_path: null
 
 lora:
-  rank: 64
-  alpha: 128
-  dropout: 0.05
-  target_modules: "auto"
+  # Aligned to Unsloth's Gemma-4 example: r == alpha, dropout=0.
+  # See https://unsloth.ai/docs/models/gemma-4/train.
+  rank: 16
+  alpha: 16
+  dropout: 0
+  target_modules: "auto"   # ignored for Gemma-4 (toggle-flag form used)
   freeze_router: true
+  seed: 3407
 
 training:
   precision: "bf16"
   learning_rate: 5.0e-5
   lr_scheduler: "cosine"
   warmup_ratio: 0.05
+  # Per-device=1, grad-accum to hit effective_batch_size, per Unsloth.
+  per_device_train_batch_size: 1
   effective_batch_size: 8
+  optim: "adamw_8bit"
+  weight_decay: 0.001
   num_epochs: 3
-  max_seq_length: 16384
+  max_seq_length: 8192
   gradient_checkpointing: true
-  packing: true
+  packing: false
 
 data:
   source: "data/output/sft/task_a_cleaned"

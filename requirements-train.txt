@@ -14,10 +14,10 @@
 torch==2.10.0
 torchvision==0.25.0
 torchaudio==2.10.0
-# transformers is overridden to git HEAD by install_train.sh — newer model
-# classes (e.g. RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic) require v5.7+ dev.
-# If installing manually:
-#   pip install "transformers @ git+https://github.com/huggingface/transformers.git"
+# transformers is overridden by install_train.sh — Unsloth's
+# `cu130-torch2100` extra pins transformers==5.5.0 (and xformers==0.0.34+cu130).
+# If installing manually, follow scripts/install_train.sh to use Unsloth's
+# auto-installer recommended command instead of the plain pip wheel.
 transformers>=4.57.6
 trl==0.24.0
 peft>=0.14.0

@@ -1,0 +1,39 @@
+# Unsloth training environment — CUDA 12.8 base.
+#
+# Why a separate image:
+# The default .devcontainer/Dockerfile uses CUDA 13.0, which is what
+# Phase 3 / Phase 4 (vLLM 0.20.0, turboquant_*) target. Unsloth's
+# training stack (torch 2.10 + cu130 wheels) hits a driver mismatch
+# on hosts running NVIDIA driver 570.x: every cublasGemmEx call
+# returns CUBLAS_STATUS_INVALID_VALUE because driver 570 only fully
+# supports CUDA 12.8 (CUDA 13 requires driver 575+ for native, or
+# the cuda-compat-13-0 forward-compat package). Symptoms:
+#   RuntimeError: CUDA error: CUBLAS_STATUS_INVALID_VALUE when
+#   calling `cublasGemmEx(... CUDA_R_16BF ...)`
+# fired on every linear layer in the model.
+#
+# CUDA 12.8 is natively supported by driver 570.x — no compat shim
+# needed. Pair this image with cu128 torch wheels in .venv-train
+# (Unsloth auto-installer recommends `unsloth[cu128-torch2100]`).
+#
+# Usage:
+#   Build:   docker build -f .devcontainer/Dockerfile.unsloth -t ai-agent-llms-unsloth .
+#   In devcontainer.json, swap "dockerfile" to "Dockerfile.unsloth" when
+#   you need to run Phase 2 SFT/GRPO training, then back to "Dockerfile"
+#   for Phase 3/4 inference work.
+
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+ENV UV_LINK_MODE=copy

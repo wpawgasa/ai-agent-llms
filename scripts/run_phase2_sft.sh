@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-MODEL_CONFIG="configs/models_exp_a/gemma4_26b_a4b_fp8.yaml"
+MODEL_CONFIG="configs/models_exp_a/gemma4_26b_a4b.yaml"
 SFT_CONFIG="configs/training/sft_cat_a.yaml"
 DRY_RUN=0
 NO_WANDB=0

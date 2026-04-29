@@ -51,17 +51,18 @@ train = [
     "torch==2.10.0",
     "torchvision==0.25.0",
     "torchaudio==2.10.0",
-    # transformers is overridden to git HEAD by install_train.sh — Unsloth's
-    # released wheel pins 4.57.6, but loading newer model classes (e.g.
-    # `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic`) requires the v5.7+ dev
-    # branch. Keep the pin permissive so uv doesn't fight the override.
+    # transformers / xformers / unsloth are overridden post-install by
+    # install_train.sh: it reinstalls unsloth from main with the
+    # `cu130-torch2100` extra (per Unsloth's auto-installer), which pins
+    # transformers==5.5.0 and xformers==0.0.34+cu130. Keep version ranges
+    # permissive here so uv doesn't fight the override.
     "transformers>=4.57.6",
     "trl==0.24.0",
     "vllm==0.19.1",
     "unsloth==2026.4.8",
     "unsloth-zoo==2026.4.9",
     "bitsandbytes>=0.49",
-    "xformers>=0.0.35",
+    "xformers>=0.0.34",
     "torchao>=0.17",
 ]
 
