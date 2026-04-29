@@ -1,0 +1,5 @@
+Is there a script to run SFT training for Task A?
+
+---
+
+Write the script

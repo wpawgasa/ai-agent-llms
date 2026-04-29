@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1354fc5bee20",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "scripts/run_phase2_sft.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/13/54fc5bee20/0/metadata.json",
+      "transcript": "/13/54fc5bee20/0/full.jsonl",
+      "content_hash": "/13/54fc5bee20/0/content_hash.txt",
+      "prompt": "/13/54fc5bee20/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1512,
+    "cache_creation_tokens": 263482,
+    "cache_read_tokens": 1454086,
+    "output_tokens": 19102,
+    "api_call_count": 20
+  }
+}
