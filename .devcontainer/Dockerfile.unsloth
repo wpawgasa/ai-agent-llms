@@ -1,0 +1,30 @@
+# Unsloth official prebuilt image (Docker Hub: unsloth/unsloth).
+#
+# Per https://unsloth.ai/docs/get-started/install/docker, this image
+# ships a ready-to-use Unsloth training stack (CUDA, torch, Unsloth,
+# Jupyter on :8888, SSH on :2222, vLLM serve on :8000) at /workspace.
+#
+# We layer `uv` on top to match the `.venv-train` / `.venv-infer`
+# workflow used by the other devcontainer images (Dockerfile,
+# Dockerfile.cuda128).
+#
+# Usage:
+#   Build:   docker build -f .devcontainer/Dockerfile.unsloth -t ai-agent-llms-unsloth .
+#   Run:     docker run -d -e JUPYTER_PASSWORD="mypassword" \
+#              -p 8888:8888 -p 8000:8000 -p 2222:22 \
+#              -v $(pwd):/workspace/ai-agent-llms \
+#              --gpus all ai-agent-llms-unsloth
+
+FROM unsloth/unsloth
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+ENV UV_LINK_MODE=copy
