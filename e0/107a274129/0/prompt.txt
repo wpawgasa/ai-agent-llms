@@ -1,0 +1,1 @@
+Read https://unsloth.ai/docs/get-started/install/docker and Create `Dockerfile.unsloth` in `.devcontainer`. Follow `uv` installation as in other Dockerfile.
