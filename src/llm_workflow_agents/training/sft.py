@@ -6,6 +6,7 @@ Unified for all 3 categories (A, B, C). Category-specific behavior
 
 from __future__ import annotations
 
+import inspect
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -188,17 +189,19 @@ def train_sft(
     # transformers + PEFT — slower, but bypasses Unsloth's MoE-expert
     # `_grouped_mm` LoRA path that crashes on Gemma-4 26B-A4B.
     #
-    # Resolution order (first non-empty wins):
+    # Resolution order (first non-empty wins). Per-model settings beat
+    # per-category defaults so individual models can pin a framework
+    # without requiring a separate SFT config:
     #   1. SFT_FRAMEWORK env var (one-off override)
-    #   2. SFT config: training.framework or top-level framework
-    #   3. Model YAML: training.framework or top-level framework
+    #   2. Model YAML: training.framework or top-level framework
+    #   3. SFT config: training.framework or top-level framework
     #   4. Default "unsloth"
     framework = (
         os.environ.get("SFT_FRAMEWORK")
-        or training_cfg.get("framework")
-        or config.get("framework")
         or model_yaml.get("training", {}).get("framework")
         or model_yaml.get("framework")
+        or training_cfg.get("framework")
+        or config.get("framework")
         or "unsloth"
     ).lower()
     if framework not in ("unsloth", "trl"):
@@ -343,6 +346,7 @@ def train_sft(
         # Vanilla PEFT LoRA injection. No Unsloth fast paths, no MoE
         # grouped_mm — adapters land on every nn.Linear matched by
         # target_modules, including per-expert FFN modules in MoE blocks.
+        import torch
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
         if is_4bit:
@@ -354,13 +358,37 @@ def train_sft(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
 
+        # PEFT only LoRA-wraps a fixed set of module types (nn.Linear,
+        # nn.Embedding, etc.). Gemma-4's projection layers are
+        # `Gemma4ClippableLinear` wrappers around an inner `nn.Linear`,
+        # so the registry's short names (`q_proj`, `k_proj`, ...) match
+        # the wrapper, not the wrappable module. Detect this and rewrite
+        # the target list to point at the inner `.linear` submodule.
+        target_modules_resolved = list(target_modules)
+        wrapper_names = {
+            type(m).__name__
+            for m in model.modules()
+            if hasattr(m, "linear")
+            and isinstance(getattr(m, "linear"), torch.nn.Linear)
+        }
+        if "Gemma4ClippableLinear" in wrapper_names:
+            target_modules_resolved = [
+                f"{t}.linear" for t in target_modules_resolved
+            ]
+            logger.info(
+                "trl_lora_targets_rewritten_for_wrapper",
+                wrapper="Gemma4ClippableLinear",
+                original=list(target_modules),
+                rewritten=target_modules_resolved,
+            )
+
         peft_config = LoraConfig(
             r=lora_rank,
             lora_alpha=lora_cfg.get("alpha", lora_rank * 2),
             lora_dropout=lora_dropout,
             bias="none",
             task_type="CAUSAL_LM",
-            target_modules=list(target_modules),
+            target_modules=target_modules_resolved,
         )
         model = get_peft_model(model, peft_config)
     elif use_unsloth_toggles:
@@ -574,7 +602,16 @@ def train_sft(
         gradient_checkpointing_kwargs={"use_reentrant": False},
         optim=training_cfg.get("optim", "adamw_8bit"),
         weight_decay=training_cfg.get("weight_decay", 0.001),
-        max_seq_length=training_cfg.get("max_seq_length", 8192),
+        # max_seq_length was a SFTConfig kwarg through TRL 0.22 and removed
+        # from SFTConfig in 0.23+ (it's now controlled by dataset preparation).
+        # We already truncate in _render_chat and pre-pack to max_seq_length,
+        # so the trainer doesn't need it. Pass via SFTConfig only when
+        # supported, otherwise rely on the pre-tokenized lengths.
+        **(
+            {"max_seq_length": training_cfg.get("max_seq_length", 8192)}
+            if "max_seq_length" in inspect.signature(SFTConfig).parameters
+            else {}
+        ),
         # We pre-pack the dataset ourselves above when training_cfg.packing
         # is True, so the trainer-level packing must be off — otherwise it
         # would either re-pack (under TRL) or be silently ignored (under
@@ -608,13 +645,20 @@ def train_sft(
             )
             trainer_tokenizer = inner
 
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=trainer_tokenizer,
-        args=sft_args,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
-    )
+    # TRL 0.23 renamed `tokenizer` to `processing_class` on SFTTrainer.
+    # Detect which kwarg is supported and pass the tokenizer under that name.
+    trainer_kwargs = {
+        "model": model,
+        "args": sft_args,
+        "train_dataset": train_ds,
+        "eval_dataset": eval_ds,
+    }
+    sft_trainer_params = inspect.signature(SFTTrainer).parameters
+    if "tokenizer" in sft_trainer_params:
+        trainer_kwargs["tokenizer"] = trainer_tokenizer
+    elif "processing_class" in sft_trainer_params:
+        trainer_kwargs["processing_class"] = trainer_tokenizer
+    trainer = SFTTrainer(**trainer_kwargs)
 
     # SDPA backend diagnostic. Gemma-4's head_dim=512 forces SDPA (FA2's
     # max is 256). PyTorch picks the best available backend among
