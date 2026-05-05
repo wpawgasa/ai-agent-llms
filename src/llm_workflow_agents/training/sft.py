@@ -458,10 +458,14 @@ def train_sft(
         # multimodal Processor whose first positional arg is `images`.
         # Pass `text=` explicitly so we route through the text path on
         # both plain tokenizers and processors.
+        # Force padding=False — Gemma4Processor's text path defaults to
+        # padding="max_length", which would silently pad every sample to
+        # max_seq_length and make subsequent packing impossible.
         encodings = tokenizer(
             text=texts,
             truncation=True,
             max_length=max_seq_length_for_tokenize,
+            padding=False,
             add_special_tokens=False,
         )
         return {
@@ -471,6 +475,69 @@ def train_sft(
 
     train_ds = train_ds.map(_render_chat, batched=True, remove_columns=["messages"])
     eval_ds = eval_ds.map(_render_chat, batched=True, remove_columns=["messages"])
+
+    # Manual sample packing. Unsloth disables its native packing for
+    # vision-language model classes (Gemma-4 here), even though our
+    # training is text-only and we already produced clean input_ids.
+    # Use First-Fit Decreasing: sort samples by length descending, then
+    # place each into the first existing window with room. FFD is the
+    # standard SFT-data packing recipe and is significantly tighter than
+    # streaming greedy when long and short samples are interleaved.
+    if training_cfg.get("packing", False):
+        eos_id = (
+            getattr(tokenizer, "eos_token_id", None)
+            or getattr(getattr(tokenizer, "tokenizer", None), "eos_token_id", None)
+            or 0
+        )
+
+        def _pack(ds: Dataset, name: str) -> Dataset:
+            # Materialize lengths and rows. Iterate via `for ex in ds` so
+            # the per-row dict comes through Datasets' standard accessor.
+            samples: list[tuple[list[int], list[int]]] = []
+            for ex in ds:
+                ids = list(ex["input_ids"])[:max_seq_length_for_tokenize]
+                attn = list(ex["attention_mask"])[:max_seq_length_for_tokenize]
+                samples.append((ids, attn))
+
+            # FFD: longest first, then first-fit into existing bins.
+            samples.sort(key=lambda s: -len(s[0]))
+            bins: list[list[list[int]]] = []  # each bin = [ids_list, attn_list]
+            for ids_l, attn_l in samples:
+                placed = False
+                for b in bins:
+                    sep = 1 if b[0] else 0
+                    if len(b[0]) + sep + len(ids_l) <= max_seq_length_for_tokenize:
+                        if sep:
+                            b[0].append(eos_id)
+                            b[1].append(1)
+                        b[0].extend(ids_l)
+                        b[1].extend(attn_l)
+                        placed = True
+                        break
+                if not placed:
+                    bins.append([list(ids_l), list(attn_l)])
+
+            packed = Dataset.from_dict(
+                {
+                    "input_ids": [b[0] for b in bins],
+                    "attention_mask": [b[1] for b in bins],
+                }
+            )
+            total_in_tokens = sum(len(s[0]) for s in samples)
+            total_out_tokens = sum(len(b[0]) for b in bins)
+            logger.info(
+                "sft_dataset_packed",
+                split=name,
+                pre=len(ds),
+                post=len(packed),
+                window=max_seq_length_for_tokenize,
+                density=round(len(ds) / max(1, len(packed)), 2),
+                util=round(total_in_tokens / max(1, total_out_tokens), 3),
+            )
+            return packed
+
+        train_ds = _pack(train_ds, "train")
+        eval_ds = _pack(eval_ds, "validation")
 
     # Configure trainer.
     # Per Unsloth's Gemma-4 docs: per_device_train_batch_size=1 with grad
@@ -508,7 +575,11 @@ def train_sft(
         optim=training_cfg.get("optim", "adamw_8bit"),
         weight_decay=training_cfg.get("weight_decay", 0.001),
         max_seq_length=training_cfg.get("max_seq_length", 8192),
-        packing=training_cfg.get("packing", False),
+        # We pre-pack the dataset ourselves above when training_cfg.packing
+        # is True, so the trainer-level packing must be off — otherwise it
+        # would either re-pack (under TRL) or be silently ignored (under
+        # Unsloth's VL-model guard) while masking what's actually happening.
+        packing=False,
         save_strategy="steps",
         save_steps=logging_cfg.get("save_steps", 500),
         eval_strategy="steps",
@@ -519,9 +590,27 @@ def train_sft(
         seed=training_cfg.get("seed", 3407),
     )
 
+    # Unsloth's SFTTrainer wrapper silently skips sample packing when the
+    # passed tokenizer looks like a multimodal Processor ("Sample packing
+    # skipped (processor-based model detected)"). For Gemma-4 we did all
+    # tokenization ourselves via _render_chat — input_ids already exist
+    # in the dataset, so the trainer only uses the tokenizer for padding
+    # metadata. Hand it the inner text tokenizer to bypass the guard.
+    trainer_tokenizer = tokenizer
+    if hasattr(tokenizer, "tokenizer"):
+        inner = tokenizer.tokenizer
+        if inner is not None:
+            logger.info(
+                "sft_using_inner_tokenizer",
+                outer=type(tokenizer).__name__,
+                inner=type(inner).__name__,
+                reason="bypass Unsloth packing-skip guard for processor-based models",
+            )
+            trainer_tokenizer = inner
+
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        tokenizer=trainer_tokenizer,
         args=sft_args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
