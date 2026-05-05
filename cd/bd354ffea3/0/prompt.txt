@@ -1,0 +1,45 @@
+server@server-DGX-Station:~/Documents/ModelTraining/ai-agent-llms/deployments/local$ sudo docker compose up -d
+[+] Building 0.0s (0/0)                                                                                                                                                                               
+[+] Running 0/0
+ ⠋ Network llm-benchmark-network  Creating                                                                                                                                                       0.1s 
+WARN[0000] Found orphan containers ([chatbot-gateway-nginx chatbot-gateway-api chatbot-orchestrator chatbot-tool-broker chatbot-finance-qa-agent chatbot-general-qa-agent chatbot-hr-knowledge-agent chatbot-database-adapter chatbot-it-support-agent chatbot-kafka-init chatbot-kafka-ui chatbot-kafka-exporter chatbot-milvus-attu chatbot-retrieval-service chatbot-postgres-init chatbot-kafka chatbot-postgres-exporter chatbot-doc-processing-service chatbot-minio-init chatbot-vector-db-standalone chatbot-grafana chatbot-otel-collector chatbot-redis-insight chatbot-redis-exporter chatbot-promtail [+] Running 2/2er chatbot-postgres chatbot-alertmanager chatbot-prometheus chatbot-minio chatbot-vector-db-minio chatbot-jaeger chatbot-redis chatbot-vector-db-etcd chatbot-loki chatbot-node-exporte
+ ✔ Network llm-benchmark-network    Created                                                                                                                                                      0.1s 
+ ✔ Container llm-benchmark-gateway  Started
+
+---
+
+LLM API will be served via this gateway. Edit `run_exp_a_single.sh` script and benchmark logic such that it can run benchmark on any frontier model specified in `deployments/local/data/bifrost/config.json`.
+
+---
+
+Model name convention is `provider/model_name`, e.g. `gemini/gemini-3.1-flash-lite-preview`
+
+---
+
+Quality score is still low for frontier model                                 
+  (results/exp_a/gemini_gemini-3.1-flash-lite-preview_frontier.log). Investigate  
+  the metrics and compare each turn response one-by-one.
+
+---
+
+What is the system prompt that send to the models? Give example from benchmark data.
+
+---
+
+fix the system prompt. Does the workflow script effective?
+
+---
+
+Workflow script is generated at runtime, isn't it? Why can't we fix workflow script generation codebase?
+
+---
+
+yes, continue
+
+---
+
+Would the training process see the similar system prompt as in benchmark?
+
+---
+
+Option A
