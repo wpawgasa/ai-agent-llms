@@ -1,0 +1,71 @@
+=> ERROR [dev_container_auto_added_stage_label 2/3] RUN apt-get update &  0.2s
+                                                                                
+------
+ > [dev_container_auto_added_stage_label 2/3] RUN apt-get update && apt-get install -y --no-install-recommends     git     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*:
+0.141 Reading package lists...
+0.152 E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)
+------
+[2026-05-05T04:42:45.651Z] Dockerfile-with-features:24
+--------------------
+  23 |     
+  24 | >>> RUN apt-get update && apt-get install -y --no-install-recommends \
+  25 | >>>     git \
+  26 | >>>     curl \
+  27 | >>>     ca-certificates \
+  28 | >>>     && rm -rf /var/lib/apt/lists/*
+  29 |     
+--------------------
+[2026-05-05T04:42:45.651Z] ERROR: failed to build: failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends     git     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
+[2026-05-05T04:42:45.657Z] Stop (839 ms): Run: docker buildx build --load --build-arg BUILDKIT_INLINE_CACHE=1 -f /tmp/devcontainercli-shadeform/container-features/0.86.0-1777956164816/Dockerfile-with-features -t vsc-ai-agent-llms-1dfa48a0f2ca4d859ca1403f18346e6b6d114050f716051742976470062dd1cf --target dev_containers_target_stage --build-arg REDACTED /home/shadeform/workspace/ai-agent-llms
+[2026-05-05T04:42:46.312Z] Error: Command failed: docker buildx build --load --build-arg BUILDKIT_INLINE_CACHE=1 -f /tmp/devcontainercli-shadeform/container-features/0.86.0-1777956164816/Dockerfile-with-features -t vsc-ai-agent-llms-1dfa48a0f2ca4d859ca1403f18346e6b6d114050f716051742976470062dd1cf --target dev_containers_target_stage --build-arg REDACTED /home/shadeform/workspace/ai-agent-llms
+[2026-05-05T04:42:46.313Z]     at GV (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:466:2009)
+[2026-05-05T04:42:46.313Z]     at async Rp (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:465:1910)
+[2026-05-05T04:42:46.313Z]     at async uG (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:465:608)
+[2026-05-05T04:42:46.313Z]     at async ZV (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:4649)
+[2026-05-05T04:42:46.314Z]     at async kI (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:5768)
+[2026-05-05T04:42:46.314Z]     at async MZ (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:664:205)
+[2026-05-05T04:42:46.314Z]     at async kZ (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:663:15080)
+[2026-05-05T04:42:46.314Z]     at async /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:1917
+[2026-05-05T04:42:46.315Z] Stop (3317 ms): Run: /home/shadeform/.vscode-server/cli/servers/Stable-7adae6a56e34cb64d08899664b814cf620465925/server/node /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js up --container-session-data-folder /tmp/devcontainers-1e90dbbd-8c77-4447-bb14-f2a55a0ef7911777956151355 --workspace-folder /home/shadeform/workspace/ai-agent-llms --workspace-mount-consistency cached --gpu-availability detect --id-label devcontainer.local_folder=/home/shadeform/workspace/ai-agent-llms --id-label devcontainer.config_file=/home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --log-level debug --log-format json --config /home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --default-user-env-probe loginInteractiveShell --experimental-lockfile --mount type=volume,source=vscode,target=/vscode,external=true --skip-post-create --update-remote-user-uid-default on --mount-workspace-git-root --include-configuration --include-merged-configuration
+[2026-05-05T04:42:46.316Z] Exit code 1
+[2026-05-05T04:42:46.330Z] Command failed: /home/shadeform/.vscode-server/cli/servers/Stable-7adae6a56e34cb64d08899664b814cf620465925/server/node /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js up --container-session-data-folder /tmp/devcontainers-1e90dbbd-8c77-4447-bb14-f2a55a0ef7911777956151355 --workspace-folder /home/shadeform/workspace/ai-agent-llms --workspace-mount-consistency cached --gpu-availability detect --id-label devcontainer.local_folder=/home/shadeform/workspace/ai-agent-llms --id-label devcontainer.config_file=/home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --log-level debug --log-format json --config /home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --default-user-env-probe loginInteractiveShell --experimental-lockfile --mount type=volume,source=vscode,target=/vscode,external=true --skip-post-create --update-remote-user-uid-default on --mount-workspace-git-root --include-configuration --include-merged-configuration
+[2026-05-05T04:42:46.330Z] Exit code 1
+
+---
+
+=> ERROR [dev_container_auto_added_stage_label 2/3] RUN apt-get update &  0.2s
+                                                                                
+------
+ > [dev_container_auto_added_stage_label 2/3] RUN apt-get update && apt-get install -y --no-install-recommends     git     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*:
+0.141 Reading package lists...
+0.152 E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)
+------
+[2026-05-05T04:42:45.651Z] Dockerfile-with-features:24
+--------------------
+  23 |     
+  24 | >>> RUN apt-get update && apt-get install -y --no-install-recommends \
+  25 | >>>     git \
+  26 | >>>     curl \
+  27 | >>>     ca-certificates \
+  28 | >>>     && rm -rf /var/lib/apt/lists/*
+  29 |     
+--------------------
+[2026-05-05T04:42:45.651Z] ERROR: failed to build: failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends     git     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100
+[2026-05-05T04:42:45.657Z] Stop (839 ms): Run: docker buildx build --load --build-arg BUILDKIT_INLINE_CACHE=1 -f /tmp/devcontainercli-shadeform/container-features/0.86.0-1777956164816/Dockerfile-with-features -t vsc-ai-agent-llms-1dfa48a0f2ca4d859ca1403f18346e6b6d114050f716051742976470062dd1cf --target dev_containers_target_stage --build-arg REDACTED /home/shadeform/workspace/ai-agent-llms
+[2026-05-05T04:42:46.312Z] Error: Command failed: docker buildx build --load --build-arg BUILDKIT_INLINE_CACHE=1 -f /tmp/devcontainercli-shadeform/container-features/0.86.0-1777956164816/Dockerfile-with-features -t vsc-ai-agent-llms-1dfa48a0f2ca4d859ca1403f18346e6b6d114050f716051742976470062dd1cf --target dev_containers_target_stage --build-arg REDACTED /home/shadeform/workspace/ai-agent-llms
+[2026-05-05T04:42:46.313Z]     at GV (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:466:2009)
+[2026-05-05T04:42:46.313Z]     at async Rp (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:465:1910)
+[2026-05-05T04:42:46.313Z]     at async uG (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:465:608)
+[2026-05-05T04:42:46.313Z]     at async ZV (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:4649)
+[2026-05-05T04:42:46.314Z]     at async kI (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:5768)
+[2026-05-05T04:42:46.314Z]     at async MZ (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:664:205)
+[2026-05-05T04:42:46.314Z]     at async kZ (/home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:663:15080)
+[2026-05-05T04:42:46.314Z]     at async /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js:483:1917
+[2026-05-05T04:42:46.315Z] Stop (3317 ms): Run: /home/shadeform/.vscode-server/cli/servers/Stable-7adae6a56e34cb64d08899664b814cf620465925/server/node /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js up --container-session-data-folder /tmp/devcontainers-1e90dbbd-8c77-4447-bb14-f2a55a0ef7911777956151355 --workspace-folder /home/shadeform/workspace/ai-agent-llms --workspace-mount-consistency cached --gpu-availability detect --id-label devcontainer.local_folder=/home/shadeform/workspace/ai-agent-llms --id-label devcontainer.config_file=/home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --log-level debug --log-format json --config /home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --default-user-env-probe loginInteractiveShell --experimental-lockfile --mount type=volume,source=vscode,target=/vscode,external=true --skip-post-create --update-remote-user-uid-default on --mount-workspace-git-root --include-configuration --include-merged-configuration
+[2026-05-05T04:42:46.316Z] Exit code 1
+[2026-05-05T04:42:46.330Z] Command failed: /home/shadeform/.vscode-server/cli/servers/Stable-7adae6a56e34cb64d08899664b814cf620465925/server/node /home/shadeform/.vscode-remote-containers/dist/dev-containers-cli-0.457.0/dist/spec-node/devContainersSpecCLI.js up --container-session-data-folder /tmp/devcontainers-1e90dbbd-8c77-4447-bb14-f2a55a0ef7911777956151355 --workspace-folder /home/shadeform/workspace/ai-agent-llms --workspace-mount-consistency cached --gpu-availability detect --id-label devcontainer.local_folder=/home/shadeform/workspace/ai-agent-llms --id-label devcontainer.config_file=/home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --log-level debug --log-format json --config /home/shadeform/workspace/ai-agent-llms/.devcontainer/devcontainer.json --default-user-env-probe loginInteractiveShell --experimental-lockfile --mount type=volume,source=vscode,target=/vscode,external=true --skip-post-create --update-remote-user-uid-default on --mount-workspace-git-root --include-configuration --include-merged-configuration
+[2026-05-05T04:42:46.330Z] Exit code 1
+
+---
+
+yes
