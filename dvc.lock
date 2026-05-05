@@ -75,11 +75,11 @@ stages:
     outs:
     - path: data/output/sft/task_a
       hash: md5
-      md5: b94264c3b8e45e0dca571a20c5f3d116.dir
-      size: 97137668
-      nfiles: 113
+      md5: d112a5e4b77be6c495a8fbe163141273.dir
+      size: 114044226
+      nfiles: 128
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 8a54307fcf0fc4eb30063da183a8137b.dir
-      size: 97066813
-      nfiles: 113
+      md5: 20b0b44ba9d52d0d71b12e29e7869fe5.dir
+      size: 211046083
+      nfiles: 131
