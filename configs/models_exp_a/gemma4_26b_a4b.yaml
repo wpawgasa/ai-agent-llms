@@ -26,3 +26,11 @@ inference:
   temperature_stochastic: 0.7
   stochastic_trials: 5
   max_tokens: 2048
+
+training:
+  # Force vanilla TRL+PEFT for SFT. Unsloth's MoE expert-LoRA path
+  # (`forward_native_grouped_mm` → `torch._grouped_mm`) crashes on this
+  # checkpoint with "contraction dimension of mat_a and mat_b must match".
+  # TRL+PEFT applies LoRA per nn.Linear, bypassing the grouped_mm fast
+  # path. Re-evaluate when Unsloth ships a fix.
+  framework: trl

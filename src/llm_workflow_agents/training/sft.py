@@ -6,6 +6,7 @@ Unified for all 3 categories (A, B, C). Category-specific behavior
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -153,8 +154,6 @@ def train_sft(config_path: Path) -> SFTResult:
       5. Select best checkpoint by validation loss
       6. Return SFTResult
     """
-    from unsloth import FastLanguageModel
-
     config = _load_sft_config(config_path)
     lora_cfg = config.get("lora", {})
     training_cfg = config.get("training", {})
@@ -174,6 +173,31 @@ def train_sft(config_path: Path) -> SFTResult:
     model_name = model_section["name"]
     is_4bit = training_cfg.get("precision") == "qlora_4bit"
 
+    # Framework selector. `unsloth` (default) uses FastLanguageModel +
+    # Unsloth's compiled training kernels. `trl` falls back to vanilla
+    # transformers + PEFT — slower, but bypasses Unsloth's MoE-expert
+    # `_grouped_mm` LoRA path that crashes on Gemma-4 26B-A4B.
+    #
+    # Resolution order (first non-empty wins):
+    #   1. SFT_FRAMEWORK env var (one-off override)
+    #   2. SFT config: training.framework or top-level framework
+    #   3. Model YAML: training.framework or top-level framework
+    #   4. Default "unsloth"
+    framework = (
+        os.environ.get("SFT_FRAMEWORK")
+        or training_cfg.get("framework")
+        or config.get("framework")
+        or model_yaml.get("training", {}).get("framework")
+        or model_yaml.get("framework")
+        or "unsloth"
+    ).lower()
+    if framework not in ("unsloth", "trl"):
+        return SFTResult(error=f"Unknown training framework: {framework!r}")
+    logger.info("sft_framework_selected", framework=framework, model=model_name)
+
+    if framework == "unsloth":
+        from unsloth import FastLanguageModel
+
     logger.info(
         "sft_starting",
         model=model_name,
@@ -182,31 +206,63 @@ def train_sft(config_path: Path) -> SFTResult:
     )
 
     lora_rank = lora_cfg.get("rank", 64)
-    try:
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_name,
-            max_seq_length=training_cfg.get("max_seq_length", 8192),
-            dtype=None,
-            load_in_4bit=is_4bit,
-        )
-    except RuntimeError as e:
-        if "out of memory" in str(e).lower() and lora_rank > _GLM_OOM_FALLBACK_RANK:
-            logger.warning(
-                "sft_oom_fallback",
-                original_rank=lora_rank,
-                fallback_rank=_GLM_OOM_FALLBACK_RANK,
-            )
-            import torch
-
-            torch.cuda.empty_cache()
-            lora_rank = _GLM_OOM_FALLBACK_RANK
+    if framework == "unsloth":
+        try:
             model, tokenizer = FastLanguageModel.from_pretrained(
                 model_name=model_name,
                 max_seq_length=training_cfg.get("max_seq_length", 8192),
                 dtype=None,
                 load_in_4bit=is_4bit,
             )
-        else:
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower() and lora_rank > _GLM_OOM_FALLBACK_RANK:
+                logger.warning(
+                    "sft_oom_fallback",
+                    original_rank=lora_rank,
+                    fallback_rank=_GLM_OOM_FALLBACK_RANK,
+                )
+                import torch
+
+                torch.cuda.empty_cache()
+                lora_rank = _GLM_OOM_FALLBACK_RANK
+                model, tokenizer = FastLanguageModel.from_pretrained(
+                    model_name=model_name,
+                    max_seq_length=training_cfg.get("max_seq_length", 8192),
+                    dtype=None,
+                    load_in_4bit=is_4bit,
+                )
+            else:
+                return SFTResult(error=str(e))
+    else:
+        # TRL + PEFT path. Use AutoProcessor when the checkpoint is multimodal
+        # (Gemma-4) so chat-template + tokenization keep working; otherwise
+        # AutoTokenizer. Model goes through standard transformers; LoRA is
+        # injected via peft.get_peft_model below.
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        try:
+            from transformers import AutoProcessor
+            tokenizer = AutoProcessor.from_pretrained(model_name)
+        except (ValueError, OSError, KeyError):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        model_kwargs: dict[str, Any] = {
+            "torch_dtype": torch.bfloat16,
+            "device_map": "auto",
+        }
+        if is_4bit:
+            from transformers import BitsAndBytesConfig
+
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+            )
+        try:
+            model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        except Exception as e:
             return SFTResult(error=str(e))
 
     # Patch Gemma-4 RoPE forward on every loaded RoPE module instance.
@@ -273,7 +329,31 @@ def train_sft(config_path: Path) -> SFTResult:
     model_family = (model_yaml.get("model", model_yaml).get("family") or "").lower()
     use_unsloth_toggles = model_family == "gemma" and "gemma-4" in model_name.lower()
 
-    if use_unsloth_toggles:
+    if framework == "trl":
+        # Vanilla PEFT LoRA injection. No Unsloth fast paths, no MoE
+        # grouped_mm — adapters land on every nn.Linear matched by
+        # target_modules, including per-expert FFN modules in MoE blocks.
+        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+        if is_4bit:
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=True
+            )
+        else:
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
+
+        peft_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_cfg.get("alpha", lora_rank * 2),
+            lora_dropout=lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=list(target_modules),
+        )
+        model = get_peft_model(model, peft_config)
+    elif use_unsloth_toggles:
         model = FastLanguageModel.get_peft_model(
             model,
             r=lora_rank,
@@ -394,6 +474,15 @@ def train_sft(config_path: Path) -> SFTResult:
     per_device_bs = training_cfg.get("per_device_train_batch_size", 1)
     grad_accum = max(1, effective_bs // max(1, per_device_bs))
 
+    # On the TRL+PEFT path we already enabled gradient checkpointing on the
+    # model (Unsloth's path uses its own "unsloth" checkpointing strategy via
+    # FastLanguageModel.get_peft_model, so let SFTConfig handle it there).
+    gc_in_trainer = (
+        training_cfg.get("gradient_checkpointing", True)
+        if framework == "unsloth"
+        else False
+    )
+
     sft_args = SFTConfig(
         output_dir=str(output_dir),
         dataset_text_field="text",
@@ -404,7 +493,7 @@ def train_sft(config_path: Path) -> SFTResult:
         gradient_accumulation_steps=grad_accum,
         num_train_epochs=training_cfg.get("num_epochs", 3),
         bf16=training_cfg.get("precision", "bf16") != "fp16",
-        gradient_checkpointing=training_cfg.get("gradient_checkpointing", True),
+        gradient_checkpointing=gc_in_trainer,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         optim=training_cfg.get("optim", "adamw_8bit"),
         weight_decay=training_cfg.get("weight_decay", 0.001),
