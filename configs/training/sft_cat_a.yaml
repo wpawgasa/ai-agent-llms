@@ -34,10 +34,13 @@ training:
   # only if eval shows truncation hurting the long-conversation tail.
   max_seq_length: 4096
   gradient_checkpointing: true
-  # Pack short samples into a single max_seq_length window. With p50≈1568
-  # tokens and a 4096 window, ~2-3 samples fit per packed sequence,
-  # eliminating padding waste and giving another ~1.5-2× throughput.
-  packing: true
+  # Sample packing disabled. Our pre-packer concatenates with an EOS
+  # separator but does NOT emit per-sample position_ids resets or a
+  # block-diagonal attention mask, so the model attends across packed
+  # samples and gets noisy cross-sample gradients. Loss reduces slower
+  # per step than unpacked. Re-enable only after wiring up proper
+  # packed-attention masking (cu_seqlens / flash_attn_varlen).
+  packing: false
 
 data:
   source: "data/output/sft/task_a_cleaned"
