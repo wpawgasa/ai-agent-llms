@@ -166,6 +166,22 @@ URL still has to be installed manually for training).
   ```bash
   UV_CACHE_DIR=/tmp/uv-cache ./scripts/install_train.sh
   ```
+- **Using `.devcontainer/Dockerfile.unsloth` as the base image.** The image
+  pre-installs a working Unsloth + torch + vLLM stack. Running
+  `uv pip install -e ".[dev]"` would re-resolve those pins and clobber the
+  pre-installed versions. Install with `--no-deps` instead, then add the dev
+  tools individually (they don't overlap on torch/transformers/vLLM):
+  ```bash
+  uv pip install -e . --no-deps
+  uv pip install --no-deps pytest pytest-cov pytest-asyncio ruff mypy 'dvc[gs]'
+  ```
+  For a stricter guarantee, freeze the existing env first and pass it as
+  constraints — uv will resolve `[dev]` normally but cannot bump anything
+  already installed:
+  ```bash
+  uv pip freeze > /tmp/constraints.txt
+  uv pip install -e ".[dev]" -c /tmp/constraints.txt
+  ```
 
 Copy `.env.example` to `.env` and fill in your API keys:
 

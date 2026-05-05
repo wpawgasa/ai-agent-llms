@@ -42,7 +42,15 @@ done
 
 # ── Environment ───────────────────────────────────────────────────────────────
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
-source .venv-train/bin/activate
+# Activate .venv-train if it exists; otherwise assume the current environment
+# already has Unsloth installed (e.g. .devcontainer/Dockerfile.unsloth image).
+if [[ -f .venv-train/bin/activate ]]; then
+  source .venv-train/bin/activate
+elif ! python3 -c "import unsloth" &>/dev/null; then
+  echo "Error: .venv-train/ not found and 'unsloth' is not importable in the current environment." >&2
+  echo "       Run ./scripts/install_train.sh, or activate the venv that has Unsloth installed." >&2
+  exit 1
+fi
 
 # ── Validate inputs ───────────────────────────────────────────────────────────
 [[ -f "$MODEL_CONFIG" ]] || { echo "Error: model config not found: $MODEL_CONFIG" >&2; exit 1; }

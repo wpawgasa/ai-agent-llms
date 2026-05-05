@@ -351,17 +351,32 @@ def train_sft(config_path: Path) -> SFTResult:
     train_ds = _load_split("train")
     eval_ds = _load_split("validation")
 
-    # Unsloth's SFTTrainer wrapper requires either a `formatting_func` or
-    # a pre-rendered `text` column — it doesn't auto-detect `messages` the
-    # way upstream TRL does. Render via the tokenizer's chat template.
+    # Render chat template AND pre-tokenize. TRL 0.23 + transformers 5.7's
+    # SFTTrainer no longer auto-tokenizes a `text` column reliably under
+    # Unsloth's wrapper — the default collator ends up trying to pad raw
+    # strings. Producing `input_ids` directly sidesteps the dispatch.
+    max_seq_length_for_tokenize = training_cfg.get("max_seq_length", 8192)
+
     def _render_chat(batch: dict[str, Any]) -> dict[str, Any]:
+        texts = [
+            tokenizer.apply_chat_template(
+                msgs, tokenize=False, add_generation_prompt=False
+            )
+            for msgs in batch["messages"]
+        ]
+        # Gemma-4's `tokenizer` from FastLanguageModel is actually a
+        # multimodal Processor whose first positional arg is `images`.
+        # Pass `text=` explicitly so we route through the text path on
+        # both plain tokenizers and processors.
+        encodings = tokenizer(
+            text=texts,
+            truncation=True,
+            max_length=max_seq_length_for_tokenize,
+            add_special_tokens=False,
+        )
         return {
-            "text": [
-                tokenizer.apply_chat_template(
-                    msgs, tokenize=False, add_generation_prompt=False
-                )
-                for msgs in batch["messages"]
-            ]
+            "input_ids": encodings["input_ids"],
+            "attention_mask": encodings["attention_mask"],
         }
 
     train_ds = train_ds.map(_render_chat, batched=True, remove_columns=["messages"])
