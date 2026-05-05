@@ -143,7 +143,10 @@ def _patch_gemma4_rope_stride(model: Any) -> int:
     return patched
 
 
-def train_sft(config_path: Path) -> SFTResult:
+def train_sft(
+    config_path: Path,
+    resume_from_checkpoint: bool | str | Path | None = None,
+) -> SFTResult:
     """Run Unsloth SFT pipeline.
 
     Pipeline:
@@ -153,6 +156,13 @@ def train_sft(config_path: Path) -> SFTResult:
       4. Train for num_epochs, checkpoint every 500 steps
       5. Select best checkpoint by validation loss
       6. Return SFTResult
+
+    Args:
+        config_path: Path to SFT YAML config.
+        resume_from_checkpoint: Resume training from a checkpoint.
+            - True: auto-detect the most recent checkpoint under output_dir.
+            - str / Path: explicit checkpoint directory.
+            - None / False (default): start fresh.
     """
     config = _load_sft_config(config_path)
     lora_cfg = config.get("lora", {})
@@ -517,7 +527,29 @@ def train_sft(config_path: Path) -> SFTResult:
         eval_dataset=eval_ds,
     )
 
-    result = trainer.train()
+    # Resolve `resume_from_checkpoint`. `True` → auto-detect latest checkpoint
+    # under output_dir; explicit Path/str → pass through; otherwise start fresh.
+    resume_arg: bool | str | None
+    if resume_from_checkpoint in (None, False):
+        resume_arg = None
+    elif resume_from_checkpoint is True:
+        ckpts = sorted(
+            output_dir.glob("checkpoint-*"),
+            key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else -1,
+        )
+        if ckpts:
+            resume_arg = str(ckpts[-1])
+            logger.info("sft_resuming", from_checkpoint=resume_arg)
+        else:
+            logger.warning(
+                "sft_resume_requested_but_no_checkpoint", output_dir=str(output_dir)
+            )
+            resume_arg = None
+    else:
+        resume_arg = str(resume_from_checkpoint)
+        logger.info("sft_resuming", from_checkpoint=resume_arg)
+
+    result = trainer.train(resume_from_checkpoint=resume_arg)
     eval_metrics = trainer.evaluate()
 
     from llm_workflow_agents.training.lora_targets import get_trainable_param_summary

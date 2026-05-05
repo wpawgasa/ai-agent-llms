@@ -11,6 +11,8 @@ MODEL_CONFIG="configs/models_exp_a/gemma4_26b_a4b.yaml"
 SFT_CONFIG="configs/training/sft_cat_a.yaml"
 DRY_RUN=0
 NO_WANDB=0
+RESUME=0
+RESUME_FROM=""
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
@@ -24,7 +26,17 @@ Options:
   --sft-config PATH     SFT training YAML (default: $SFT_CONFIG)
   --dry-run             Prepare splits + patched config, exit before training
   --no-wandb            Disable W&B logging (overrides YAML)
+  --resume              Resume from the latest checkpoint under
+                        checkpoints/<sft-config-stem>/checkpoint-*
+  --resume-from PATH    Resume from a specific checkpoint directory
   -h, --help            Show this help
+
+Pause/resume:
+  - Stop a running job with Ctrl+C; checkpoints saved every save_steps remain
+    on disk under checkpoints/<sft-config-stem>/checkpoint-N.
+  - Re-launch with --resume (auto-pick latest) or --resume-from PATH to
+    continue from where it stopped. Optimizer state, scheduler, RNG, and
+    epoch counter are restored.
 EOF
   exit 0
 }
@@ -35,6 +47,8 @@ while [[ $# -gt 0 ]]; do
     --sft-config)   SFT_CONFIG="$2";   shift 2 ;;
     --dry-run)      DRY_RUN=1;         shift   ;;
     --no-wandb)     NO_WANDB=1;        shift   ;;
+    --resume)       RESUME=1;          shift   ;;
+    --resume-from)  RESUME_FROM="$2";  shift 2 ;;
     -h|--help)      usage              ;;
     *) echo "Error: unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -127,7 +141,18 @@ echo "  SFT config   : $SFT_CONFIG"
 echo "  Patched cfg  : $PATCHED_CFG"
 echo "  Checkpoint   : $PROJECT_ROOT/checkpoints/sft_cat_a/"
 echo "  W&B          : $([ "$NO_WANDB" -eq 1 ] && echo disabled || echo enabled)"
+if [[ -n "$RESUME_FROM" ]]; then
+  echo "  Resume       : $RESUME_FROM"
+elif [[ "$RESUME" -eq 1 ]]; then
+  echo "  Resume       : auto (latest checkpoint)"
+fi
 echo "==========================="
+
+# Validate resume target now so we fail fast.
+if [[ -n "$RESUME_FROM" && ! -d "$RESUME_FROM" ]]; then
+  echo "Error: --resume-from path does not exist: $RESUME_FROM" >&2
+  exit 1
+fi
 
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "Dry-run: splits prepared and config patched. Exiting without training."
@@ -140,18 +165,23 @@ mkdir -p "$CKPT_DIR"
 LOG_FILE="$CKPT_DIR/train.log"
 echo "Logs: $LOG_FILE"
 
-python3 -c "
+RESUME_FROM="$RESUME_FROM" RESUME="$RESUME" python3 -c "
+import os
 import sys
 from pathlib import Path
 from llm_workflow_agents.training.sft import train_sft
 
-result = train_sft(Path('${PATCHED_CFG}'))
+resume_from = os.environ.get('RESUME_FROM') or None
+resume_flag = os.environ.get('RESUME', '0') == '1'
+resume_arg = resume_from if resume_from else (True if resume_flag else None)
+
+result = train_sft(Path('${PATCHED_CFG}'), resume_from_checkpoint=resume_arg)
 if result.error:
     print(f'ERROR: {result.error}', file=sys.stderr)
     sys.exit(1)
 print(f'Best eval loss : {result.best_eval_loss}')
 print(f'Total steps    : {result.total_steps}')
 print(f'Checkpoint     : {result.checkpoint_path}')
-" 2>&1 | tee "$LOG_FILE"
+" 2>&1 | tee -a "$LOG_FILE"
 
 echo "Done. Checkpoint: $CKPT_DIR"
