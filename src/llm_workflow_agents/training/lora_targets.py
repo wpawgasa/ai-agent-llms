@@ -139,9 +139,13 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
         warnings=("MoE variant: freeze mlp.gate to avoid router destabilisation.",),
     ),
     "gemma4_31b": LoRATargetSpec(
+        # Attention-only LoRA. Dense 31B with FA2 disabled (head_dim=512)
+        # already pays a heavy attention cost; including FFN modules doubles
+        # the LoRA backward path with a small quality return. Re-add
+        # gate_proj/up_proj/down_proj if eval shows underfitting on the
+        # FFN-bound parts of the workflow domain.
         target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
         ),
     ),
     "gemma4_e4b": LoRATargetSpec(

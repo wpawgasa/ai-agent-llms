@@ -527,6 +527,44 @@ def train_sft(
         eval_dataset=eval_ds,
     )
 
+    # SDPA backend diagnostic. Gemma-4's head_dim=512 forces SDPA (FA2's
+    # max is 256). PyTorch picks the best available backend among
+    # {flash, mem_efficient, math}. Math is the slow fallback. Logging
+    # which backends are *enabled* tells us which SDPA can pick from; the
+    # actual selection per-call is opaque, so we also dispatch a single
+    # representative forward through `sdpa_kernel([EFFICIENT_ATTENTION])`
+    # to verify the mem-efficient path doesn't error out for this model.
+    try:
+        import torch
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+
+        logger.info(
+            "sdpa_backend_availability",
+            flash=torch.backends.cuda.flash_sdp_enabled(),
+            mem_efficient=torch.backends.cuda.mem_efficient_sdp_enabled(),
+            math=torch.backends.cuda.math_sdp_enabled(),
+        )
+
+        # Probe: try a 1-token dummy forward forced to mem_efficient. If this
+        # raises, mem_efficient is unsupported for this model's head_dim and
+        # SDPA must use math (the slow path).
+        try:
+            with torch.no_grad(), sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
+                dummy = torch.tensor([[tokenizer.eos_token_id or 1]], device=model.device)
+                model(input_ids=dummy)
+            logger.info("sdpa_mem_efficient_probe", supported=True)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "sdpa_mem_efficient_probe",
+                supported=False,
+                error=str(e)[:200],
+                hint="SDPA will fall back to the math kernel — attention is the bottleneck.",
+            )
+    except ImportError:
+        # torch.nn.attention.sdpa_kernel was added in PyTorch 2.5; older
+        # versions just skip the probe.
+        pass
+
     # Resolve `resume_from_checkpoint`. `True` → auto-detect latest checkpoint
     # under output_dir; explicit Path/str → pass through; otherwise start fresh.
     resume_arg: bool | str | None
