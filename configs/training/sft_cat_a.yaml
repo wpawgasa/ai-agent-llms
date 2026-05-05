@@ -27,9 +27,17 @@ training:
   optim: "adamw_8bit"
   weight_decay: 0.001
   num_epochs: 3
-  max_seq_length: 8192
+  # 4096 truncates ~8% of samples (p95≈4534 tokens by char/4 estimate on
+  # task_a_cleaned, n=4414). 8192 is wasteful since attention cost is
+  # quadratic and Gemma-4's head_dim=512 disables FA2, so SDPA dominates
+  # step time. Drop to 4096 for ~4× attention speedup; bump back to 8192
+  # only if eval shows truncation hurting the long-conversation tail.
+  max_seq_length: 4096
   gradient_checkpointing: true
-  packing: false
+  # Pack short samples into a single max_seq_length window. With p50≈1568
+  # tokens and a 4096 window, ~2-3 samples fit per packed sequence,
+  # eliminating padding waste and giving another ~1.5-2× throughput.
+  packing: true
 
 data:
   source: "data/output/sft/task_a_cleaned"
