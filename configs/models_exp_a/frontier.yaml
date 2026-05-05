@@ -1,0 +1,19 @@
+model:
+  # name is overridden at runtime via --frontier-model (provider/model_name); this is a placeholder
+  name: "frontier-placeholder"
+  family: "frontier"
+  architecture: "remote_api"
+  precision: "remote"
+
+serving:
+  engine: "bifrost"
+  endpoint: "http://localhost:23040"
+  tool_call_parser: "openai_compatible"
+  chat_template: "remote"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 2
+  max_tokens: 2048
+  max_samples_default: 50

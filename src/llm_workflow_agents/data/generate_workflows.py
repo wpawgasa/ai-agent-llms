@@ -183,65 +183,25 @@ def _graph_to_script(
     workflow: "WorkflowGraph",
     tool_schemas: list[dict[str, Any]],
     language: str = "en",
+    messages: list[dict[str, Any]] | None = None,
 ) -> str:
     """Convert a WorkflowGraph to a natural language script.
 
-    Produces a section-per-state script that mirrors the style of real
-    voicebot/workflow scripts, with conditional branch instructions written
-    in plain language alongside the structured graph data.
+    Delegates to :func:`build_workflow_script` (single source of truth in
+    ``data/_workflow_script.py``). When ``messages`` is provided, per-state
+    tools are inferred from actual GT tool calls and override the graph's
+    ``state.tools`` field — fixes the data-generation bug where ``state.tools``
+    was set randomly by ``rng.randint(0, 2)`` independent of conversation
+    content (~60% of samples have script-vs-GT mismatches).
     """
-    t = _SCRIPT_TEMPLATES.get(language, _SCRIPT_TEMPLATES["en"])
+    from llm_workflow_agents.data._workflow_script import build_workflow_script
 
-    # Index outgoing transitions per state and tool schemas by name
-    outgoing: dict[str, list[WorkflowTransition]] = {s.id: [] for s in workflow.states}
-    for tr in workflow.transitions:
-        outgoing.setdefault(tr.from_state, []).append(tr)
-
-    tool_desc: dict[str, str] = {}
-    for schema in tool_schemas:
-        fn = schema.get("function", {})
-        tool_desc[fn.get("name", "")] = fn.get("description", "")
-
-    state_name: dict[str, str] = {s.id: s.name for s in workflow.states}
-
-    lines: list[str] = []
-    for state in workflow.states:
-        is_initial = state.id == workflow.initial_state
-        is_terminal = state.id in workflow.terminal_states
-
-        header = t["header"].format(section=state.name)
-        if is_initial:
-            header += f"  {t['initial_marker']}"
-        lines.append(header)
-
-        if is_terminal:
-            lines.append(t["terminal_marker"])
-            lines.append("")
-            continue
-
-        # Tools
-        if state.tools:
-            tool_list = ", ".join(
-                f"{name} ({tool_desc.get(name, '')})" if tool_desc.get(name) else name
-                for name in state.tools
-            )
-            lines.append(t["tools_intro"].format(tools=tool_list))
-        else:
-            lines.append(t["no_tools"])
-
-        # Transitions — sort so priority-0 (primary) comes first
-        branches = sorted(outgoing.get(state.id, []), key=lambda x: x.priority)
-        for tr in branches:
-            to_name = state_name.get(tr.to_state, tr.to_state)
-            if tr.priority == 0:
-                lines.append(t["primary_branch"].format(to=to_name))
-            else:
-                cond = _humanise_condition(tr.condition) or t["condition_fallback"]
-                lines.append(t["alt_branch"].format(condition=cond, to=to_name))
-
-        lines.append("")
-
-    return "\n".join(lines).strip()
+    return build_workflow_script(
+        workflow.to_dict(),
+        tool_schemas=tool_schemas,
+        language=language,
+        messages=messages,
+    )
 
 
 _STATE_ANNOTATION_RE = re.compile(
@@ -1332,10 +1292,14 @@ def generate_workflow_dataset(
         # Enrich system prompt so training and eval see the same prompt shape.
         # build_enriched_system_prompt is idempotent — safe for placeholder messages
         # that are already enriched after the simplification above.
+        # Pass messages through so the workflow_script reflects the actual GT
+        # tool calls per state, not the random rng-populated state.tools.
         _enrich_ctx = {
-            "workflow_script": _graph_to_script(workflow, tool_schemas, sample_language),
+            "workflow_script": _graph_to_script(workflow, tool_schemas, sample_language, messages=messages),
             "workflow_graph": workflow.to_dict(),
             "tool_schemas": tool_schemas,
+            "messages": messages,
+            "language": sample_language,
         }
         if messages and messages[0].get("role") == "system":
             messages[0] = {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, messages[0]["content"])}
@@ -1361,7 +1325,7 @@ def generate_workflow_dataset(
             num_tools=spec.num_tools,
             chain_depth=spec.chain_depth,
             workflow_graph=workflow.to_dict(),
-            workflow_script=_graph_to_script(workflow, tool_schemas, sample_language),
+            workflow_script=_graph_to_script(workflow, tool_schemas, sample_language, messages=messages),
             tool_schemas=tool_schemas,
             messages=messages,
             user_behavior=behavior,

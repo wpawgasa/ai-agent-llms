@@ -101,8 +101,29 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     from datasets import load_dataset
 
+    from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
+
     data_source = data_cfg.get("source", "")
     train_ds = load_dataset("json", data_dir=data_source, split="train")
+
+    # Re-enrich the system prompt so GRPO rollouts see the same prompt the
+    # benchmark sees. JSONL has stale enrichment baked in; force_rebuild=True
+    # strips it and rebuilds from current code using each row's upstream
+    # fields (workflow_graph, tool_schemas, messages, language).
+    def _rebuild_system_prompt(row: dict[str, Any]) -> dict[str, Any]:
+        msgs = row.get("messages") or []
+        if not msgs or msgs[0].get("role") != "system" or not row.get("workflow_graph"):
+            return row
+        new_msgs = list(msgs)
+        new_msgs[0] = {
+            "role": "system",
+            "content": build_enriched_system_prompt(
+                row, msgs[0].get("content") or "", force_rebuild=True
+            ),
+        }
+        return {**row, "messages": new_msgs}
+
+    train_ds = train_ds.map(_rebuild_system_prompt)
 
     from trl import GRPOConfig, GRPOTrainer
 

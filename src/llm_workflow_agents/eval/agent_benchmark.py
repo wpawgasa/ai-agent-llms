@@ -228,12 +228,12 @@ def _call_vllm(
     max_tokens: int = 1024,
     tools: list[dict[str, Any]] | None = None,
     enable_thinking: bool = False,
+    engine: str = "vllm",
 ) -> tuple[str, list[dict[str, Any]], float, float]:
-    """Call the vLLM OpenAI-compatible chat completions endpoint.
+    """Call the OpenAI-compatible chat completions endpoint (vLLM or BiFrost gateway).
 
     When *tools* are provided they are included in the request so that
-    vLLM can use its ``--tool-call-parser`` to emit structured tool
-    calls.
+    the server can emit structured tool calls.
 
     Uses streaming to measure TTFT (Time To First Token).
 
@@ -258,12 +258,13 @@ def _call_vllm(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
+    }
+    if engine == "vllm":
         # Qwen3-family thinking toggle. Ignored by tokenizer chat templates
         # that don't reference enable_thinking (Gemma, Mistral, etc.), so it's
         # safe to always send. Default False for fair latency comparison
         # against non-thinking models in Phase 1.
-        "chat_template_kwargs": {"enable_thinking": enable_thinking},
-    }
+        request_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
     if tools:
         request_body["tools"] = tools
     payload = json.dumps(request_body).encode()
@@ -360,6 +361,7 @@ def _replay_conversation(
     sample: dict[str, Any],
     temperature: float = 0.0,
     enable_thinking: bool = False,
+    engine: str = "vllm",
 ) -> tuple[list[dict[str, Any]], list[float], list[float]]:
     """Replay a conversation, substituting model completions at assistant turns.
 
@@ -421,7 +423,7 @@ def _replay_conversation(
 
             content, raw_tool_calls, latency, ttft = _call_vllm(
                 endpoint, model, context, temperature, tools=tools,
-                enable_thinking=enable_thinking,
+                enable_thinking=enable_thinking, engine=engine,
             )
             latencies_ms.append(latency)
             ttfts_ms.append(ttft)
@@ -505,7 +507,7 @@ if __name__ == "__main__":
     from llm_workflow_agents.eval.tool_chain_propagation import evaluate_chain_propagation
 
     parser = argparse.ArgumentParser(description="Experiment A: workflow quality benchmark")
-    parser.add_argument("--model",    required=True,  help="Model name (must match vLLM --model)")
+    parser.add_argument("--model",    required=True,  help="Model name (must match the endpoint's model name)")
     parser.add_argument("--output",   required=True,  help="Path to write results JSON")
     parser.add_argument(
         "--data",
@@ -515,7 +517,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--endpoint",
         default="http://localhost:8000",
-        help="vLLM server base URL (default: http://localhost:8000)",
+        help="Server base URL (vLLM default: http://localhost:8000; BiFrost gateway: http://localhost:23040)",
     )
     parser.add_argument(
         "--max-samples",
@@ -550,6 +552,17 @@ if __name__ == "__main__":
             "ignored by tokenizer templates that don't reference the flag."
         ),
     )
+    parser.add_argument(
+        "--engine",
+        default="vllm",
+        choices=["vllm", "bifrost"],
+        help=(
+            "Backend engine: 'vllm' for a local vLLM server (default), "
+            "'bifrost' for the BiFrost LLM gateway. The 'bifrost' engine "
+            "omits vLLM-specific body fields (chat_template_kwargs) that "
+            "frontier provider APIs do not accept."
+        ),
+    )
     args = parser.parse_args()
 
     import logging
@@ -580,6 +593,7 @@ if __name__ == "__main__":
     logger.info(
         "benchmark_start",
         model=args.model,
+        engine=args.engine,
         endpoint=args.endpoint,
         data_dir=str(data_dir),
         num_samples=len(samples),
@@ -609,7 +623,7 @@ if __name__ == "__main__":
 
         pred_messages, latencies, ttfts = _replay_conversation(
             args.endpoint, args.model, sample, temperature=0.0,
-            enable_thinking=args.enable_thinking,
+            enable_thinking=args.enable_thinking, engine=args.engine,
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
@@ -663,7 +677,7 @@ if __name__ == "__main__":
             conv_id = sample.get("conversation_id", f"sample_{idx}")
             trial_messages, _, _ = _replay_conversation(
                 args.endpoint, args.model, sample, temperature=0.7,
-                enable_thinking=args.enable_thinking,
+                enable_thinking=args.enable_thinking, engine=args.engine,
             )
             stochastic_map[conv_id].append(trial_messages)
 
@@ -697,6 +711,8 @@ if __name__ == "__main__":
 
     result = {
         "model": args.model,
+        "engine": args.engine,
+        "endpoint": args.endpoint,
         "kv_cache_dtype": args.kv_cache_dtype,
         "data_dir": str(data_dir),
         "num_samples": len(samples),

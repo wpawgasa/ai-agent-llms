@@ -444,6 +444,13 @@ def train_sft(
             return c
         return _json.dumps(c, ensure_ascii=False)
 
+    # Re-enrich the system prompt at load time so training sees the same
+    # prompt the benchmark sees. Existing SFT JSONL has stale enrichment
+    # baked in (broken workflow_script + old FORMAT_RULES); force_rebuild=True
+    # strips it and rebuilds from current code using the row's upstream
+    # fields (workflow_graph, tool_schemas, messages, language).
+    from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
+
     def _load_split(name: str) -> Dataset:
         path = Path(data_source) / f"{name}.jsonl"
         if not path.exists():
@@ -454,12 +461,22 @@ def train_sft(
                 if not line.strip():
                     continue
                 raw = _json.loads(line)
+                raw_msgs = raw.get("messages", []) or []
+                # Rebuild messages[0] (system) if upstream fields are present.
+                if raw_msgs and raw_msgs[0].get("role") == "system" and raw.get("workflow_graph"):
+                    raw_msgs = list(raw_msgs)
+                    raw_msgs[0] = {
+                        "role": "system",
+                        "content": build_enriched_system_prompt(
+                            raw, raw_msgs[0].get("content") or "", force_rebuild=True
+                        ),
+                    }
                 msgs = [
                     {
                         "role": m.get("role", "") or "",
                         "content": _coerce_content(m.get("content")),
                     }
-                    for m in raw.get("messages", [])
+                    for m in raw_msgs
                 ]
                 rows.append({"messages": msgs})
         if not rows:
