@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c61c17e55979",
+  "session_id": "5c749f71-0396-43b4-9c85-9a0a8f1363e2",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-06T09:53:06.12587453Z",
+  "branch": "main",
+  "checkpoints_count": 22,
+  "files_touched": [
+    "docs/metrics.md",
+    "scripts/run_exp_a_per_level.sh",
+    "scripts/run_exp_a_single.sh",
+    "src/llm_workflow_agents/eval/agent_benchmark.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "4a298109c9f8",
+  "token_usage": {
+    "input_tokens": 413,
+    "cache_creation_tokens": 1057928,
+    "cache_read_tokens": 32497026,
+    "output_tokens": 187781,
+    "api_call_count": 214
+  },
+  "session_metrics": {
+    "turn_count": 22
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-06T09:53:04.590309106Z",
+    "agent_lines": 474,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 474,
+    "agent_percentage": 100
+  }
+}
