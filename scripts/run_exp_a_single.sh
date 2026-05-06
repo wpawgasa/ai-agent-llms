@@ -40,6 +40,8 @@ FRONTIER_MODEL=""
 CONFIG_ARG=""
 KV_CACHE_DTYPE="auto"
 DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
+DATA_DIR_SET=false
+LEVEL=""
 MAX_SAMPLES=0
 MAX_SAMPLES_SET=false
 MAX_MODEL_LEN=""
@@ -57,7 +59,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --frontier-model)    FRONTIER_MODEL="$2";                    shift 2 ;;
         --kv-cache-dtype)    KV_CACHE_DTYPE="$2";                    shift 2 ;;
-        --data)              DATA_DIR="$2";                           shift 2 ;;
+        --data)              DATA_DIR="$2"; DATA_DIR_SET=true;        shift 2 ;;
+        --level)             LEVEL="$2";                              shift 2 ;;
         --max-samples)       MAX_SAMPLES="$2"; MAX_SAMPLES_SET=true;  shift 2 ;;
         --stochastic-trials) STOCHASTIC_TRIALS_OVERRIDE="$2";         shift 2 ;;
         --max-model-len)     MAX_MODEL_LEN="$2";                      shift 2 ;;
@@ -169,6 +172,32 @@ print(c.get('inference', {}).get('max_samples_default', 50))
 " "$MODEL_CONFIG")
 fi
 
+# ---------------------------------------------------------------------------
+# Level filter: resolve --level to a single JSONL file under DATA_DIR.
+# ---------------------------------------------------------------------------
+
+LEVEL_TAG=""
+if [[ -n "$LEVEL" ]]; then
+    LEVEL_LC=$(echo "$LEVEL" | tr '[:upper:]' '[:lower:]')
+    if [[ ! "$LEVEL_LC" =~ ^l[1-5]$ ]]; then
+        echo "ERROR: --level must be one of L1, L2, L3, L4, L5 (got: $LEVEL)" >&2
+        exit 1
+    fi
+    if [[ "$DATA_DIR_SET" == "false" ]]; then
+        SEARCH_ROOT="$PROJECT_ROOT/data/output/benchmark/task_a"
+    else
+        SEARCH_ROOT="$DATA_DIR"
+    fi
+    # Find a single JSONL whose basename starts with the level token
+    LEVEL_FILE=$(find "$SEARCH_ROOT" -maxdepth 1 -type f -name "${LEVEL_LC}_*.jsonl" | head -n1)
+    if [[ -z "$LEVEL_FILE" || ! -f "$LEVEL_FILE" ]]; then
+        echo "ERROR: no JSONL matching ${LEVEL_LC}_*.jsonl under $SEARCH_ROOT" >&2
+        exit 1
+    fi
+    DATA_DIR="$LEVEL_FILE"
+    LEVEL_TAG="_${LEVEL_LC}"
+fi
+
 mkdir -p "$RESULTS_DIR"
 
 echo "=== Experiment A (single model): Prompt-Encoded Business Logic ==="
@@ -179,7 +208,10 @@ echo "Endpoint:       $SERVING_ENDPOINT"
 if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
     echo "KV cache dtype: $KV_CACHE_DTYPE"
 fi
-echo "Data dir:       $DATA_DIR"
+if [[ -n "$LEVEL" ]]; then
+    echo "Level:          $LEVEL"
+fi
+echo "Data path:      $DATA_DIR"
 echo "Results dir:    $RESULTS_DIR"
 echo "Max samples:    ${MAX_SAMPLES} (0=all)"
 echo "Stoch trials:   $STOCHASTIC_TRIALS"
@@ -190,9 +222,9 @@ echo "=================================================================="
 # ---------------------------------------------------------------------------
 
 if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
-    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_frontier.json"
+    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_frontier${LEVEL_TAG}.json"
 else
-    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}.json"
+    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}${LEVEL_TAG}.json"
 fi
 
 # ---------------------------------------------------------------------------

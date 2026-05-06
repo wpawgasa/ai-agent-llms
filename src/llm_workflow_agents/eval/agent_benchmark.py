@@ -23,7 +23,7 @@ from typing import Any
 import structlog
 
 from llm_workflow_agents.eval.state_accuracy import StateMachineMetrics, parse_state_transitions
-from llm_workflow_agents.eval.tool_call_f1 import ToolCallMetrics
+from llm_workflow_agents.eval.tool_call_f1 import ToolCallMetrics, parse_tool_calls
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
@@ -205,19 +205,69 @@ def evaluate_workflow_quality(
 # CLI entrypoint — invoked by scripts/run_exp_a.sh
 # ---------------------------------------------------------------------------
 
-def _load_samples(data_dir: "Path") -> list[dict[str, Any]]:
-    """Load all JSONL samples from a benchmark data directory."""
+def _load_samples(data_path: "Path") -> list[dict[str, Any]]:
+    """Load benchmark samples from a directory (all *.jsonl) or a single file."""
     import json
     from pathlib import Path
 
+    p = Path(data_path)
+    if p.is_file():
+        paths = [p]
+    else:
+        paths = sorted(p.glob("*.jsonl"))
+
     samples: list[dict[str, Any]] = []
-    for path in sorted(Path(data_dir).glob("*.jsonl")):
+    for path in paths:
         with open(path) as f:
             for line in f:
                 line = line.strip()
                 if line:
                     samples.append(json.loads(line))
     return samples
+
+
+def _downgrade_tool_turns_to_text(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert past structured tool turns to plain text.
+
+    Gemini-3 (via BiFrost) requires a server-generated ``thought_signature`` on
+    every re-sent ``functionCall`` part. BiFrost's OpenAI translation strips
+    that field, so any conversation containing a past ``assistant.tool_calls``
+    fails the next request with HTTP 400. We sidestep the validation by
+    rewriting past tool turns:
+
+      - assistant + tool_calls -> assistant with ``<tool_call>{...}</tool_call>``
+        tags appended in ``content``.
+      - role=tool -> role=user with ``[Tool result] ...`` prefix.
+
+    The ``tools=[...]`` schema in the request is unchanged, so the model can
+    still emit *new* structured tool calls; only past ones are textualised.
+    """
+    import json as _json
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant" and msg.get("tool_calls"):
+            tags: list[str] = []
+            for tc in msg.get("tool_calls", []):
+                fn = tc.get("function", {})
+                args = fn.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = _json.loads(args)
+                    except _json.JSONDecodeError:
+                        pass
+                tags.append(_json.dumps({"name": fn.get("name", ""), "arguments": args}))
+            content = msg.get("content") or ""
+            tag_block = "\n".join(f"<tool_call>{t}</tool_call>" for t in tags)
+            new_content = (content + ("\n" if content else "") + tag_block).strip()
+            out.append({"role": "assistant", "content": new_content})
+        elif role == "tool":
+            tcid = msg.get("tool_call_id", "")
+            prefix = f"[Tool result {tcid}]" if tcid else "[Tool result]"
+            out.append({"role": "user", "content": f"{prefix}: {msg.get('content', '')}"})
+        else:
+            out.append(msg)
+    return out
 
 
 def _call_vllm(
@@ -250,7 +300,11 @@ def _call_vllm(
     """
     import json
     import time
+    import urllib.error
     import urllib.request
+
+    if engine == "bifrost":
+        messages = _downgrade_tool_turns_to_text(messages)
 
     request_body: dict[str, Any] = {
         "model": model,
@@ -291,7 +345,27 @@ def _call_vllm(
     import os
 
     read_timeout_s = float(os.environ.get("VLLM_HTTP_READ_TIMEOUT_S", "600"))
-    with urllib.request.urlopen(req, timeout=read_timeout_s) as resp:
+    try:
+        resp_cm = urllib.request.urlopen(req, timeout=read_timeout_s)
+    except urllib.error.HTTPError as e:
+        # 400-class errors usually mean a malformed conversation slipped through
+        # (e.g. mismatched tool_call_ids, schema-incompatible arguments). Log
+        # the response body once and return an empty turn so the benchmark
+        # continues instead of aborting all 200 samples.
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:1000]
+        except Exception:
+            body = "<no body>"
+        logger.warning(
+            "http_error_during_call",
+            status=e.code,
+            body=body,
+            messages_len=len(messages),
+            last_role=messages[-1].get("role") if messages else None,
+        )
+        latency_ms = (time.monotonic() - t0) * 1000.0
+        return "", [], latency_ms, 0.0
+    with resp_cm as resp:
         for raw_line in resp:
             line = raw_line.decode("utf-8", errors="replace").strip()
             if not line or not line.startswith("data:"):
@@ -435,10 +509,45 @@ def _replay_conversation(
                 content=content[:2000],  # truncate to avoid flooding logs
             )
 
+            # Fix #2: synthesize structured tool_calls from inline <tool_call>
+            # text tags when the API didn't return them in the structured field.
+            # Without this the next tool-role message has no tool_call_id and
+            # frontier providers reject the conversation with HTTP 400.
+            synthesized_from_text = False
+            if not raw_tool_calls:
+                parsed = parse_tool_calls(content)
+                if parsed:
+                    import json as _json
+                    import uuid as _uuid
+                    raw_tool_calls = [
+                        {
+                            "id": f"call_{_uuid.uuid4().hex[:24]}",
+                            "type": "function",
+                            "function": {
+                                "name": p.get("name", ""),
+                                "arguments": _json.dumps(p.get("arguments", {})),
+                            },
+                        }
+                        for p in parsed
+                    ]
+                    synthesized_from_text = True
+
             # Build a well-formed assistant message for the context so
             # that subsequent tool-role messages have matching tool_call_ids.
             # Use content *without* appended <tool_call> tags for the API context
-            text_content = content.split("\n<tool_call>")[0] if raw_tool_calls else content
+            if raw_tool_calls and not synthesized_from_text:
+                text_content = content.split("\n<tool_call>")[0]
+            elif synthesized_from_text:
+                # Strip ALL <tool_call>...</tool_call> blocks from content for context
+                import re as _re
+                text_content = _re.sub(
+                    r"\s*<tool_call>.*?</tool_call>\s*",
+                    " ",
+                    content,
+                    flags=_re.DOTALL,
+                ).strip()
+            else:
+                text_content = content
             ctx_msg: dict[str, Any] = {"role": "assistant", "content": text_content}
             if raw_tool_calls:
                 ctx_msg["tool_calls"] = raw_tool_calls
@@ -454,16 +563,20 @@ def _replay_conversation(
             pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
             predicted.append(pred_msg)
 
-            # Stop if the model reached a terminal state
+            # Fix #1: do NOT early-exit on terminal state. Multi-turn
+            # negotiations (L1_002, L1_004) reach TERMINAL on turn 1 if the
+            # model collapses negotiation; truncating the loop loses every
+            # subsequent GT tool call from per-turn alignment. Walk every
+            # GT turn instead — the natural end of `for msg in messages`
+            # provides the stop condition.
             if terminal_states:
                 transitions = parse_state_transitions([pred_msg])
                 if transitions and transitions[-1][1] in terminal_states:
                     logger.info(
-                        "terminal_state_reached",
+                        "terminal_state_reached_continuing",
                         state=transitions[-1][1],
                         turn=len(latencies_ms),
                     )
-                    break
 
         elif role == "tool":
             # Use ground-truth tool response to avoid cascading failures.
@@ -575,7 +688,7 @@ if __name__ == "__main__":
 
     data_dir = Path(args.data)
     if not data_dir.exists():
-        print(f"ERROR: data directory not found: {data_dir}", file=sys.stderr)
+        print(f"ERROR: data path not found: {data_dir}", file=sys.stderr)
         print(
             "Run ./scripts/generate_benchmark_data.sh first to generate benchmark data.",
             file=sys.stderr,
@@ -584,11 +697,15 @@ if __name__ == "__main__":
 
     samples = _load_samples(data_dir)
     if not samples:
-        print(f"ERROR: no JSONL samples found in {data_dir}", file=sys.stderr)
+        print(f"ERROR: no JSONL samples found at {data_dir}", file=sys.stderr)
         sys.exit(1)
 
     if args.max_samples > 0:
         samples = samples[: args.max_samples]
+
+    import re as _re_start
+    _start_level_match = _re_start.match(r"(l[1-5])_", data_dir.name) if data_dir.is_file() else None
+    _start_level_tag = _start_level_match.group(1).upper() if _start_level_match else "mixed"
 
     logger.info(
         "benchmark_start",
@@ -596,6 +713,7 @@ if __name__ == "__main__":
         engine=args.engine,
         endpoint=args.endpoint,
         data_dir=str(data_dir),
+        complexity_level=_start_level_tag,
         num_samples=len(samples),
         stochastic_trials=args.stochastic_trials,
     )
@@ -709,12 +827,20 @@ if __name__ == "__main__":
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Derive complexity level from data path when --data is a single
+    # `l[1-5]_*.jsonl` file (the per-level case). For directory inputs
+    # spanning all levels, "mixed" is recorded.
+    import re as _re
+    level_match = _re.match(r"(l[1-5])_", data_dir.name) if data_dir.is_file() else None
+    level_tag = level_match.group(1).upper() if level_match else "mixed"
+
     result = {
         "model": args.model,
         "engine": args.engine,
         "endpoint": args.endpoint,
         "kv_cache_dtype": args.kv_cache_dtype,
         "data_dir": str(data_dir),
+        "complexity_level": level_tag,
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
         "metrics": quality.to_dict(),
