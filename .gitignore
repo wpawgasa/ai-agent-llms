@@ -49,3 +49,11 @@ Thumbs.db
 
 # GCP service account credentials (never commit)
 *.json
+# Track BiFrost gateway config explicitly (uses env.* placeholders, no secrets)
+!deployments/**/config.json
+
+# SQLite runtime state (BiFrost logs/config store) — machine-specific, may
+# contain logged prompts/responses. Never commit.
+*.db
+*.db-shm
+*.db-wal

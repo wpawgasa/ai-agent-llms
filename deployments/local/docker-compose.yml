@@ -1,0 +1,78 @@
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+x-logging: &logging-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+
+  # ==========================================================================
+  # LLM Gateway Service
+  # ==========================================================================
+
+  # LLM Gateway Service (BiFrost - Production)
+  # BiFrost offers 50x faster performance than LiteLLM with 11µs overhead
+  # Documentation: https://docs.getbifrost.ai
+  llm-gateway:
+    image: maximhq/bifrost:latest
+    container_name: llm-benchmark-gateway
+    ports:
+    - 23040:8080      # BiFrost API (OpenAI-compatible at /v1/chat/completions)
+    environment:
+      # LLM Provider API Keys (set in .env file)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROK_API_KEY: ${GROK_API_KEY:-}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # BiFrost Configuration
+      APP_PORT: '8080'
+      APP_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_STYLE: json
+    volumes:
+    - ./data/bifrost:/app/data
+    - ./data/bifrost/config.json:/app/data/config.json:ro
+    networks:
+    - llm-benchmark-network
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://localhost:8080/health]
+    <<: [*restart-policy, *logging-defaults]
+
+  # ==========================================================================
+  # Application Services
+  # ==========================================================================
+
+  
+
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  llm-benchmark-network:
+    name: llm-benchmark-network
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 172.32.0.0/16
