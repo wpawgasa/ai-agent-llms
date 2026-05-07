@@ -70,8 +70,8 @@ stages:
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: 1da0c256dfb0689114a8956527ada45a
-      size: 56579
+      md5: 224d2229344cac0e18f0f377d9047aca
+      size: 55421
     outs:
     - path: data/output/sft/task_a
       hash: md5
@@ -80,6 +80,43 @@ stages:
       nfiles: 128
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 20b0b44ba9d52d0d71b12e29e7869fe5.dir
-      size: 211046083
+      md5: 8ef8681808e348f82eac36edbbd6c2ae.dir
+      size: 227958540
       nfiles: 131
+  task_a_sft_gemma4_26b_a4b:
+    cmd: ./scripts/run_phase2_sft.sh --model-config 
+      configs/models_exp_a/gemma4_26b_a4b.yaml --sft-config 
+      configs/training/sft_cat_a.yaml
+    deps:
+    - path: configs/models_exp_a/gemma4_26b_a4b.yaml
+      hash: md5
+      md5: 9894665b15093cecef5b4c4f4675a5ed
+      size: 1133
+    - path: configs/training/sft_cat_a.yaml
+      hash: md5
+      md5: 6323c277ca12a706ef5ddeab2fe3505f
+      size: 1822
+    - path: data/output/sft/task_a_cleaned
+      hash: md5
+      md5: 8ef8681808e348f82eac36edbbd6c2ae.dir
+      size: 227958540
+      nfiles: 131
+    - path: scripts/run_phase2_sft.sh
+      hash: md5
+      md5: 204fa36d41a44c9b3467dadbf006ebdb
+      size: 8227
+      isexec: true
+    - path: src/llm_workflow_agents/training/lora_targets.py
+      hash: md5
+      md5: 4668724b2b8bb7feb1207fb48c44effa
+      size: 9466
+    - path: src/llm_workflow_agents/training/sft.py
+      hash: md5
+      md5: dc74aa236b849724220ed0cf9b7dfbaf
+      size: 34398
+    outs:
+    - path: checkpoints/sft_cat_a/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 7c6bd069b79501949ff60b8079af082a.dir
+      size: 560242205
+      nfiles: 46
