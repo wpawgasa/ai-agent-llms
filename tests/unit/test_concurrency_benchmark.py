@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from llm_workflow_agents.eval.concurrency_benchmark import (
+    ConcurrencySweepResult,
     LevelResult,
     PercentileStats,
     _percentiles,
@@ -122,3 +123,37 @@ class TestDegradationRule:
             _make_level(4, 900.0),
         ]
         assert _max_sustainable(levels, 2.0, 0.01) == 1
+
+
+class TestSweepResultSerialization:
+    """The result envelope must surface engine + endpoint so frontier and vLLM
+    runs can be told apart (and re-targeted) from the JSON alone."""
+
+    def test_default_engine_is_vllm(self):
+        r = ConcurrencySweepResult(
+            model="qwen3-32b",
+            kv_cache_dtype="auto",
+            input_tokens=512,
+            output_tokens=128,
+            degradation_ttft_multiplier=2.0,
+            max_failure_rate=0.01,
+        )
+        d = r.to_dict()
+        assert d["engine"] == "vllm"
+        assert d["endpoint"] == ""
+
+    def test_frontier_engine_round_trip(self):
+        r = ConcurrencySweepResult(
+            model="anthropic/claude-sonnet-4-6",
+            kv_cache_dtype="remote",
+            input_tokens=512,
+            output_tokens=128,
+            degradation_ttft_multiplier=2.0,
+            max_failure_rate=0.01,
+            engine="bifrost",
+            endpoint="http://localhost:23040",
+        )
+        d = r.to_dict()
+        assert d["engine"] == "bifrost"
+        assert d["endpoint"] == "http://localhost:23040"
+        assert d["kv_cache_dtype"] == "remote"

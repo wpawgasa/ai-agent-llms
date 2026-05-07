@@ -104,11 +104,15 @@ class ConcurrencySweepResult:
     output_tokens: int
     degradation_ttft_multiplier: float
     max_failure_rate: float
+    engine: str = "vllm"
+    endpoint: str = ""
     by_context_length: list[ContextSweepResult] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
+            "engine": self.engine,
+            "endpoint": self.endpoint,
             "kv_cache_dtype": self.kv_cache_dtype,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -324,7 +328,8 @@ def run_concurrency_sweep(
     model_name: str,
     kv_cache_dtype: str,
     *,
-    base_url: str = "http://localhost:8000/v1",
+    base_url: str = "http://localhost:8000",
+    engine: str = "vllm",
     context_lengths: list[int] | tuple[int, ...] = (2048, 4096, 8192),
     input_tokens: int = 512,
     output_tokens: int = 128,
@@ -336,7 +341,15 @@ def run_concurrency_sweep(
     degradation_ttft_multiplier: float = 2.0,
     max_failure_rate: float = 0.01,
 ) -> ConcurrencySweepResult:
-    """Sweep concurrency levels and context lengths for a running vLLM server.
+    """Sweep concurrency levels and context lengths for a running OpenAI-compatible server.
+
+    Two backends are supported:
+      * ``engine="vllm"`` — local vLLM server (default). ``kv_cache_dtype`` is
+        recorded in the result for cross-quantization comparisons, and peak
+        VRAM is sampled via ``nvidia-smi`` during each level.
+      * ``engine="bifrost"`` — remote frontier model routed through the BiFrost
+        gateway. ``kv_cache_dtype`` is preserved as metadata (typically the
+        sentinel ``"remote"``) but no VRAM sampling is performed.
 
     The server must already be running and healthy at ``base_url`` before
     this function is called. Server lifecycle is managed by the caller
@@ -350,9 +363,12 @@ def run_concurrency_sweep(
     to serve as the baseline.
     """
     levels_list = sorted(set([1, *concurrency_levels]))
+    sample_vram = engine == "vllm"
 
     result = ConcurrencySweepResult(
         model=model_name,
+        engine=engine,
+        endpoint=base_url,
         kv_cache_dtype=kv_cache_dtype,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -387,7 +403,21 @@ def run_concurrency_sweep(
                 requests=effective_total,
             )
 
-            with _PeakVramSampler() as vram_sampler:
+            if sample_vram:
+                with _PeakVramSampler() as vram_sampler:
+                    raw_metrics, wall_s = asyncio.run(
+                        _run_level(
+                            base_url,
+                            model_name,
+                            prompt,
+                            output_tokens,
+                            concurrency,
+                            effective_total,
+                            warmup_requests,
+                        )
+                    )
+                peak_vram_gb = vram_sampler.peak_gb
+            else:
                 raw_metrics, wall_s = asyncio.run(
                     _run_level(
                         base_url,
@@ -399,8 +429,9 @@ def run_concurrency_sweep(
                         warmup_requests,
                     )
                 )
+                peak_vram_gb = 0.0
 
-            lv = _compute_level_result(concurrency, raw_metrics, wall_s, vram_sampler.peak_gb)
+            lv = _compute_level_result(concurrency, raw_metrics, wall_s, peak_vram_gb)
             ctx_levels.append(lv)
 
             if concurrency == 1:
@@ -484,8 +515,18 @@ if __name__ == "__main__":
         description="Run concurrency sweep for a vLLM-served model"
     )
     parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--engine",
+        choices=["vllm", "bifrost"],
+        default="vllm",
+        help="Backend engine: 'vllm' (default, local server) or 'bifrost' (remote LLM gateway).",
+    )
     parser.add_argument("--kv-cache-dtype", default="auto")
-    parser.add_argument("--base-url", default="http://localhost:8000/v1")
+    parser.add_argument(
+        "--base-url",
+        default="http://localhost:8000",
+        help="Server base URL (no /v1 suffix; the harness appends /v1/chat/completions).",
+    )
     parser.add_argument("--context-lengths", default="2048,4096,8192")
     parser.add_argument("--input-tokens", type=int, default=512)
     parser.add_argument("--output-tokens", type=int, default=128)
@@ -506,6 +547,7 @@ if __name__ == "__main__":
         model_name=args.model,
         kv_cache_dtype=args.kv_cache_dtype,
         base_url=args.base_url,
+        engine=args.engine,
         context_lengths=ctx_lens,
         input_tokens=args.input_tokens,
         output_tokens=args.output_tokens,
