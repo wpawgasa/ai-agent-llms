@@ -76,5 +76,34 @@ stages:
     # test split must NOT be used during training or hyperparameter selection
 
   # ---------------------------------------------------------------------------
+  # Phase 2 — SFT fine-tuning
+  # ---------------------------------------------------------------------------
+
+  task_a_sft_gemma4_26b_a4b:
+    desc: >-
+      Phase 2 SFT — Gemma-4 26B-A4B-it on cleaned Task A data. Outputs
+      LoRA adapter checkpoints at every save_steps interval plus the
+      train log under checkpoints/sft_cat_a/gemma-4-26B-A4B-it/.
+
+      Training takes several hours on an H100. To register an existing
+      checkpoint without re-running training, use:
+          dvc commit task_a_sft_gemma4_26b_a4b
+      Push to the GCS remote afterwards:
+          dvc push task_a_sft_gemma4_26b_a4b
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_26b_a4b.yaml
+      --sft-config configs/training/sft_cat_a.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_26b_a4b.yaml
+      - configs/training/sft_cat_a.yaml
+      - data/output/sft/task_a_cleaned
+    outs:
+      - checkpoints/sft_cat_a/gemma-4-26B-A4B-it
+
+  # ---------------------------------------------------------------------------
   # Task B and Task C stages will be added once recipes are defined.
   # ---------------------------------------------------------------------------
