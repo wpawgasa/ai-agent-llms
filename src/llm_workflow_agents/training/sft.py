@@ -357,21 +357,59 @@ def train_sft(
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
+            # Without this, the frozen input-embeddings produce activations
+            # with requires_grad=False; the gradient-checkpoint boundary then
+            # detaches the autograd graph and LoRA params receive zero grad.
+            model.enable_input_require_grads()
 
         # PEFT only LoRA-wraps a fixed set of module types (nn.Linear,
-        # nn.Embedding, etc.). Gemma-4's projection layers are
+        # nn.Embedding, etc.). Some Gemma-4 projection layers are
         # `Gemma4ClippableLinear` wrappers around an inner `nn.Linear`,
-        # so the registry's short names (`q_proj`, `k_proj`, ...) match
-        # the wrapper, not the wrappable module. Detect this and rewrite
-        # the target list to point at the inner `.linear` submodule.
+        # so when *all* projections in the model are wrappers, the
+        # registry's short names (`q_proj`, `k_proj`, ...) match nothing
+        # PEFT can wrap and we have to redirect to `*.linear`. But the
+        # text decoder of Gemma-4 conditional-generation models uses
+        # bare `nn.Linear` while only the vision/audio towers use the
+        # wrapper. A blanket "any wrapper present anywhere" rewrite
+        # attaches LoRA to the vision tower only — text-only SFT never
+        # activates those params and grad_norm stays 0.
+        #
+        # Positive test: only rewrite if no bare nn.Linear with the
+        # target leaf name already exists. If at least one does, PEFT
+        # will attach LoRA to those (the language decoder's projections),
+        # which is what we want. Robust to any model wrapping.
         target_modules_resolved = list(target_modules)
-        wrapper_names = {
-            type(m).__name__
-            for m in model.modules()
-            if hasattr(m, "linear")
-            and isinstance(getattr(m, "linear"), torch.nn.Linear)
-        }
-        if "Gemma4ClippableLinear" in wrapper_names:
+        target_leaf_names = set(target_modules)
+        bare_target_count = sum(
+            1
+            for name, m in model.named_modules()
+            if isinstance(m, torch.nn.Linear)
+            and name.rsplit(".", 1)[-1] in target_leaf_names
+        )
+        wrapper_target_count = sum(
+            1
+            for name, m in model.named_modules()
+            if type(m).__name__ == "Gemma4ClippableLinear"
+            and name.rsplit(".", 1)[-1] in target_leaf_names
+        )
+        logger.info(
+            "trl_lora_target_module_scan",
+            bare_linear_matches=bare_target_count,
+            clippable_wrapper_matches=wrapper_target_count,
+        )
+        exclude_modules: str | None = None
+        if bare_target_count > 0 and wrapper_target_count > 0:
+            # Mixed population — Gemma-4 conditional-generation has bare
+            # nn.Linear in the language decoder AND Gemma4ClippableLinear
+            # in the vision/audio towers. PEFT's suffix matcher catches
+            # both and raises on the wrapper. Exclude the tower paths so
+            # LoRA lands only on the decoder.
+            exclude_modules = r".*(vision_tower|audio_tower)\..*"
+            logger.info(
+                "trl_lora_excluding_multimodal_towers",
+                exclude_pattern=exclude_modules,
+            )
+        elif bare_target_count == 0 and wrapper_target_count > 0:
             target_modules_resolved = [
                 f"{t}.linear" for t in target_modules_resolved
             ]
@@ -382,14 +420,17 @@ def train_sft(
                 rewritten=target_modules_resolved,
             )
 
-        peft_config = LoraConfig(
-            r=lora_rank,
-            lora_alpha=lora_cfg.get("alpha", lora_rank * 2),
-            lora_dropout=lora_dropout,
-            bias="none",
-            task_type="CAUSAL_LM",
-            target_modules=target_modules_resolved,
-        )
+        lora_config_kwargs: dict[str, Any] = {
+            "r": lora_rank,
+            "lora_alpha": lora_cfg.get("alpha", lora_rank * 2),
+            "lora_dropout": lora_dropout,
+            "bias": "none",
+            "task_type": "CAUSAL_LM",
+            "target_modules": target_modules_resolved,
+        }
+        if exclude_modules is not None:
+            lora_config_kwargs["exclude_modules"] = exclude_modules
+        peft_config = LoraConfig(**lora_config_kwargs)
         model = get_peft_model(model, peft_config)
     elif use_unsloth_toggles:
         model = FastLanguageModel.get_peft_model(
@@ -591,7 +632,7 @@ def train_sft(
     # gradient_accumulation_steps when per_device is fixed at 1.
     from trl import SFTConfig, SFTTrainer
 
-    output_dir = Path("checkpoints") / Path(config_path).stem
+    output_dir = Path("checkpoints") / Path(config_path).stem / Path(model_name).name
     effective_bs = training_cfg.get("effective_batch_size", 8)
     per_device_bs = training_cfg.get("per_device_train_batch_size", 1)
     grad_accum = max(1, effective_bs // max(1, per_device_bs))
@@ -699,8 +740,15 @@ def train_sft(
         # raises, mem_efficient is unsupported for this model's head_dim and
         # SDPA must use math (the slow path).
         try:
+            # Multimodal processors (e.g. Gemma4Processor) don't expose
+            # eos_token_id directly — fall back to the wrapped tokenizer.
+            probe_eos = (
+                getattr(tokenizer, "eos_token_id", None)
+                or getattr(getattr(tokenizer, "tokenizer", None), "eos_token_id", None)
+                or 1
+            )
             with torch.no_grad(), sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]):
-                dummy = torch.tensor([[tokenizer.eos_token_id or 1]], device=model.device)
+                dummy = torch.tensor([[probe_eos]], device=model.device)
                 model(input_ids=dummy)
             logger.info("sdpa_mem_efficient_probe", supported=True)
         except Exception as e:  # noqa: BLE001

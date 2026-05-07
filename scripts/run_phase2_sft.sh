@@ -134,12 +134,19 @@ with open('${PATCHED_CFG}', 'w') as f:
     yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
 "
 
+# Resolve the HF model basename from the model YAML (matches the
+# `Path(model_name).name` segment that sft.py appends to output_dir).
+MODEL_BASENAME=$(python3 -c "
+import yaml, pathlib
+print(pathlib.PurePosixPath(yaml.safe_load(open('${MODEL_CONFIG}'))['model']['name']).name)
+")
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo "=== Task A SFT — Phase 2 ==="
 echo "  Model config : $MODEL_CONFIG"
 echo "  SFT config   : $SFT_CONFIG"
 echo "  Patched cfg  : $PATCHED_CFG"
-echo "  Checkpoint   : $PROJECT_ROOT/checkpoints/sft_cat_a/"
+echo "  Checkpoint   : $PROJECT_ROOT/checkpoints/sft_cat_a/$MODEL_BASENAME/"
 echo "  W&B          : $([ "$NO_WANDB" -eq 1 ] && echo disabled || echo enabled)"
 if [[ -n "$RESUME_FROM" ]]; then
   echo "  Resume       : $RESUME_FROM"
@@ -160,7 +167,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 # ── Train ─────────────────────────────────────────────────────────────────────
-CKPT_DIR="$PROJECT_ROOT/checkpoints/sft_cat_a"
+CKPT_DIR="$PROJECT_ROOT/checkpoints/sft_cat_a/$MODEL_BASENAME"
 mkdir -p "$CKPT_DIR"
 LOG_FILE="$CKPT_DIR/train.log"
 echo "Logs: $LOG_FILE"
