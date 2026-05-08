@@ -134,6 +134,33 @@ The installers call `uv venv` + `uv pip install -e ".[train,dev]"` (or
 `vllm-0.19.1+cu130` wheel from the GitHub release (PyPI only ships the
 cu129 build).
 
+#### Unsloth pre-built container (`Dockerfile.unsloth`)
+
+When using `.devcontainer/Dockerfile.unsloth` (based on `unsloth/unsloth`),
+the container already ships torch, Unsloth, vLLM, and trl at the system level.
+Use `install_train_unsloth.sh` instead — it layers the project on top without
+re-resolving or clobbering those pre-installed versions:
+
+```bash
+./scripts/install_train_unsloth.sh
+```
+
+What it does:
+
+1. Creates `.venv-train` with `--system-site-packages` so the container's
+   torch / Unsloth / vLLM are visible without redundant downloads.
+2. Freezes the container packages as uv constraints (all versions locked).
+3. Installs the project `src/` in editable mode (`--no-deps`) so that
+   `from llm_workflow_agents import …` works without re-resolving the training
+   stack.
+4. Installs the project's base dependencies and dev tools under those
+   constraints; packages already in the container are kept at their
+   container-pinned versions.
+5. Upgrades `transformers` to `>=5.6.0` inside the venv (required for
+   Gemma-4 and Qwen3.6 support; overrides the Unsloth-pinned version for any
+   process that activates this venv).
+6. Installs `dvc[gs]` for GCS-backed data versioning.
+
 ### Activating
 
 ```bash
