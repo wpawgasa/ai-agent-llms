@@ -1,0 +1,1 @@
+Make additional `install_train_unsloth.sh` that create virtual environment and install dependencies over the container environment `Dockerfile.unsloth`. All dependencies should be copied from based container except for transformers that must be >=5.6.0. Also install `dvc[gs]`. Document this in README.md
