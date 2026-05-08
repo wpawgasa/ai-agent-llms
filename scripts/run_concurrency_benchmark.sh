@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run concurrency and latency benchmark for a single model.
 #
-# Two modes:
-#   vLLM:       Spawns a local vLLM server from a Cat A YAML config.
+# Three local modes (vLLM, SGLang, TensorRT-LLM) plus BiFrost frontier:
+#   Local:      Spawns a server from a YAML config (engine read from YAML).
 #   Frontier:   Routes requests through the BiFrost LLM gateway (no local
 #               server lifecycle; gateway is assumed already running).
 #
@@ -11,23 +11,23 @@
 # maximum concurrency that stays within the degradation envelope
 # (TTFT p95 ≤ 2× baseline AND failure rate ≤ 1%).
 #
-# Usage (vLLM mode):
+# Usage (local server mode — vLLM, SGLang, or TensorRT-LLM from YAML):
 #   ./scripts/run_concurrency_benchmark.sh <config> [OPTIONS]
 #
 # Usage (frontier mode — routes through BiFrost):
 #   ./scripts/run_concurrency_benchmark.sh --frontier-model <provider/name> [OPTIONS]
 #
 # Arguments:
-#   <config>                          Path to Cat A model YAML (relative to project
-#                                     root or absolute). vLLM mode only.
-#                                     e.g. configs/models/cat_a/qwen3_32b.yaml
+#   <config>                          Path to model YAML (relative to project root
+#                                     or absolute). Backend is read from serving.engine.
+#                                     e.g. configs/models_exp_a/qwen3_32b_sglang.yaml
 #   --frontier-model <provider/name>  provider/model_name from bifrost/config.json,
 #                                     e.g. openai/gpt-5, anthropic/claude-sonnet-4-6,
 #                                          gemini/gemini-2.5-flash
 #
 # Options:
-#   --kv-cache-dtype <d>    KV cache quantization dtype (vLLM mode only;
-#                           default: auto)
+#   --kv-cache-dtype <d>    KV cache quantization dtype (local server only;
+#                           valid values are backend-specific; default: auto)
 #   --context-lengths <cs>  Comma-separated context lengths to sweep
 #                           (default: 2048,4096,8192)
 #   --input-tokens <n>      Approximate input prompt tokens (default: 512)
@@ -40,7 +40,7 @@
 #   --warmup-requests <n>   Discarded warm-up requests per level (default: 8)
 #   --degradation-ttft-mul  TTFT p95 threshold multiplier vs. baseline (default: 2.0)
 #   --max-failure-rate <f>  Maximum allowed request failure rate (default: 0.01)
-#   --port <p>              vLLM server port (vLLM mode only; default: 8000)
+#   --port <p>              Server port (local server mode only; default: 8000)
 #   --results-dir <path>    Output directory (default: results/concurrency)
 #   --dry-run               Print commands without executing
 
@@ -48,7 +48,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LAUNCH_SCRIPT="$PROJECT_ROOT/serving/launch_vllm.sh"
+LAUNCH_SCRIPT="$PROJECT_ROOT/serving/launch.sh"
 BIFROST_CONFIG="$PROJECT_ROOT/deployments/local/data/bifrost/config.json"
 FRONTIER_CONFIG="$PROJECT_ROOT/configs/models_exp_a/frontier.yaml"
 
@@ -187,15 +187,22 @@ fi
 # Mode-specific defaults (only applied when user didn't override)
 # ---------------------------------------------------------------------------
 
-if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
-    # Frontier defaults: cap concurrency to provider-friendly range and reduce
-    # request volume to control cost. ~3 ctx × 6 levels × 16 reqs ≈ 288 calls/model.
-    [[ "$CONCURRENCY_LEVELS_SET" == "false" ]] && CONCURRENCY_LEVELS="1,2,4,8,16,32"
-    [[ "$REQUESTS_PER_LEVEL_SET" == "false" ]] && REQUESTS_PER_LEVEL=16
-else
-    [[ "$CONCURRENCY_LEVELS_SET" == "false" ]] && CONCURRENCY_LEVELS="1,2,4,8,16,32,64,128,256,512,1024"
-    [[ "$REQUESTS_PER_LEVEL_SET" == "false" ]] && REQUESTS_PER_LEVEL=64
-fi
+case "$SERVING_ENGINE" in
+    bifrost)
+        # Frontier defaults: cap concurrency to provider-friendly range and reduce
+        # request volume to control cost. ~3 ctx × 6 levels × 16 reqs ≈ 288 calls/model.
+        [[ "$CONCURRENCY_LEVELS_SET" == "false" ]] && CONCURRENCY_LEVELS="1,2,4,8,16,32"
+        [[ "$REQUESTS_PER_LEVEL_SET" == "false" ]] && REQUESTS_PER_LEVEL=16
+        ;;
+    vllm|sglang|tensorrt_llm)
+        [[ "$CONCURRENCY_LEVELS_SET" == "false" ]] && CONCURRENCY_LEVELS="1,2,4,8,16,32,64,128,256,512,1024"
+        [[ "$REQUESTS_PER_LEVEL_SET" == "false" ]] && REQUESTS_PER_LEVEL=64
+        ;;
+    *)
+        echo "ERROR: Unknown serving.engine '$SERVING_ENGINE'" >&2
+        exit 1
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Result file path + summary banner
@@ -204,7 +211,7 @@ fi
 if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
     RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_frontier.json"
 else
-    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${KV_CACHE_DTYPE}.json"
+    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${SERVING_ENGINE}_${KV_CACHE_DTYPE}.json"
 fi
 LOG_FILE="${RESULT_FILE%.json}.log"
 
@@ -241,7 +248,7 @@ if [ "$DRY_RUN" = true ]; then
     if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
         echo "[DRY RUN] Would run frontier sweep against: $BASE_URL"
     else
-        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE --port $PORT --max-model-len $MAX_CTX"
+        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE --port $PORT --max-model-len $MAX_CTX (engine=$SERVING_ENGINE)"
     fi
     echo "[DRY RUN] Output: $RESULT_FILE"
     exit 0
@@ -256,17 +263,28 @@ if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
         --kv-cache-dtype "$KV_CACHE_DTYPE" \
         --port "$PORT" \
         --max-model-len "$MAX_CTX" &
-    VLLM_PID=$!
+    SERVER_PID=$!
 
     cleanup() {
-        kill "$VLLM_PID" 2>/dev/null || true
-        wait "$VLLM_PID" 2>/dev/null || true
+        # Process-group kill handles multi-process backends (SGLang router+workers,
+        # TRT-LLM mpirun children).
+        kill -- -"$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
         echo "Server stopped."
     }
     trap cleanup EXIT
 
-    echo "Waiting for vLLM server (PID $VLLM_PID) at $BASE_URL ..."
-    for i in $(seq 1 90); do
+    # TRT-LLM JIT-from-HF compiles the engine on first launch (5-15 min for
+    # 30B-class models). Allow up to 30 min; vLLM/SGLang keep the 450s budget.
+    if [[ "$SERVING_ENGINE" == "tensorrt_llm" ]]; then
+        HEALTH_ITERS=360
+        WARMUP_REQUESTS=32   # absorb TRT-LLM prefill warm-up bias
+    else
+        HEALTH_ITERS=90
+    fi
+
+    echo "Waiting for $SERVING_ENGINE server (PID $SERVER_PID) at $BASE_URL ..."
+    for i in $(seq 1 $HEALTH_ITERS); do
         if curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
             echo "Server ready after $((i * 5))s"
             break
@@ -274,7 +292,7 @@ if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
         sleep 5
     done
     if ! curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
-        echo "ERROR: vLLM server failed to start within 450s for $MODEL_NAME" >&2
+        echo "ERROR: $SERVING_ENGINE server failed to start for $MODEL_NAME" >&2
         exit 1
     fi
 fi

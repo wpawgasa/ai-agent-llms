@@ -13,6 +13,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RESULTS_DIR="$PROJECT_ROOT/results/exp_d"
+# NOTE: This experiment is intentionally vLLM-only. TurboQuant / RotorQuant /
+# KIVI / KVQuant kernels are vLLM-internal (src/llm_workflow_agents/vllm_plugin.py)
+# and do not translate to SGLang or TensorRT-LLM. Cross-backend FP8 comparisons
+# belong in run_concurrency_benchmark.sh with <model>_sglang.yaml / _trtllm.yaml.
 LAUNCH_SCRIPT="$PROJECT_ROOT/serving/launch_vllm.sh"
 
 MODEL_SET="all"

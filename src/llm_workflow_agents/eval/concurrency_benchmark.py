@@ -363,7 +363,7 @@ def run_concurrency_sweep(
     to serve as the baseline.
     """
     levels_list = sorted(set([1, *concurrency_levels]))
-    sample_vram = engine == "vllm"
+    sample_vram = engine in {"vllm", "sglang", "tensorrt_llm"}
 
     result = ConcurrencySweepResult(
         model=model_name,
@@ -517,9 +517,14 @@ if __name__ == "__main__":
     parser.add_argument("--model", required=True)
     parser.add_argument(
         "--engine",
-        choices=["vllm", "bifrost"],
+        choices=["vllm", "bifrost", "sglang", "tensorrt_llm"],
         default="vllm",
-        help="Backend engine: 'vllm' (default, local server) or 'bifrost' (remote LLM gateway).",
+        help=(
+            "Backend engine: 'vllm', 'sglang', or 'tensorrt_llm' for a local "
+            "OpenAI-compatible server (default: vllm), or 'bifrost' for the "
+            "remote BiFrost LLM gateway. VRAM sampling is enabled for all "
+            "local backends."
+        ),
     )
     parser.add_argument("--kv-cache-dtype", default="auto")
     parser.add_argument(

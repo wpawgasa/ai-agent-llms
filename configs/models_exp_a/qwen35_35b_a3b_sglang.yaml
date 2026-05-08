@@ -1,0 +1,26 @@
+model:
+  name: "Qwen/Qwen3.5-35B-A3B"
+  family: "qwen35"
+  architecture: "moe_deltanet_transformer"
+  params_total: 35_000_000_000
+  params_active: 3_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 70
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "qwen25"    # vLLM uses "qwen3_coder"; SGLang uses "qwen25"
+  chat_template: "qwen2.5"
+  mem_fraction_static: 0.90
+  context_length: 8192
+  max_running_requests: 256
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

@@ -1,0 +1,53 @@
+# TensorRT-LLM serving environment.
+#
+# Based on the official NVIDIA TRT-LLM release container from NGC, which ships:
+#   - CUDA 13.1 + cuDNN + cuBLAS
+#   - libopenmpi-dev  (required even at tp_size=1 — MPI is TRT-LLM's process model)
+#   - torch 2.10.0+cu130  (pinned by TRT-LLM)
+#   - tensorrt_llm 1.2.1  (pre-installed at /usr/local/lib/python3.12/dist-packages)
+#   - trtllm-serve CLI on PATH
+#
+# NGC access required to pull the base image (free account):
+#   docker login nvcr.io
+#   Username: $oauthtoken
+#   Password: <NGC API key from https://ngc.nvidia.com/setup/api-key>
+#
+# Why a separate container from .venv-infer / .venv-train:
+#   TRT-LLM pins torch==2.10.0, conflicting with .venv-infer (≥2.11).
+#   libopenmpi-dev is an apt-level dep that cannot be satisfied by pip.
+#   This image resolves both without touching other environments.
+#
+# Usage:
+#   Build:   docker build -f .devcontainer/Dockerfile.tensorrt \
+#                         -t ai-agent-llms-trtllm .
+#   Run:     docker run --gpus all --network host --ipc host \
+#              --ulimit memlock=-1:-1 \
+#              -v $(pwd):/workspace -v /ephemeral/cache:/root/.cache \
+#              -w /workspace ai-agent-llms-trtllm
+#   First-time setup inside container:
+#              ./scripts/install_trtllm.sh
+#
+#   In devcontainer.json, swap "dockerfile" to "Dockerfile.tensorrt" when
+#   you need TRT-LLM serving, then back to "Dockerfile" (or Dockerfile.cuda128)
+#   for vLLM / training work.
+
+FROM nvcr.io/nvidia/tensorrt-llm/release:1.2.1
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Signals to install_trtllm.sh that torch + tensorrt_llm are pre-installed
+# at the system level; the script will use --system-site-packages and skip
+# re-downloading those packages.
+ENV TRTLLM_CONTAINER=1
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+ENV UV_LINK_MODE=copy

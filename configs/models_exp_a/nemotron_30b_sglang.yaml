@@ -1,0 +1,29 @@
+model:
+  name: "nvidia/Nemotron-3-30B"
+  family: "nemotron"
+  architecture: "dense_gqa_transformer"
+  params_total: 30_000_000_000
+  params_active: 30_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 60
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "pythonic"   # no dedicated Nemotron parser in SGLang
+  chat_template: "llama-3"
+  mem_fraction_static: 0.90
+  context_length: 8192
+  max_running_requests: 256
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+  # Nemotron-3-Nano (Mamba hybrid) may not load on SGLang 0.5.x.
+  # If it fails, comment it out or set skip_reason below.
+  # skip_reason: "Mamba hybrid architecture not supported by SGLang 0.5.x"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

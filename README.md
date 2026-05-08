@@ -100,20 +100,86 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 
 ---
 
+## Serving Backends
+
+The project supports three local serving backends. Every backend exposes an OpenAI-compatible API on port 8000, so all eval scripts work unchanged across them.
+
+| Backend | Venv | Installer | Launcher |
+|---------|------|-----------|----------|
+| vLLM 0.20 | `.venv-infer` | `scripts/install_infer.sh` | `serving/launch_vllm.sh` |
+| SGLang 0.5.11 | `.venv-sglang` | `scripts/install_sglang.sh` | `serving/launch_sglang.sh` |
+| TensorRT-LLM 1.2.1 | `.venv-trtllm` | `scripts/install_trtllm.sh` | `serving/launch_trtllm.sh` |
+
+The venvs are **mutually exclusive** (torch pin conflicts). Never activate two at once.
+
+`serving/launch.sh` is the unified dispatcher — it reads `serving.engine` from the model YAML and execs the right backend launcher automatically.
+
+### Quick start
+
+```bash
+# Install a backend (one-time)
+./scripts/install_sglang.sh      # or install_trtllm.sh
+
+# Start the server using the dispatcher
+./serving/launch.sh configs/models_exp_bc/qwen25_3b_sglang.yaml
+
+# Run the benchmark (engine is read from the YAML)
+source .venv-sglang/bin/activate
+python -m llm_workflow_agents.eval.agent_benchmark \
+    --model Qwen/Qwen2.5-3B-Instruct --engine sglang \
+    --output results/smoke_sglang.json
+
+# Or use the experiment runner with --backend
+./scripts/run_exp_a.sh --backend sglang --max-samples 50
+```
+
+For TensorRT-LLM, the first launch performs JIT compilation from HF weights (~5–15 min). Subsequent launches reuse the cached engine. The health-poll budget is automatically extended to 30 min.
+
+### Per-backend model YAMLs
+
+Each model has per-backend YAML variants following the naming convention `<model>_<backend>.yaml`:
+
+```
+configs/models_exp_a/qwen3_32b_sglang.yaml
+configs/models_exp_a/qwen3_32b_trtllm.yaml
+configs/models_exp_bc/qwen25_3b_sglang.yaml
+configs/models_exp_bc/qwen25_3b_trtllm.yaml
+```
+
+### Caveats
+
+**TensorRT-LLM devcontainer:** `.devcontainer/Dockerfile.tensorrt` is the recommended way to run TRT-LLM. It is based on the official NVIDIA TRT-LLM NGC image (`nvcr.io/nvidia/tensorrt-llm/release:1.2.1`), which pre-installs CUDA 13.1, `libopenmpi-dev`, and `tensorrt_llm` itself. Swap `"dockerfile": "Dockerfile.tensorrt"` in `devcontainer.json` to use it. An NGC account is required to pull the image — generate a free API key at https://ngc.nvidia.com/setup/api-key, then `docker login nvcr.io`.
+
+**TensorRT-LLM bare-metal apt prerequisite:** If not using the devcontainer, `sudo apt-get install -y libopenmpi-dev` must be installed before running `install_trtllm.sh`. The script checks for it and exits with a hint if it's missing.
+
+**KV-cache quantization vocabulary:** The vLLM-only quant strings (`turboquant_*`, `rotorquant_*`, `kivi_*`, `kvquant*`) are rejected by `launch_sglang.sh` and `launch_trtllm.sh` with a clear error. Phase 3 KV-quant benchmarks (`run_exp_d.sh`) are intentionally vLLM-only.
+
+**SGLang tool-call parsers:** SGLang uses different parser names than vLLM. The per-backend YAMLs already carry the correct value — do not copy `tool_call_parser` between vLLM and SGLang configs.
+
+| vLLM parser | SGLang parser |
+|-------------|---------------|
+| `hermes`, `qwen3_coder` | `qwen25` |
+| `mistral` | `mistral` |
+| `gemma`, `gemma4`, `glm4`, `nemotron` | `pythonic` |
+
+**Nemotron-3-Nano (Mamba hybrid):** Not supported by SGLang or TRT-LLM in their current versions. The YAMLs carry `serving.skip_reason` and the runner shells skip them automatically.
+
+---
+
 ## Setup
 
 **Requirements:** Python 3.11+, CUDA 13.0, NVIDIA H100 (80 GB recommended)
 
-### Two-venv layout
+### Venv layout
 
-Training and inference pin mutually-incompatible versions of `torch`,
-`transformers`, and `vllm`, so the project ships with **two separate
-virtualenvs**:
+All serving backends and training pin mutually-incompatible versions of `torch`, so the project ships with **four separate virtualenvs**:
 
 | Venv | Purpose | Key pins |
 |------|---------|----------|
 | `.venv-train` | Phase 2 SFT + GRPO (Unsloth) | torch 2.10.0+cu130, vllm 0.19.1+cu130, transformers 4.57.6, trl 0.24.0, unsloth 2026.4.x |
-| `.venv-infer` | Phase 1/3/4 serving + benchmarks (vLLM) | torch 2.11.0+cu130, vllm 0.20.0, transformers 5.6.2 |
+| `.venv-infer` | Phase 1/3/4 vLLM serving + benchmarks | torch 2.11.0+cu130, vllm 0.20.0, transformers 5.6.2 |
+| `.venv-sglang` | SGLang serving + benchmarks | torch 2.11.0+cu130, sglang 0.5.11, transformers 5.6.0+ |
+| `.venv-trtllm` | TensorRT-LLM serving + benchmarks | torch 2.10.0+cu130, tensorrt_llm 1.2.1 |
 
 Each venv is bootstrapped by its own installer script:
 
@@ -124,8 +190,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Bootstrap the training environment (.venv-train)
 ./scripts/install_train.sh
 
-# Bootstrap the inference / serving environment (.venv-infer)
+# Bootstrap the inference / serving environment (.venv-infer, vLLM)
 ./scripts/install_infer.sh
+
+# Bootstrap the SGLang serving environment (.venv-sglang)
+./scripts/install_sglang.sh
+
+# Bootstrap the TensorRT-LLM serving environment (.venv-trtllm)
+# Requires: sudo apt-get install -y libopenmpi-dev
+./scripts/install_trtllm.sh
 ```
 
 The installers call `uv venv` + `uv pip install -e ".[train,dev]"` (or
@@ -169,11 +242,19 @@ source .venv-train/bin/activate
 
 # For vLLM-backed serving and the Phase 3 quantization benchmarks:
 source .venv-infer/bin/activate
+
+# For SGLang-backed serving:
+source .venv-sglang/bin/activate
+
+# For TensorRT-LLM-backed serving:
+source .venv-trtllm/bin/activate
 ```
 
 The runner scripts pick the right venv automatically:
 - `scripts/run_phase2_sft.sh` sources `.venv-train`.
 - `serving/launch_vllm.sh` sources `.venv-infer` if no venv is currently active.
+- `serving/launch_sglang.sh` sources `.venv-sglang` if no venv is currently active.
+- `serving/launch_trtllm.sh` sources `.venv-trtllm` if no venv is currently active.
 
 ### Locked requirements files
 

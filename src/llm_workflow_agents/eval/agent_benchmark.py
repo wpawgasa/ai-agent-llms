@@ -280,7 +280,7 @@ def _call_vllm(
     enable_thinking: bool = False,
     engine: str = "vllm",
 ) -> tuple[str, list[dict[str, Any]], float, float]:
-    """Call the OpenAI-compatible chat completions endpoint (vLLM or BiFrost gateway).
+    """Call the OpenAI-compatible chat completions endpoint (vLLM, SGLang, TRT-LLM, or BiFrost).
 
     When *tools* are provided they are included in the request so that
     the server can emit structured tool calls.
@@ -313,11 +313,12 @@ def _call_vllm(
         "max_tokens": max_tokens,
         "stream": True,
     }
-    if engine == "vllm":
+    if engine in {"vllm", "sglang"}:
         # Qwen3-family thinking toggle. Ignored by tokenizer chat templates
         # that don't reference enable_thinking (Gemma, Mistral, etc.), so it's
-        # safe to always send. Default False for fair latency comparison
-        # against non-thinking models in Phase 1.
+        # safe to always send for vLLM and SGLang (≥0.5 accepts the field).
+        # TRT-LLM rejects unknown body fields, so it stays in the else branch.
+        # Default False for fair latency comparison against non-thinking models.
         request_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
     if tools:
         request_body["tools"] = tools
@@ -668,12 +669,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--engine",
         default="vllm",
-        choices=["vllm", "bifrost"],
+        choices=["vllm", "bifrost", "sglang", "tensorrt_llm"],
         help=(
-            "Backend engine: 'vllm' for a local vLLM server (default), "
-            "'bifrost' for the BiFrost LLM gateway. The 'bifrost' engine "
-            "omits vLLM-specific body fields (chat_template_kwargs) that "
-            "frontier provider APIs do not accept."
+            "Backend engine: 'vllm' (default) or 'sglang' or 'tensorrt_llm' "
+            "for a local OpenAI-compatible server, 'bifrost' for the BiFrost "
+            "LLM gateway. 'bifrost' omits vLLM/SGLang-specific body fields "
+            "(chat_template_kwargs) that frontier provider APIs reject. "
+            "'sglang' enables the Qwen3 thinking toggle like vLLM. "
+            "'tensorrt_llm' skips the thinking toggle (TRT-LLM rejects "
+            "unknown body fields)."
         ),
     )
     args = parser.parse_args()

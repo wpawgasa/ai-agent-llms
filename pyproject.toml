@@ -93,6 +93,23 @@ dev = [
     "dvc[gs]>=3.0",
 ]
 
+# SGLang serving venv (.venv-sglang). Bootstrapped by scripts/install_sglang.sh.
+# Cannot coexist with .venv-infer (torch ≥2.11 vs vLLM's own pin).
+# The install script is the supported entry point; this extra is documentation-as-code.
+sglang = [
+    "sglang>=0.5.11",
+    "torch>=2.11.0",
+    "transformers>=5.6.0",
+]
+
+# TensorRT-LLM serving venv (.venv-trtllm). Bootstrapped by scripts/install_trtllm.sh.
+# Requires apt-level libopenmpi-dev BEFORE running the install script — pip cannot
+# satisfy this. Cannot coexist with .venv-infer or .venv-train (torch pin conflicts).
+trtllm = [
+    "tensorrt-llm==1.2.1",
+    "torch==2.10.0",
+]
+
 # vLLM plugin entry point. Auto-loaded by vllm.plugins.load_general_plugins()
 # in every vLLM process (APIServer, engine-core, worker). Installs runtime
 # patches for TurboQuant + hybrid-model KV-cache compatibility.
