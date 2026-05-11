@@ -2,7 +2,7 @@
 
 This document describes how `scripts/run_concurrency_benchmark.sh` and `src/llm_workflow_agents/eval/concurrency_benchmark.py` measure the latency / throughput / max-sustainable-concurrency surface of a serving stack — both **local vLLM** and **frontier models routed through the BiFrost LLM gateway**.
 
-It mirrors the code as of the commit that added frontier-model support. Quality of generated content is **not** measured here; that is the job of `eval/agent_benchmark.py` (see `metrics.md`).
+It mirrors the code as of the commit that introduced per-request prompt variation to defeat provider prefix caching. Quality of generated content is **not** measured here; that is the job of `eval/agent_benchmark.py` (see `metrics.md`).
 
 ---
 
@@ -62,13 +62,12 @@ Implemented by `run_concurrency_sweep` in `concurrency_benchmark.py`.
 
 For each `context_length` in the requested list, and within that, for each `concurrency` level:
 
-1. Build a synthetic prompt sized to approximately `input_tokens`:
+1. Build a **distinct prompt per request** using `_build_prompts`:
    ```python
-   snippet = "Describe a step in a business workflow that involves state transitions and tool calls. "
-   reps   = max(1, (input_tokens * 4) // len(snippet))   # 4 chars/token rule of thumb
-   prompt = snippet * reps
+   seed    = (ctx_len * 1_000_003 + concurrency) & 0xFFFF_FFFF
+   prompts = _build_prompts(effective_total, input_tokens_min, input_tokens_max, seed)
    ```
-   Every request in every level uses the *same* prompt and `max_tokens=output_tokens` (default 128) at `temperature=0.0`. This isolates serving-stack variance from content variance — see *Caveats* below.
+   Each prompt starts with a unique header `[req-<seed>-<i:04d>] ` that defeats provider prefix caching by changing the very first tokens. The body is the business-workflow snippet repeated to hit a target token count drawn uniformly from `[input_tokens_min, input_tokens_max]` (4 chars/token rule of thumb). The seed is deterministic per `(context_length, concurrency)` cell, so reruns are reproducible. `max_tokens=output_tokens` (default 128) at `temperature=0.0`.
 2. Issue `effective_total = max(requests_per_level, concurrency + warmup_requests)` streaming requests, with concurrency capped by `asyncio.Semaphore(concurrency)`. Requests are fired as a rolling window, not as strict synchronous batches, to model real-world concurrent load.
 3. **In vLLM mode only**, a background `_PeakVramSampler` polls `nvidia-smi --query-gpu=memory.used` every 200 ms; the maximum observed value is recorded as `peak_vram_gb`. Frontier mode reports `peak_vram_gb=0.0` (no local GPU).
 4. Each request is parsed as an SSE stream (`/v1/chat/completions` with `"stream": true`). Per-request fields recorded:
@@ -89,8 +88,9 @@ For each `context_length` in the requested list, and within that, for each `conc
 
 | Parameter | vLLM default | Frontier default | Why frontier differs |
 |-----------|--------------|------------------|----------------------|
-| `context_lengths` | `2048,4096,8192` | same | — |
-| `input_tokens` | 512 | same | — |
+| `context_lengths` | `2048` | same | — |
+| `input_tokens_min` | 512 | same | — |
+| `input_tokens_max` | 2048 | same | — |
 | `output_tokens` | 128 | same | — |
 | `concurrency_levels` | `1,2,4,8,16,32,64,128,256,512,1024` | `1,2,4,8,16,32` | Provider-side rate limits; tail levels would just produce 429s. |
 | `requests_per_level` | 64 | 16 | Cost guardrail (~288 calls / model across 3 contexts vs ~2 100 for vLLM). |
@@ -130,7 +130,8 @@ JSON written to `results/concurrency/<model>_<tag>.json` where `<tag>` is the `k
   "engine": "vllm" | "bifrost",
   "endpoint": "http://localhost:23040",
   "kv_cache_dtype": "remote",
-  "input_tokens": 512,
+  "input_tokens_min": 512,
+  "input_tokens_max": 2048,
   "output_tokens": 128,
   "degradation_policy": {
     "ttft_multiplier": 2.0,
@@ -167,9 +168,10 @@ JSON written to `results/concurrency/<model>_<tag>.json` where `<tag>` is the `k
 
 ## 6. Caveats
 
-- **Synthetic prompt — provider caching.** Every request sends the same repeated sentence. vLLM automatic prefix caching and provider-side caching (Anthropic, OpenAI, Gemini) will hit on every request after the first, so frontier TTFT numbers reflect cached prefill, not cold prefill. To defeat caching, pass `--input-tokens` along with code changes to vary the prompt per request — the current harness does not vary it.
-- **Token counting is approximate.** The 4-chars-per-token rule is rough; the resulting prompt may be ±10-20 % of the requested `input_tokens` after real tokenization.
-- **`context_length` does not vary the prompt.** It only sizes `max_model_len` for the launcher and is recorded for grouping in the JSON. All three context-length sweeps use the same `input_tokens`-sized prompt.
+- **Prefix caching mitigated.** Each request has a unique `[req-<seed>-<i:04d>] ` header, so provider prefix caches (Anthropic, OpenAI, Gemini) and vLLM automatic prefix caching miss on every request. TTFT numbers now reflect real prefill cost.
+- **Within-level latency variance.** Prompt lengths are drawn uniformly from `[input_tokens_min, input_tokens_max]`. Longer prompts incur higher prefill cost, which inflates TTFT p95 relative to a fixed-length design. This is intentional — it exercises a realistic spread. Compare runs with the same min/max range to keep results comparable.
+- **Token counting is approximate.** The 4-chars-per-token rule is rough; actual prompt token counts may be ±10–20 % of the target after real tokenization.
+- **`context_length` does not vary the prompt.** It only sizes `max_model_len` for the launcher and is recorded for grouping in the JSON. Prompt lengths are governed solely by `input_tokens_min`/`input_tokens_max`; the per-cell seed does differ across context lengths, so the exact prompt set varies, but the length distribution is the same.
 - **Streaming is mandatory.** TTFT and ITL require SSE deltas. A backend that does not stream will record `ttft_ms = e2e_ms` and empty ITL.
 - **Peak VRAM is GPU-0 only.** The sampler reads the first nvidia-smi line. Multi-GPU deployments need the harness extended.
 - **Cost.** Frontier mode at default settings issues ~288 paid API calls per model. Increase `--requests-per-level` and `--concurrency-levels` deliberately.
@@ -189,8 +191,9 @@ scripts/run_concurrency_benchmark.sh --frontier-model <provider/name> [OPTIONS]
 | `<config>` | — | Cat A model YAML. Mutually exclusive with `--frontier-model`. |
 | `--frontier-model` | — | `<provider>/<model>` from `bifrost/config.json`. |
 | `--kv-cache-dtype` | `auto` / forced to `remote` | vLLM-only knob. |
-| `--context-lengths` | `2048,4096,8192` | Comma-separated. |
-| `--input-tokens` | `512` | Approximate prompt size. |
+| `--context-lengths` | `2048` | Comma-separated. |
+| `--input-tokens-min` | `512` | Lower bound of per-request prompt length range. |
+| `--input-tokens-max` | `2048` | Upper bound of per-request prompt length range. |
 | `--output-tokens` | `128` | `max_tokens` per request. |
 | `--concurrency-levels` | `1..1024` / `1..32` | Comma-separated. |
 | `--requests-per-level` | `64` / `16` | Excluding warmup. |

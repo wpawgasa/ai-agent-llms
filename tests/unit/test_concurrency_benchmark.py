@@ -8,6 +8,7 @@ from llm_workflow_agents.eval.concurrency_benchmark import (
     ConcurrencySweepResult,
     LevelResult,
     PercentileStats,
+    _build_prompts,
     _percentiles,
 )
 
@@ -133,7 +134,8 @@ class TestSweepResultSerialization:
         r = ConcurrencySweepResult(
             model="qwen3-32b",
             kv_cache_dtype="auto",
-            input_tokens=512,
+            input_tokens_min=512,
+            input_tokens_max=2048,
             output_tokens=128,
             degradation_ttft_multiplier=2.0,
             max_failure_rate=0.01,
@@ -141,12 +143,15 @@ class TestSweepResultSerialization:
         d = r.to_dict()
         assert d["engine"] == "vllm"
         assert d["endpoint"] == ""
+        assert d["input_tokens_min"] == 512
+        assert d["input_tokens_max"] == 2048
 
     def test_frontier_engine_round_trip(self):
         r = ConcurrencySweepResult(
             model="anthropic/claude-sonnet-4-6",
             kv_cache_dtype="remote",
-            input_tokens=512,
+            input_tokens_min=512,
+            input_tokens_max=2048,
             output_tokens=128,
             degradation_ttft_multiplier=2.0,
             max_failure_rate=0.01,
@@ -157,3 +162,45 @@ class TestSweepResultSerialization:
         assert d["engine"] == "bifrost"
         assert d["endpoint"] == "http://localhost:23040"
         assert d["kv_cache_dtype"] == "remote"
+
+
+class TestPromptVariation:
+    """_build_prompts must return varied, unique prompts that defeat prefix caching."""
+
+    def test_count(self):
+        prompts = _build_prompts(10, 512, 2048, seed=42)
+        assert len(prompts) == 10
+
+    def test_lengths_in_range(self):
+        snippet = "Describe a step in a business workflow that involves state transitions and tool calls. "
+        min_tok, max_tok = 512, 2048
+        prompts = _build_prompts(50, min_tok, max_tok, seed=7)
+        for p in prompts:
+            # char length must be at least min_tok*4 − len(snippet) (min reps=1 floor)
+            # and at most max_tok*4 + len(snippet) + 20 (header slack)
+            assert len(p) >= min_tok * 4 - len(snippet), f"prompt too short: {len(p)}"
+            assert len(p) <= max_tok * 4 + len(snippet) + 20, f"prompt too long: {len(p)}"
+
+    def test_all_unique(self):
+        prompts = _build_prompts(20, 512, 2048, seed=99)
+        # Unique per-request header guarantees no two prompts share the same prefix.
+        headers = {p[:32] for p in prompts}
+        assert len(headers) == len(prompts)
+
+    def test_seed_reproducibility(self):
+        p1 = _build_prompts(5, 512, 2048, seed=123)
+        p2 = _build_prompts(5, 512, 2048, seed=123)
+        assert p1 == p2
+
+    def test_different_seeds_differ(self):
+        p1 = _build_prompts(5, 512, 2048, seed=1)
+        p2 = _build_prompts(5, 512, 2048, seed=2)
+        assert p1[0] != p2[0]
+
+    def test_validation_min_gt_max(self):
+        with pytest.raises(ValueError, match="Invalid token range"):
+            _build_prompts(5, 2048, 512, seed=0)
+
+    def test_validation_min_zero(self):
+        with pytest.raises(ValueError, match="Invalid token range"):
+            _build_prompts(5, 0, 512, seed=0)

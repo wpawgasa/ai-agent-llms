@@ -30,7 +30,10 @@
 #                           valid values are backend-specific; default: auto)
 #   --context-lengths <cs>  Comma-separated context lengths to sweep
 #                           (default: 2048,4096,8192)
-#   --input-tokens <n>      Approximate input prompt tokens (default: 512)
+#   --input-tokens-min <n>  Minimum input prompt tokens, inclusive (default: 512)
+#   --input-tokens-max <n>  Maximum input prompt tokens, inclusive (default: 2048)
+#                           Each request gets a unique prompt drawn uniformly from
+#                           [min, max] to defeat provider prefix caching.
 #   --output-tokens <n>     max_tokens for each request (default: 128)
 #   --concurrency-levels    Comma-separated concurrency levels to sweep
 #                           (default vLLM:     1,2,4,8,16,32,64,128,256,512,1024)
@@ -68,8 +71,9 @@ fi
 # Defaults — frontier-mode overrides applied below if --frontier-model is set
 FRONTIER_MODEL=""
 KV_CACHE_DTYPE="auto"
-CONTEXT_LENGTHS="2048,4096,8192"
-INPUT_TOKENS=512
+CONTEXT_LENGTHS="2048"
+INPUT_TOKENS_MIN=512
+INPUT_TOKENS_MAX=2048
 OUTPUT_TOKENS=128
 CONCURRENCY_LEVELS=""
 CONCURRENCY_LEVELS_SET=false
@@ -87,7 +91,8 @@ while [[ $# -gt 0 ]]; do
         --frontier-model)       FRONTIER_MODEL="$2";        shift 2 ;;
         --kv-cache-dtype)       KV_CACHE_DTYPE="$2";        shift 2 ;;
         --context-lengths)      CONTEXT_LENGTHS="$2";       shift 2 ;;
-        --input-tokens)         INPUT_TOKENS="$2";          shift 2 ;;
+        --input-tokens-min)     INPUT_TOKENS_MIN="$2";      shift 2 ;;
+        --input-tokens-max)     INPUT_TOKENS_MAX="$2";      shift 2 ;;
         --output-tokens)        OUTPUT_TOKENS="$2";         shift 2 ;;
         --concurrency-levels)   CONCURRENCY_LEVELS="$2"; CONCURRENCY_LEVELS_SET=true; shift 2 ;;
         --requests-per-level)   REQUESTS_PER_LEVEL="$2"; REQUESTS_PER_LEVEL_SET=true; shift 2 ;;
@@ -226,7 +231,7 @@ if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
     echo "KV cache dtype:      $KV_CACHE_DTYPE"
 fi
 echo "Context lengths:     $CONTEXT_LENGTHS"
-echo "Input tokens:        $INPUT_TOKENS"
+echo "Input tokens:        ${INPUT_TOKENS_MIN}..${INPUT_TOKENS_MAX} (varied per request)"
 echo "Output tokens:       $OUTPUT_TOKENS"
 echo "Concurrency levels:  $CONCURRENCY_LEVELS"
 echo "Requests per level:  $REQUESTS_PER_LEVEL  (+$WARMUP_REQUESTS warmup)"
@@ -307,7 +312,8 @@ python3 -m llm_workflow_agents.eval.concurrency_benchmark \
     --kv-cache-dtype           "$KV_CACHE_DTYPE" \
     --base-url                 "${BASE_URL}" \
     --context-lengths          "$CONTEXT_LENGTHS" \
-    --input-tokens             "$INPUT_TOKENS" \
+    --input-tokens-min         "$INPUT_TOKENS_MIN" \
+    --input-tokens-max         "$INPUT_TOKENS_MAX" \
     --output-tokens            "$OUTPUT_TOKENS" \
     --concurrency-levels       "$CONCURRENCY_LEVELS" \
     --requests-per-level       "$REQUESTS_PER_LEVEL" \

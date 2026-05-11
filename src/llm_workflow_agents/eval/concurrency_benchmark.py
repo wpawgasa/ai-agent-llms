@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import threading
 import time
 import urllib.request
@@ -100,7 +101,8 @@ class ContextSweepResult:
 class ConcurrencySweepResult:
     model: str
     kv_cache_dtype: str
-    input_tokens: int
+    input_tokens_min: int
+    input_tokens_max: int
     output_tokens: int
     degradation_ttft_multiplier: float
     max_failure_rate: float
@@ -114,7 +116,8 @@ class ConcurrencySweepResult:
             "engine": self.engine,
             "endpoint": self.endpoint,
             "kv_cache_dtype": self.kv_cache_dtype,
-            "input_tokens": self.input_tokens,
+            "input_tokens_min": self.input_tokens_min,
+            "input_tokens_max": self.input_tokens_max,
             "output_tokens": self.output_tokens,
             "degradation_policy": {
                 "ttft_multiplier": self.degradation_ttft_multiplier,
@@ -253,6 +256,40 @@ async def _stream_request(
 
 
 # ---------------------------------------------------------------------------
+# Prompt builder
+# ---------------------------------------------------------------------------
+
+
+def _build_prompts(
+    total: int,
+    input_tokens_min: int,
+    input_tokens_max: int,
+    seed: int,
+) -> list[str]:
+    """Return `total` prompts of varied length, each with a unique header.
+
+    The header defeats provider prefix caching by changing the first tokens of
+    every request. Body length is drawn uniformly from
+    [input_tokens_min, input_tokens_max] (4 chars ≈ 1 token heuristic).
+    """
+    if input_tokens_min <= 0 or input_tokens_min > input_tokens_max:
+        raise ValueError(
+            f"Invalid token range: input_tokens_min={input_tokens_min}, "
+            f"input_tokens_max={input_tokens_max}"
+        )
+    rng = random.Random(seed)
+    snippet = "Describe a step in a business workflow that involves state transitions and tool calls. "
+    prompts: list[str] = []
+    for i in range(total):
+        target_tokens = rng.randint(input_tokens_min, input_tokens_max)
+        header = f"[req-{seed}-{i:04d}] "
+        body_chars = max(0, target_tokens * 4 - len(header))
+        reps = max(1, body_chars // len(snippet))
+        prompts.append(header + snippet * reps)
+    return prompts
+
+
+# ---------------------------------------------------------------------------
 # Level runner
 # ---------------------------------------------------------------------------
 
@@ -260,22 +297,19 @@ async def _stream_request(
 async def _run_level(
     endpoint: str,
     model_name: str,
-    prompt: str,
+    prompts: list[str],
     max_tokens: int,
     concurrency: int,
-    total_requests: int,
     warmup_requests: int,
 ) -> tuple[list[_RequestMetrics], float]:
-    """Run `total_requests` requests in batches of `concurrency`, return (metrics, wall_s)."""
+    """Run one request per prompt in rolling windows of `concurrency`, return (metrics, wall_s)."""
     # We fire requests in rolling windows of `concurrency` to model real-world
     # concurrent load rather than strict synchronous batches. A semaphore limits
     # the maximum number of in-flight requests at any time.
     sem = asyncio.Semaphore(concurrency)
     tasks = [
-        asyncio.create_task(
-            _stream_request(endpoint, model_name, prompt, max_tokens, sem)
-        )
-        for _ in range(total_requests)
+        asyncio.create_task(_stream_request(endpoint, model_name, p, max_tokens, sem))
+        for p in prompts
     ]
     t0 = time.monotonic()
     all_metrics: list[_RequestMetrics] = await asyncio.gather(*tasks)
@@ -330,8 +364,9 @@ def run_concurrency_sweep(
     *,
     base_url: str = "http://localhost:8000",
     engine: str = "vllm",
-    context_lengths: list[int] | tuple[int, ...] = (2048, 4096, 8192),
-    input_tokens: int = 512,
+    context_lengths: list[int] | tuple[int, ...] = (2048,),
+    input_tokens_min: int = 512,
+    input_tokens_max: int = 2048,
     output_tokens: int = 128,
     concurrency_levels: list[int] | tuple[int, ...] = (
         1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
@@ -370,7 +405,8 @@ def run_concurrency_sweep(
         engine=engine,
         endpoint=base_url,
         kv_cache_dtype=kv_cache_dtype,
-        input_tokens=input_tokens,
+        input_tokens_min=input_tokens_min,
+        input_tokens_max=input_tokens_max,
         output_tokens=output_tokens,
         degradation_ttft_multiplier=degradation_ttft_multiplier,
         max_failure_rate=max_failure_rate,
@@ -383,12 +419,6 @@ def run_concurrency_sweep(
             kv_cache_dtype=kv_cache_dtype,
             context_length=ctx_len,
         )
-        # Build a representative prompt whose token count approximates input_tokens.
-        # Rough rule: 1 token ≈ 4 chars in English.
-        snippet = "Describe a step in a business workflow that involves state transitions and tool calls. "
-        reps = max(1, (input_tokens * 4) // len(snippet))
-        prompt = snippet * reps
-
         ctx_levels: list[LevelResult] = []
         baseline_ttft_p95: float = 0.0
         consecutive_violations = 0
@@ -396,6 +426,9 @@ def run_concurrency_sweep(
 
         for concurrency in levels_list:
             effective_total = max(total_requests, concurrency + warmup_requests)
+            # Unique seed per (context_length, concurrency) cell for reproducibility.
+            seed = (ctx_len * 1_000_003 + concurrency) & 0xFFFF_FFFF
+            prompts = _build_prompts(effective_total, input_tokens_min, input_tokens_max, seed)
             logger.info(
                 "level_start",
                 concurrency=concurrency,
@@ -409,10 +442,9 @@ def run_concurrency_sweep(
                         _run_level(
                             base_url,
                             model_name,
-                            prompt,
+                            prompts,
                             output_tokens,
                             concurrency,
-                            effective_total,
                             warmup_requests,
                         )
                     )
@@ -422,10 +454,9 @@ def run_concurrency_sweep(
                     _run_level(
                         base_url,
                         model_name,
-                        prompt,
+                        prompts,
                         output_tokens,
                         concurrency,
-                        effective_total,
                         warmup_requests,
                     )
                 )
@@ -532,8 +563,9 @@ if __name__ == "__main__":
         default="http://localhost:8000",
         help="Server base URL (no /v1 suffix; the harness appends /v1/chat/completions).",
     )
-    parser.add_argument("--context-lengths", default="2048,4096,8192")
-    parser.add_argument("--input-tokens", type=int, default=512)
+    parser.add_argument("--context-lengths", default="2048")
+    parser.add_argument("--input-tokens-min", type=int, default=512)
+    parser.add_argument("--input-tokens-max", type=int, default=2048)
     parser.add_argument("--output-tokens", type=int, default=128)
     parser.add_argument(
         "--concurrency-levels", default="1,2,4,8,16,32,64,128,256,512,1024"
@@ -548,13 +580,20 @@ if __name__ == "__main__":
     ctx_lens = [int(x) for x in args.context_lengths.split(",")]
     conc_levels = [int(x) for x in args.concurrency_levels.split(",")]
 
+    if args.input_tokens_min <= 0 or args.input_tokens_min > args.input_tokens_max:
+        parser.error(
+            f"--input-tokens-min must be > 0 and <= --input-tokens-max "
+            f"(got {args.input_tokens_min}..{args.input_tokens_max})"
+        )
+
     sweep = run_concurrency_sweep(
         model_name=args.model,
         kv_cache_dtype=args.kv_cache_dtype,
         base_url=args.base_url,
         engine=args.engine,
         context_lengths=ctx_lens,
-        input_tokens=args.input_tokens,
+        input_tokens_min=args.input_tokens_min,
+        input_tokens_max=args.input_tokens_max,
         output_tokens=args.output_tokens,
         concurrency_levels=conc_levels,
         requests_per_level=args.requests_per_level,
