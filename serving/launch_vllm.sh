@@ -95,14 +95,22 @@ fi
 KV_CACHE_DTYPE=""
 MAX_MODEL_LEN_OVERRIDE=""
 MAX_NUM_SEQS_OVERRIDE=""
+NO_SPECULATIVE=false
+SPEC_METHOD_OVERRIDE=""
+SPEC_DRAFT_MODEL_OVERRIDE=""
+SPEC_NUM_TOKENS_OVERRIDE=""
 
 # Parse CLI overrides
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype)  KV_CACHE_DTYPE="$2";          shift 2 ;;
-        --port)            PORT="$2";                     shift 2 ;;
-        --max-model-len)   MAX_MODEL_LEN_OVERRIDE="$2";  shift 2 ;;
-        --max-num-seqs)    MAX_NUM_SEQS_OVERRIDE="$2";   shift 2 ;;
+        --kv-cache-dtype)          KV_CACHE_DTYPE="$2";            shift 2 ;;
+        --port)                    PORT="$2";                       shift 2 ;;
+        --max-model-len)           MAX_MODEL_LEN_OVERRIDE="$2";    shift 2 ;;
+        --max-num-seqs)            MAX_NUM_SEQS_OVERRIDE="$2";     shift 2 ;;
+        --speculative-method)      SPEC_METHOD_OVERRIDE="$2";      shift 2 ;;
+        --speculative-draft-model) SPEC_DRAFT_MODEL_OVERRIDE="$2"; shift 2 ;;
+        --speculative-num-tokens)  SPEC_NUM_TOKENS_OVERRIDE="$2";  shift 2 ;;
+        --no-speculative)          NO_SPECULATIVE=true;             shift   ;;
         *)
             echo "Unknown argument: $1"
             exit 1
@@ -114,6 +122,42 @@ done
 if [ -n "$MAX_MODEL_LEN_OVERRIDE" ]; then
     MAX_LEN="$MAX_MODEL_LEN_OVERRIDE"
 fi
+
+# Build --speculative-config JSON from serving.speculative YAML block + CLI overrides.
+# CLI flags (--speculative-method, etc.) take precedence over YAML.
+# Produces an empty string when speculative decoding is disabled (no flag is emitted).
+SPEC_JSON=$(python3 - "$CONFIG_FILE" "$SPEC_METHOD_OVERRIDE" "$SPEC_DRAFT_MODEL_OVERRIDE" \
+    "$SPEC_NUM_TOKENS_OVERRIDE" "$NO_SPECULATIVE" <<'PYEOF'
+import yaml, json, sys
+config_file, method_cli, draft_cli, num_tokens_cli, no_spec = sys.argv[1:6]
+with open(config_file) as f:
+    cfg = yaml.safe_load(f)
+spec_cfg = cfg.get("serving", {}).get("speculative") or {}
+enabled = spec_cfg.get("enabled", False)
+if no_spec == "true":
+    sys.exit(0)
+if method_cli or draft_cli or num_tokens_cli:
+    enabled = True
+if not enabled:
+    sys.exit(0)
+spec = {}
+method     = method_cli     or spec_cfg.get("method", "")
+draft      = draft_cli      or spec_cfg.get("draft_model", "")
+num_tokens = num_tokens_cli or str(spec_cfg.get("num_speculative_tokens") or "")
+block_size  = spec_cfg.get("dflash_block_size")
+window_size = spec_cfg.get("dflash_draft_window_size")
+extra       = spec_cfg.get("extra") or {}
+if method:  spec["method"] = method
+if draft:   spec["model"]  = draft
+if num_tokens:
+    try: spec["num_speculative_tokens"] = int(num_tokens)
+    except ValueError: pass
+if block_size  is not None: spec["dflash_block_size"]        = int(block_size)
+if window_size is not None: spec["dflash_draft_window_size"] = int(window_size)
+if isinstance(extra, dict): spec.update(extra)
+print(json.dumps(spec, separators=(',', ':')), end="")
+PYEOF
+)
 
 VLLM_ARGS=(
     --model                  "$MODEL_NAME"
@@ -150,6 +194,10 @@ if [ -n "$HF_OVERRIDES" ]; then
     VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
 fi
 
+if [ -n "$SPEC_JSON" ]; then
+    VLLM_ARGS+=(--speculative-config "$SPEC_JSON")
+fi
+
 echo "=== Launching vLLM Server ==="
 echo "Model:        $MODEL_NAME"
 echo "Tool Parser:  $TOOL_PARSER"
@@ -158,7 +206,25 @@ echo "Max Len:      $MAX_LEN"
 echo "Port:         $PORT"
 echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
 echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
+echo "Spec Decoding:${SPEC_JSON:- (disabled)}"
 echo "============================="
+
+# Warn when speculative decoding is combined with a custom KV-cache backend (untested).
+if [ -n "$SPEC_JSON" ]; then
+    case "$KV_CACHE_DTYPE" in
+        turboquant*|rotorquant*)
+            echo "WARN: speculative decoding + '$KV_CACHE_DTYPE' is untested." >&2
+            echo "      The engine-config hook patches is_hybrid/is_mm_prefix_lm during" >&2
+            echo "      create_engine_config, which runs alongside draft model loading." >&2
+            ;;
+    esac
+fi
+
+# LAUNCH_PRINT_ONLY=1: print resolved VLLM_ARGS and exit without launching (used by tests).
+if [ "${LAUNCH_PRINT_ONLY:-}" = "1" ]; then
+    echo "${VLLM_ARGS[@]}"
+    exit 0
+fi
 
 # Route any turboquant*/rotorquant* dtype through the project's custom launcher.
 # Bare "turboquant"/"rotorquant" need the argparse + Pydantic patches to be

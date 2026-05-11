@@ -85,29 +85,52 @@ MAX_FAILURE_RATE=0.01
 PORT=8000
 RESULTS_DIR="$PROJECT_ROOT/results/concurrency"
 DRY_RUN=false
+SPEC_METHOD=""
+SPEC_DRAFT_MODEL=""
+SPEC_NUM_TOKENS=""
+NO_SPECULATIVE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --frontier-model)       FRONTIER_MODEL="$2";        shift 2 ;;
-        --kv-cache-dtype)       KV_CACHE_DTYPE="$2";        shift 2 ;;
-        --context-lengths)      CONTEXT_LENGTHS="$2";       shift 2 ;;
-        --input-tokens-min)     INPUT_TOKENS_MIN="$2";      shift 2 ;;
-        --input-tokens-max)     INPUT_TOKENS_MAX="$2";      shift 2 ;;
-        --output-tokens)        OUTPUT_TOKENS="$2";         shift 2 ;;
-        --concurrency-levels)   CONCURRENCY_LEVELS="$2"; CONCURRENCY_LEVELS_SET=true; shift 2 ;;
-        --requests-per-level)   REQUESTS_PER_LEVEL="$2"; REQUESTS_PER_LEVEL_SET=true; shift 2 ;;
-        --warmup-requests)      WARMUP_REQUESTS="$2";       shift 2 ;;
-        --degradation-ttft-mul) DEGRADATION_TTFT_MUL="$2"; shift 2 ;;
-        --max-failure-rate)     MAX_FAILURE_RATE="$2";      shift 2 ;;
-        --port)                 PORT="$2";                  shift 2 ;;
-        --results-dir)          RESULTS_DIR="$2";           shift 2 ;;
-        --dry-run)              DRY_RUN=true;               shift   ;;
+        --frontier-model)          FRONTIER_MODEL="$2";        shift 2 ;;
+        --kv-cache-dtype)          KV_CACHE_DTYPE="$2";        shift 2 ;;
+        --context-lengths)         CONTEXT_LENGTHS="$2";       shift 2 ;;
+        --input-tokens-min)        INPUT_TOKENS_MIN="$2";      shift 2 ;;
+        --input-tokens-max)        INPUT_TOKENS_MAX="$2";      shift 2 ;;
+        --output-tokens)           OUTPUT_TOKENS="$2";         shift 2 ;;
+        --concurrency-levels)      CONCURRENCY_LEVELS="$2"; CONCURRENCY_LEVELS_SET=true; shift 2 ;;
+        --requests-per-level)      REQUESTS_PER_LEVEL="$2"; REQUESTS_PER_LEVEL_SET=true; shift 2 ;;
+        --warmup-requests)         WARMUP_REQUESTS="$2";       shift 2 ;;
+        --degradation-ttft-mul)    DEGRADATION_TTFT_MUL="$2"; shift 2 ;;
+        --max-failure-rate)        MAX_FAILURE_RATE="$2";      shift 2 ;;
+        --port)                    PORT="$2";                  shift 2 ;;
+        --results-dir)             RESULTS_DIR="$2";           shift 2 ;;
+        --dry-run)                 DRY_RUN=true;               shift   ;;
+        --speculative-method)      SPEC_METHOD="$2";           shift 2 ;;
+        --speculative-draft-model) SPEC_DRAFT_MODEL="$2";     shift 2 ;;
+        --speculative-num-tokens)  SPEC_NUM_TOKENS="$2";      shift 2 ;;
+        --no-speculative)          NO_SPECULATIVE=true;         shift   ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
             ;;
     esac
 done
+
+# Build forwarding args array and result-file suffix for A/B base-vs-spec comparisons.
+SPEC_ARGS=()
+SPEC_SUFFIX=""
+if [ "$NO_SPECULATIVE" = "true" ]; then
+    SPEC_ARGS+=(--no-speculative)
+    SPEC_SUFFIX="_spec-off"
+else
+    if [ -n "$SPEC_METHOD" ]; then
+        SPEC_ARGS+=(--speculative-method "$SPEC_METHOD")
+        SPEC_SUFFIX="_spec-${SPEC_METHOD}"
+    fi
+    [ -n "$SPEC_DRAFT_MODEL" ] && SPEC_ARGS+=(--speculative-draft-model "$SPEC_DRAFT_MODEL")
+    [ -n "$SPEC_NUM_TOKENS" ]  && SPEC_ARGS+=(--speculative-num-tokens  "$SPEC_NUM_TOKENS")
+fi
 
 # Mutual exclusion: --frontier-model XOR positional config
 if [[ -n "$FRONTIER_MODEL" && -n "$CONFIG_ARG" ]]; then
@@ -216,7 +239,7 @@ esac
 if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
     RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_frontier.json"
 else
-    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${SERVING_ENGINE}_${KV_CACHE_DTYPE}.json"
+    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${SERVING_ENGINE}_${KV_CACHE_DTYPE}${SPEC_SUFFIX}.json"
 fi
 LOG_FILE="${RESULT_FILE%.json}.log"
 
@@ -229,6 +252,7 @@ echo "Engine:              $SERVING_ENGINE"
 echo "Endpoint:            $BASE_URL"
 if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
     echo "KV cache dtype:      $KV_CACHE_DTYPE"
+    echo "Spec Decoding:       ${SPEC_SUFFIX:-none}"
 fi
 echo "Context lengths:     $CONTEXT_LENGTHS"
 echo "Input tokens:        ${INPUT_TOKENS_MIN}..${INPUT_TOKENS_MAX} (varied per request)"
@@ -253,7 +277,7 @@ if [ "$DRY_RUN" = true ]; then
     if [[ "$SERVING_ENGINE" == "bifrost" ]]; then
         echo "[DRY RUN] Would run frontier sweep against: $BASE_URL"
     else
-        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE --port $PORT --max-model-len $MAX_CTX (engine=$SERVING_ENGINE)"
+        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE --port $PORT --max-model-len $MAX_CTX ${SPEC_ARGS[*]} (engine=$SERVING_ENGINE)"
     fi
     echo "[DRY RUN] Output: $RESULT_FILE"
     exit 0
@@ -267,7 +291,8 @@ if [[ "$SERVING_ENGINE" != "bifrost" ]]; then
     bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" \
         --kv-cache-dtype "$KV_CACHE_DTYPE" \
         --port "$PORT" \
-        --max-model-len "$MAX_CTX" &
+        --max-model-len "$MAX_CTX" \
+        "${SPEC_ARGS[@]}" &
     SERVER_PID=$!
 
     cleanup() {

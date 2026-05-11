@@ -1,0 +1,32 @@
+# Llama-3.1-8B-Instruct + Dflash speculative decoding (SGLang)
+# Smoke-test config — the only public Dflash draft pair as of 2026-05.
+model:
+  name: "meta-llama/Llama-3.1-8B-Instruct"
+  family: "llama"
+  architecture: "dense_gqa_transformer"
+  params_total: 8
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 16
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "pythonic"
+  mem_fraction_static: 0.85
+  context_length: 8192
+  max_running_requests: 256
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+  pp_size: 1
+  enable_dp_attention: false
+  speculative:
+    enabled: true
+    algorithm: "DFLASH"
+    draft_model_path: "z-lab/LLaMA3.1-8B-Instruct-DFlash-UltraChat"
+    num_draft_tokens: 5
+    dflash_block_size: 4
+    dflash_draft_window_size: 16
+
+category: "smoke_test"
+benchmark_tasks: []

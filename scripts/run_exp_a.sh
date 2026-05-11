@@ -27,20 +27,43 @@ BACKEND=""
 DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
 MAX_SAMPLES=0
 DRY_RUN=false
+SPEC_METHOD=""
+SPEC_DRAFT_MODEL=""
+SPEC_NUM_TOKENS=""
+NO_SPECULATIVE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --kv-cache-dtype) KV_CACHE_DTYPE="$2"; shift 2 ;;
-        --backend)        BACKEND="$2";         shift 2 ;;
-        --data)           DATA_DIR="$2";        shift 2 ;;
-        --max-samples)    MAX_SAMPLES="$2";     shift 2 ;;
-        --dry-run)        DRY_RUN=true;         shift ;;
+        --kv-cache-dtype)          KV_CACHE_DTYPE="$2";    shift 2 ;;
+        --backend)                 BACKEND="$2";            shift 2 ;;
+        --data)                    DATA_DIR="$2";           shift 2 ;;
+        --max-samples)             MAX_SAMPLES="$2";        shift 2 ;;
+        --dry-run)                 DRY_RUN=true;            shift   ;;
+        --speculative-method)      SPEC_METHOD="$2";        shift 2 ;;
+        --speculative-draft-model) SPEC_DRAFT_MODEL="$2";  shift 2 ;;
+        --speculative-num-tokens)  SPEC_NUM_TOKENS="$2";   shift 2 ;;
+        --no-speculative)          NO_SPECULATIVE=true;     shift   ;;
         *)
             echo "Unknown argument: $1"
             exit 1
             ;;
     esac
 done
+
+# Build forwarding args array and result-file suffix for A/B base-vs-spec comparisons.
+SPEC_ARGS=()
+SPEC_SUFFIX=""
+if [ "$NO_SPECULATIVE" = "true" ]; then
+    SPEC_ARGS+=(--no-speculative)
+    SPEC_SUFFIX="_spec-off"
+else
+    if [ -n "$SPEC_METHOD" ]; then
+        SPEC_ARGS+=(--speculative-method "$SPEC_METHOD")
+        SPEC_SUFFIX="_spec-${SPEC_METHOD}"
+    fi
+    [ -n "$SPEC_DRAFT_MODEL" ] && SPEC_ARGS+=(--speculative-draft-model "$SPEC_DRAFT_MODEL")
+    [ -n "$SPEC_NUM_TOKENS" ]  && SPEC_ARGS+=(--speculative-num-tokens  "$SPEC_NUM_TOKENS")
+fi
 
 mkdir -p "$RESULTS_DIR"
 
@@ -84,6 +107,7 @@ fi
 echo "=== Experiment A: Prompt-Encoded Business Logic ==="
 echo "KV cache dtype: $KV_CACHE_DTYPE"
 echo "Backend:        ${BACKEND:-vllm (default)}"
+echo "Spec Decoding:  ${SPEC_SUFFIX:-none}"
 echo "Data dir:       $DATA_DIR"
 echo "Results dir:    $RESULTS_DIR"
 echo "Max samples:    ${MAX_SAMPLES} (0=all)"
@@ -128,13 +152,13 @@ print(c.get('inference', {}).get('stochastic_trials', 5))
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE"
+        echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG --kv-cache-dtype $KV_CACHE_DTYPE ${SPEC_ARGS[*]}"
         echo "[DRY RUN] Would run eval for $MODEL_NAME (engine=$SERVING_ENGINE)"
         continue
     fi
 
     # Launch server in background (dispatch to the correct backend via launch.sh)
-    bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" --kv-cache-dtype "$KV_CACHE_DTYPE" &
+    bash "$LAUNCH_SCRIPT" "$MODEL_CONFIG" --kv-cache-dtype "$KV_CACHE_DTYPE" "${SPEC_ARGS[@]}" &
     SERVER_PID=$!
 
     # TRT-LLM JIT-from-HF can take 5-15 min on first launch; allow 30 min.
@@ -159,7 +183,7 @@ print(c.get('inference', {}).get('stochastic_trials', 5))
     fi
 
     # Run evaluation
-    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${SERVING_ENGINE}_${KV_CACHE_DTYPE}.json"
+    RESULT_FILE="$RESULTS_DIR/${MODEL_NAME//\//_}_${SERVING_ENGINE}_${KV_CACHE_DTYPE}${SPEC_SUFFIX}.json"
     python3 -m llm_workflow_agents.eval.agent_benchmark \
         --model             "$MODEL_NAME" \
         --engine            "$SERVING_ENGINE" \

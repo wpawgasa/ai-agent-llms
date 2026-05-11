@@ -41,8 +41,33 @@ class ComplexityLevel(StrEnum):
 # --- Config Models ---
 
 
+class SpeculativeConfig(BaseModel):
+    """Optional speculative-decoding sub-block. Fields are engine-native and informational;
+    bash launchers bypass Pydantic and read YAML directly."""
+
+    enabled: bool = False
+    # Unified / vLLM
+    method: str | None = None
+    draft_model: str | None = None
+    num_speculative_tokens: int | None = None
+    extra: dict | None = None
+    # vLLM Dflash extras (merged into --speculative-config JSON)
+    dflash_block_size: int | None = None
+    dflash_draft_window_size: int | None = None
+    # SGLang-native
+    algorithm: str | None = None
+    draft_model_path: str | None = None
+    num_draft_tokens: int | None = None
+    # TRT-LLM-native
+    mode: str | None = None
+    build_recipe: str | None = None
+    build_params: dict | None = None
+
+    model_config = {"extra": "allow"}
+
+
 class ServingConfig(BaseModel):
-    """vLLM serving configuration."""
+    """Serving configuration (engine-agnostic; engine-specific fields are read by bash launchers)."""
 
     engine: str = "vllm"
     tool_call_parser: str = "hermes"
@@ -50,6 +75,9 @@ class ServingConfig(BaseModel):
     gpu_memory_utilization: float = 0.90
     max_model_len: int = 8192
     enforce_eager: bool = False
+    speculative: SpeculativeConfig | None = None
+
+    model_config = {"extra": "allow"}
 
 
 class InferenceConfig(BaseModel):

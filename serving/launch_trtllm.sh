@@ -63,15 +63,24 @@ MAX_BATCH=$(parse_yaml "serving.max_batch_size" "256")
 MAX_TOKENS=$(parse_yaml "serving.max_num_tokens" "8192")
 TP_SIZE=$(parse_yaml "serving.tp_size" "1")
 PORT=$(parse_yaml "serving.port" "8000")
+SPEC_ENABLED=$(parse_yaml "serving.speculative.enabled" "false")
+SPEC_MODE=$(parse_yaml "serving.speculative.mode" "")
+SPEC_BUILD_RECIPE=$(parse_yaml "serving.speculative.build_recipe" "")
 KV_CACHE_DTYPE="auto"
 MAX_NUM_TOKENS_OVERRIDE=""
+NO_SPECULATIVE=false
+SPEC_METHOD_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype) KV_CACHE_DTYPE="$2";          shift 2 ;;
-        --port)           PORT="$2";                    shift 2 ;;
-        --max-model-len)  MAX_NUM_TOKENS_OVERRIDE="$2"; shift 2 ;;
-        --max-num-seqs)   MAX_BATCH="$2";               shift 2 ;;
+        --kv-cache-dtype)          KV_CACHE_DTYPE="$2";          shift 2 ;;
+        --port)                    PORT="$2";                    shift 2 ;;
+        --max-model-len)           MAX_NUM_TOKENS_OVERRIDE="$2"; shift 2 ;;
+        --max-num-seqs)            MAX_BATCH="$2";               shift 2 ;;
+        --speculative-method)      SPEC_METHOD_OVERRIDE="$2";    shift 2 ;;
+        --speculative-draft-model) echo "WARN: --speculative-draft-model is build-time for TRT-LLM; ignored at runtime." >&2; shift 2 ;;
+        --speculative-num-tokens)  echo "WARN: --speculative-num-tokens is build-time for TRT-LLM; ignored at runtime." >&2; shift 2 ;;
+        --no-speculative)          NO_SPECULATIVE=true;           shift   ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
@@ -81,6 +90,30 @@ done
 
 if [ -n "$MAX_NUM_TOKENS_OVERRIDE" ]; then
     MAX_TOKENS="$MAX_NUM_TOKENS_OVERRIDE"
+fi
+
+# Apply CLI overrides for speculative settings
+if [ "$NO_SPECULATIVE" = "true" ]; then
+    SPEC_ENABLED="false"
+fi
+if [ -n "$SPEC_METHOD_OVERRIDE" ] && [ "$NO_SPECULATIVE" = "false" ]; then
+    SPEC_MODE="$SPEC_METHOD_OVERRIDE"
+    SPEC_ENABLED="true"
+fi
+
+# Guard: TRT-LLM Dflash heads are baked in at engine-build time; source=hf is unsupported.
+if [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; then
+    if [[ "$SOURCE" != "engine_dir" ]]; then
+        echo "ERROR: Dflash speculative decoding requires a pre-built TRT-LLM engine." >&2
+        echo "       Set 'serving.source: engine_dir' and 'serving.engine_dir: <path>'." >&2
+        echo "       Build the engine first: bash scripts/build_trtllm_engines.sh $CONFIG_FILE" >&2
+        exit 1
+    fi
+    if [ -z "$ENGINE_DIR" ]; then
+        echo "ERROR: serving.speculative.enabled=true but serving.engine_dir is not set." >&2
+        echo "       Build the engine first: bash scripts/build_trtllm_engines.sh $CONFIG_FILE" >&2
+        exit 1
+    fi
 fi
 
 # KV-cache dtype handling: TRT-LLM is build-time only.
@@ -111,6 +144,10 @@ TRT_ARGS=(
     --tp_size        "$TP_SIZE"
 )
 
+if { [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; } && [ -n "$SPEC_MODE" ]; then
+    TRT_ARGS+=(--speculative_decoding_mode "$SPEC_MODE")
+fi
+
 # Determine model source
 if [[ "$SOURCE" == "engine_dir" ]]; then
     if [ -z "$ENGINE_DIR" ]; then
@@ -133,9 +170,19 @@ echo "Max Batch:   $MAX_BATCH"
 echo "Max Tokens:  $MAX_TOKENS"
 echo "TP Size:     $TP_SIZE"
 echo "Port:        $PORT"
+if [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; then
+    echo "Spec Mode:   $SPEC_MODE"
+    [ -n "$SPEC_BUILD_RECIPE" ] && echo "Build Recipe: $SPEC_BUILD_RECIPE"
+fi
 if [[ "$SOURCE" == "hf" ]]; then
     echo "NOTE: First launch compiles TRT engine (5-15 min for large models)."
 fi
 echo "======================================"
+
+# LAUNCH_PRINT_ONLY=1: print resolved TRT_ARGS and exit without launching (used by tests).
+if [ "${LAUNCH_PRINT_ONLY:-}" = "1" ]; then
+    echo "${TRT_ARGS[@]}"
+    exit 0
+fi
 
 exec trtllm-serve "$MODEL_ARG" "${TRT_ARGS[@]}"

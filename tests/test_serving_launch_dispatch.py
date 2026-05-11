@@ -1,5 +1,6 @@
 """Tests for serving/launch.sh backend dispatch and launcher script integrity."""
 
+import json
 import os
 import stat
 import subprocess
@@ -179,4 +180,276 @@ def test_existing_vllm_yamls_unchanged(yaml_path: Path):
     assert engine == "vllm", (
         f"Unexpected engine '{engine}' in existing config {yaml_path.name}; "
         f"vLLM configs must not be changed by the SGLang/TRT-LLM PR."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Speculative-decoding wiring tests (LAUNCH_PRINT_ONLY=1)
+# ---------------------------------------------------------------------------
+
+VLLM_LAUNCHER = SERVING_DIR / "launch_vllm.sh"
+SGLANG_LAUNCHER = SERVING_DIR / "launch_sglang.sh"
+TRTLLM_LAUNCHER = SERVING_DIR / "launch_trtllm.sh"
+
+
+def _run_launcher(
+    script: Path,
+    yaml_path: Path,
+    extra_args: list | None = None,
+    env_overrides: dict | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a launcher with LAUNCH_PRINT_ONLY=1 to capture its resolved arg list."""
+    env = {**os.environ, "LAUNCH_PRINT_ONLY": "1", **(env_overrides or {})}
+    cmd = ["bash", str(script), str(yaml_path)] + (extra_args or [])
+    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+
+def _make_vllm_yaml(tmp_path: Path, spec: dict | None = None) -> Path:
+    cfg: dict = {
+        "model": {"name": "test/model"},
+        "serving": {
+            "engine": "vllm",
+            "tool_call_parser": "hermes",
+            "gpu_memory_utilization": 0.90,
+            "max_model_len": 4096,
+            "port": 8000,
+        },
+    }
+    if spec is not None:
+        cfg["serving"]["speculative"] = spec
+    p = tmp_path / "test_vllm.yaml"
+    p.write_text(yaml.dump(cfg))
+    return p
+
+
+def _make_sglang_yaml(tmp_path: Path, spec: dict | None = None, **extra_serving) -> Path:
+    cfg: dict = {
+        "model": {"name": "test/model"},
+        "serving": {
+            "engine": "sglang",
+            "tool_call_parser": "pythonic",
+            "mem_fraction_static": 0.90,
+            "context_length": 4096,
+            "max_running_requests": 64,
+            "attention_backend": "triton",
+            "port": 8000,
+            "kv_cache_dtype": "auto",
+            "pp_size": 1,
+            "enable_dp_attention": False,
+            **extra_serving,
+        },
+    }
+    if spec is not None:
+        cfg["serving"]["speculative"] = spec
+    p = tmp_path / "test_sglang.yaml"
+    p.write_text(yaml.dump(cfg))
+    return p
+
+
+def _make_trtllm_yaml(
+    tmp_path: Path, spec: dict | None = None, source: str = "hf", engine_dir: str = ""
+) -> Path:
+    cfg: dict = {
+        "model": {"name": "test/model"},
+        "serving": {
+            "engine": "tensorrt_llm",
+            "source": source,
+            "engine_dir": engine_dir,
+            "max_batch_size": 64,
+            "max_num_tokens": 4096,
+            "tp_size": 1,
+            "port": 8000,
+        },
+    }
+    if spec is not None:
+        cfg["serving"]["speculative"] = spec
+    p = tmp_path / "test_trtllm.yaml"
+    p.write_text(yaml.dump(cfg))
+    return p
+
+
+# --- vLLM speculative tests ---
+
+
+def test_vllm_launcher_emits_speculative_config_json_when_enabled(tmp_path: Path):
+    yaml_path = _make_vllm_yaml(
+        tmp_path,
+        spec={
+            "enabled": True,
+            "method": "dflash",
+            "draft_model": "z-lab/Test-Draft",
+            "num_speculative_tokens": 5,
+        },
+    )
+    result = _run_launcher(VLLM_LAUNCHER, yaml_path)
+    assert result.returncode == 0, result.stderr
+    parts = result.stdout.strip().split()
+    assert "--speculative-config" in parts, f"--speculative-config not in output: {result.stdout!r}"
+    idx = parts.index("--speculative-config")
+    spec = json.loads(parts[idx + 1])
+    assert spec["method"] == "dflash"
+    assert spec["model"] == "z-lab/Test-Draft"
+    assert spec["num_speculative_tokens"] == 5
+
+
+def test_vllm_launcher_omits_speculative_when_disabled(tmp_path: Path):
+    yaml_path = _make_vllm_yaml(tmp_path)  # no speculative block
+    result = _run_launcher(VLLM_LAUNCHER, yaml_path)
+    assert result.returncode == 0, result.stderr
+    assert "--speculative-config" not in result.stdout
+
+
+def test_vllm_cli_override_no_speculative_trumps_yaml(tmp_path: Path):
+    yaml_path = _make_vllm_yaml(
+        tmp_path,
+        spec={"enabled": True, "method": "dflash", "draft_model": "z-lab/Test-Draft"},
+    )
+    result = _run_launcher(VLLM_LAUNCHER, yaml_path, extra_args=["--no-speculative"])
+    assert result.returncode == 0, result.stderr
+    assert "--speculative-config" not in result.stdout, (
+        "--no-speculative should suppress spec config from YAML"
+    )
+
+
+def test_vllm_cli_speculative_method_override(tmp_path: Path):
+    yaml_path = _make_vllm_yaml(tmp_path)  # no YAML spec block
+    result = _run_launcher(
+        VLLM_LAUNCHER,
+        yaml_path,
+        extra_args=[
+            "--speculative-method", "dflash",
+            "--speculative-draft-model", "z-lab/CLI-Draft",
+            "--speculative-num-tokens", "3",
+        ],
+    )
+    assert result.returncode == 0, result.stderr
+    parts = result.stdout.strip().split()
+    assert "--speculative-config" in parts
+    idx = parts.index("--speculative-config")
+    spec = json.loads(parts[idx + 1])
+    assert spec["method"] == "dflash"
+    assert spec["model"] == "z-lab/CLI-Draft"
+    assert spec["num_speculative_tokens"] == 3
+
+
+# --- SGLang speculative tests ---
+
+
+def test_sglang_launcher_emits_dflash_flags(tmp_path: Path):
+    yaml_path = _make_sglang_yaml(
+        tmp_path,
+        spec={
+            "enabled": True,
+            "algorithm": "DFLASH",
+            "draft_model_path": "z-lab/Test-Draft",
+            "num_draft_tokens": 5,
+            "dflash_block_size": 4,
+            "dflash_draft_window_size": 16,
+        },
+    )
+    result = _run_launcher(SGLANG_LAUNCHER, yaml_path)
+    assert result.returncode == 0, result.stderr
+    args = result.stdout.strip()
+    assert "--speculative-algorithm" in args
+    assert "DFLASH" in args
+    assert "--speculative-draft-model-path" in args
+    assert "z-lab/Test-Draft" in args
+    assert "--speculative-num-draft-tokens" in args
+    assert "--speculative-dflash-block-size" in args
+    assert "--speculative-dflash-draft-window-size" in args
+
+
+def test_sglang_rejects_dp_attention_with_speculative(tmp_path: Path):
+    yaml_path = _make_sglang_yaml(
+        tmp_path,
+        spec={"enabled": True, "algorithm": "DFLASH", "draft_model_path": "z-lab/Draft"},
+        enable_dp_attention=True,
+    )
+    result = _run_launcher(SGLANG_LAUNCHER, yaml_path)
+    assert result.returncode != 0, "Should have failed due to dp-attention + speculative"
+    assert "dp-attention" in result.stderr.lower() or "dp_attention" in result.stderr.lower()
+
+
+def test_sglang_rejects_pp_size_gt_1_with_speculative(tmp_path: Path):
+    yaml_path = _make_sglang_yaml(
+        tmp_path,
+        spec={"enabled": True, "algorithm": "DFLASH", "draft_model_path": "z-lab/Draft"},
+        pp_size=2,
+    )
+    result = _run_launcher(SGLANG_LAUNCHER, yaml_path)
+    assert result.returncode != 0, "Should have failed due to pp_size > 1 + speculative"
+    assert "pp_size" in result.stderr
+
+
+# --- TRT-LLM speculative tests ---
+
+
+def test_trtllm_rejects_hf_source_with_speculative(tmp_path: Path):
+    yaml_path = _make_trtllm_yaml(
+        tmp_path,
+        spec={"enabled": True, "mode": "dflash"},
+        source="hf",
+    )
+    result = _run_launcher(TRTLLM_LAUNCHER, yaml_path)
+    assert result.returncode != 0, "Should have failed: spec + source=hf"
+    assert "engine_dir" in result.stderr
+
+
+def test_trtllm_emits_speculative_mode_when_engine_dir(tmp_path: Path):
+    engine_dir = str(tmp_path / "fake_engine")
+    (tmp_path / "fake_engine").mkdir()
+    yaml_path = _make_trtllm_yaml(
+        tmp_path,
+        spec={"enabled": True, "mode": "dflash"},
+        source="engine_dir",
+        engine_dir=engine_dir,
+    )
+    result = _run_launcher(TRTLLM_LAUNCHER, yaml_path)
+    assert result.returncode == 0, result.stderr
+    assert "--speculative_decoding_mode" in result.stdout
+    assert "dflash" in result.stdout
+
+
+# --- Pydantic round-trip ---
+
+
+def test_speculative_config_pydantic_roundtrip():
+    from llm_workflow_agents.config.schema import ModelConfig, SpeculativeConfig
+
+    for yaml_path in [
+        PROJECT_ROOT / "configs/models_exp_a/llama31_8b_dflash.yaml",
+        PROJECT_ROOT / "configs/models_exp_a/llama31_8b_dflash_sglang.yaml",
+        PROJECT_ROOT / "configs/models_exp_a/llama31_8b_dflash_trtllm.yaml",
+    ]:
+        if not yaml_path.exists():
+            pytest.skip(f"Smoke-test YAML not found: {yaml_path.name}")
+        with open(yaml_path) as f:
+            raw = yaml.safe_load(f)
+        spec_raw = raw.get("serving", {}).get("speculative", {})
+        spec = SpeculativeConfig.model_validate(spec_raw)
+        assert spec.enabled is True, f"speculative.enabled should be True in {yaml_path.name}"
+
+
+# --- run_exp_a.sh forwards speculative CLI to launcher ---
+
+
+def test_run_exp_a_forwards_speculative_cli(tmp_path: Path):
+    run_exp_a = PROJECT_ROOT / "scripts" / "run_exp_a.sh"
+    if not run_exp_a.exists():
+        pytest.skip("run_exp_a.sh not found")
+    result = subprocess.run(
+        [
+            "bash", str(run_exp_a),
+            "--dry-run",
+            "--speculative-method", "dflash",
+            "--speculative-draft-model", "z-lab/Test-Draft",
+            "--speculative-num-tokens", "5",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+    )
+    output = result.stdout + result.stderr
+    assert "--speculative-method" in output or "dflash" in output, (
+        f"Expected spec args to appear in dry-run output:\n{output}"
     )

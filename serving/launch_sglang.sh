@@ -72,6 +72,14 @@ ATTN_BACKEND=$(parse_yaml "serving.attention_backend" "triton")
 TORCH_COMPILE=$(parse_yaml "serving.enable_torch_compile" "false")
 PORT=$(parse_yaml "serving.port" "8000")
 KV_CACHE_DTYPE=$(parse_yaml "serving.kv_cache_dtype" "auto")
+PP_SIZE=$(parse_yaml "serving.pp_size" "1")
+ENABLE_DP_ATTN=$(parse_yaml "serving.enable_dp_attention" "false")
+SPEC_ENABLED=$(parse_yaml "serving.speculative.enabled" "false")
+SPEC_ALGORITHM=$(parse_yaml "serving.speculative.algorithm" "")
+SPEC_DRAFT_MODEL_PATH=$(parse_yaml "serving.speculative.draft_model_path" "")
+SPEC_NUM_DRAFT_TOKENS=$(parse_yaml "serving.speculative.num_draft_tokens" "")
+SPEC_DFLASH_BLOCK_SIZE=$(parse_yaml "serving.speculative.dflash_block_size" "")
+SPEC_DFLASH_WINDOW_SIZE=$(parse_yaml "serving.speculative.dflash_draft_window_size" "")
 
 if [ -z "$MODEL_NAME" ]; then
     echo "Error: model.name not found in config" >&2
@@ -79,13 +87,21 @@ if [ -z "$MODEL_NAME" ]; then
 fi
 
 MAX_MODEL_LEN_OVERRIDE=""
+NO_SPECULATIVE=false
+SPEC_METHOD_OVERRIDE=""
+SPEC_DRAFT_MODEL_OVERRIDE=""
+SPEC_NUM_TOKENS_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --kv-cache-dtype) KV_CACHE_DTYPE="$2";         shift 2 ;;
-        --port)           PORT="$2";                   shift 2 ;;
-        --max-model-len)  MAX_MODEL_LEN_OVERRIDE="$2"; shift 2 ;;
-        --max-num-seqs)   MAX_RUNNING="$2";            shift 2 ;;
+        --kv-cache-dtype)          KV_CACHE_DTYPE="$2";            shift 2 ;;
+        --port)                    PORT="$2";                       shift 2 ;;
+        --max-model-len)           MAX_MODEL_LEN_OVERRIDE="$2";    shift 2 ;;
+        --max-num-seqs)            MAX_RUNNING="$2";               shift 2 ;;
+        --speculative-method)      SPEC_METHOD_OVERRIDE="$2";      shift 2 ;;
+        --speculative-draft-model) SPEC_DRAFT_MODEL_OVERRIDE="$2"; shift 2 ;;
+        --speculative-num-tokens)  SPEC_NUM_TOKENS_OVERRIDE="$2";  shift 2 ;;
+        --no-speculative)          NO_SPECULATIVE=true;             shift   ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
@@ -142,6 +158,39 @@ if [ "$TORCH_COMPILE" = "true" ] || [ "$TORCH_COMPILE" = "True" ]; then
     SGLANG_ARGS+=(--enable-torch-compile)
 fi
 
+# Apply CLI overrides for speculative settings (CLI > YAML); then validate + append flags.
+if [ "$NO_SPECULATIVE" = "true" ]; then
+    SPEC_ENABLED="false"
+fi
+if [ -n "$SPEC_METHOD_OVERRIDE" ] && [ "$NO_SPECULATIVE" = "false" ]; then
+    SPEC_ALGORITHM="${SPEC_METHOD_OVERRIDE^^}"
+    SPEC_ENABLED="true"
+fi
+if [ -n "$SPEC_DRAFT_MODEL_OVERRIDE" ] && [ "$NO_SPECULATIVE" = "false" ]; then
+    SPEC_DRAFT_MODEL_PATH="$SPEC_DRAFT_MODEL_OVERRIDE"
+    SPEC_ENABLED="true"
+fi
+if [ -n "$SPEC_NUM_TOKENS_OVERRIDE" ]; then
+    SPEC_NUM_DRAFT_TOKENS="$SPEC_NUM_TOKENS_OVERRIDE"
+fi
+
+if [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; then
+    if [ "$ENABLE_DP_ATTN" = "true" ] || [ "$ENABLE_DP_ATTN" = "True" ]; then
+        echo "ERROR: DFLASH speculative decoding is incompatible with serving.enable_dp_attention=true." >&2
+        exit 1
+    fi
+    if [ -n "$PP_SIZE" ] && [ "$PP_SIZE" != "1" ]; then
+        echo "ERROR: DFLASH speculative decoding requires serving.pp_size=1 (got pp_size=$PP_SIZE)." >&2
+        exit 1
+    fi
+    [ -n "$SPEC_ALGORITHM" ]          && SGLANG_ARGS+=(--speculative-algorithm           "$SPEC_ALGORITHM")
+    [ -n "$SPEC_DRAFT_MODEL_PATH" ]   && SGLANG_ARGS+=(--speculative-draft-model-path    "$SPEC_DRAFT_MODEL_PATH")
+    [ -n "$SPEC_NUM_DRAFT_TOKENS" ]   && SGLANG_ARGS+=(--speculative-num-draft-tokens    "$SPEC_NUM_DRAFT_TOKENS")
+    [ -n "$SPEC_DFLASH_BLOCK_SIZE" ]  && SGLANG_ARGS+=(--speculative-dflash-block-size   "$SPEC_DFLASH_BLOCK_SIZE")
+    [ -n "$SPEC_DFLASH_WINDOW_SIZE" ] && SGLANG_ARGS+=(--speculative-dflash-draft-window-size "$SPEC_DFLASH_WINDOW_SIZE")
+    echo "WARN: DFLASH causes SGLang to disable its overlap scheduler and mixed-chunked-prefill." >&2
+fi
+
 echo "=== Launching SGLang Server ==="
 echo "Model:           $MODEL_NAME"
 echo "Tool Parser:     $TOOL_PARSER"
@@ -150,6 +199,15 @@ echo "Mem Fraction:    $MEM_FRACTION"
 echo "Attn Backend:    $ATTN_BACKEND"
 echo "Port:            $PORT"
 echo "KV Cache:        $SGLANG_KV_ARG"
+if [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; then
+    echo "Spec Decoding:   ${SPEC_ALGORITHM} (draft=${SPEC_DRAFT_MODEL_PATH:-<none>})"
+fi
 echo "==============================="
+
+# LAUNCH_PRINT_ONLY=1: print resolved SGLANG_ARGS and exit without launching (used by tests).
+if [ "${LAUNCH_PRINT_ONLY:-}" = "1" ]; then
+    echo "${SGLANG_ARGS[@]}"
+    exit 0
+fi
 
 exec python -m sglang.launch_server "${SGLANG_ARGS[@]}"

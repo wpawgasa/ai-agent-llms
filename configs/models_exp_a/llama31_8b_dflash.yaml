@@ -1,0 +1,29 @@
+# Llama-3.1-8B-Instruct + Dflash speculative decoding (vLLM)
+# Smoke-test config — the only public Dflash draft pair as of 2026-05.
+# Use this config to validate the speculative-decoding wiring before
+# Qwen3/Gemma/Mistral Dflash drafts are trained.
+model:
+  name: "meta-llama/Llama-3.1-8B-Instruct"
+  family: "llama"
+  architecture: "dense_gqa_transformer"
+  params_total: 8
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 16
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "hermes"
+  gpu_memory_utilization: 0.85
+  max_model_len: 8192
+  port: 8000
+  speculative:
+    enabled: true
+    method: "dflash"
+    draft_model: "z-lab/LLaMA3.1-8B-Instruct-DFlash-UltraChat"
+    num_speculative_tokens: 5
+    dflash_block_size: 4
+    dflash_draft_window_size: 16
+
+category: "smoke_test"
+benchmark_tasks: []

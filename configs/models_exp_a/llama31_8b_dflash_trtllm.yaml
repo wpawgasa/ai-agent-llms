@@ -1,0 +1,33 @@
+# Llama-3.1-8B-Instruct + Dflash speculative decoding (TensorRT-LLM)
+# Smoke-test config — engine must be pre-built with NVIDIA ModelOpt (PR #1211).
+# See scripts/build_trtllm_engines.sh for build instructions.
+model:
+  name: "meta-llama/Llama-3.1-8B-Instruct"
+  family: "llama"
+  architecture: "dense_gqa_transformer"
+  params_total: 8
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 16
+
+serving:
+  engine: "tensorrt_llm"
+  source: "engine_dir"
+  engine_dir: "checkpoints/trt-engines/llama31_8b_bf16_dflash"
+  max_batch_size: 64
+  max_num_tokens: 8192
+  tp_size: 1
+  port: 8000
+  speculative:
+    enabled: true
+    mode: "dflash"
+    build_recipe: "modelopt_recipes/general/speculative_decoding/dflash.yaml"
+    build_params:
+      block_size: 4
+      num_layers: 1
+      mask_token_id: 0
+      num_anchors: 16
+      attention_heads: 8
+
+category: "smoke_test"
+benchmark_tasks: []
