@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c24356692140",
+  "session_id": "50a5290f-89e0-42b9-9d36-2cfb694c4f43",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-11T06:09:17.157187833Z",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "docs/concurrency_benchmark.md",
+    "scripts/run_concurrency_benchmark.sh",
+    "src/llm_workflow_agents/eval/concurrency_benchmark.py",
+    "tests/unit/test_concurrency_benchmark.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "2d57e044e0d1",
+  "token_usage": {
+    "input_tokens": 202,
+    "cache_creation_tokens": 697459,
+    "cache_read_tokens": 10985992,
+    "output_tokens": 77376,
+    "api_call_count": 130
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-11T06:09:16.021123648Z",
+    "agent_lines": 142,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 142,
+    "agent_percentage": 100
+  }
+}

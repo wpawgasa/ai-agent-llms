@@ -1,0 +1,25 @@
+Analyze the concurrency benchmark result of gemini-3.1-flash-lite
+
+---
+
+Analyze the concurrency benchmark result of gemini-3.1-flash-lite
+
+---
+
+Vary the prompt per request. Use the prompt lengths betweween 512-2048 tokens.
+
+---
+
+Update @docs/concurrency_benchmark.md document
+
+---
+
+Does Context length have any effect?
+
+---
+
+What's about bechmarking at one ctx_len setting, i.e. 2048 instead of three settings.
+
+---
+
+yes

@@ -1,0 +1,28 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c24356692140",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "docs/concurrency_benchmark.md",
+    "scripts/run_concurrency_benchmark.sh",
+    "src/llm_workflow_agents/eval/concurrency_benchmark.py",
+    "tests/unit/test_concurrency_benchmark.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c2/4356692140/0/metadata.json",
+      "transcript": "/c2/4356692140/0/full.jsonl",
+      "content_hash": "/c2/4356692140/0/content_hash.txt",
+      "prompt": "/c2/4356692140/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 202,
+    "cache_creation_tokens": 697459,
+    "cache_read_tokens": 10985992,
+    "output_tokens": 77376,
+    "api_call_count": 130
+  }
+}
