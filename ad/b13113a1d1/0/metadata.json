@@ -1,0 +1,43 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "adb13113a1d1",
+  "session_id": "0428d648-08b0-4e91-941c-c7c8d997b106",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-11T08:41:55.3223316Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "configs/models_exp_a/llama31_8b_dflash.yaml",
+    "configs/models_exp_a/llama31_8b_dflash_sglang.yaml",
+    "configs/models_exp_a/llama31_8b_dflash_trtllm.yaml",
+    "scripts/build_trtllm_engines.sh",
+    "scripts/run_concurrency_benchmark.sh",
+    "scripts/run_exp_a.sh",
+    "serving/launch_sglang.sh",
+    "serving/launch_trtllm.sh",
+    "serving/launch_vllm.sh",
+    "src/llm_workflow_agents/config/schema.py",
+    "tests/test_serving_launch_dispatch.py"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "125716478f8a",
+  "token_usage": {
+    "input_tokens": 53,
+    "cache_creation_tokens": 259372,
+    "cache_read_tokens": 3838513,
+    "output_tokens": 67669,
+    "api_call_count": 36
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-11T08:41:54.367491577Z",
+    "agent_lines": 753,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 753,
+    "agent_percentage": 100
+  }
+}

@@ -1,0 +1,1 @@
+Enable speculative decoding (Dflash) for vllm, SGLang and TensorRT-LLM. Make speculative decoding configurable through model config files or arguments in benchmark scripts.
