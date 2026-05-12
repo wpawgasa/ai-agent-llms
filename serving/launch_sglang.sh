@@ -71,6 +71,7 @@ fi
 source "$LAUNCH_SCRIPT_DIR/_yaml_helper.sh"
 
 MODEL_NAME=$(parse_yaml "model.name" "")
+MODEL_ARCH=$(parse_yaml "model.architecture" "")
 TOOL_PARSER=$(parse_yaml "serving.tool_call_parser" "pythonic")
 REASONING_PARSER=$(parse_yaml "serving.reasoning_parser" "")
 CHAT_TEMPLATE=$(parse_yaml "serving.chat_template" "")
@@ -223,6 +224,22 @@ if [ "$SPEC_ENABLED" = "true" ] || [ "$SPEC_ENABLED" = "True" ]; then
     [ -n "$SPEC_DFLASH_BLOCK_SIZE" ]  && SGLANG_ARGS+=(--speculative-dflash-block-size   "$SPEC_DFLASH_BLOCK_SIZE")
     [ -n "$SPEC_DFLASH_WINDOW_SIZE" ] && SGLANG_ARGS+=(--speculative-dflash-draft-window-size "$SPEC_DFLASH_WINDOW_SIZE")
     echo "WARN: DFLASH causes SGLang to disable its overlap scheduler and mixed-chunked-prefill." >&2
+
+    # Hybrid Mamba/DeltaNet + DFLASH compatibility (SGLang 0.5.11+).
+    # server_args.py:_handle_mamba_radix_cache aborts with a ValueError on
+    # hybrid models (Qwen3.5/3.6 *MoE w/ DeltaNet, Mamba) unless both
+    # --mamba-scheduler-strategy=extra_buffer is passed AND SGLANG_ENABLE_SPEC_V2=1
+    # is exported. Detect via model.architecture containing "deltanet"/"mamba"/"hybrid"
+    # and apply both automatically — the other DFLASH yamls (Gemma 4 dense/MoE GQA)
+    # leave this off.
+    case "${MODEL_ARCH,,}" in
+        *deltanet*|*mamba*|*hybrid*)
+            SGLANG_ARGS+=(--mamba-scheduler-strategy extra_buffer)
+            export SGLANG_ENABLE_SPEC_V2=1
+            echo "INFO: hybrid architecture '$MODEL_ARCH' + DFLASH detected:" >&2
+            echo "      auto-set --mamba-scheduler-strategy=extra_buffer + SGLANG_ENABLE_SPEC_V2=1" >&2
+            ;;
+    esac
 fi
 
 echo "=== Launching SGLang Server ==="
