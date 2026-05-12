@@ -1,0 +1,51 @@
+# Qwen3.6 35B-A3B + Dflash speculative decoding (SGLang)
+# Draft model: z-lab/Qwen3.6-35B-A3B-DFlash
+# DFLASH disables SGLang's overlap scheduler and mixed-chunked-prefill;
+# also requires pp_size=1 and enable_dp_attention=false (enforced by launcher).
+model:
+  name: "Qwen/Qwen3.6-35B-A3B"
+  family: "qwen35"
+  architecture: "moe_deltanet_transformer"
+  params_total: 35_000_000_000
+  params_active: 3_000_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 70
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "qwen"
+  # chat_template intentionally omitted: SGLang falls back to the HF tokenizer's
+  # built-in chat_template (canonical for Qwen instruct models).
+  # 0.95 not 0.90: BF16 35B base = ~65 GB; with 80 GB H100 and a DFLASH draft
+  # alongside, the KV cache pool initializer needs the extra headroom (the lmsys
+  # cookbook's 0.85 default is for the FP8 variant).
+  mem_fraction_static: 0.95
+  context_length: 8192
+  # 64 not 256: DFLASH allocates a *separate* draft KV cache pool alongside the
+  # base pool. With ~10 GB free after the BF16 base model loads, supporting 256
+  # in-flight requests is infeasible — the pool configurator returns
+  # max_total_num_tokens <= 0 and aborts. 64 fits and still lets the benchmark
+  # measure queueing behavior at higher concurrency levels.
+  max_running_requests: 64
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+  pp_size: 1
+  enable_dp_attention: false
+  speculative:
+    enabled: true
+    algorithm: "DFLASH"
+    draft_model_path: "z-lab/Qwen3.6-35B-A3B-DFlash"
+    num_draft_tokens: 4    # SGLang requires num_draft_tokens == dflash_block_size for DFLASH
+    dflash_block_size: 4
+    dflash_draft_window_size: 16
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
+
+category: "A"
+benchmark_tasks: []

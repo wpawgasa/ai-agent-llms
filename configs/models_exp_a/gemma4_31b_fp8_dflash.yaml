@@ -1,14 +1,15 @@
-# Gemma-4 26B-A4B-it + Dflash speculative decoding (vLLM)
-# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash
+# Gemma-4 31B-it (FP8) + Dflash speculative decoding (vLLM)
+# Draft model: z-lab/gemma-4-31B-it-DFlash (BF16 draft pairs with FP8 target —
+# speculative decoding only requires shared tokenizer/vocab, not matching dtype).
 model:
-  name: "google/gemma-4-26B-A4B-it"
+  name: "RedHatAI/gemma-4-31B-it-FP8-block"
   family: "gemma"
-  architecture: "moe_gqa_transformer"
-  params_total: 26_000_000_000
-  params_active: 4_000_000_000
+  architecture: "dense_gqa_transformer"
+  params_total: 31_000_000_000
+  params_active: 31_000_000_000
   context_length: 262144
-  precision: "bfloat16"
-  vram_estimate_gb: 52
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 32
 
 serving:
   engine: "vllm"
@@ -28,14 +29,12 @@ serving:
   # (which is gated on attention_config.backend is None). Expect a perf
   # penalty vs FA/Triton — FlexAttention is the slow but correct path here.
   attention_backend: "FLEX_ATTENTION"
-  # Fallback for vLLM versions where patch_model_config.py symlink fix is
-  # insufficient: pass rope_scaling=null via --hf-overrides at serve time.
   hf_overrides:
     rope_scaling: null
   speculative:
     enabled: true
     method: "dflash"
-    draft_model: "z-lab/gemma-4-26B-A4B-it-DFlash"
+    draft_model: "z-lab/gemma-4-31B-it-DFlash"
     num_speculative_tokens: 5
     # NB: vLLM's SpeculativeConfig does not accept dflash_block_size /
     # dflash_draft_window_size kwargs. block_size is derived from the draft

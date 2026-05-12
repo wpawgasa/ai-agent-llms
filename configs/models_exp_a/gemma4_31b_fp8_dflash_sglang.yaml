@@ -1,16 +1,17 @@
-# Gemma-4 26B-A4B-it + Dflash speculative decoding (SGLang)
-# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash
+# Gemma-4 31B-it (FP8) + Dflash speculative decoding (SGLang)
+# Draft model: z-lab/gemma-4-31B-it-DFlash (BF16 draft pairs with FP8 target —
+# speculative decoding only requires shared tokenizer/vocab, not matching dtype).
 # DFLASH disables SGLang's overlap scheduler and mixed-chunked-prefill;
 # also requires pp_size=1 and enable_dp_attention=false (enforced by launcher).
 model:
-  name: "google/gemma-4-26B-A4B-it"
+  name: "RedHatAI/gemma-4-31B-it-FP8-block"
   family: "gemma"
-  architecture: "moe_gqa_transformer"
-  params_total: 26_000_000_000
-  params_active: 4_000_000_000
+  architecture: "dense_gqa_transformer"
+  params_total: 31_000_000_000
+  params_active: 31_000_000_000
   context_length: 262144
-  precision: "bfloat16"
-  vram_estimate_gb: 52
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 32
 
 serving:
   engine: "sglang"
@@ -20,10 +21,7 @@ serving:
   # built-in chat_template (canonical for Gemma 4 instruct models).
   mem_fraction_static: 0.85
   context_length: 8192
-  # 64 is the empirically validated single-H100 ceiling for DFLASH (base model
-  # weights + DFLASH draft + separate draft KV pool leave only ~10-15 GB for the
-  # base KV pool, so the pool configurator can't satisfy higher request counts).
-  max_running_requests: 64
+  max_running_requests: 64    # DFLASH single-H100 ceiling (see *_dflash_sglang.yaml)
   attention_backend: "triton"
   port: 8000
   kv_cache_dtype: "auto"
@@ -32,7 +30,7 @@ serving:
   speculative:
     enabled: true
     algorithm: "DFLASH"
-    draft_model_path: "z-lab/gemma-4-26B-A4B-it-DFlash"
+    draft_model_path: "z-lab/gemma-4-31B-it-DFlash"
     num_draft_tokens: 4    # SGLang requires num_draft_tokens == dflash_block_size for DFLASH
     dflash_block_size: 4
     dflash_draft_window_size: 16

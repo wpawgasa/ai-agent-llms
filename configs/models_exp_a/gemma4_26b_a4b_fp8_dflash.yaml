@@ -1,14 +1,15 @@
-# Gemma-4 26B-A4B-it + Dflash speculative decoding (vLLM)
-# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash
+# Gemma-4 26B-A4B-it (FP8) + Dflash speculative decoding (vLLM)
+# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash (BF16 draft pairs with FP8 target —
+# speculative decoding only requires shared tokenizer/vocab, not matching dtype).
 model:
-  name: "google/gemma-4-26B-A4B-it"
+  name: "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
   family: "gemma"
   architecture: "moe_gqa_transformer"
   params_total: 26_000_000_000
   params_active: 4_000_000_000
   context_length: 262144
-  precision: "bfloat16"
-  vram_estimate_gb: 52
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 26
 
 serving:
   engine: "vllm"

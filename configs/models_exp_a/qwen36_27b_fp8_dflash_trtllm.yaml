@@ -1,22 +1,22 @@
-# Gemma-4 26B-A4B-it + Dflash speculative decoding (TensorRT-LLM)
-# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash
+# Qwen3.6 27B (FP8) + Dflash speculative decoding (TensorRT-LLM)
+# Draft model: z-lab/Qwen3.6-27B-DFlash
 # Engine must be pre-built with NVIDIA ModelOpt (PR #1211). The Dflash heads
 # are baked into the TRT engine at build time, so source=engine_dir is required.
 # See scripts/build_trtllm_engines.sh for build instructions.
 model:
-  name: "google/gemma-4-26B-A4B-it"
-  family: "gemma"
-  architecture: "moe_gqa_transformer"
-  params_total: 26_000_000_000
-  params_active: 4_000_000_000
+  name: "Qwen/Qwen3.6-27B-FP8"
+  family: "qwen35"
+  architecture: "hybrid_deltanet_transformer"
+  params_total: 27_000_000_000
+  params_active: 27_000_000_000
   context_length: 262144
-  precision: "bfloat16"
-  vram_estimate_gb: 52
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 27
 
 serving:
   engine: "tensorrt_llm"
   source: "engine_dir"
-  engine_dir: "checkpoints/trt-engines/gemma4_26b_a4b_bf16_dflash"
+  engine_dir: "checkpoints/trt-engines/qwen36_27b_fp8_dflash"
   tool_call_parser: null
   port: 8000
   max_batch_size: 64      # DFLASH single-H100 ceiling (see *_dflash_sglang.yaml)

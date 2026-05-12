@@ -14,7 +14,10 @@ serving:
   tool_call_parser: "pythonic"
   mem_fraction_static: 0.85
   context_length: 8192
-  max_running_requests: 256
+  # Aligned with the DFLASH+SGLang convention on single H100 (see
+  # qwen36_35b_a3b_*_dflash_sglang.yaml). Llama 3.1 8B at BF16 leaves plenty of
+  # headroom on its own, but 64 keeps DFLASH configs uniform across model sizes.
+  max_running_requests: 64
   attention_backend: "triton"
   port: 8000
   kv_cache_dtype: "auto"
@@ -24,7 +27,7 @@ serving:
     enabled: true
     algorithm: "DFLASH"
     draft_model_path: "z-lab/LLaMA3.1-8B-Instruct-DFlash-UltraChat"
-    num_draft_tokens: 5
+    num_draft_tokens: 4    # SGLang requires num_draft_tokens == dflash_block_size for DFLASH
     dflash_block_size: 4
     dflash_draft_window_size: 16
 
