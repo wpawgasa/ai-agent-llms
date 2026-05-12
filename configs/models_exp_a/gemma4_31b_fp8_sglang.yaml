@@ -10,9 +10,11 @@ model:
 
 serving:
   engine: "sglang"
-  tool_call_parser: "pythonic"
-  chat_template: "gemma"
-  mem_fraction_static: 0.90
+  tool_call_parser: "gemma4"
+  reasoning_parser: "gemma4"
+  # chat_template intentionally omitted: SGLang falls back to the HF tokenizer's
+  # built-in chat_template (canonical for Gemma 4 instruct models).
+  mem_fraction_static: 0.85
   context_length: 8192
   max_running_requests: 512
   attention_backend: "triton"

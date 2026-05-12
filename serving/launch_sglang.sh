@@ -11,7 +11,9 @@
 # Reads from YAML config (serving.*):
 #   model.name              → --model-path
 #   serving.tool_call_parser → --tool-call-parser
-#   serving.chat_template   → --chat-template
+#   serving.reasoning_parser → --reasoning-parser  (optional, e.g. "gemma4")
+#   serving.chat_template   → --chat-template  (auto-dropped if not a registered
+#                            SGLang template name; HF tokenizer template is used)
 #   serving.mem_fraction_static (default 0.90) → --mem-fraction-static
 #   serving.context_length  (default 8192)     → --context-length
 #   serving.max_running_requests (default 256) → --max-running-requests
@@ -20,14 +22,20 @@
 #   serving.port            (default 8000)     → --port (overridable via CLI)
 #   serving.kv_cache_dtype  (default auto)     → --kv-cache-dtype
 #
-# SGLang tool-call parser vocabulary differs from vLLM. Mapping for reference:
-#   vLLM: hermes       → SGLang: qwen25
-#   vLLM: qwen3_coder  → SGLang: qwen25
+# SGLang tool-call parser vocabulary differs from vLLM. Current mapping
+# (verified against SGLang ≥0.5.11 — sglang/srt/function_call/function_call_parser.py):
+#   vLLM: hermes       → SGLang: hermes  (both registered)
+#   vLLM: qwen3_coder  → SGLang: qwen3_coder
 #   vLLM: mistral      → SGLang: mistral
-#   vLLM: gemma/gemma4 → SGLang: pythonic  (no dedicated Gemma parser)
-#   vLLM: glm4         → SGLang: pythonic  (no dedicated GLM parser)
+#   vLLM: gemma4       → SGLang: gemma4   (new in 0.5.11; was "pythonic")
+#   vLLM: gemma (3)    → SGLang: pythonic (no dedicated Gemma 3 parser)
+#   vLLM: glm4         → SGLang: glm / glm45 / glm47 (pick by variant)
 #   vLLM: nemotron     → SGLang: pythonic  (no dedicated Nemotron parser)
 #   vLLM: pythonic     → SGLang: pythonic  (same)
+#
+# Reasoning parsers (separate registry — sglang/srt/parser/reasoning_parser.py):
+#   gemma4, deepseek-r1, qwen3-thinking, gpt-oss, glm45, ... — opt-in per
+#   request via chat_template_kwargs.enable_thinking=true.
 #
 # KV-cache dtype vocabulary (SGLang):
 #   auto, fp8_e5m2, fp8_e4m3
@@ -64,6 +72,7 @@ source "$LAUNCH_SCRIPT_DIR/_yaml_helper.sh"
 
 MODEL_NAME=$(parse_yaml "model.name" "")
 TOOL_PARSER=$(parse_yaml "serving.tool_call_parser" "pythonic")
+REASONING_PARSER=$(parse_yaml "serving.reasoning_parser" "")
 CHAT_TEMPLATE=$(parse_yaml "serving.chat_template" "")
 MEM_FRACTION=$(parse_yaml "serving.mem_fraction_static" "0.90")
 CONTEXT_LEN=$(parse_yaml "serving.context_length" "8192")
@@ -150,8 +159,33 @@ if [ -n "$TOOL_PARSER" ] && [ "$TOOL_PARSER" != "null" ]; then
     SGLANG_ARGS+=(--tool-call-parser "$TOOL_PARSER")
 fi
 
+if [ -n "$REASONING_PARSER" ] && [ "$REASONING_PARSER" != "null" ]; then
+    SGLANG_ARGS+=(--reasoning-parser "$REASONING_PARSER")
+fi
+
 if [ -n "$CHAT_TEMPLATE" ]; then
-    SGLANG_ARGS+=(--chat-template "$CHAT_TEMPLATE")
+    # SGLang's registered chat-template vocabulary differs from vLLM's.
+    # vLLM accepts "gemma" / "glm4" / "qwen2.5" / "llama-3"; SGLang exposes
+    # only "gemma-it", "mistral", "chatml", "llama-2/4", etc. Passing an
+    # unregistered name aborts startup with a hard RuntimeError.
+    # When the name is neither a registered template nor an existing file,
+    # warn and drop it — SGLang then falls back to the HF tokenizer's
+    # built-in chat_template, which is canonical for our instruct models.
+    CHAT_TEMPLATE_VALID=$(python -c "
+import sys
+try:
+    from sglang.srt.parser.conversation import chat_template_exists
+    sys.exit(0 if chat_template_exists('$CHAT_TEMPLATE') else 1)
+except Exception:
+    sys.exit(2)
+" && echo "yes" || echo "no")
+    if [ "$CHAT_TEMPLATE_VALID" = "yes" ] || [ -f "$CHAT_TEMPLATE" ]; then
+        SGLANG_ARGS+=(--chat-template "$CHAT_TEMPLATE")
+    else
+        echo "WARN: chat_template '$CHAT_TEMPLATE' is not a registered SGLang template" >&2
+        echo "      nor an existing file. Falling back to the HF tokenizer's" >&2
+        echo "      built-in chat_template from the model repo." >&2
+    fi
 fi
 
 if [ "$TORCH_COMPILE" = "true" ] || [ "$TORCH_COMPILE" = "True" ]; then
@@ -194,6 +228,7 @@ fi
 echo "=== Launching SGLang Server ==="
 echo "Model:           $MODEL_NAME"
 echo "Tool Parser:     $TOOL_PARSER"
+echo "Reasoning:       ${REASONING_PARSER:-(off)}"
 echo "Context Length:  $CONTEXT_LEN"
 echo "Mem Fraction:    $MEM_FRACTION"
 echo "Attn Backend:    $ATTN_BACKEND"
