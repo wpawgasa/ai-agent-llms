@@ -1,0 +1,51 @@
+# Gemma-4 26B-A4B-it + Dflash speculative decoding (vLLM)
+# Draft model: z-lab/gemma-4-26B-A4B-it-DFlash
+model:
+  name: "google/gemma-4-26B-A4B-it"
+  family: "gemma"
+  architecture: "moe_gqa_transformer"
+  params_total: 26_000_000_000
+  params_active: 4_000_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 52
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enforce_eager: false
+  port: 8000
+  # DFlash sets use_non_causal=True for every attention layer
+  # (vllm/v1/attention/selector.py:85-87). Gemma-4 has heterogeneous head_dim
+  # (head_dim != global_head_dim, max > 256), which makes Gemma4Config force
+  # TRITON_ATTN — but TRITON_ATTN does not support non-causal, so layer init
+  # raises ValueError. FLEX_ATTENTION supports both non-causal and arbitrary
+  # head_size; setting it explicitly also bypasses the Gemma4Config force
+  # (which is gated on attention_config.backend is None). Expect a perf
+  # penalty vs FA/Triton — FlexAttention is the slow but correct path here.
+  attention_backend: "FLEX_ATTENTION"
+  # Fallback for vLLM versions where patch_model_config.py symlink fix is
+  # insufficient: pass rope_scaling=null via --hf-overrides at serve time.
+  hf_overrides:
+    rope_scaling: null
+  speculative:
+    enabled: true
+    method: "dflash"
+    draft_model: "z-lab/gemma-4-26B-A4B-it-DFlash"
+    num_speculative_tokens: 5
+    # NB: vLLM's SpeculativeConfig does not accept dflash_block_size /
+    # dflash_draft_window_size kwargs. block_size is derived from the draft
+    # model's KV-cache spec; mask token comes from the draft model's
+    # config.json (dflash_config.mask_token_id / pard_token / ptd_token_id).
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
+
+category: "A"
+benchmark_tasks: []

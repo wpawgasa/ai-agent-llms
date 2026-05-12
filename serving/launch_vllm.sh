@@ -72,6 +72,7 @@ MAX_LEN=$(parse_yaml "serving.max_model_len" "8192")
 MAX_NUM_SEQS=$(parse_yaml "serving.max_num_seqs" "")
 ENFORCE_EAGER=$(parse_yaml "serving.enforce_eager" "false")
 PORT=$(parse_yaml "serving.port" "8000")
+ATTENTION_BACKEND=$(parse_yaml "serving.attention_backend" "")
 
 # Read serving.hf_overrides as a JSON string (empty if not set).
 # This is the vLLM 0.11.1+ replacement for --rope-scaling / --rope-theta CLI
@@ -194,6 +195,14 @@ if [ -n "$HF_OVERRIDES" ]; then
     VLLM_ARGS+=(--hf-overrides "$HF_OVERRIDES")
 fi
 
+# Explicit attention backend (e.g., FLEX_ATTENTION). Needed for Gemma-4 + DFlash:
+# vLLM's Gemma4Config force-sets TRITON_ATTN on heterogeneous-head-dim Gemma-4
+# variants, and DFlash globally requires non-causal attention which TRITON_ATTN
+# does not support. Setting the backend explicitly bypasses the force.
+if [ -n "$ATTENTION_BACKEND" ]; then
+    VLLM_ARGS+=(--attention-backend "$ATTENTION_BACKEND")
+fi
+
 if [ -n "$SPEC_JSON" ]; then
     VLLM_ARGS+=(--speculative-config "$SPEC_JSON")
 fi
@@ -206,6 +215,7 @@ echo "Max Len:      $MAX_LEN"
 echo "Port:         $PORT"
 echo "KV Cache:     ${KV_CACHE_DTYPE:-auto}"
 echo "HF Overrides: ${HF_OVERRIDES:-(none)}"
+echo "Attn Backend: ${ATTENTION_BACKEND:-(auto)}"
 echo "Spec Decoding:${SPEC_JSON:- (disabled)}"
 echo "============================="
 
