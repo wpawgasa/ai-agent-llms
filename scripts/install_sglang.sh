@@ -86,9 +86,16 @@ echo "Installing transformers ≥5.6.0 ..."
 VIRTUAL_ENV="$VENV" uv pip install "transformers>=5.6.0"
 
 # ── 5. Project package + dev tools ───────────────────────────────────────────
-echo "Installing project package (editable) + dev tools ..."
+# --no-deps: the project's full dep set pulls in vLLM/peft/triton pins that
+# clash with sglang's torch ≥2.11 graph. We re-install only the small subset
+# of pure-Python runtime deps the benchmark client actually needs at import
+# time (top-level imports across src/llm_workflow_agents/eval/*.py); the
+# heavier deps (torch, numpy, networkx) are lazy-imported inside functions
+# that the SGLang benchmark client never reaches.
+echo "Installing project package (editable) + benchmark-client deps + dev tools ..."
 VIRTUAL_ENV="$VENV" uv pip install -e . --no-deps
 VIRTUAL_ENV="$VENV" uv pip install \
+    "structlog>=24.0.0" \
     "pytest>=8.0" \
     "pytest-cov>=5.0" \
     "pytest-asyncio>=0.23" \
