@@ -34,6 +34,26 @@ CU130_INDEX="https://download.pytorch.org/whl/cu130"
 
 cd "$PROJECT_ROOT"
 
+# ── 0. System library: libnuma ────────────────────────────────────────────────
+# sgl_kernel's prebuilt SM90 wheel links against libnuma.so.1. Without it the
+# server crashes at import with "libnuma.so.1: cannot open shared object file".
+# Baked into .devcontainer/Dockerfile{,.cuda128}; this block self-heals older
+# images. apt-get is a no-op once the package is present.
+if ! ldconfig -p | grep -q 'libnuma\.so\.1'; then
+    echo "Installing libnuma1 (required by sgl_kernel) ..."
+    if command -v apt-get >/dev/null 2>&1; then
+        if [[ "$(id -u)" -eq 0 ]]; then
+            apt-get update -qq && apt-get install -y --no-install-recommends libnuma1
+        elif command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libnuma1
+        else
+            echo "  WARNING: not root and sudo not available — install libnuma1 manually."
+        fi
+    else
+        echo "  WARNING: apt-get not available — install libnuma manually for your distro."
+    fi
+fi
+
 # ── 1. Virtual environment ────────────────────────────────────────────────────
 if [[ ! -d "$VENV" ]]; then
     echo "Creating $VENV ..."
@@ -54,8 +74,12 @@ VIRTUAL_ENV="$VENV" uv pip install \
 # all platforms. We install the base sglang wheel first; FlashInfer is pulled
 # automatically. If FlashInfer fails to build, set attention_backend: triton
 # in your model YAMLs (the default for *_sglang.yaml configs).
+#
+# --prerelease=allow: sglang ≥0.5.11 depends on flash-attn-4>=4.0.0b9 (a
+# pre-release wheel). uv refuses pre-releases by default, so the flag is
+# required for the resolver to consider it.
 echo "Installing sglang ≥0.5.11 ..."
-VIRTUAL_ENV="$VENV" uv pip install "sglang>=0.5.11"
+VIRTUAL_ENV="$VENV" uv pip install --prerelease=allow "sglang>=0.5.11"
 
 # ── 4. Transformers ≥5.6.0 ────────────────────────────────────────────────────
 echo "Installing transformers ≥5.6.0 ..."
