@@ -1,0 +1,26 @@
+model:
+  name: "Qwen/Qwen3.5-9B-FP8"
+  family: "qwen35"
+  architecture: "dense_gqa_transformer"
+  params_total: 9_000_000_000
+  params_active: 9_000_000_000
+  context_length: 131072
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 9
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "qwen3_coder"
+  reasoning_parser: "qwen3"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "B"
+
+benchmark_tasks:
+  - "task_b"
+
+# Upstream Qwen-published FP8 variant; architecture unchanged from BF16.
+# If Qwen/Qwen3.5-9B-FP8 is not yet published on HF, fall back to a
+# RedHatAI/Qwen3.5-9B-FP8-Dynamic build (see cat_a gemma4 FP8 precedent).

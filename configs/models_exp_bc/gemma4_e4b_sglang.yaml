@@ -1,0 +1,28 @@
+model:
+  name: "google/gemma-4-E4B-it"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 4_000_000_000
+  params_active: 4_000_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 8
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "gemma4"
+  reasoning_parser: "gemma4"
+  # chat_template intentionally omitted: SGLang falls back to the HF tokenizer's
+  # built-in chat_template (canonical for Gemma 4 instruct models).
+  mem_fraction_static: 0.90
+  context_length: 8192
+  max_running_requests: 1024
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048

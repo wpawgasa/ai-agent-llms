@@ -1,0 +1,22 @@
+model:
+  name: "Qwen/Qwen3.5-9B"
+  family: "qwen35"
+  architecture: "dense_gqa_transformer"
+  params_total: 9_000_000_000
+  params_active: 9_000_000_000
+  context_length: 131072
+  precision: "bfloat16"
+  vram_estimate_gb: 18
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "qwen3_coder"
+  reasoning_parser: "qwen3"
+  chat_template: "chatml"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+
+category: "B"
+
+benchmark_tasks:
+  - "task_b"
