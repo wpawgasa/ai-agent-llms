@@ -48,18 +48,53 @@ else
     echo "Reusing existing $VENV ..."
 fi
 
+# The unsloth/unsloth image keeps its training stack in /opt/venv (a venv
+# whose python is a symlink to /usr/bin/python3.12).  --system-site-packages
+# inherits the *base interpreter's* site-packages — /usr/lib/python3.12/...,
+# not /opt/venv/lib/python3.12/site-packages — so unsloth/trl/vllm/torch
+# would be invisible and uv would re-download ~3GB of CUDA wheels.
+# A .pth file in our venv's site-packages restores /opt/venv on sys.path
+# before uv runs its resolver, so uv detects torch/peft/etc. as already
+# installed and skips them.
+PTH_FILE="$VENV/lib/python3.12/site-packages/_opt_venv.pth"
+if [[ -d /opt/venv/lib/python3.12/site-packages && ! -f "$PTH_FILE" ]]; then
+    echo "Linking /opt/venv site-packages into venv via _opt_venv.pth ..."
+    echo "/opt/venv/lib/python3.12/site-packages" > "$PTH_FILE"
+fi
+
 # ── 2. Freeze container packages as constraints (minus transformers) ───────────
 # We use the system interpreter's pip so we capture packages pre-installed
 # by the Docker image, not just what's in the (currently empty) venv.
 CONSTRAINTS_FILE="$(mktemp /tmp/unsloth_constraints_XXXXXX.txt)"
-trap 'rm -f "$CONSTRAINTS_FILE"' EXIT
+OVERRIDES_FILE="$(mktemp /tmp/unsloth_overrides_XXXXXX.txt)"
+trap 'rm -f "$CONSTRAINTS_FILE" "$OVERRIDES_FILE"' EXIT
 
 echo "Capturing container package versions as constraints ..."
+# Exclusions:
+#   transformers           — upgraded in step 5 (Gemma-4 / Qwen3.6 hooks need >=5.6)
+#   huggingface-hub        — transformers 5.x requires hub >=1.0; the /opt/venv
+#                            pin (0.36.x) would drag transformers back to 4.x
+#                            on every re-run, causing install thrash
+#   tokenizers             — travels with transformers; 5.x needs tokenizers
+#                            from the same major as the matched transformers
+#   llm-workflow-agents    — project src, installed editable in step 3
+# Note: pip freeze emits the dist's declared name verbatim, so e.g.
+# huggingface-hub is reported as "huggingface_hub==" (underscore).  Match
+# both separators to be safe.
 python3 -m pip freeze 2>/dev/null \
-    | grep -iv "^transformers==" \
-    | grep -iv "^llm-workflow-agents" \
+    | grep -ivE "^transformers==" \
+    | grep -ivE "^huggingface[-_]hub==" \
+    | grep -ivE "^tokenizers==" \
+    | grep -ivE "^llm[-_]workflow[-_]agents" \
     > "$CONSTRAINTS_FILE" || true
-echo "  -> $(wc -l < "$CONSTRAINTS_FILE") constraints captured (transformers excluded)"
+echo "  -> $(wc -l < "$CONSTRAINTS_FILE") constraints captured (transformers/hf-hub/tokenizers excluded)"
+
+# Overrides: torch 2.10.0+cu128 declares cuda-bindings==12.9.4 in its
+# metadata, but the unsloth container ships and runs against
+# cuda-bindings==12.8.0.  Force the resolver to honor the container's
+# working version (matches the system-site-packages install) instead of
+# pulling a divergent cuda-bindings into the venv overlay.
+echo "cuda-bindings==12.8.0" > "$OVERRIDES_FILE"
 
 # ── 3. Install project src (editable, no dep re-resolution) ──────────────────
 # --no-deps registers the src/ package as importable without touching the
@@ -74,8 +109,15 @@ VIRTUAL_ENV="$VENV" uv pip install -e . --no-deps
 # [train] extras are intentionally excluded — torch / vllm / unsloth are
 # inherited from the container via --system-site-packages.
 echo "Installing project dependencies + dev tools under container constraints ..."
+# --extra-index-url is required so uv can resolve torch==2.10.0+cu128 (a
+# transitive constraint via peft==0.18.1).  The +cu128 local-version wheel
+# is hosted on the PyTorch index, not PyPI.  No actual download happens:
+# torch is already present via --system-site-packages, so uv recognizes it
+# as installed and skips the wheel.
 VIRTUAL_ENV="$VENV" uv pip install \
+    --extra-index-url "https://download.pytorch.org/whl/cu128" \
     --constraint "$CONSTRAINTS_FILE" \
+    --override "$OVERRIDES_FILE" \
     "peft>=0.14.0" \
     "accelerate>=0.34.0" \
     "triton>=3.0.0" \
