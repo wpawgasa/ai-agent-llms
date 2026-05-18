@@ -66,8 +66,9 @@ def train_grpo(config_path: Path) -> GRPOResult
 
 ### Key GRPO Config
 - `normalization: DAPO` — removes length bias
-- `generation_backend: vllm` — 11× faster RL inference
-- `fp8_rl: true` — H100: 1.4× faster, 60% less VRAM during RL
+- `generation_backend: vllm` — 11× faster RL inference. **Auto-falls back to HF `model.generate()`** for families in `UNSLOTH_VLLM_INCOMPATIBLE_FAMILIES` (currently `{"gemma4"}`; see CLAUDE.md Risk R9). Detection is done by `_detect_model_family()` in `training/grpo.py`, which reads the SFT checkpoint's `adapter_config.json → base_model_name_or_path` and resolves `AutoConfig.model_type`. On fallback, a `vllm_rollout_disabled_unsloth_incompat` warning is emitted at startup.
+- `vllm_gpu_memory_utilization: 0.55` — vLLM's slice of H100 VRAM in colocate mode (ignored on HF fallback).
+- `fp8_rl: true` — H100: 1.4× faster, 60% less VRAM during RL. **No-op pending follow-up** — TRL 0.23.1's `GRPOConfig` has no `fp8_rl` field; FP8 RL needs separate Unsloth wiring.
 - `beta: 0.04` — KL penalty to stay near SFT policy
 
 ## Reward Functions (`training/rewards/`)
