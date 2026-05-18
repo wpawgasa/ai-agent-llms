@@ -51,23 +51,44 @@ def _resolve_reward_fn(name: str) -> Callable:
     return getattr(mod, module_path.rsplit(".", 1)[1])
 
 
+def _slim_content(content: Any) -> str:
+    """Coerce a message ``content`` value to a chat-template-renderable string."""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
 def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
-    """Load a GRPO split, bypassing pyarrow JSON schema inference.
+    """Load a GRPO split as one (prompt, ground_truth) row per user→assistant turn.
 
-    The synthetic GRPO corpus has heterogeneous leaf types under
-    ``ground_truth.tool_calls[].arguments`` and
-    ``messages[].annotations.tool_calls[].arguments`` (e.g. ``amount`` is int
-    in most rows, float/str in a few), which causes
-    ``datasets.load_dataset("json", ...)`` to abort with ArrowInvalid mid-file.
+    The synthetic corpus stores full multi-turn conversations (~49 messages
+    each). TRL 0.23.1's ``apply_chat_template`` requires the ``prompt`` to
+    end on ``user`` or ``assistant`` (``trl/data_utils.py:158``), so we slice
+    each conversation at every ``user → assistant`` boundary and emit one
+    GRPO row per boundary. Assistant turns preceded by ``tool`` responses
+    are skipped (TRL rejects ``tool`` as the last role); this loses signal
+    on tool-response continuations but unblocks training without forking TRL.
 
-    Mirrors the manual loader in ``training/sft.py`` (lines 495-525):
-      - Rebuilds the enriched system prompt so GRPO rollouts see what the
-        benchmark sees (``force_rebuild=True``).
-      - Strips messages to ``{role, content}`` — drops per-message
-        ``annotations`` (the inline ``<tool_call>{...}</tool_call>`` blocks in
-        assistant content carry the same info; annotations are duplicative).
-      - Serializes ``ground_truth`` as a JSON string column. The reward
-        adapter decodes it on access (see ``_make_reward_adapter``).
+    Per emitted row:
+      - ``prompt``: messages up to and including the user turn, stripped to
+        ``{role, content}``. The leading system message is re-enriched via
+        ``build_enriched_system_prompt`` so rollouts see the same prompt
+        the benchmark sees.
+      - ``ground_truth`` (JSON string column to bypass pyarrow schema
+        inference; see ``_make_reward_adapter`` for the decode):
+        * ``state_sequence`` — the single ``{from, to}`` transition from
+          this assistant turn's ``annotations.state_transition``.
+        * ``tool_calls`` — the tool calls from this assistant turn's
+          ``annotations.tool_calls`` (per-turn, not the whole conversation).
+        * ``messages`` — just this assistant message; ``chain_propagation``
+          is neutralized for single-turn rows (its score is 1.0 when the
+          chain has ≤1 link).
+        * ``terminal_state`` / ``terminal_reached`` — propagated from the
+          conversation's ground truth, but ``terminal_reached`` is True
+          only on the FINAL emitted row from a conversation that originally
+          reached its terminal state. Non-terminal rows have
+          ``terminal_reached=False`` so the reward correctly skips the
+          completion sub-reward (see ``reward_business_logic.py:72``).
     """
     from datasets import Dataset
 
@@ -78,38 +99,90 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
         raise FileNotFoundError(f"GRPO split missing: {path}")
 
     rows: list[dict[str, Any]] = []
+    n_convs = 0
+    n_skipped_tool_preceded = 0
     with open(path) as fh:
         for line in fh:
             if not line.strip():
                 continue
             raw = json.loads(line)
-            msgs = raw.get("messages") or []
-            if msgs and msgs[0].get("role") == "system" and raw.get("workflow_graph"):
-                msgs = list(msgs)
-                msgs[0] = {
-                    "role": "system",
-                    "content": build_enriched_system_prompt(
-                        raw, msgs[0].get("content") or "", force_rebuild=True
-                    ),
-                }
-            slim_msgs = [
-                {
-                    "role": m.get("role", "") or "",
-                    "content": (
-                        m.get("content")
-                        if isinstance(m.get("content"), str)
-                        else json.dumps(m.get("content"), ensure_ascii=False)
-                    ),
-                }
-                for m in msgs
+            n_convs += 1
+            raw_msgs = raw.get("messages") or []
+            if (
+                raw_msgs
+                and raw_msgs[0].get("role") == "system"
+                and raw.get("workflow_graph")
+            ):
+                raw_msgs = [
+                    {
+                        "role": "system",
+                        "content": build_enriched_system_prompt(
+                            raw, raw_msgs[0].get("content") or "", force_rebuild=True
+                        ),
+                    },
+                    *raw_msgs[1:],
+                ]
+
+            gt_full = raw.get("ground_truth") or {}
+            terminal_state = gt_full.get("terminal_state", "") or ""
+            terminal_reached_overall = bool(gt_full.get("terminal_reached", True))
+
+            asst_indices = [
+                i for i, m in enumerate(raw_msgs) if m.get("role") == "assistant"
             ]
-            gt_str = json.dumps(
-                raw.get("ground_truth") or {}, ensure_ascii=False, default=str
-            )
-            rows.append({"prompt": slim_msgs, "ground_truth": gt_str})
+            valid_pairs = [
+                i for i in asst_indices
+                if i > 0 and raw_msgs[i - 1].get("role") == "user"
+            ]
+            n_skipped_tool_preceded += len(asst_indices) - len(valid_pairs)
+
+            for j, asst_idx in enumerate(valid_pairs):
+                prompt = [
+                    {
+                        "role": m.get("role", "") or "",
+                        "content": _slim_content(m.get("content")),
+                    }
+                    for m in raw_msgs[:asst_idx]
+                ]
+                asst_msg = raw_msgs[asst_idx]
+                ann = asst_msg.get("annotations") or {}
+                state_trans = ann.get("state_transition") or {}
+                state_seq = [state_trans] if state_trans else []
+                tool_calls = ann.get("tool_calls") or []
+
+                is_terminal_row = (
+                    j == len(valid_pairs) - 1 and terminal_reached_overall
+                )
+                row_gt = {
+                    "state_sequence": state_seq,
+                    "tool_calls": tool_calls,
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": _slim_content(asst_msg.get("content")),
+                        }
+                    ],
+                    "terminal_state": terminal_state,
+                    "terminal_reached": is_terminal_row,
+                }
+                rows.append(
+                    {
+                        "prompt": prompt,
+                        "ground_truth": json.dumps(
+                            row_gt, ensure_ascii=False, default=str
+                        ),
+                    }
+                )
 
     if not rows:
-        raise ValueError(f"GRPO split is empty: {path}")
+        raise ValueError(f"GRPO split is empty after slicing: {path}")
+    logger.info(
+        "grpo_data_loaded",
+        split=split,
+        conversations=n_convs,
+        rows=len(rows),
+        skipped_tool_preceded_turns=n_skipped_tool_preceded,
+    )
     return Dataset.from_list(rows)
 
 
