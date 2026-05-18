@@ -14,7 +14,8 @@ grpo:
   learning_rate: 5.0e-6
   training_steps: 1000
   generation_backend: "vllm"
-  fp8_rl: true
+  vllm_gpu_memory_utilization: 0.55  # vLLM's slice of H100 VRAM (colocate mode)
+  fp8_rl: true                        # NO-OP for now; FP8 RL path not wired
 
 reward:
   function: "reward_business_logic"

@@ -285,19 +285,39 @@ def train_grpo(config_path: Path) -> GRPOResult:
     reward_fn_name = reward_cfg.get("function", "")
     reward_fn = _resolve_reward_fn(reward_fn_name)
 
+    # Generation backend — "vllm" enables Unsloth's colocate vLLM engine
+    # (shares weights with the training model; no second copy of the 26B+
+    # checkpoint). Any other value falls back to HF model.generate().
+    gen_backend = str(grpo_cfg.get("generation_backend", "hf")).lower()
+    use_vllm = gen_backend == "vllm"
+    vllm_gpu_util = float(grpo_cfg.get("vllm_gpu_memory_utilization", 0.55))
+    max_lora_rank = int(config.get("lora", {}).get("rank", 64))
+
     logger.info(
         "grpo_starting",
         sft_checkpoint=sft_checkpoint,
         reward_function=reward_fn_name,
         training_steps=grpo_cfg.get("training_steps", 1000),
         beta=grpo_cfg.get("beta", 0.04),
+        generation_backend="vllm" if use_vllm else "hf",
+        vllm_gpu_memory_utilization=vllm_gpu_util if use_vllm else None,
+        max_lora_rank=max_lora_rank if use_vllm else None,
     )
+
+    fast_inference_kwargs: dict[str, Any] = {}
+    if use_vllm:
+        fast_inference_kwargs = {
+            "fast_inference": True,
+            "gpu_memory_utilization": vllm_gpu_util,
+            "max_lora_rank": max_lora_rank,
+        }
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=sft_checkpoint,
         max_seq_length=8192,
         dtype=None,
         load_in_4bit=True,
+        **fast_inference_kwargs,
     )
 
     data_source = data_cfg.get("source", "")
@@ -316,7 +336,7 @@ def train_grpo(config_path: Path) -> GRPOResult:
     else:
         model_basename = Path(sft_checkpoint).parent.name
 
-    grpo_config = GRPOConfig(
+    grpo_kwargs: dict[str, Any] = dict(
         output_dir=f"checkpoints/{Path(config_path).stem}/{model_basename}",
         num_generations=grpo_cfg.get("num_generations", 4),
         max_steps=grpo_cfg.get("training_steps", 1000),
@@ -324,6 +344,15 @@ def train_grpo(config_path: Path) -> GRPOResult:
         beta=grpo_cfg.get("beta", 0.04),
         report_to="wandb",
     )
+    if use_vllm:
+        grpo_kwargs.update(
+            use_vllm=True,
+            vllm_mode="colocate",
+            vllm_gpu_memory_utilization=vllm_gpu_util,
+            vllm_tensor_parallel_size=1,
+            vllm_importance_sampling_correction=True,
+        )
+    grpo_config = GRPOConfig(**grpo_kwargs)
 
     # Build reward hacking callback
     eval_held_out_every = monitoring_cfg.get("eval_held_out_every", 50)
