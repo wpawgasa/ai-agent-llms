@@ -1,0 +1,47 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "64b4002b0865",
+  "session_id": "39365481-fe65-435d-ab57-2e0e9b01df51",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-18T03:13:50.117173342Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "configs/models/cat_bc/qwen35_9b.yaml",
+    "configs/models/cat_bc/qwen35_9b_fp8.yaml",
+    "configs/models_exp_bc/gemma4_e2b.yaml",
+    "configs/models_exp_bc/gemma4_e2b_sglang.yaml",
+    "configs/models_exp_bc/gemma4_e2b_trtllm.yaml",
+    "configs/models_exp_bc/gemma4_e4b.yaml",
+    "configs/models_exp_bc/gemma4_e4b_sglang.yaml",
+    "configs/models_exp_bc/gemma4_e4b_trtllm.yaml",
+    "configs/models_exp_bc/qwen35_9b.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8_sglang.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8_trtllm.yaml",
+    "configs/models_exp_bc/qwen35_9b_sglang.yaml",
+    "configs/models_exp_bc/qwen35_9b_trtllm.yaml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "867bf338a14f",
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 255388,
+    "cache_read_tokens": 1848599,
+    "output_tokens": 35045,
+    "api_call_count": 24
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-18T03:13:49.761380363Z",
+    "agent_lines": 359,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 359,
+    "agent_percentage": 100
+  }
+}

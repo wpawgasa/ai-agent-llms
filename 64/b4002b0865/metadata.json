@@ -1,0 +1,38 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "64b4002b0865",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "configs/models/cat_bc/qwen35_9b.yaml",
+    "configs/models/cat_bc/qwen35_9b_fp8.yaml",
+    "configs/models_exp_bc/gemma4_e2b.yaml",
+    "configs/models_exp_bc/gemma4_e2b_sglang.yaml",
+    "configs/models_exp_bc/gemma4_e2b_trtllm.yaml",
+    "configs/models_exp_bc/gemma4_e4b.yaml",
+    "configs/models_exp_bc/gemma4_e4b_sglang.yaml",
+    "configs/models_exp_bc/gemma4_e4b_trtllm.yaml",
+    "configs/models_exp_bc/qwen35_9b.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8_sglang.yaml",
+    "configs/models_exp_bc/qwen35_9b_fp8_trtllm.yaml",
+    "configs/models_exp_bc/qwen35_9b_sglang.yaml",
+    "configs/models_exp_bc/qwen35_9b_trtllm.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/64/b4002b0865/0/metadata.json",
+      "transcript": "/64/b4002b0865/0/full.jsonl",
+      "content_hash": "/64/b4002b0865/0/content_hash.txt",
+      "prompt": "/64/b4002b0865/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 255388,
+    "cache_read_tokens": 1848599,
+    "output_tokens": 35045,
+    "api_call_count": 24
+  }
+}
