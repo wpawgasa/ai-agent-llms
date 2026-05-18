@@ -7,11 +7,15 @@ reward function, vLLM generation backend, and FP8 RL.
 from __future__ import annotations
 
 import importlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import structlog
+
+if TYPE_CHECKING:
+    from datasets import Dataset
 
 logger = structlog.get_logger(__name__)
 
@@ -45,6 +49,130 @@ def _resolve_reward_fn(name: str) -> Callable:
     module_path = _REWARD_REGISTRY[name]
     mod = importlib.import_module(f"{module_path.rsplit('.', 1)[0]}")
     return getattr(mod, module_path.rsplit(".", 1)[1])
+
+
+def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
+    """Load a GRPO split, bypassing pyarrow JSON schema inference.
+
+    The synthetic GRPO corpus has heterogeneous leaf types under
+    ``ground_truth.tool_calls[].arguments`` and
+    ``messages[].annotations.tool_calls[].arguments`` (e.g. ``amount`` is int
+    in most rows, float/str in a few), which causes
+    ``datasets.load_dataset("json", ...)`` to abort with ArrowInvalid mid-file.
+
+    Mirrors the manual loader in ``training/sft.py`` (lines 495-525):
+      - Rebuilds the enriched system prompt so GRPO rollouts see what the
+        benchmark sees (``force_rebuild=True``).
+      - Strips messages to ``{role, content}`` — drops per-message
+        ``annotations`` (the inline ``<tool_call>{...}</tool_call>`` blocks in
+        assistant content carry the same info; annotations are duplicative).
+      - Serializes ``ground_truth`` as a JSON string column. The reward
+        adapter decodes it on access (see ``_make_reward_adapter``).
+    """
+    from datasets import Dataset
+
+    from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
+
+    path = Path(data_dir) / f"{split}.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(f"GRPO split missing: {path}")
+
+    rows: list[dict[str, Any]] = []
+    with open(path) as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            msgs = raw.get("messages") or []
+            if msgs and msgs[0].get("role") == "system" and raw.get("workflow_graph"):
+                msgs = list(msgs)
+                msgs[0] = {
+                    "role": "system",
+                    "content": build_enriched_system_prompt(
+                        raw, msgs[0].get("content") or "", force_rebuild=True
+                    ),
+                }
+            slim_msgs = [
+                {
+                    "role": m.get("role", "") or "",
+                    "content": (
+                        m.get("content")
+                        if isinstance(m.get("content"), str)
+                        else json.dumps(m.get("content"), ensure_ascii=False)
+                    ),
+                }
+                for m in msgs
+            ]
+            gt_str = json.dumps(
+                raw.get("ground_truth") or {}, ensure_ascii=False, default=str
+            )
+            rows.append({"prompt": slim_msgs, "ground_truth": gt_str})
+
+    if not rows:
+        raise ValueError(f"GRPO split is empty: {path}")
+    return Dataset.from_list(rows)
+
+
+def _make_reward_adapter(reward_fn: Callable) -> Callable:
+    """Bridge project reward signature to TRL 0.23.1's keyword-only call.
+
+    TRL 0.23.1 invokes reward functions as
+    ``reward_fn(prompts=..., completions=..., completion_ids=..., **kwargs)``
+    where ``**kwargs`` are dataset columns other than prompt/completion
+    (``trl/trainer/grpo_trainer.py:1034``). The project's rewards expect
+    ``(prompts, completions, ground_truths)`` with ``ground_truths`` as a list
+    of dicts.
+
+    This adapter:
+      - JSON-decodes the ``ground_truth`` string column (see ``_load_grpo_jsonl``).
+      - Aliases ``ground_truth.state_sequence`` → ``state_annotations`` to match
+        what ``reward_business_logic`` reads (the data emits the former; the
+        reward reads the latter).
+      - Flattens conversational completions (``list[list[{role, content}]]``)
+        to a list of assistant content strings.
+    """
+
+    def adapter(  # noqa: ANN001
+        *,
+        prompts: Any = None,
+        completions: Any = None,
+        completion_ids: Any = None,
+        **kwargs: Any,
+    ) -> list[float]:
+        gt_raw = kwargs.get("ground_truth") or []
+        gts: list[dict[str, Any]] = []
+        for g in gt_raw:
+            d = json.loads(g) if isinstance(g, str) else (g or {})
+            if not isinstance(d, dict):
+                d = {}
+            # Alias state_sequence → state_annotations and reshape:
+            # the data stores [{from, to}, ...]; the reward expects
+            # [(from, to), ...] (hashable tuples used in set(...)).
+            if "state_sequence" in d and "state_annotations" not in d:
+                seq = d["state_sequence"]
+                if isinstance(seq, list):
+                    d["state_annotations"] = [
+                        (s.get("from", ""), s.get("to", "")) if isinstance(s, dict)
+                        else tuple(s) if isinstance(s, (list, tuple)) and len(s) == 2
+                        else ("", "")
+                        for s in seq
+                    ]
+                else:
+                    d["state_annotations"] = []
+            gts.append(d)
+
+        flat_completions: list[str] = []
+        for c in completions or []:
+            if isinstance(c, str):
+                flat_completions.append(c)
+            elif isinstance(c, list) and c and isinstance(c[-1], dict):
+                flat_completions.append(c[-1].get("content", "") or "")
+            else:
+                flat_completions.append(str(c))
+
+        return reward_fn(prompts or [], flat_completions, gts)
+
+    return adapter
 
 
 def train_grpo(config_path: Path) -> GRPOResult:
@@ -99,31 +227,8 @@ def train_grpo(config_path: Path) -> GRPOResult:
         load_in_4bit=True,
     )
 
-    from datasets import load_dataset
-
-    from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
-
     data_source = data_cfg.get("source", "")
-    train_ds = load_dataset("json", data_dir=data_source, split="train")
-
-    # Re-enrich the system prompt so GRPO rollouts see the same prompt the
-    # benchmark sees. JSONL has stale enrichment baked in; force_rebuild=True
-    # strips it and rebuilds from current code using each row's upstream
-    # fields (workflow_graph, tool_schemas, messages, language).
-    def _rebuild_system_prompt(row: dict[str, Any]) -> dict[str, Any]:
-        msgs = row.get("messages") or []
-        if not msgs or msgs[0].get("role") != "system" or not row.get("workflow_graph"):
-            return row
-        new_msgs = list(msgs)
-        new_msgs[0] = {
-            "role": "system",
-            "content": build_enriched_system_prompt(
-                row, msgs[0].get("content") or "", force_rebuild=True
-            ),
-        }
-        return {**row, "messages": new_msgs}
-
-    train_ds = train_ds.map(_rebuild_system_prompt)
+    train_ds = _load_grpo_jsonl(Path(data_source), split="train")
 
     from trl import GRPOConfig, GRPOTrainer
 
@@ -197,7 +302,7 @@ def train_grpo(config_path: Path) -> GRPOResult:
         tokenizer=tokenizer,
         config=grpo_config,
         train_dataset=train_ds,
-        reward_funcs=reward_fn,
+        reward_funcs=_make_reward_adapter(reward_fn),
         callbacks=callbacks,
     )
 
