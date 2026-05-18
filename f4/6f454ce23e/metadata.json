@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f46f454ce23e",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "README.md",
+    "configs/training/sft_cat_a.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "docs/data_generation_recipes.md",
+    "docs/phase7-integration-summary.md",
+    "dvc.yaml",
+    "scripts/generate_grpo_data.sh",
+    "scripts/run_phase2_sft.sh",
+    "src/llm_workflow_agents/training/grpo.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f4/6f454ce23e/0/metadata.json",
+      "transcript": "/f4/6f454ce23e/0/full.jsonl",
+      "content_hash": "/f4/6f454ce23e/0/content_hash.txt",
+      "prompt": "/f4/6f454ce23e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 65,
+    "cache_creation_tokens": 269298,
+    "cache_read_tokens": 2569189,
+    "output_tokens": 39234,
+    "api_call_count": 30
+  }
+}

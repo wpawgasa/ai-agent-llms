@@ -1,0 +1,17 @@
+We are conducting concurrency benchmark for small LLMs (cat B/C). There are missing latest small LLMs, i.e. Qwen3.5-9B (https://huggingface.co/Qwen/Qwen3.5-9B), Qwen3.5-4B (https://huggingface.co/Qwen/Qwen3.5-4B), Gemma-4-E4B-it (https://huggingface.co/google/gemma-4-E4B-it), and Gemma-4-E2B-it (https://huggingface.co/google/gemma-4-E2B-it). Let's make configs for vllm, sglang and trtllm like other models. Should we consider FP8 for small LLMs or it's fine to use BF16 models?
+
+---
+
+commit and push
+
+---
+
+direct push to main
+
+---
+
+Should we use FP8 or BF16 KV cache dtype for 2B-4B models?
+
+---
+
+I think we can overwrite kv cache dtype through input arguments in the @scripts/run_concurrency_benchmark.sh script
