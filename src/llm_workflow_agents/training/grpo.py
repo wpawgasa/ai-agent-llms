@@ -299,10 +299,10 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     trainer = GRPOTrainer(
         model=model,
-        tokenizer=tokenizer,
-        config=grpo_config,
-        train_dataset=train_ds,
         reward_funcs=_make_reward_adapter(reward_fn),
+        args=grpo_config,
+        train_dataset=train_ds,
+        processing_class=tokenizer,
         callbacks=callbacks,
     )
 
