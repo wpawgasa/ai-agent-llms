@@ -1,5 +1,5 @@
 model:
-  name: "Qwen/Qwen3.5-9B-FP8"
+  name: "RedHatAI/Qwen3.5-9B-FP8-dynamic"
   family: "qwen35"
   architecture: "dense_gqa_transformer"
   params_total: 9_000_000_000
