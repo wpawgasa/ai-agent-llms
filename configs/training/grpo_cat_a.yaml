@@ -18,6 +18,12 @@ grpo:
   training_steps: 1000
   # Short warmup so peak LR is reached by ~step 50 instead of step 750.
   warmup_ratio: 0.05
+  # Checkpoint cadence for resumability. training/grpo.py auto-resumes
+  # from the highest-numbered checkpoint in output_dir on restart.
+  # To continue the same W&B run on resume, export these before launching:
+  #   WANDB_RESUME=allow  WANDB_RUN_ID=<previous-run-id>
+  save_steps: 100
+  save_total_limit: 3
   sampling:
     temperature: 1.0   # widen the group; lower values collapsed rollouts
     top_p: 0.95

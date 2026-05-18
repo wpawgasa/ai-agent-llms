@@ -419,6 +419,12 @@ def train_grpo(config_path: Path) -> GRPOResult:
         # of 1000, leaving the policy almost untrained. 5% warmup hits peak
         # by ~step 50.
         warmup_ratio=float(grpo_cfg.get("warmup_ratio", 0.05)),
+        # Checkpoint cadence — default `save_steps=500` was too sparse for
+        # resumability (a killed run lost everything below optimizer step
+        # 500). 100 gives a ~30-min safety net; cap retention to 3 to bound
+        # disk usage at ~5 GB for the Gemma-4 26B QLoRA adapter sizes.
+        save_steps=int(grpo_cfg.get("save_steps", 100)),
+        save_total_limit=int(grpo_cfg.get("save_total_limit", 3)),
         report_to="wandb",
     )
     if use_vllm:
@@ -485,7 +491,26 @@ def train_grpo(config_path: Path) -> GRPOResult:
         callbacks=callbacks,
     )
 
-    result = trainer.train()
+    # Auto-resume from the highest-numbered checkpoint in output_dir if one
+    # exists. GRPOTrainer inherits transformers.Trainer.train(), which loads
+    # optimizer.pt + scheduler.pt + trainer_state.json from the checkpoint
+    # — warmup picks up where it left off, LR resumes mid-curve. Set
+    # WANDB_RESUME=allow and WANDB_RUN_ID=<previous-id> in the environment
+    # to continue the same W&B run; otherwise a fresh run is started.
+    ckpt_dir = Path(grpo_config.output_dir)
+    resume_from: str | None = None
+    if ckpt_dir.is_dir():
+        existing = sorted(
+            (p for p in ckpt_dir.glob("checkpoint-*") if p.is_dir()),
+            key=lambda p: int(p.name.rsplit("-", 1)[-1]),
+        )
+        if existing:
+            resume_from = str(existing[-1])
+            logger.info("grpo_resuming", from_checkpoint=resume_from)
+        else:
+            logger.info("grpo_starting_fresh", output_dir=str(ckpt_dir))
+
+    result = trainer.train(resume_from_checkpoint=resume_from)
 
     # Collect monitoring data from callback
     reward_curves: list[float] = []
