@@ -8,11 +8,19 @@ model:
 grpo:
   algorithm: "GRPO"
   normalization: "DAPO"
-  num_generations: 4
+  # 8 generations per group — empirically the 4-gen runs at step 0-260
+  # hit frac_reward_zero_std≈1.0 most of the time (no learning signal).
+  # More samples → more chance of reward variance per group.
+  num_generations: 8
   beta: 0.04
   epsilon: 0.2
   learning_rate: 5.0e-6
   training_steps: 1000
+  # Short warmup so peak LR is reached by ~step 50 instead of step 750.
+  warmup_ratio: 0.05
+  sampling:
+    temperature: 1.0   # widen the group; lower values collapsed rollouts
+    top_p: 0.95
   # generation_backend: "vllm" enables Unsloth colocate vLLM rollouts.
   # Auto-falls back to HF model.generate() for families that Unsloth's
   # fast_inference rejects — currently Gemma-4 (see CLAUDE.md Risk R9).

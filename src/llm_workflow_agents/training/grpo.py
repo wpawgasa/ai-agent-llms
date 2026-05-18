@@ -403,12 +403,22 @@ def train_grpo(config_path: Path) -> GRPOResult:
     else:
         model_basename = Path(sft_checkpoint).parent.name
 
+    sampling_cfg = grpo_cfg.get("sampling", {}) or {}
     grpo_kwargs: dict[str, Any] = dict(
         output_dir=f"checkpoints/{Path(config_path).stem}/{model_basename}",
-        num_generations=grpo_cfg.get("num_generations", 4),
+        num_generations=grpo_cfg.get("num_generations", 8),
         max_steps=grpo_cfg.get("training_steps", 1000),
         learning_rate=grpo_cfg.get("learning_rate", 5e-6),
         beta=grpo_cfg.get("beta", 0.04),
+        # Sampling diversity — higher temperature widens the group of N
+        # generations so they don't collapse to identical completions
+        # (the root cause of frac_reward_zero_std≈1 in the first run).
+        temperature=float(sampling_cfg.get("temperature", 1.0)),
+        top_p=float(sampling_cfg.get("top_p", 0.95)),
+        # Short warmup — default behavior reached peak LR only at ~step 750
+        # of 1000, leaving the policy almost untrained. 5% warmup hits peak
+        # by ~step 50.
+        warmup_ratio=float(grpo_cfg.get("warmup_ratio", 0.05)),
         report_to="wandb",
     )
     if use_vllm:
