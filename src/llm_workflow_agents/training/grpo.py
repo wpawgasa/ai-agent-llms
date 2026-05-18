@@ -127,8 +127,19 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     from trl import GRPOConfig, GRPOTrainer
 
+    # Mirror sft.py layout: checkpoints/<config-stem>/<model-basename>/.
+    # Prefer model.config_path (HF model name in YAML); fall back to the
+    # SFT checkpoint's parent dir, which sft.py names after the HF basename.
+    model_cfg_path = config.get("model", {}).get("config_path")
+    if model_cfg_path:
+        model_basename = Path(
+            yaml.safe_load(open(model_cfg_path))["model"]["name"]
+        ).name
+    else:
+        model_basename = Path(sft_checkpoint).parent.name
+
     grpo_config = GRPOConfig(
-        output_dir=f"checkpoints/{Path(config_path).stem}",
+        output_dir=f"checkpoints/{Path(config_path).stem}/{model_basename}",
         num_generations=grpo_cfg.get("num_generations", 4),
         max_steps=grpo_cfg.get("training_steps", 1000),
         learning_rate=grpo_cfg.get("learning_rate", 5e-6),

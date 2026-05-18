@@ -83,7 +83,7 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 ├── scripts/
 │   ├── generate_benchmark_data.sh   # 1 000 benchmark samples (no API key)
 │   ├── generate_sft_data.sh         # ~12 504 SFT training samples
-│   ├── generate_grpo_data.sh        # 2 250 GRPO training prompts
+│   ├── filter_grpo_data.py          # GRPO prompts: L3–L5 filter over cleaned SFT splits
 │   ├── generate_eval_data.sh        # 1 000 val + test samples
 │   ├── run_exp_a.sh                 # Experiment A: Cat A benchmark
 │   ├── run_exp_b.sh                 # Experiment B: Cat B–C fine-tuning
@@ -314,8 +314,8 @@ See [`docs/data_generation_recipes.md`](docs/data_generation_recipes.md) for the
 # SFT training data (~12 504 samples, ~$42 in API costs)
 OPENAI_API_KEY=... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
 
-# GRPO training prompts (2 250 samples, L3–L5 only)
-OPENAI_API_KEY=... GEMINI_API_KEY=... ./scripts/generate_grpo_data.sh
+# GRPO training prompts — L3–L5 subset of the cleaned SFT splits (no new generation)
+python scripts/filter_grpo_data.py
 
 # Validation + test splits
 OPENAI_API_KEY=... ./scripts/generate_eval_data.sh
@@ -329,7 +329,7 @@ Each script accepts `--dry-run` to preview commands without executing, and `--ou
 |-------|---------|------|-----------------|-----------|
 | Benchmark | 1 000 | 100 | default | mixed (en/th) |
 | SFT | ~12 504 | 42 | **adversarial** | en + th + code-switch |
-| GRPO | 2 250 | 200 | **balanced** | mixed + code-switch |
+| GRPO | L3–L5 of cleaned SFT splits | — | inherits SFT | inherits SFT |
 | Validation | 500 | 300 | default | mixed |
 | Test | 500 | 400 | default | mixed |
 
@@ -487,6 +487,95 @@ Fine-tuning uses [Unsloth](https://github.com/unslothai/unsloth) for 2× speed a
 ```
 SFT (format + domain adaptation)  →  GRPO RL (task metric optimisation)
 ```
+
+### Prerequisites
+
+```bash
+# 1. Training venv with Unsloth installed
+./scripts/install_train.sh
+source .venv-train/bin/activate
+
+# 2. Data: cleaned SFT corpus + deterministic 85/10/5 splits
+#    (skip if you've already run the data-generation pipeline)
+OPENAI_API_KEY=... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
+python scripts/clean_task_a_sft.py \
+    --input-dir data/output/sft/task_a \
+    --output-dir data/output/sft/task_a_cleaned
+python scripts/split_task_a_sft.py    # → data/output/sft/task_a_splits/
+
+# 3. HF token for gated models (Gemma, Mistral)
+export HF_TOKEN=hf_...
+```
+
+The SFT and GRPO runners both auto-load `.env` and auto-activate `.venv-train/` if it exists, so steps 1 + 3 only need to be done once.
+
+### SFT — `run_phase2_sft.sh`
+
+Default invocation trains Gemma4-26B-A4B on Task A with the Cat A SFT config:
+
+```bash
+./scripts/run_phase2_sft.sh
+```
+
+Common variations:
+
+```bash
+# Different base model (any YAML in configs/models_exp_a/)
+./scripts/run_phase2_sft.sh --model-config configs/models_exp_a/qwen36_27b.yaml
+
+# Different SFT config (Cat B / Cat C use their own data sources)
+./scripts/run_phase2_sft.sh --sft-config configs/training/sft_cat_b.yaml
+
+# Smoke test: prepare splits + patched config, exit before training
+./scripts/run_phase2_sft.sh --dry-run
+
+# Disable W&B for a local run
+./scripts/run_phase2_sft.sh --no-wandb
+
+# Resume after Ctrl+C (auto-picks latest checkpoint)
+./scripts/run_phase2_sft.sh --resume
+
+# Resume from a specific checkpoint
+./scripts/run_phase2_sft.sh --resume-from checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1500
+```
+
+**Outputs:** `checkpoints/sft_cat_a/<HF-model-basename>/checkpoint-N/` every `save_steps` (500 by default) plus `train.log`. Optimizer state, scheduler, RNG, and epoch counter are all restored on resume.
+
+### GRPO — `run_phase2_grpo.sh`
+
+GRPO consumes an SFT checkpoint plus the L3–L5 filtered prompt set. Rewards are recomputed online from policy generations, so no new ground truth is required.
+
+```bash
+# Default: auto-picks latest SFT checkpoint, filters SFT splits to L3-L5
+./scripts/run_phase2_grpo.sh
+```
+
+Common variations:
+
+```bash
+# Pin a specific SFT checkpoint
+./scripts/run_phase2_grpo.sh \
+    --sft-checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-2000
+
+# Use a different complexity-level mix
+./scripts/run_phase2_grpo.sh --levels L4 L5
+
+# Use an already-prepared prompt directory, skip the filter step
+./scripts/run_phase2_grpo.sh --data-dir data/output/grpo/task_a --skip-filter
+
+# Different GRPO config (Cat B / Cat C reward functions)
+./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_b.yaml
+
+# Smoke test
+./scripts/run_phase2_grpo.sh --dry-run
+
+# Local run without W&B
+./scripts/run_phase2_grpo.sh --no-wandb
+```
+
+**Outputs:** `checkpoints/grpo_cat_a/<HF-model-basename>/` plus reward curves and held-out scores in the W&B run (and `train.log`).
+
+> **Note:** `training/grpo.py` does not currently expose a resume hook, so re-launching starts a fresh trainer. Held-out evaluation runs every 50 steps; training auto-stops if the held-out metric drops while training reward increases (reward-hacking detector, Risk R5).
 
 ### GRPO reward functions
 

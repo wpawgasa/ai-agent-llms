@@ -45,19 +45,38 @@ stages:
     # Cleanup: drops 5 truncated rows, strips 264 role-confused tool messages,
     #          flags 476 empty-terminal convs with terminal_reached=false
 
+  task_a_sft_splits:
+    desc: >-
+      Deterministic 85/10/5 train/validation/test split of the cleaned Task A
+      SFT corpus. Seed=42. Reused across SFT training, GRPO training, and
+      held-out evaluation.
+    cmd: >-
+      python scripts/split_task_a_sft.py
+        --input-dir data/output/sft/task_a_cleaned
+        --output-dir data/output/sft/task_a_splits
+        --force
+    deps:
+      - scripts/split_task_a_sft.py
+      - data/output/sft/task_a_cleaned
+    outs:
+      - data/output/sft/task_a_splits
+
   task_a_grpo:
     desc: >-
-      2 250 balanced prompts for GRPO reward fine-tuning (L3–L5 only).
-      Requires OPENAI_API_KEY and GEMINI_API_KEY.
-    cmd: ./scripts/generate_grpo_data.sh
+      GRPO prompts: L3–L5 subset of the cleaned SFT splits (no new generation).
+      Rewards are recomputed online from policy generations, so GRPO needs
+      prompts — not labels. See docs/data_generation_recipes.md.
+    cmd: >-
+      python scripts/filter_grpo_data.py
+        --input-dir data/output/sft/task_a_splits
+        --output-dir data/output/grpo/task_a
     deps:
-      - scripts/generate_grpo_data.sh
-      - src/llm_workflow_agents/data/generate_workflows.py
-      - data/templates/workflow_prompt_template.txt
-      - data/templates/tool_schemas_L1_to_L5.json
+      - scripts/filter_grpo_data.py
+      - data/output/sft/task_a_splits
     outs:
       - data/output/grpo/task_a
-    # Levels L3–L5, 750 samples/level (3 × 250), seed=200, behavior=balanced
+    # Filter only — L3-L5 of train.jsonl + validation.jsonl. test.jsonl is
+    # reserved for final evaluation and is intentionally not included.
 
   task_a_eval:
     desc: >-

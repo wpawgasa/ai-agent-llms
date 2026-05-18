@@ -76,46 +76,15 @@ if command -v nvidia-smi &>/dev/null; then
 fi
 
 # ── Prepare data splits ───────────────────────────────────────────────────────
-python3 -c "
-import json, random, sys
-from pathlib import Path
-import yaml
-
-cfg = yaml.safe_load(open('${SFT_CONFIG}'))
-data_dir = Path(cfg['data']['source'])
-splits_dir = data_dir / 'splits'
-
-if (splits_dir / 'train.jsonl').exists():
-    counts = {s: sum(1 for _ in open(splits_dir / f'{s}.jsonl')) for s in ('train', 'validation', 'test')}
-    print(f'Splits already exist: {counts}')
-    sys.exit(0)
-
-files = sorted(data_dir.glob('*.jsonl'))
-rows = []
-for f in files:
-    with open(f) as fh:
-        rows.extend(json.loads(line) for line in fh if line.strip())
-
-random.Random(42).shuffle(rows)
-n = len(rows)
-ratios = cfg['data']['splits']
-n_train = int(n * ratios['train'])
-n_val   = int(n * ratios.get('val', ratios.get('validation', 0.10)))
-n_test  = n - n_train - n_val
-
-splits_dir.mkdir(parents=True, exist_ok=True)
-for name, chunk in [('train',      rows[:n_train]),
-                    ('validation', rows[n_train:n_train + n_val]),
-                    ('test',       rows[n_train + n_val:])]:
-    with open(splits_dir / f'{name}.jsonl', 'w') as fh:
-        for r in chunk:
-            fh.write(json.dumps(r, ensure_ascii=False) + '\n')
-
-print(f'Splits written to {splits_dir}')
-print(f'  train={n_train}  validation={n_val}  test={n_test}  total={n}')
-"
+# Splits are produced by scripts/split_task_a_sft.py (DVC stage: task_a_sft_splits).
+# Calling it here keeps the SFT runner self-contained for users who run outside DVC;
+# the splitter is idempotent and a no-op if the splits already exist.
+python3 scripts/split_task_a_sft.py
 
 # ── Patch SFT config ──────────────────────────────────────────────────────────
+# The SFT config's data.source already points at the splits dir
+# (data/output/sft/task_a_splits/). The only patch here is wiring the model
+# config path through so sft.py can resolve the base model.
 PATCHED_DIR="$PROJECT_ROOT/.runs/sft_cat_a"
 mkdir -p "$PATCHED_DIR"
 PATCHED_CFG="$PATCHED_DIR/sft_cat_a.yaml"
@@ -126,7 +95,7 @@ import yaml
 
 cfg = yaml.safe_load(open('${SFT_CONFIG}'))
 cfg.setdefault('model', {})['config_path'] = str(Path('${MODEL_CONFIG}').resolve())
-cfg['data']['source'] = str((Path(cfg['data']['source']) / 'splits').resolve())
+cfg['data']['source'] = str(Path(cfg['data']['source']).resolve())
 if ${NO_WANDB}:
     cfg.setdefault('logging', {}).pop('wandb_project', None)
 

@@ -43,7 +43,10 @@ training:
   packing: false
 
 data:
-  source: "data/output/sft/task_a_cleaned"
+  # Pre-split train/val/test files produced by scripts/split_task_a_sft.py
+  # (DVC stage: task_a_sft_splits). Cleaned corpus lives one level up at
+  # data/output/sft/task_a_cleaned/.
+  source: "data/output/sft/task_a_splits"
   format: "chatml"
   splits:
     train: 0.85
