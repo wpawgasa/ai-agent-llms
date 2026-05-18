@@ -1,0 +1,13 @@
+do we have a script to prepare data for GRPO according to the data generation recipe?
+
+---
+
+replace generate_grpo_data.sh with an L3-L5 filter over the cleaned SFT corpus
+
+---
+
+make the split itself a standalone script + DVC stage
+
+---
+
+Document in README.md how to run SFT and GRPO training via scripts

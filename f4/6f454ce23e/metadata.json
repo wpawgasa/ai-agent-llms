@@ -3,7 +3,7 @@
   "checkpoint_id": "f46f454ce23e",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 5,
+  "checkpoints_count": 6,
   "files_touched": [
     "README.md",
     "configs/training/sft_cat_a.yaml",
@@ -21,13 +21,19 @@
       "transcript": "/f4/6f454ce23e/0/full.jsonl",
       "content_hash": "/f4/6f454ce23e/0/content_hash.txt",
       "prompt": "/f4/6f454ce23e/0/prompt.txt"
+    },
+    {
+      "metadata": "/f4/6f454ce23e/1/metadata.json",
+      "transcript": "/f4/6f454ce23e/1/full.jsonl",
+      "content_hash": "/f4/6f454ce23e/1/content_hash.txt",
+      "prompt": "/f4/6f454ce23e/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 65,
-    "cache_creation_tokens": 269298,
-    "cache_read_tokens": 2569189,
-    "output_tokens": 39234,
-    "api_call_count": 30
+    "input_tokens": 180,
+    "cache_creation_tokens": 578914,
+    "cache_read_tokens": 10809094,
+    "output_tokens": 88387,
+    "api_call_count": 117
   }
 }

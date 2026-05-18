@@ -1,0 +1,42 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f46f454ce23e",
+  "session_id": "799cdbe8-a4b1-4689-9f92-e4e883b9e108",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-18T06:55:02.730302826Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "README.md",
+    "configs/training/sft_cat_a.yaml",
+    "docs/Codebase_Spec_LLM_Workflow_Agents_Experiment.md",
+    "docs/data_generation_recipes.md",
+    "docs/phase7-integration-summary.md",
+    "dvc.yaml",
+    "scripts/generate_grpo_data.sh",
+    "scripts/run_phase2_sft.sh",
+    "src/llm_workflow_agents/training/grpo.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "10928bb9c860",
+  "token_usage": {
+    "input_tokens": 115,
+    "cache_creation_tokens": 309616,
+    "cache_read_tokens": 8239905,
+    "output_tokens": 49153,
+    "api_call_count": 87
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-18T06:55:02.292441753Z",
+    "agent_lines": 1205,
+    "human_added": 737,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1942,
+    "agent_percentage": 62.049433573635426
+  }
+}
