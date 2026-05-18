@@ -25,6 +25,50 @@ _REWARD_REGISTRY: dict[str, str] = {
     "reward_graph_extraction": "llm_workflow_agents.training.rewards.reward_graph_extraction",
 }
 
+# Model families that Unsloth's `fast_inference=True` rejects with a
+# RuntimeError from `unsloth/models/vision.py:610` because they are not in
+# the hardcoded `VLLM_SUPPORTED_VLM` allowlist (currently qwen2_5_vl,
+# gemma3, mistral3, qwen3_vl, qwen3_vl_moe — as of unsloth 2026.5.2).
+# When the SFT checkpoint's `config.model_type` matches one of these,
+# `train_grpo` auto-falls back to HF `model.generate()` rollouts even if
+# the YAML requests `generation_backend: vllm`.
+UNSLOTH_VLLM_INCOMPATIBLE_FAMILIES: frozenset[str] = frozenset({
+    "gemma4",  # SigLIP + Gemma4 multimodal stack; not in VLLM_SUPPORTED_VLM.
+})
+
+
+def _detect_model_family(sft_checkpoint: str) -> str | None:
+    """Return ``config.model_type`` for the SFT checkpoint, or None on failure.
+
+    SFT checkpoints are PEFT adapters (``adapter_config.json`` only, no full
+    model ``config.json``), so we first resolve the base model via
+    ``base_model_name_or_path`` from the adapter config. Failures are
+    non-fatal — we conservatively assume compatibility and let Unsloth
+    raise its own error if it knows better.
+    """
+    try:
+        from transformers import AutoConfig
+
+        ckpt_path = Path(sft_checkpoint)
+        adapter_cfg_path = ckpt_path / "adapter_config.json"
+        if adapter_cfg_path.is_file():
+            adapter_cfg = json.loads(adapter_cfg_path.read_text())
+            base_model = adapter_cfg.get("base_model_name_or_path", "")
+            if not base_model:
+                return None
+            cfg = AutoConfig.from_pretrained(base_model, trust_remote_code=False)
+        else:
+            cfg = AutoConfig.from_pretrained(sft_checkpoint, trust_remote_code=False)
+        family = (getattr(cfg, "model_type", "") or "").lower()
+        return family or None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "vllm_compat_detect_failed",
+            sft_checkpoint=sft_checkpoint,
+            error=str(exc),
+        )
+        return None
+
 
 @dataclass(frozen=True)
 class GRPOResult:
@@ -289,9 +333,31 @@ def train_grpo(config_path: Path) -> GRPOResult:
     # (shares weights with the training model; no second copy of the 26B+
     # checkpoint). Any other value falls back to HF model.generate().
     gen_backend = str(grpo_cfg.get("generation_backend", "hf")).lower()
-    use_vllm = gen_backend == "vllm"
+    vllm_requested = gen_backend == "vllm"
     vllm_gpu_util = float(grpo_cfg.get("vllm_gpu_memory_utilization", 0.55))
     max_lora_rank = int(config.get("lora", {}).get("rank", 64))
+
+    # Some model families are rejected by Unsloth's `fast_inference` check
+    # (unsloth/models/vision.py:610). For those, silently fall back to HF
+    # rollouts with a warning so training still runs.
+    family = _detect_model_family(sft_checkpoint) if vllm_requested else None
+    use_vllm = vllm_requested
+    if vllm_requested and family in UNSLOTH_VLLM_INCOMPATIBLE_FAMILIES:
+        use_vllm = False
+        logger.warning(
+            "vllm_rollout_disabled_unsloth_incompat",
+            model_family=family,
+            yaml_setting=gen_backend,
+            effective_backend="hf",
+            note=(
+                "Unsloth fast_inference does not support this model family "
+                "(see unsloth.models.vision.VLLM_SUPPORTED_VLM allowlist). "
+                "Falling back to HF model.generate() for rollouts. Step time "
+                "will be significantly slower until Unsloth adds support or "
+                "this run is switched to a supported family (qwen2_5_vl, "
+                "gemma3, mistral3, qwen3_vl, qwen3_vl_moe)."
+            ),
+        )
 
     logger.info(
         "grpo_starting",
@@ -300,6 +366,7 @@ def train_grpo(config_path: Path) -> GRPOResult:
         training_steps=grpo_cfg.get("training_steps", 1000),
         beta=grpo_cfg.get("beta", 0.04),
         generation_backend="vllm" if use_vllm else "hf",
+        model_family=family,
         vllm_gpu_memory_utilization=vllm_gpu_util if use_vllm else None,
         max_lora_rank=max_lora_rank if use_vllm else None,
     )
