@@ -120,3 +120,23 @@ stages:
       md5: 7c6bd069b79501949ff60b8079af082a.dir
       size: 560242205
       nfiles: 46
+  task_a_grpo:
+    cmd: "python scripts/filter_grpo_data.py\n  --input-dir data/output/sft/task_a_splits\n\
+      \  --output-dir data/output/grpo/task_a"
+    deps:
+    - path: data/output/sft/task_a_splits
+      hash: md5
+      md5: 9107615d23d6fbddb26914db88eccad1.dir
+      size: 113979270
+      nfiles: 3
+    - path: scripts/filter_grpo_data.py
+      hash: md5
+      md5: faecb09d830abbc89d1e0319a45eb50a
+      size: 5606
+      isexec: true
+    outs:
+    - path: data/output/grpo/task_a
+      hash: md5
+      md5: 60831c6695e943fd354b86d816b799d3.dir
+      size: 83869766
+      nfiles: 2
