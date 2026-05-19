@@ -41,10 +41,23 @@ def state_sequence_match(
 
 
 def tool_call_f1(predicted: list[dict], ground_truth: list[dict]) -> float:
-    """Compute BFCL-style AST-match F1 score."""
+    """Compute BFCL-style AST-match F1 score (strict; used by benchmark eval)."""
     from llm_workflow_agents.eval.tool_call_f1 import compute_ast_f1
 
     return compute_ast_f1(predicted, ground_truth)
+
+
+def graded_tool_call_f1(predicted: list[dict], ground_truth: list[dict]) -> float:
+    """Argument-graded F1 over tool calls — continuous variant for GRPO reward.
+
+    Per (pred, gt) pair: 0.4 for matching name + up to 0.6 prorated across
+    correctly-matched arguments. Aggregated as a soft F1 with greedy assignment.
+    Use this for training reward (avoids the 0/1 cliff of subtree-match);
+    keep ``tool_call_f1`` for benchmark eval to preserve the strict metric.
+    """
+    from llm_workflow_agents.eval.tool_call_f1 import compute_argument_graded_f1
+
+    return compute_argument_graded_f1(predicted, ground_truth)
 
 
 def chain_propagation_score(

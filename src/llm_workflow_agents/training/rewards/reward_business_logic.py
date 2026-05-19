@@ -1,26 +1,29 @@
 """Cat A reward function — Prompt-Encoded Business Logic.
 
-Six weighted components (sum = 1.0):
-  state_transition_correctness  0.30   (partial credit: 0.5 for `from`-only match)
-  tool_call_f1 (AST match)      0.30
-  chain_propagation_accuracy    0.10   (was 0.20; dead for per-turn GRPO rows)
-  format_compliance             0.10
+Four weighted components (sum = 1.0):
+  state_transition (graded)     0.40
+  tool_call_f1 (argument-graded) 0.40
   task_completion               0.10
-  length_band (continuous)      0.10   (tie-breaker — see ADR below)
+  length_band (continuous)      0.10
 
-ADR — Why the length-band term: With per-turn GRPO rows (one assistant turn
-per training row) the other five components are coarse:
-  - state_transition: ground truth has length 1 → result ∈ {0, 0.5, 1}.
-  - tool_call_f1: for 0-N tool calls per turn, F1 is small-N-discrete.
-  - chain_propagation: returns 1.0 for ≤1-link chains (always for per-turn).
-  - format_compliance: 5 discrete values from `format_compliance_check`.
-  - task_completion: binary, only fires on terminal rows.
-4 generations per group routinely produced identical totals
-(`frac_reward_zero_std ≈ 1.0` in the W&B traces from step 0-260), zeroing
-the GRPO advantage. The length-band term is a smooth Gaussian-shaped
-score on completion character count — guarantees that two completions
-with even small length differences produce different rewards, so the
-group has non-zero variance and a real learning signal.
+Why this shape (2026-05-19): the per-flight diagnostic in
+``docs/grpo_diagnosis_gemma4_26b.md`` showed the previous 6-component
+reward was structurally incapable of producing within-group reward
+variance > ~0.05 from anything but the length_band tie-breaker:
+
+  - chain_propagation: returned 1.0 on every single-assistant-turn row
+    (n_pairs <= 1 shortcut in ``chain_propagation_score``) → fixed +0.10
+    contribution to every reward; carried zero signal. Dropped.
+  - format_compliance: 1.0 for any SFT'd model output (no tracebacks,
+    matched <tool_call> tags) → fixed +0.10 with zero signal. Dropped.
+  - state_transition + tool_call_f1: binary cliffs (0 or 1 per row),
+    flipped on only 1-2 of 5 prompts. Replaced with graded variants
+    (``_graded_state_match``, ``graded_tool_call_f1``) that give partial
+    credit for argument-level overlap and same-target/reverse-direction
+    state transitions.
+
+The length_band tie-breaker stays — it's the only smooth component and
+guarantees non-zero within-group variance even when the others all agree.
 """
 
 from __future__ import annotations
@@ -30,20 +33,16 @@ from typing import Any
 import structlog
 
 from llm_workflow_agents.training.reward_utils import (
-    chain_propagation_score,
     extract_state_annotations,
     extract_tool_calls,
-    format_compliance_check,
+    graded_tool_call_f1,
     reached_terminal,
-    tool_call_f1,
 )
 
 logger = structlog.get_logger(__name__)
 
-W_STATE_TRANSITION = 0.30
-W_TOOL_CALL_F1 = 0.30
-W_CHAIN_PROPAGATION = 0.10
-W_FORMAT_COMPLIANCE = 0.10
+W_STATE_TRANSITION = 0.40
+W_TOOL_CALL_F1 = 0.40
 W_TASK_COMPLETION = 0.10
 W_LENGTH_BAND = 0.10
 
@@ -60,10 +59,13 @@ def _partial_state_match(
 ) -> float:
     """State-transition score with partial credit for `from`-only matches.
 
+    Retained for benchmark eval and back-compat. New training reward uses
+    :func:`_graded_state_match`, which adds credit for `to`-only matches
+    and reverse-direction transitions.
+
     Returns 1.0 for an exact (from, to) match and 0.5 when only `from`
-    matches — softens the binary {0, 1} signal that exact match gives on
-    per-turn rows (gt_len == 1). Empty ground truth returns 1.0 when the
-    prediction is also empty, else 0.0 (matches the legacy behavior).
+    matches. Empty ground truth returns 1.0 when the prediction is also
+    empty, else 0.0.
     """
     if not ground_truth:
         return 1.0 if not predicted else 0.0
@@ -76,6 +78,40 @@ def _partial_state_match(
             total += 1.0
         elif pred[0] == gt_pair[0]:
             total += 0.5
+    return total / len(ground_truth)
+
+
+def _graded_state_match(
+    predicted: list[tuple[str, str]],
+    ground_truth: list[tuple[str, str]],
+) -> float:
+    """State-transition score with five graded tiers (continuous variant for GRPO).
+
+    Per (pred, gt) pair:
+      exact match            → 1.0
+      `from` matches only    → 0.5    (correct origin, wrong destination)
+      `to` matches only      → 0.5    (correct destination, wrong origin)
+      reverse direction      → 0.3    (right state-pair, wrong direction)
+      no overlap             → 0.0
+
+    The added `to`-only and reverse-direction credit breaks the 0/0.5/1
+    cliff of :func:`_partial_state_match` into a {0, 0.3, 0.5, 1.0} ladder
+    — finer-grained signal for GRPO advantage when the model gets *part*
+    of a transition right.
+    """
+    if not ground_truth:
+        return 1.0 if not predicted else 0.0
+    total = 0.0
+    for i, gt_pair in enumerate(ground_truth):
+        if i >= len(predicted):
+            continue
+        pred = predicted[i]
+        if pred == gt_pair:
+            total += 1.0
+        elif pred[0] == gt_pair[0] or pred[1] == gt_pair[1]:
+            total += 0.5
+        elif pred[0] == gt_pair[1] and pred[1] == gt_pair[0]:
+            total += 0.3
     return total / len(ground_truth)
 
 
@@ -106,7 +142,7 @@ def reward_business_logic(
         prompts: Input prompts (unused but required by GRPOTrainer interface).
         completions: Model completions to score.
         ground_truths: Expected outputs with keys: ``state_annotations``,
-            ``tool_calls``, ``messages``, ``terminal_state``.
+            ``tool_calls``, ``terminal_state``, ``terminal_reached``.
 
     Returns:
         List of scalar rewards in [0.0, 1.0].
@@ -115,29 +151,23 @@ def reward_business_logic(
     for completion, gt in zip(completions, ground_truths):
         pred_states = extract_state_annotations(completion)
         gt_states = gt.get("state_annotations", [])
-        r_state = _partial_state_match(pred_states, gt_states)
+        r_state = _graded_state_match(pred_states, gt_states)
 
         pred_tools = extract_tool_calls(completion)
         gt_tools = gt.get("tool_calls", [])
-        r_tool = tool_call_f1(pred_tools, gt_tools)
+        r_tool = graded_tool_call_f1(pred_tools, gt_tools)
 
-        pred_msgs = [{"role": "assistant", "content": completion}]
-        gt_msgs = gt.get("messages", [])
-        r_chain = chain_propagation_score(pred_msgs, gt_msgs)
-
-        r_format = format_compliance_check(completion)
         r_length = _length_band_score(completion)
 
         terminal = gt.get("terminal_state", "")
-        # terminal_reached=False means the data never reached a terminal state
-        # (e.g. adversarial L4/L5 timeouts). Skip the completion sub-reward and
+        # terminal_reached=False means the conversation never reached a terminal
+        # state in the ground truth (e.g. adversarial L4/L5 timeouts, or this
+        # is a non-final per-turn row). Skip the completion sub-reward and
         # rescale the remaining weights to sum to 1 to keep scores in [0, 1].
         if not gt.get("terminal_reached", True):
             score = (
                 W_STATE_TRANSITION * r_state
                 + W_TOOL_CALL_F1 * r_tool
-                + W_CHAIN_PROPAGATION * r_chain
-                + W_FORMAT_COMPLIANCE * r_format
                 + W_LENGTH_BAND * r_length
             ) / (1.0 - W_TASK_COMPLETION)
         else:
@@ -145,8 +175,6 @@ def reward_business_logic(
             score = (
                 W_STATE_TRANSITION * r_state
                 + W_TOOL_CALL_F1 * r_tool
-                + W_CHAIN_PROPAGATION * r_chain
-                + W_FORMAT_COMPLIANCE * r_format
                 + W_TASK_COMPLETION * r_completion
                 + W_LENGTH_BAND * r_length
             )

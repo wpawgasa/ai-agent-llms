@@ -8,20 +8,26 @@ from __future__ import annotations
 
 import pytest
 
+from llm_workflow_agents.eval.tool_call_f1 import (
+    compute_argument_graded_f1,
+    compute_ast_f1,
+)
 from llm_workflow_agents.training.reward_utils import (
     extract_state_annotations,
     extract_tool_calls,
     format_compliance_check,
+    graded_tool_call_f1,
     reached_terminal,
     state_sequence_match,
     tool_call_f1,
 )
 from llm_workflow_agents.training.rewards.reward_business_logic import (
-    W_CHAIN_PROPAGATION,
-    W_FORMAT_COMPLIANCE,
+    W_LENGTH_BAND,
     W_STATE_TRANSITION,
     W_TASK_COMPLETION,
     W_TOOL_CALL_F1,
+    _graded_state_match,
+    _partial_state_match,
     reward_business_logic,
 )
 from llm_workflow_agents.training.rewards.reward_subagent import (
@@ -107,10 +113,18 @@ class TestRewardBusinessLogic:
 
     def test_weights_sum_to_one(self) -> None:
         total = (
-            W_STATE_TRANSITION + W_TOOL_CALL_F1 + W_CHAIN_PROPAGATION
-            + W_FORMAT_COMPLIANCE + W_TASK_COMPLETION
+            W_STATE_TRANSITION + W_TOOL_CALL_F1
+            + W_TASK_COMPLETION + W_LENGTH_BAND
         )
         assert abs(total - 1.0) < 1e-9
+
+    def test_weights_match_2026_05_19_redesign(self) -> None:
+        # Pins the post-pre-flight weights so future drift is caught.
+        # See docs/grpo_diagnosis_gemma4_26b.md addendum.
+        assert W_STATE_TRANSITION == 0.40
+        assert W_TOOL_CALL_F1 == 0.40
+        assert W_TASK_COMPLETION == 0.10
+        assert W_LENGTH_BAND == 0.10
 
     def test_format_only_score(self) -> None:
         """Well-formatted but wrong content scores at least format component."""
@@ -150,6 +164,122 @@ class TestRewardBusinessLogic:
             ],
         )
         assert len(result) == 2
+
+
+# --- Graded State Match Tests (fix c2 — see grpo_diagnosis addendum) ---
+
+
+class TestGradedStateMatch:
+    """Continuous variant of _partial_state_match used by the GRPO reward."""
+
+    def test_exact_match_scores_one(self) -> None:
+        assert _graded_state_match([("A", "B")], [("A", "B")]) == 1.0
+
+    def test_from_only_scores_half(self) -> None:
+        assert _graded_state_match([("A", "X")], [("A", "B")]) == 0.5
+
+    def test_to_only_scores_half(self) -> None:
+        # New credit not present in _partial_state_match.
+        assert _graded_state_match([("X", "B")], [("A", "B")]) == 0.5
+
+    def test_reverse_direction_scores_three_tenths(self) -> None:
+        assert _graded_state_match([("B", "A")], [("A", "B")]) == pytest.approx(0.3)
+
+    def test_no_overlap_scores_zero(self) -> None:
+        assert _graded_state_match([("X", "Y")], [("A", "B")]) == 0.0
+
+    def test_empty_gt_empty_pred_scores_one(self) -> None:
+        assert _graded_state_match([], []) == 1.0
+
+    def test_empty_gt_with_pred_scores_zero(self) -> None:
+        assert _graded_state_match([("A", "B")], []) == 0.0
+
+    def test_dominates_partial_state_match_on_to_only(self) -> None:
+        # The whole point of the redesign: to-only matches must give credit.
+        pred, gt = [("X", "B")], [("A", "B")]
+        assert _graded_state_match(pred, gt) > _partial_state_match(pred, gt)
+
+    def test_matches_partial_state_match_on_exact_and_from_only(self) -> None:
+        # Where the old metric did give credit, the new one must agree.
+        for pred, gt in [
+            ([("A", "B")], [("A", "B")]),     # exact
+            ([("A", "X")], [("A", "B")]),     # from-only
+            ([("X", "Y")], [("A", "B")]),     # no overlap
+        ]:
+            assert _graded_state_match(pred, gt) == _partial_state_match(pred, gt)
+
+
+# --- Graded Tool F1 Tests (fix c1 — see grpo_diagnosis addendum) ---
+
+
+class TestArgumentGradedF1:
+    """Continuous variant of compute_ast_f1 used by the GRPO reward."""
+
+    def test_perfect_match_scores_one(self) -> None:
+        tools = [{"name": "fn", "arguments": {"x": 1, "y": 2}}]
+        assert compute_argument_graded_f1(tools, tools) == 1.0
+
+    def test_both_empty_scores_one(self) -> None:
+        assert compute_argument_graded_f1([], []) == 1.0
+
+    def test_one_empty_scores_zero(self) -> None:
+        assert compute_argument_graded_f1([], [{"name": "fn", "arguments": {}}]) == 0.0
+        assert compute_argument_graded_f1([{"name": "fn", "arguments": {}}], []) == 0.0
+
+    def test_wrong_name_scores_zero(self) -> None:
+        pred = [{"name": "wrong", "arguments": {"x": 1}}]
+        gt = [{"name": "fn", "arguments": {"x": 1}}]
+        assert compute_argument_graded_f1(pred, gt) == 0.0
+
+    def test_right_name_no_args_scores_full(self) -> None:
+        pred = [{"name": "fn", "arguments": {}}]
+        gt = [{"name": "fn", "arguments": {}}]
+        assert compute_argument_graded_f1(pred, gt) == 1.0
+
+    def test_right_name_half_args_correct(self) -> None:
+        # Pair score = 0.4 (name) + 0.6 * (1/2 args) = 0.7
+        # F1 with single pred & gt: precision=recall=0.7 → F1 = 0.7
+        pred = [{"name": "fn", "arguments": {"x": 1, "y": 999}}]
+        gt = [{"name": "fn", "arguments": {"x": 1, "y": 2}}]
+        assert compute_argument_graded_f1(pred, gt) == pytest.approx(0.7)
+
+    def test_right_name_zero_args_correct(self) -> None:
+        # Pair score = 0.4 (name) + 0.6 * 0/2 = 0.4. F1 = 0.4.
+        pred = [{"name": "fn", "arguments": {"x": 999, "y": 999}}]
+        gt = [{"name": "fn", "arguments": {"x": 1, "y": 2}}]
+        assert compute_argument_graded_f1(pred, gt) == pytest.approx(0.4)
+
+    def test_dominates_strict_on_partial_match(self) -> None:
+        # The whole point of the redesign: a partial-arg match must not
+        # collapse to 0 (which is what compute_ast_f1 does on this input).
+        pred = [{"name": "fn", "arguments": {"x": 1, "y": 999}}]
+        gt = [{"name": "fn", "arguments": {"x": 1, "y": 2}}]
+        graded = compute_argument_graded_f1(pred, gt)
+        strict = compute_ast_f1(pred, gt)
+        assert graded > strict
+        assert strict == 0.0
+
+    def test_matches_strict_on_exact_and_no_match(self) -> None:
+        # Where the strict metric gives a clean 1.0 or 0.0, graded agrees.
+        exact_pred = [{"name": "fn", "arguments": {"x": 1}}]
+        wrong_name = [{"name": "wrong", "arguments": {"x": 1}}]
+        assert compute_argument_graded_f1(exact_pred, exact_pred) == 1.0
+        assert compute_argument_graded_f1(wrong_name, exact_pred) == 0.0
+
+    def test_hallucinated_extra_call_lowers_precision(self) -> None:
+        # 1 correct + 1 hallucinated: partial_tp=1.0, p=1/2, r=1/1 → F1 = 2/3.
+        gt = [{"name": "fn", "arguments": {"x": 1}}]
+        pred = [
+            {"name": "fn", "arguments": {"x": 1}},
+            {"name": "ghost", "arguments": {}},
+        ]
+        assert compute_argument_graded_f1(pred, gt) == pytest.approx(2 / 3)
+
+    def test_graded_tool_call_f1_wrapper_matches(self) -> None:
+        # reward_utils wrapper delegates to compute_argument_graded_f1.
+        pred = [{"name": "fn", "arguments": {"x": 1, "y": 999}}]
+        gt = [{"name": "fn", "arguments": {"x": 1, "y": 2}}]
+        assert graded_tool_call_f1(pred, gt) == compute_argument_graded_f1(pred, gt)
 
 
 # --- Reward Subagent Tests ---

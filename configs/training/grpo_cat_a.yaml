@@ -37,12 +37,17 @@ grpo:
 
 reward:
   function: "reward_business_logic"
+  # Weights reflect the 2026-05-19 reward redesign (see
+  # docs/grpo_diagnosis_gemma4_26b.md addendum). chain_propagation and
+  # format_compliance were structurally constant (1.0 on every row) and
+  # were dropped. state_transition + tool_call_f1 are now argument-graded
+  # variants (graded_tool_call_f1, _graded_state_match) so they vary
+  # smoothly within a GRPO group instead of flipping 0↔1.
   weights:
-    state_transition: 0.30
-    tool_call_f1: 0.30
-    chain_propagation: 0.20
-    format_compliance: 0.10
+    state_transition: 0.40
+    tool_call_f1: 0.40
     task_completion: 0.10
+    length_band: 0.10
 
 data:
   source: "data/output/task_a"

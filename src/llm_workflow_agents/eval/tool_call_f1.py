@@ -224,6 +224,91 @@ def _is_subtree_match(predicted: dict[str, Any], ground_truth: dict[str, Any]) -
     return True
 
 
+def _pair_match_graded(
+    predicted: dict[str, Any],
+    ground_truth: dict[str, Any],
+    name_weight: float = 0.4,
+) -> float:
+    """Continuous partial-match score in [0, 1] for one (pred, gt) tool-call pair.
+
+    - Names mismatch → 0.0 (a wrong tool is wrong, no partial credit for arg overlap).
+    - Names match, GT has no args → name_weight + (1 - name_weight) = 1.0.
+    - Names match, GT has args → name_weight + (1 - name_weight) * (matched / total_gt_args).
+      A predicted arg "matches" iff the key exists in pred and the value deep-equals GT.
+    """
+    if predicted.get("name") != ground_truth.get("name"):
+        return 0.0
+    gt_args = ground_truth.get("arguments", {})
+    pred_args = predicted.get("arguments", {})
+
+    if not isinstance(gt_args, dict) or not isinstance(pred_args, dict):
+        return 1.0 if _deep_equals(gt_args, pred_args) else name_weight
+
+    if not gt_args:
+        return 1.0
+
+    matched = 0
+    for key, gt_val in gt_args.items():
+        if key in pred_args and _deep_equals(pred_args[key], gt_val):
+            matched += 1
+    arg_frac = matched / len(gt_args)
+    return name_weight + (1.0 - name_weight) * arg_frac
+
+
+def compute_argument_graded_f1(
+    predicted: list[dict[str, Any]],
+    ground_truth: list[dict[str, Any]],
+    name_weight: float = 0.4,
+) -> float:
+    """Argument-graded F1 over tool calls — continuous variant for GRPO reward.
+
+    Unlike :func:`compute_ast_f1` (all-or-nothing subtree match), each
+    (pred, gt) pair contributes a continuous partial-match score from
+    :func:`_pair_match_graded`. Aggregated as a soft F1:
+
+      partial_tp  = sum over greedy 1:1 assignment of pair match scores
+      precision   = partial_tp / |predicted|
+      recall      = partial_tp / |ground_truth|
+      F1          = 2pr / (p + r)
+
+    Assignment is greedy by best-available match score (stable and deterministic).
+    Use this for training reward; keep :func:`compute_ast_f1` for benchmark eval.
+    """
+    if not ground_truth and not predicted:
+        return 1.0
+    if not ground_truth or not predicted:
+        return 0.0
+
+    # Greedy best-first assignment. For each predicted call, take the
+    # unmatched GT with highest partial score; record the score.
+    matched_gt: set[int] = set()
+    partial_scores: list[float] = []
+
+    # Pre-compute all pairwise scores once.
+    pairs: list[tuple[float, int, int]] = []
+    for pi, pred in enumerate(predicted):
+        for gi, gt in enumerate(ground_truth):
+            s = _pair_match_graded(pred, gt, name_weight=name_weight)
+            if s > 0.0:
+                pairs.append((s, pi, gi))
+    # Best-first assignment.
+    pairs.sort(key=lambda x: -x[0])
+    matched_pred: set[int] = set()
+    for score, pi, gi in pairs:
+        if pi in matched_pred or gi in matched_gt:
+            continue
+        matched_pred.add(pi)
+        matched_gt.add(gi)
+        partial_scores.append(score)
+
+    partial_tp = sum(partial_scores)
+    precision = partial_tp / len(predicted) if predicted else 0.0
+    recall = partial_tp / len(ground_truth) if ground_truth else 0.0
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
 def detect_hallucinated_tools(
     predicted: list[dict[str, Any]],
     valid_tool_names: list[str],
