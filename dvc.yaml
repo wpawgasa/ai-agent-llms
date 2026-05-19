@@ -124,5 +124,47 @@ stages:
       - checkpoints/sft_cat_a/gemma-4-26B-A4B-it
 
   # ---------------------------------------------------------------------------
+  # Phase 2 — GRPO RL fine-tuning
+  # ---------------------------------------------------------------------------
+
+  task_a_grpo_gemma4_26b_a4b:
+    desc: >-
+      Phase 2 GRPO — Gemma-4 26B-A4B-it RL fine-tune seeded from the
+      task_a_sft_gemma4_26b_a4b SFT checkpoint-500 (epoch 0.91; see
+      docs/grpo_diagnosis_gemma4_26b.md for why this specific checkpoint).
+      Outputs LoRA adapter checkpoints at every save_steps interval plus
+      the train log under checkpoints/grpo_cat_a/gemma-4-26B-A4B-it/.
+
+      Training takes ~13 hours on an H100 (Gemma-4 R9 fallback — HF
+      rollouts, no vLLM). To register an existing checkpoint without
+      re-running training, use:
+          dvc commit task_a_grpo_gemma4_26b_a4b
+      Push to the GCS remote afterwards:
+          dvc push task_a_grpo_gemma4_26b_a4b
+
+      Reward function, weights, and graded scoring helpers are tracked
+      as explicit deps so any change to them invalidates the run (per
+      the 2026-05-19 reward redesign addendum).
+    cmd: >-
+      ./scripts/run_phase2_grpo.sh
+      --model-config configs/models_exp_a/gemma4_26b_a4b.yaml
+      --grpo-config configs/training/grpo_cat_a.yaml
+      --sft-checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-500
+      --skip-filter
+    deps:
+      - scripts/run_phase2_grpo.sh
+      - src/llm_workflow_agents/training/grpo.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - src/llm_workflow_agents/training/reward_utils.py
+      - src/llm_workflow_agents/training/rewards/reward_business_logic.py
+      - src/llm_workflow_agents/eval/tool_call_f1.py
+      - configs/models_exp_a/gemma4_26b_a4b.yaml
+      - configs/training/grpo_cat_a.yaml
+      - data/output/grpo/task_a
+      - checkpoints/sft_cat_a/gemma-4-26B-A4B-it
+    outs:
+      - checkpoints/grpo_cat_a/gemma-4-26B-A4B-it
+
+  # ---------------------------------------------------------------------------
   # Task B and Task C stages will be added once recipes are defined.
   # ---------------------------------------------------------------------------
