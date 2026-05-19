@@ -140,3 +140,58 @@ stages:
       md5: 60831c6695e943fd354b86d816b799d3.dir
       size: 83869766
       nfiles: 2
+  task_a_grpo_gemma4_26b_a4b:
+    cmd: ./scripts/run_phase2_grpo.sh --model-config 
+      configs/models_exp_a/gemma4_26b_a4b.yaml --grpo-config 
+      configs/training/grpo_cat_a.yaml --sft-checkpoint 
+      checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-500 --skip-filter
+    deps:
+    - path: checkpoints/sft_cat_a/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 7c6bd069b79501949ff60b8079af082a.dir
+      size: 560242205
+      nfiles: 46
+    - path: configs/models_exp_a/gemma4_26b_a4b.yaml
+      hash: md5
+      md5: 9894665b15093cecef5b4c4f4675a5ed
+      size: 1133
+    - path: configs/training/grpo_cat_a.yaml
+      hash: md5
+      md5: 049098861b4183a105d32ccdf58f2c2e
+      size: 3077
+    - path: data/output/grpo/task_a
+      hash: md5
+      md5: 60831c6695e943fd354b86d816b799d3.dir
+      size: 83869766
+      nfiles: 2
+    - path: scripts/run_phase2_grpo.sh
+      hash: md5
+      md5: 9a711915ed34745a4ab935ff29ecd7d0
+      size: 9077
+      isexec: true
+    - path: src/llm_workflow_agents/eval/tool_call_f1.py
+      hash: md5
+      md5: db71f85d07050494e8c6dcdff12cbc5c
+      size: 15629
+    - path: src/llm_workflow_agents/training/grpo.py
+      hash: md5
+      md5: b6916f554a2210bc81bc8a2171328087
+      size: 22915
+    - path: src/llm_workflow_agents/training/lora_targets.py
+      hash: md5
+      md5: 4668724b2b8bb7feb1207fb48c44effa
+      size: 9466
+    - path: src/llm_workflow_agents/training/reward_utils.py
+      hash: md5
+      md5: 11323a7bfd3e67b5aac60b78be904af2
+      size: 5762
+    - path: src/llm_workflow_agents/training/rewards/reward_business_logic.py
+      hash: md5
+      md5: b27e6e42d71ef649b61f4eb8144849d7
+      size: 6716
+    outs:
+    - path: checkpoints/grpo_cat_a/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 3c3617fbc657a15a0d205bed5cb8d08a.dir
+      size: 323904051
+      nfiles: 26
