@@ -12,17 +12,31 @@ grpo:
   # hit frac_reward_zero_std≈1.0 most of the time (no learning signal).
   # More samples → more chance of reward variance per group.
   num_generations: 8
-  beta: 0.04
+  # KL penalty — was 0.04, too weak to constrain a low-entropy ref policy
+  # (KL spiked to 131 in the killed run). 0.1 per diagnosis doc.
+  beta: 0.1
   epsilon: 0.2
   learning_rate: 5.0e-6
   training_steps: 1000
   # Short warmup so peak LR is reached by ~step 50 instead of step 750.
   warmup_ratio: 0.05
+  # Loss type — TRL default is "dapo". The killed run used "bnpo" which
+  # was numerically sensitive on the low-entropy SFT ref policy (KL spikes
+  # to 131, grad norm 4929). Switch to "grpo" until the base run is stable.
+  loss_type: "grpo"
+  # Completion length — was 256 (TRL default), causing 16% truncation rate
+  # in the killed run. 512 eliminates the truncation noise.
+  max_completion_length: 512
+  # Surface a handful of completions to W&B each log step so the diagnostic
+  # has actual samples next to frac_reward_zero_std. Cheap, load-bearing
+  # for triage.
+  log_completions: true
+  num_completions_to_print: 4
   # Checkpoint cadence for resumability. training/grpo.py auto-resumes
   # from the highest-numbered checkpoint in output_dir on restart.
   # To continue the same W&B run on resume, export these before launching:
   #   WANDB_RESUME=allow  WANDB_RUN_ID=<previous-run-id>
-  save_steps: 100
+  save_steps: 50
   save_total_limit: 3
   sampling:
     temperature: 1.0   # widen the group; lower values collapsed rollouts

@@ -427,6 +427,24 @@ def train_grpo(config_path: Path) -> GRPOResult:
         save_total_limit=int(grpo_cfg.get("save_total_limit", 3)),
         report_to="wandb",
     )
+    # Optional GRPOConfig kwargs — only set when present in YAML so existing
+    # configs that don't specify them keep TRL's defaults. The diagnosis
+    # doc (docs/grpo_diagnosis_gemma4_26b.md) recommends:
+    #   loss_type=grpo (over TRL's dapo default; BNPO was too sensitive in
+    #     the killed run with a low-entropy ref policy)
+    #   max_completion_length=512 (TRL default 256 caused 16% truncation rate)
+    #   log_completions=true / num_completions_to_print=4 (sample groups land
+    #     in W&B alongside frac_reward_zero_std — load-bearing for the
+    #     50-step diagnostic).
+    for key in (
+        "loss_type",
+        "max_completion_length",
+        "max_prompt_length",
+        "log_completions",
+        "num_completions_to_print",
+    ):
+        if key in grpo_cfg:
+            grpo_kwargs[key] = grpo_cfg[key]
     if use_vllm:
         grpo_kwargs.update(
             use_vllm=True,

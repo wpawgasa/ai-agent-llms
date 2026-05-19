@@ -1,0 +1,72 @@
+# 50-step GRPO diagnostic — see docs/grpo_diagnosis_gemma4_26b.md addendum
+# "Updated retry plan" for what to read off this run.
+#
+# Mirrors grpo_cat_a.yaml exactly except:
+#   training_steps: 50   (vs 1000)  — fast triage; ~10 min on H100 with HF rollouts
+#   save_steps: 25       (vs 50)    — save twice during the run (steps 25 and 50)
+#                                     so we have an artifact if signal looks promising
+#
+# Decision rule on completion (from the diagnosis doc):
+#   frac_reward_zero_std < ~0.5                    → proceed to full 1000 steps
+#   frac_reward_zero_std high + diverse completions → reward still under-resolved,
+#                                                     iterate on (c)
+#   frac_reward_zero_std high + identical completions → policy entropy collapse;
+#                                                       SFT reset or (a*) needed
+#
+# Launch:
+#   ./scripts/run_phase2_grpo.sh \
+#     --grpo-config configs/training/grpo_cat_a_diagnostic.yaml \
+#     --sft-checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-500
+
+stage: "grpo"
+framework: "unsloth"
+
+model:
+  sft_checkpoint: null  # populated at runtime by run_phase2_grpo.sh
+
+grpo:
+  algorithm: "GRPO"
+  normalization: "DAPO"
+  num_generations: 8
+  beta: 0.1
+  epsilon: 0.2
+  learning_rate: 5.0e-6
+  training_steps: 50           # ← diagnostic override
+  warmup_ratio: 0.05
+  loss_type: "grpo"
+  max_completion_length: 512
+  log_completions: true
+  num_completions_to_print: 4
+  save_steps: 25               # ← diagnostic override (save at steps 25 and 50)
+  save_total_limit: 3
+  sampling:
+    temperature: 1.0
+    top_p: 0.95
+  generation_backend: "vllm"   # auto-falls back to HF for Gemma-4 (Risk R9)
+  vllm_gpu_memory_utilization: 0.55
+  fp8_rl: true
+
+reward:
+  function: "reward_business_logic"
+  weights:
+    state_transition: 0.40
+    tool_call_f1: 0.40
+    task_completion: 0.10
+    length_band: 0.10
+
+data:
+  source: "data/output/task_a"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+monitoring:
+  eval_held_out_every: 50
+  reward_hacking_detector: true
+  kl_divergence_log: true
+
+logging:
+  # Separate W&B project from the production grpo_cat_a runs so the
+  # diagnostic doesn't clutter the comparison set.
+  wandb_project: "llm-workflow-agents-grpo-diagnostic"
