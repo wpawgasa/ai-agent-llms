@@ -1,0 +1,13 @@
+Analyze GRPO trainer from this log https://wandb.ai/wpawgasa/huggingface/runs/36ysj7u8?nw=nwuserwpawgasa
+
+---
+
+I'm login. Let's try access the training log data again.
+
+---
+
+Should we use the latest SFT checkpoint or the earlier checkpoints? Is it possible that the cause of unstable GRPO training is that SFT checkpoint is already too good?
+
+---
+
+Document GRPO diagnosis
