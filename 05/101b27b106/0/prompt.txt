@@ -1,0 +1,25 @@
+Analyze GRPO trainer from this log https://wandb.ai/wpawgasa/huggingface/runs/t82y64hc/logs?nw=nwuserwpawgasa
+
+---
+
+2
+
+---
+
+help me run
+
+---
+
+I intentionally killed the trainer after step 100.
+
+---
+
+Let's examine the train data @data/output/grpo/task_a/train.jsonl and reward function. Are they in good design for GRPO training?
+
+---
+
+Raise `max_prompt_length` to 8092 and start all reward fixes
+
+---
+
+Document in @docs/grpo_diagnosis_gemma4_26b.md

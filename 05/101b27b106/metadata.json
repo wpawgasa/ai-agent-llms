@@ -1,0 +1,32 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "05101b27b106",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/grpo_cat_a.yaml",
+    "configs/training/grpo_cat_a_diagnostic.yaml",
+    "docs/grpo_diagnosis_gemma4_26b.md",
+    "src/llm_workflow_agents/training/grpo.py",
+    "src/llm_workflow_agents/training/reward_utils.py",
+    "src/llm_workflow_agents/training/rewards/reward_business_logic.py",
+    "tests/unit/test_reward_business_logic_terminal_flag.py",
+    "tests/unit/test_reward_functions.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/05/101b27b106/0/metadata.json",
+      "transcript": "/05/101b27b106/0/full.jsonl",
+      "content_hash": "/05/101b27b106/0/content_hash.txt",
+      "prompt": "/05/101b27b106/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 130,
+    "cache_creation_tokens": 246578,
+    "cache_read_tokens": 9921477,
+    "output_tokens": 83921,
+    "api_call_count": 64
+  }
+}
