@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from llm_workflow_agents.training.rewards.reward_business_logic import (
-    W_TASK_COMPLETION,
     reward_business_logic,
 )
 
@@ -16,6 +15,7 @@ def _gt(terminal_state: str = "S_DONE", terminal_reached: bool | None = None) ->
         "tool_calls": [],
         "messages": [],
         "terminal_state": terminal_state,
+        "valid_transitions": [["S1", "S_DONE"], ["S1", "S2"]],
     }
     if terminal_reached is not None:
         g["terminal_reached"] = terminal_reached
@@ -32,15 +32,10 @@ class TestTerminalReachedFlag:
         gt = _gt(terminal_state="", terminal_reached=False)
         scores = reward_business_logic(["prompt"], [COMPLETION_NO_TERMINAL], [gt])
         score = scores[0]
-        # Score must be in [0, 1] and must NOT be penalised by a missing terminal.
+        # With terminal_reached=False the task_completion component is excluded
+        # from the weighted mean and the remaining weights are renormalized, so
+        # a missing terminal does not silently penalize the score.
         assert 0.0 <= score <= 1.0
-        # With terminal_reached=False the completion sub-reward is excluded and
-        # remaining weights are rescaled by 1/(1-W_TASK_COMPLETION). Verify that
-        # adding format_compliance alone (0.10 / 0.9 ≈ 0.111) puts the score above
-        # the equivalent with the full weight set (which would score 0.10 * 1.0 for
-        # format only). Concretely: score must be >= format_compliance_weight rescaled.
-        rescaled_format_w = W_TASK_COMPLETION / (1.0 - W_TASK_COMPLETION)  # ≈ 0.111
-        assert score >= 0.0  # lower-bound sanity; exact value depends on sub-rewards
 
     def test_flag_true_behaves_identically_to_legacy(self):
         gt_flag = _gt(terminal_state="S_DONE", terminal_reached=True)

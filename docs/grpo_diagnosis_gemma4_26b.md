@@ -506,3 +506,57 @@ Concrete next step before committing to a 1000-step GRPO run:
    ~8.4%) and a train/deploy alignment win, but should not be conflated with the
    variance question.
 
+---
+
+## Retry Outcome (2026-05-21): Run `t82y64hc` killed — two new root causes
+
+**Run analyzed:** [`wpawgasa/huggingface/t82y64hc`](https://wandb.ai/wpawgasa/huggingface/runs/t82y64hc) — the first GRPO run launched after (b)+(c) landed. Config `grpo_cat_a.yaml` (`beta=0.1`, `loss_type=grpo`, `max_completion_length=512`, 1000 steps, HF rollouts via the Gemma-4 R9 fallback). **Killed manually at step 100/1000.**
+
+### Symptoms — (b)+(c) did not unblock training
+
+| Symptom | Measured |
+|---------|----------|
+| Reward trend | flat — 0.40 (step 1) → 0.26 (step 100) |
+| `reward_std` within group | ≈ 0.003 |
+| `frac_reward_zero_std` | hit **1.0** on steps 18, 50, 89 |
+| `train/kl` | spiked 0.7 → **37.9** → **40.2** |
+| `train/grad_norm` | spiked to **1126** (clipped to `max_grad_norm=1`) |
+
+The step-100 W&B completions table is conclusive: 8 completions to one prompt scored **0.2570–0.2646** (spread 0.0076). The completions were genuinely different text (188–229 chars) — the reward simply could not tell them apart.
+
+### Root cause 1 — prompt truncation
+
+`max_prompt_length` was never set in `grpo_cat_a.yaml`, so TRL's default **512** applied. The enriched system prompts (workflow script + tool-schema JSON + growing history) are 3,000–5,500+ tokens. The model saw ~10% of its input and could not perceive its workflow state — every rollout collapsed to a generic `[STATE: … → TERMINAL]`. At step 100 every completion emitted `[STATE: RESOLVE → TERMINAL]`, and `RESOLVE` was not even a state in that prompt's workflow.
+
+### Root cause 2 — `length_band` was load-bearing reward hacking
+
+(b)+(c) deliberately kept `length_band` as the tie-breaker. This run proved that tie-breaker is the *only* live signal: the entire 0.0076 within-group spread was `length_band` reacting to completion length — `(229−188 chars)/300 × 0.5 × 0.10 ≈ 0.0068` matches exactly. GRPO normalized that length noise into ±1.5 advantages. `length_band` is task-irrelevant; it cannot teach workflow correctness, and with the model truncation-blinded the state/tool components stayed constant across the group, leaving length as the sole variance source.
+
+### Fix landed (2026-05-21)
+
+- **`max_prompt_length: 7680`** added to `grpo_cat_a.yaml` + `grpo_cat_a_diagnostic.yaml`. 7680 + 512 completion = 8192 = the `max_seq_length` hardcoded in `grpo.py:384`. (Chose to cap the prompt rather than raise `max_seq_length` and pay its KV-cache VRAM cost.)
+- **Dropped `length_band`** entirely (removed `_length_band_score`, `LENGTH_BAND_*`). Added **`transition_legality` (weight 0.10)** — `transition_legality_score` in `reward_utils.py` scores the fraction of emitted `[STATE: X→Y]` that are legal edges in the workflow graph. Complementary to `_graded_state_match` (which asks "is it the *expected* transition"): legality asks "does this edge exist at all" → directly penalizes hallucinated states like the `RESOLVE→TERMINAL` collapse.
+- Legal-edge set sourced from **ground truth, not the prompt** — `grpo.py::_load_grpo_jsonl` parses `workflow_graph.transitions` into a `valid_transitions` field on each row, so legality scoring stays correct even when a late-turn prompt truncates at 7680.
+- **Placeholder-arg sanitizer** — 17% of dataset tool calls carry a frozen `{"placeholder": "value"}` arg stub; `_strip_placeholder_args` blanks it so scoring degrades to name-only matching instead of rewarding the literal placeholder.
+- Reward aggregation rewritten as a weighted **active-component mean** — `task_completion` drops out when `terminal_reached=False`, `transition_legality` drops out when `valid_transitions` is empty; remaining weights renormalize. Generalizes the old `terminal_reached` rescale path.
+- New weights: `state_transition 0.40 / tool_call_f1 0.40 / task_completion 0.10 / transition_legality 0.10`.
+
+### Verification
+
+70 reward unit tests pass — added `TestTransitionLegality`, `TestStripPlaceholderArgs`, and `TestRewardWithinGroupVariance` (a regression gate asserting within-group spread > 0.2). On a real Task A row, four completions of differing quality scored:
+
+| completion | reward |
+|------------|-------:|
+| correct transition + correct tool | 1.000 |
+| valid-but-wrong edge, no tool | 0.556 |
+| hallucinated states | 0.444 |
+| empty | 0.444 |
+
+**Within-group spread 0.556 — versus ≈0.003 in the killed run.** Note: on no-tool turns (61% of rows) `graded_tool_call_f1([], [])` returns 1.0, making the tool component a within-group constant; `state + legality` (0.50 combined) carry the variance. Acceptable — the spread is healthy.
+
+### Updated retry plan
+
+1. Run `grpo_cat_a_diagnostic.yaml` (50 steps) from the SFT checkpoint. Check W&B: `train/reward_std` materially above 0.003, `frac_reward_zero_std` near 0, `train/kl` not spiking into the 30–40 range.
+2. Keep `beta=0.1`, `loss_type=grpo`, `max_completion_length=512`, the `save_steps` cadence.
+3. **Still open, not addressed by this fix:** SFT over-training (policy entropy — same prompt + same policy = same completions, regardless of reward resolution), the one-prompt-per-step batch geometry (`generation_batch_size` 8 ÷ `num_generations` 8 = 1 unique prompt per step), and multi-turn rollouts (a\*). If the diagnostic still shows byte-identical completions within groups, the bottleneck is policy entropy — follow the decision tree in the prior addendum.
+

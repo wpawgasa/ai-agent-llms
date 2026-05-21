@@ -109,6 +109,28 @@ def reached_terminal(text: str, expected_terminal: str) -> bool:
     return transitions[-1][1] == expected_terminal
 
 
+def transition_legality_score(
+    predicted: list[tuple[str, str]],
+    valid_transitions: list,
+) -> float:
+    """Fraction of predicted [STATE: X → Y] transitions that are legal edges.
+
+    A transition is legal when ``(from, to)`` appears in the workflow graph's
+    edge list. Unlike state-correctness scoring, this is independent of which
+    transition is *expected* for the turn — it only asks whether the emitted
+    transition exists in the graph at all, directly penalizing hallucinated
+    states. Empty prediction → 0.0 (the model must emit a transition).
+    """
+    if not predicted:
+        return 0.0
+    valid = {
+        (t[0], t[1])
+        for t in valid_transitions
+        if isinstance(t, (list, tuple)) and len(t) == 2
+    }
+    return sum(1 for tr in predicted if tuple(tr) in valid) / len(predicted)
+
+
 def node_f1(predicted_nodes: list[dict], gold_nodes: list[dict]) -> float:
     """Compute node F1 score between predicted and gold graphs."""
     from llm_workflow_agents.eval.graph_extraction_eval import (

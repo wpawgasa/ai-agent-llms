@@ -27,6 +27,11 @@ grpo:
   # Completion length — was 256 (TRL default), causing 16% truncation rate
   # in the killed run. 512 eliminates the truncation noise.
   max_completion_length: 512
+  # Prompt length — was absent, so TRL's default 512 applied and truncated
+  # ~90% of the enriched workflow prompts (3-5.5k tokens). The model could
+  # not perceive its workflow state. 7680 + 512 completion = 8192, exactly
+  # the max_seq_length hardcoded in training/grpo.py.
+  max_prompt_length: 7680
   # Surface a handful of completions to W&B each log step so the diagnostic
   # has actual samples next to frac_reward_zero_std. Cheap, load-bearing
   # for triage.
@@ -51,17 +56,20 @@ grpo:
 
 reward:
   function: "reward_business_logic"
-  # Weights reflect the 2026-05-19 reward redesign (see
-  # docs/grpo_diagnosis_gemma4_26b.md addendum). chain_propagation and
-  # format_compliance were structurally constant (1.0 on every row) and
-  # were dropped. state_transition + tool_call_f1 are now argument-graded
-  # variants (graded_tool_call_f1, _graded_state_match) so they vary
-  # smoothly within a GRPO group instead of flipping 0↔1.
+  # Weights reflect the reward redesign that replaced length_band with a
+  # prompt-grounded transition_legality component. length_band was
+  # task-irrelevant — it became the only source of within-group reward
+  # variance, so GRPO optimized completion length instead of workflow
+  # correctness. transition_legality scores whether each emitted
+  # [STATE: X → Y] is a legal edge in the workflow graph, penalizing
+  # hallucinated states. (Informational only — grpo.py reads reward.function,
+  # not reward.weights; the live weights are constants in
+  # training/rewards/reward_business_logic.py.)
   weights:
     state_transition: 0.40
     tool_call_f1: 0.40
     task_completion: 0.10
-    length_band: 0.10
+    transition_legality: 0.10
 
 data:
   source: "data/output/task_a"

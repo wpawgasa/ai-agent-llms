@@ -171,6 +171,21 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
             terminal_state = gt_full.get("terminal_state", "") or ""
             terminal_reached_overall = bool(gt_full.get("terminal_reached", True))
 
+            # Legal-edge set for the transition_legality reward component.
+            # Sourced from ground truth (not the prompt) so it stays correct
+            # even when a late-turn prompt is truncated at max_prompt_length.
+            wf_graph = raw.get("workflow_graph") or {}
+            if isinstance(wf_graph, str):
+                try:
+                    wf_graph = json.loads(wf_graph)
+                except (ValueError, TypeError):
+                    wf_graph = {}
+            valid_transitions = [
+                [t.get("from", ""), t.get("to", "")]
+                for t in wf_graph.get("transitions", [])
+                if isinstance(t, dict)
+            ]
+
             asst_indices = [
                 i for i, m in enumerate(raw_msgs) if m.get("role") == "assistant"
             ]
@@ -208,6 +223,7 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
                     ],
                     "terminal_state": terminal_state,
                     "terminal_reached": is_terminal_row,
+                    "valid_transitions": valid_transitions,
                 }
                 rows.append(
                     {

@@ -35,6 +35,7 @@ grpo:
   warmup_ratio: 0.05
   loss_type: "grpo"
   max_completion_length: 512
+  max_prompt_length: 7680      # 7680 + 512 completion = 8192 (grpo.py max_seq_length)
   log_completions: true
   num_completions_to_print: 4
   save_steps: 25               # ← diagnostic override (save at steps 25 and 50)
@@ -52,7 +53,7 @@ reward:
     state_transition: 0.40
     tool_call_f1: 0.40
     task_completion: 0.10
-    length_band: 0.10
+    transition_legality: 0.10
 
 data:
   source: "data/output/task_a"

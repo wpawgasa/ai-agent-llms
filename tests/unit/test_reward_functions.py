@@ -20,14 +20,16 @@ from llm_workflow_agents.training.reward_utils import (
     reached_terminal,
     state_sequence_match,
     tool_call_f1,
+    transition_legality_score,
 )
 from llm_workflow_agents.training.rewards.reward_business_logic import (
-    W_LENGTH_BAND,
     W_STATE_TRANSITION,
     W_TASK_COMPLETION,
     W_TOOL_CALL_F1,
+    W_TRANSITION_LEGALITY,
     _graded_state_match,
     _partial_state_match,
+    _strip_placeholder_args,
     reward_business_logic,
 )
 from llm_workflow_agents.training.rewards.reward_subagent import (
@@ -114,17 +116,17 @@ class TestRewardBusinessLogic:
     def test_weights_sum_to_one(self) -> None:
         total = (
             W_STATE_TRANSITION + W_TOOL_CALL_F1
-            + W_TASK_COMPLETION + W_LENGTH_BAND
+            + W_TASK_COMPLETION + W_TRANSITION_LEGALITY
         )
         assert abs(total - 1.0) < 1e-9
 
-    def test_weights_match_2026_05_19_redesign(self) -> None:
-        # Pins the post-pre-flight weights so future drift is caught.
-        # See docs/grpo_diagnosis_gemma4_26b.md addendum.
+    def test_weights_match_redesign(self) -> None:
+        # Pins the weights so future drift is caught. length_band was
+        # replaced by the prompt-grounded transition_legality component.
         assert W_STATE_TRANSITION == 0.40
         assert W_TOOL_CALL_F1 == 0.40
         assert W_TASK_COMPLETION == 0.10
-        assert W_LENGTH_BAND == 0.10
+        assert W_TRANSITION_LEGALITY == 0.10
 
     def test_format_only_score(self) -> None:
         """Well-formatted but wrong content scores at least format component."""
@@ -164,6 +166,143 @@ class TestRewardBusinessLogic:
             ],
         )
         assert len(result) == 2
+
+    def test_empty_valid_transitions_drops_legality_component(self) -> None:
+        # With no valid_transitions, the legality component is excluded and
+        # the remaining weights are renormalized — score stays in [0, 1].
+        result = reward_business_logic(
+            prompts=["p"],
+            completions=["[STATE: A → B]"],
+            ground_truths=[{
+                "state_annotations": [("A", "B")],
+                "tool_calls": [],
+                "terminal_state": "",
+                "terminal_reached": False,
+                "valid_transitions": [],
+            }],
+        )
+        assert 0.0 <= result[0] <= 1.0
+
+    def test_placeholder_args_not_rewarded_literally(self) -> None:
+        # A ground-truth tool call with the frozen placeholder stub is graded
+        # name-only; emitting the literal placeholder gives no arg bonus over
+        # any other arguments for the same tool name.
+        gt = [{
+            "state_annotations": [("A", "B")],
+            "tool_calls": [{"name": "fn", "arguments": {"placeholder": "value"}}],
+            "terminal_state": "",
+            "terminal_reached": False,
+            "valid_transitions": [["A", "B"]],
+        }]
+        literal = reward_business_logic(
+            ["p"],
+            ['[STATE: A → B]\n<tool_call>{"name": "fn", "arguments": {"placeholder": "value"}}</tool_call>'],
+            gt,
+        )
+        other = reward_business_logic(
+            ["p"],
+            ['[STATE: A → B]\n<tool_call>{"name": "fn", "arguments": {"real": "arg"}}</tool_call>'],
+            gt,
+        )
+        assert literal[0] == pytest.approx(other[0])
+
+
+# --- Strip Placeholder Args Tests ---
+
+
+class TestStripPlaceholderArgs:
+    """The dataset placeholder-stub sanitizer."""
+
+    def test_placeholder_stub_blanked(self) -> None:
+        out = _strip_placeholder_args(
+            [{"name": "fn", "arguments": {"placeholder": "value"}}]
+        )
+        assert out[0]["arguments"] == {}
+        assert out[0]["name"] == "fn"
+
+    def test_real_args_untouched(self) -> None:
+        calls = [{"name": "fn", "arguments": {"x": 1}}]
+        assert _strip_placeholder_args(calls) == calls
+
+    def test_does_not_mutate_input(self) -> None:
+        calls = [{"name": "fn", "arguments": {"placeholder": "value"}}]
+        _strip_placeholder_args(calls)
+        assert calls[0]["arguments"] == {"placeholder": "value"}
+
+
+# --- Transition Legality Tests ---
+
+
+class TestTransitionLegality:
+    """Prompt-grounded transition_legality component (replaces length_band)."""
+
+    def test_legal_edge_scores_one(self) -> None:
+        assert transition_legality_score([("A", "B")], [["A", "B"]]) == 1.0
+
+    def test_hallucinated_state_scores_zero(self) -> None:
+        assert transition_legality_score([("X", "Y")], [["A", "B"]]) == 0.0
+
+    def test_mixed_scores_fraction(self) -> None:
+        score = transition_legality_score(
+            [("A", "B"), ("X", "Y")], [["A", "B"], ["B", "C"]]
+        )
+        assert score == pytest.approx(0.5)
+
+    def test_empty_prediction_scores_zero(self) -> None:
+        assert transition_legality_score([], [["A", "B"]]) == 0.0
+
+    def test_empty_valid_transitions_scores_zero(self) -> None:
+        assert transition_legality_score([("A", "B")], []) == 0.0
+
+
+# --- Within-Group Variance Tests (regression gate for the dead-reward bug) ---
+
+
+class TestRewardWithinGroupVariance:
+    """The GRPO failure mode: all completions of one prompt scored alike.
+
+    GRPO learns from within-group reward variance. The reward MUST give
+    different scores to different-quality completions of the *same* prompt.
+    """
+
+    def test_discriminates_completion_quality(self) -> None:
+        gt = {
+            "state_annotations": [("VERIFY_IDENTITY", "AUTHENTICATE")],
+            "tool_calls": [{
+                "name": "manage_subscription",
+                "arguments": {"customer_id": "C1", "action": "upgrade"},
+            }],
+            "messages": [],
+            "terminal_state": "TERMINAL",
+            "terminal_reached": False,
+            "valid_transitions": [
+                ["GREETING", "VERIFY_IDENTITY"],
+                ["VERIFY_IDENTITY", "AUTHENTICATE"],
+                ["AUTHENTICATE", "LOOKUP_ACCOUNT"],
+                ["VERIFY_IDENTITY", "UPDATE_RECORDS"],
+            ],
+        }
+        best = (
+            "[STATE: VERIFY_IDENTITY → AUTHENTICATE]\n"
+            '<tool_call>{"name": "manage_subscription", '
+            '"arguments": {"customer_id": "C1", "action": "upgrade"}}</tool_call>'
+        )
+        mid = "[STATE: VERIFY_IDENTITY → UPDATE_RECORDS]"  # valid edge, wrong target, no tool
+        poor = "[STATE: FOO → BAR]"  # hallucinated states
+        empty = ""
+
+        completions = [best, mid, poor, empty]
+        scores = reward_business_logic(
+            prompts=["p"] * 4,
+            completions=completions,
+            ground_truths=[gt] * 4,
+        )
+
+        # Real within-group spread — the property GRPO needs.
+        assert max(scores) - min(scores) > 0.2
+        # Ordering tracks quality.
+        assert scores[0] > scores[1] > scores[2]
+        assert scores[2] == pytest.approx(scores[3])
 
 
 # --- Graded State Match Tests (fix c2 — see grpo_diagnosis addendum) ---
