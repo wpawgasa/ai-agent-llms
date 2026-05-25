@@ -93,6 +93,30 @@ def _unwrap_unsloth_gemma4_kv_zero_proxy() -> None:
     _install(Gemma4TextConfig)
 
 
+def _silence_trl_completion_console_print() -> None:
+    """Suppress TRL's rich-based ``print_prompt_completions_sample`` console
+    dump while keeping W&B completion-table logging intact.
+
+    ``GRPOTrainer.log()`` (trl 0.23.1) gates two independent branches on
+    ``log_completions=True``: the rich console print and the wandb.Table
+    upload. Replacing the symbol bound in ``trl.trainer.grpo_trainer`` with
+    a no-op silences the console output without touching the W&B branch and
+    without affecting other modules that import the same helper.
+    """
+    try:
+        import trl.trainer.grpo_trainer as gt
+    except ImportError:
+        return
+    if getattr(gt, "_unsloth_silenced_completion_print", False):
+        return
+
+    def _noop(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    gt.print_prompt_completions_sample = _noop
+    gt._unsloth_silenced_completion_print = True
+
+
 def _detect_model_family(sft_checkpoint: str) -> str | None:
     """Return ``config.model_type`` for the SFT checkpoint, or None on failure.
 
@@ -389,6 +413,11 @@ def train_grpo(config_path: Path) -> GRPOResult:
     # transformers 5.9.0 — both ``_detect_model_family`` below and Unsloth's
     # own loader rely on it. Disarm immediately.
     _unwrap_unsloth_gemma4_kv_zero_proxy()
+
+    # Keep ``log_completions: true`` so W&B receives the completion table,
+    # but suppress TRL's rich console dump (which spams the training log
+    # with full prompt/completion text every logging step).
+    _silence_trl_completion_console_print()
 
     with open(config_path) as f:
         config = yaml.safe_load(f) or {}
