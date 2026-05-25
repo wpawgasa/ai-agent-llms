@@ -41,6 +41,10 @@ training:
   # per step than unpacked. Re-enable only after wiring up proper
   # packed-attention masking (cu_seqlens / flash_attn_varlen).
   packing: false
+  # all_tokens: loss on every non-pad token (default; preserves baseline).
+  # response_only: loss only on assistant-turn tokens; system/user/tool → -100.
+  # See docs/fine_tuning_recipes.md "Loss Masking: Two Recipes".
+  loss_mask: "all_tokens"
 
 data:
   # Pre-split train/val/test files produced by scripts/split_task_a_sft.py

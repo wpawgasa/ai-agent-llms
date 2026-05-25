@@ -18,6 +18,79 @@ logger = structlog.get_logger(__name__)
 
 _GLM_OOM_FALLBACK_RANK = 32
 
+_LOSS_MASK_ALL_TOKENS = "all_tokens"
+_LOSS_MASK_RESPONSE_ONLY = "response_only"
+_VALID_LOSS_MASKS = (_LOSS_MASK_ALL_TOKENS, _LOSS_MASK_RESPONSE_ONLY)
+
+
+def render_response_only_sample(
+    messages: list[dict[str, str]],
+    tokenizer: Any,
+    max_seq_length: int,
+) -> dict[str, list[int]]:
+    """Tokenize one conversation, masking non-assistant spans to -100.
+
+    Walks `messages` incrementally: for each turn, tokenizes
+    `apply_chat_template(prefix)` and `apply_chat_template(prefix + turn)` and
+    takes the delta. Tokens from non-assistant turns get label -100; assistant
+    tokens carry through unmasked. Truncates from the left so the final
+    assistant turn always survives.
+
+    Chat-template-agnostic — relies only on `apply_chat_template`'s
+    deterministic prefix-extension behavior. Used by Recipe B (response_only)
+    in docs/fine_tuning_recipes.md.
+
+    Returns {"input_ids", "attention_mask", "labels"} for a single sample.
+    """
+    ids: list[int] = []
+    labels: list[int] = []
+
+    def _encode(msgs: list[dict[str, str]]) -> list[int]:
+        if not msgs:
+            return []
+        out = tokenizer.apply_chat_template(
+            msgs, tokenize=True, add_generation_prompt=False
+        )
+        # Some processors / wrappers return BatchEncoding; normalize to list.
+        if hasattr(out, "tolist"):
+            out = out.tolist()
+        if out and isinstance(out[0], list):
+            out = out[0]
+        return list(out)
+
+    prev_encoded: list[int] = []
+    for i, msg in enumerate(messages):
+        extended = _encode(messages[: i + 1])
+        # Guard against tokenizers that don't deterministically extend
+        # (rare; e.g. some templates re-render BOS). Fall back to encoding
+        # this turn alone if the prefix doesn't match the head of `extended`.
+        if (
+            len(extended) >= len(prev_encoded)
+            and extended[: len(prev_encoded)] == prev_encoded
+        ):
+            new = extended[len(prev_encoded) :]
+        else:
+            new = _encode([msg])
+            extended = prev_encoded + new
+        ids.extend(new)
+        if msg.get("role") == "assistant":
+            labels.extend(new)
+        else:
+            labels.extend([-100] * len(new))
+        prev_encoded = extended
+
+    # Left-truncate to preserve the final assistant turn.
+    if len(ids) > max_seq_length:
+        cut = len(ids) - max_seq_length
+        ids = ids[cut:]
+        labels = labels[cut:]
+
+    return {
+        "input_ids": ids,
+        "attention_mask": [1] * len(ids),
+        "labels": labels,
+    }
+
 
 @dataclass(frozen=True)
 class SFTResult:
@@ -170,6 +243,27 @@ def train_sft(
     training_cfg = config.get("training", {})
     data_cfg = config.get("data", {})
     logging_cfg = config.get("logging", {})
+
+    loss_mask = training_cfg.get("loss_mask", _LOSS_MASK_ALL_TOKENS)
+    if loss_mask not in _VALID_LOSS_MASKS:
+        return SFTResult(
+            error=(
+                f"Unknown training.loss_mask={loss_mask!r}. "
+                f"Valid values: {_VALID_LOSS_MASKS}."
+            )
+        )
+    if loss_mask == _LOSS_MASK_RESPONSE_ONLY:
+        # eval_loss averages over a different denominator under response_only
+        # (only assistant tokens) vs all_tokens (every non-pad token), so the
+        # two recipes' eval_loss numbers are not directly comparable. Within a
+        # single run, metric_for_best_model: eval_loss still selects correctly.
+        logger.warning(
+            "sft_loss_mask_response_only",
+            note=(
+                "eval_loss is NOT comparable across loss_mask recipes; "
+                "rank recipes via eval/agent_benchmark.py weighted_workflow_score."
+            ),
+        )
 
     model_config_path = config.get("model", {}).get("config_path")
     if not model_config_path:
@@ -559,8 +653,34 @@ def train_sft(
             "attention_mask": encodings["attention_mask"],
         }
 
-    train_ds = train_ds.map(_render_chat, batched=True, remove_columns=["messages"])
-    eval_ds = eval_ds.map(_render_chat, batched=True, remove_columns=["messages"])
+    def _render_chat_response_only(batch: dict[str, Any]) -> dict[str, Any]:
+        # Per-turn re-tokenization. Emits a `labels` column with -100 over
+        # system/user/tool spans; TRL's default collator preserves any
+        # pre-existing `labels` column and only pads with -100.
+        out_ids: list[list[int]] = []
+        out_attn: list[list[int]] = []
+        out_labels: list[list[int]] = []
+        for msgs in batch["messages"]:
+            sample = render_response_only_sample(
+                msgs, tokenizer, max_seq_length_for_tokenize
+            )
+            out_ids.append(sample["input_ids"])
+            out_attn.append(sample["attention_mask"])
+            out_labels.append(sample["labels"])
+        return {
+            "input_ids": out_ids,
+            "attention_mask": out_attn,
+            "labels": out_labels,
+        }
+
+    _render_fn = (
+        _render_chat_response_only
+        if loss_mask == _LOSS_MASK_RESPONSE_ONLY
+        else _render_chat
+    )
+    logger.info("sft_dataset_render", loss_mask=loss_mask)
+    train_ds = train_ds.map(_render_fn, batched=True, remove_columns=["messages"])
+    eval_ds = eval_ds.map(_render_fn, batched=True, remove_columns=["messages"])
 
     # Manual sample packing. Unsloth disables its native packing for
     # vision-language model classes (Gemma-4 here), even though our
@@ -576,19 +696,30 @@ def train_sft(
             or 0
         )
 
+        has_labels = loss_mask == _LOSS_MASK_RESPONSE_ONLY
+
         def _pack(ds: Dataset, name: str) -> Dataset:
             # Materialize lengths and rows. Iterate via `for ex in ds` so
             # the per-row dict comes through Datasets' standard accessor.
-            samples: list[tuple[list[int], list[int]]] = []
+            # Carry an optional `labels` channel for response_only mode; the
+            # EOS separator inserted between concatenated samples is masked
+            # to -100 so the model never receives gradient on filler tokens.
+            samples: list[tuple[list[int], list[int], list[int] | None]] = []
             for ex in ds:
                 ids = list(ex["input_ids"])[:max_seq_length_for_tokenize]
                 attn = list(ex["attention_mask"])[:max_seq_length_for_tokenize]
-                samples.append((ids, attn))
+                labs = (
+                    list(ex["labels"])[:max_seq_length_for_tokenize]
+                    if has_labels
+                    else None
+                )
+                samples.append((ids, attn, labs))
 
             # FFD: longest first, then first-fit into existing bins.
             samples.sort(key=lambda s: -len(s[0]))
-            bins: list[list[list[int]]] = []  # each bin = [ids_list, attn_list]
-            for ids_l, attn_l in samples:
+            # each bin = [ids_list, attn_list, labels_list_or_None]
+            bins: list[list[list[int] | None]] = []
+            for ids_l, attn_l, labs_l in samples:
                 placed = False
                 for b in bins:
                     sep = 1 if b[0] else 0
@@ -596,19 +727,30 @@ def train_sft(
                         if sep:
                             b[0].append(eos_id)
                             b[1].append(1)
+                            if has_labels and b[2] is not None:
+                                b[2].append(-100)
                         b[0].extend(ids_l)
                         b[1].extend(attn_l)
+                        if has_labels and b[2] is not None and labs_l is not None:
+                            b[2].extend(labs_l)
                         placed = True
                         break
                 if not placed:
-                    bins.append([list(ids_l), list(attn_l)])
+                    bins.append(
+                        [
+                            list(ids_l),
+                            list(attn_l),
+                            list(labs_l) if (has_labels and labs_l is not None) else None,
+                        ]
+                    )
 
-            packed = Dataset.from_dict(
-                {
-                    "input_ids": [b[0] for b in bins],
-                    "attention_mask": [b[1] for b in bins],
-                }
-            )
+            packed_dict: dict[str, list[list[int]]] = {
+                "input_ids": [b[0] for b in bins],
+                "attention_mask": [b[1] for b in bins],
+            }
+            if has_labels:
+                packed_dict["labels"] = [b[2] for b in bins]  # type: ignore[misc]
+            packed = Dataset.from_dict(packed_dict)
             total_in_tokens = sum(len(s[0]) for s in samples)
             total_out_tokens = sum(len(b[0]) for b in bins)
             logger.info(
@@ -619,6 +761,7 @@ def train_sft(
                 window=max_seq_length_for_tokenize,
                 density=round(len(ds) / max(1, len(packed)), 2),
                 util=round(total_in_tokens / max(1, total_out_tokens), 3),
+                has_labels=has_labels,
             )
             return packed
 

@@ -23,6 +23,8 @@ training:
   max_seq_length: 4096
   gradient_checkpointing: true
   packing: true
+  # all_tokens (default) | response_only — see docs/fine_tuning_recipes.md.
+  loss_mask: "all_tokens"
 
 data:
   source: "data/output/task_b"

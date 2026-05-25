@@ -704,3 +704,115 @@ class TestModuleImports:
     def test_import_training_result(self) -> None:
         from llm_workflow_agents.training.train_specialist import TrainingResult
         assert TrainingResult is not None
+
+
+# --- Loss-mask recipe tests (Recipe B: response_only) ---
+
+
+def _load_tokenizer_or_skip(model_id: str):
+    """Load a tokenizer for chat-template tests, skipping if offline."""
+    pytest.importorskip("transformers")
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained(model_id)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"tokenizer {model_id!r} unavailable offline: {e}")
+
+
+SAMPLE_CONVERSATION = [
+    {"role": "system", "content": "You are a helpful workflow assistant. Follow FORMAT_RULES strictly."},
+    {"role": "user", "content": "I need to reset my password."},
+    {"role": "assistant", "content": "[STATE: greeting → authenticating] Sure — please confirm your email."},
+    {"role": "user", "content": "alice@example.com"},
+    {"role": "assistant", "content": "[STATE: authenticating → resetting] <tool_call>{\"name\":\"reset_password\",\"arguments\":{\"email\":\"alice@example.com\"}}</tool_call>"},
+    {"role": "tool", "content": "{\"status\":\"sent\",\"to\":\"alice@example.com\"}"},
+    {"role": "assistant", "content": "[STATE: resetting → done] A reset link was emailed."},
+]
+
+
+class TestLossMaskResponseOnly:
+    """Recipe B: assistant-only loss masking via render_response_only_sample.
+
+    These tests exercise the per-turn re-tokenization helper directly to
+    confirm system/user/tool spans are masked to -100 and assistant spans
+    survive — across two chat-template families (Qwen ChatML, Gemma) where
+    the tokenizers are available offline.
+    """
+
+    def _check_masking_invariants(self, sample: dict[str, list[int]], tokenizer) -> None:
+        ids = sample["input_ids"]
+        labels = sample["labels"]
+        attn = sample["attention_mask"]
+        assert len(ids) == len(labels) == len(attn)
+        assert all(a == 1 for a in attn)
+        # Must contain at least one masked AND one unmasked position.
+        assert any(lab == -100 for lab in labels), "no -100 labels found"
+        assert any(lab != -100 for lab in labels), "no unmasked labels found"
+        # Decoded unmasked tokens should include assistant content fragments
+        # and exclude phrases that appear ONLY in system/user/tool turns.
+        unmasked_ids = [i for i, lab in zip(ids, labels) if lab != -100]
+        unmasked_text = tokenizer.decode(unmasked_ids, skip_special_tokens=False)
+        assert "[STATE: resetting → done]" in unmasked_text
+        assert "reset link was emailed" in unmasked_text
+        # User/system/tool-exclusive phrases must NOT bleed into the unmasked
+        # span. (Note: "alice@example.com" appears in BOTH a user turn AND an
+        # assistant tool_call argument, so it correctly stays unmasked — pick
+        # phrases that appear in non-assistant turns only.)
+        assert "FORMAT_RULES strictly" not in unmasked_text  # system-only
+        assert "I need to reset my password" not in unmasked_text  # user-only
+        assert '"status":"sent"' not in unmasked_text  # tool-only
+
+    def test_qwen_chatml_template(self) -> None:
+        from llm_workflow_agents.training.sft import render_response_only_sample
+
+        tok = _load_tokenizer_or_skip("Qwen/Qwen2.5-0.5B-Instruct")
+        sample = render_response_only_sample(SAMPLE_CONVERSATION, tok, max_seq_length=2048)
+        self._check_masking_invariants(sample, tok)
+
+    def test_gemma_template(self) -> None:
+        from llm_workflow_agents.training.sft import render_response_only_sample
+
+        tok = _load_tokenizer_or_skip("google/gemma-2-2b-it")
+        # Gemma uses role "model" instead of "assistant" in its template, but
+        # our masking key is the input role string — apply_chat_template
+        # accepts "assistant" and remaps it. Decoded output uses "model".
+        sample = render_response_only_sample(SAMPLE_CONVERSATION, tok, max_seq_length=2048)
+        self._check_masking_invariants(sample, tok)
+
+    def test_left_truncation_preserves_final_assistant_turn(self) -> None:
+        from llm_workflow_agents.training.sft import render_response_only_sample
+
+        tok = _load_tokenizer_or_skip("Qwen/Qwen2.5-0.5B-Instruct")
+        # Force truncation: full conv is ~150 tokens; cap at 40 to drop the
+        # head while keeping the trailing assistant turn intact.
+        sample = render_response_only_sample(SAMPLE_CONVERSATION, tok, max_seq_length=40)
+        assert len(sample["input_ids"]) == 40
+        ids = sample["input_ids"]
+        labels = sample["labels"]
+        unmasked_ids = [i for i, lab in zip(ids, labels) if lab != -100]
+        decoded = tok.decode(unmasked_ids, skip_special_tokens=False)
+        assert "reset link was emailed" in decoded
+
+    def test_invalid_loss_mask_value_rejected(self, tmp_path: Path) -> None:
+        """train_sft returns an error SFTResult on unknown loss_mask values."""
+        import yaml
+
+        from llm_workflow_agents.training.sft import train_sft
+
+        model_cfg_path = tmp_path / "model.yaml"
+        model_cfg_path.write_text(yaml.safe_dump({"model": {"name": "fake"}}))
+        sft_cfg_path = tmp_path / "sft.yaml"
+        sft_cfg_path.write_text(
+            yaml.safe_dump(
+                {
+                    "stage": "sft",
+                    "model": {"config_path": str(model_cfg_path)},
+                    "training": {"loss_mask": "bogus_mode"},
+                }
+            )
+        )
+        result = train_sft(sft_cfg_path)
+        assert result.error is not None
+        assert "loss_mask" in result.error
+        assert "bogus_mode" in result.error

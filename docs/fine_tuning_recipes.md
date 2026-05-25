@@ -99,6 +99,7 @@ source .venv/bin/activate && python -m training.sft \
 | `training.num_epochs` | 3 |
 | `training.max_seq_length` | 8192 |
 | `training.packing` | true |
+| `training.loss_mask` | `all_tokens` (default) or `response_only` — see [Loss Masking](#loss-masking-two-recipes) |
 | `data.source` | `data/output/task_a` |
 | `logging.wandb_project` | `llm-workflow-agents-sft` |
 
@@ -109,6 +110,34 @@ source .venv/bin/activate && python -m training.sft \
 | Cat A | `data/output/task_a` | Multi-turn workflow conversations (L1–L5, 1000 samples) |
 | Cat B | `data/output/task_b` | Tool-call data (external + 15K synthetic, 15% negatives) |
 | Cat C | `data/output/task_c` | (prompt, graph) pairs (5000 samples) |
+
+### Loss Masking: Two Recipes
+
+The SFT cross-entropy loss can be computed over different token spans. Two recipes are supported, selected via `training.loss_mask` in the SFT config YAML.
+
+#### Recipe A — `all_tokens` (default)
+
+Loss is computed on **every non-padding token**: system prompt, user turns, assistant turns, and tool results all contribute equally.
+
+- **Implementation:** default path, no extra handling. `_render_chat` emits only `input_ids` / `attention_mask`; TRL's collator sets `labels = input_ids` and masks only padding (`-100` where `attention_mask == 0`).
+- **Pros:** simplest; no chat-template-specific logic; the model also fits the input distribution, which can mildly regularize when completions are short and training data is limited.
+- **Cons:** the gradient is dominated by the long system prompt — whose `FORMAT_RULES` block is byte-identical across every sample — and by user/tool tokens the model never emits at inference. This dilutes the learning signal on the tokens that matter (`[STATE: X → Y]` annotations and `<tool_call>{...}</tool_call>` tags).
+
+#### Recipe B — `response_only` (completion-only)
+
+Loss is computed **only on assistant-turn tokens**. System, user, and tool turns are masked to `-100` and contribute no gradient.
+
+- **Implementation:** `render_response_only_sample()` in `training/sft.py`. Per-turn re-tokenization — walk `messages` incrementally; for each turn, tokenize `apply_chat_template(prefix)` vs `apply_chat_template(prefix + turn)` and take the delta. Tokens whose source turn has `role == "assistant"` keep their token id as the label; all other tokens get `-100`. Chat-template-agnostic — works for Qwen ChatML, Gemma `<start_of_turn>`, Mistral `[INST]`, Nemotron, and GLM without a per-family marker registry. The trade-off is O(N²) tokenizer calls per sample at dataset-prep time; negligible at our scale (≤5k samples × ≤30 turns, one-time cost). The conversation is left-truncated to `max_seq_length` so the final assistant turn always survives. When `training.packing: true`, the inter-sample EOS separator inserted by `_pack` is also masked to `-100`.
+- **Pros:** the entire gradient targets the tokens the model must produce; aligns SFT with GRPO, which scores only assistant tokens by construction; typically faster convergence on the `[STATE:]` / `<tool_call>` format.
+- **Cons:** O(N²) tokenization at dataset-prep time (one-time); `eval_loss` is on a different scale than Recipe A — see warning below.
+
+#### Choosing between them
+
+`response_only` is expected to be the better recipe for Task A — the system prompt is long and boilerplate-heavy, so `all_tokens` spends most of each step re-fitting text the model will never generate. It is **not** a settled win, however; treat it as a hypothesis to A/B test.
+
+> **`eval_loss` is not comparable across recipes.** `all_tokens` averages loss over easy boilerplate (numerically lower); `response_only` averages only over harder assistant tokens (numerically higher). `metric_for_best_model: eval_loss` still selects the best checkpoint *within* a single run, but you cannot rank the two recipes by `eval_loss`. Compare them only via the downstream `eval/agent_benchmark.py` `weighted_workflow_score`.
+
+**Recommended procedure:** train one checkpoint per recipe with config otherwise identical, run `agent_benchmark.py` on both, and adopt whichever scores higher.
 
 ---
 
