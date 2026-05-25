@@ -1,0 +1,30 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "d6c0c2f4c6c7",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/sft_cat_a.yaml",
+    "configs/training/sft_cat_b.yaml",
+    "configs/training/sft_cat_c.yaml",
+    "docs/fine_tuning_recipes.md",
+    "src/llm_workflow_agents/training/sft.py",
+    "tests/unit/test_training.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d6/c0c2f4c6c7/0/metadata.json",
+      "transcript": "/d6/c0c2f4c6c7/0/full.jsonl",
+      "content_hash": "/d6/c0c2f4c6c7/0/content_hash.txt",
+      "prompt": "/d6/c0c2f4c6c7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1804,
+    "cache_creation_tokens": 383321,
+    "cache_read_tokens": 4041444,
+    "output_tokens": 63399,
+    "api_call_count": 47
+  }
+}

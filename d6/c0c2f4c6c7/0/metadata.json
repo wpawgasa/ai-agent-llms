@@ -1,0 +1,39 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "d6c0c2f4c6c7",
+  "session_id": "3b33c429-d8c4-4f17-8103-7b40fd922cca",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T03:57:31.043686468Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/sft_cat_a.yaml",
+    "configs/training/sft_cat_b.yaml",
+    "configs/training/sft_cat_c.yaml",
+    "docs/fine_tuning_recipes.md",
+    "src/llm_workflow_agents/training/sft.py",
+    "tests/unit/test_training.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "c4b3b5317ef9",
+  "token_usage": {
+    "input_tokens": 1804,
+    "cache_creation_tokens": 383321,
+    "cache_read_tokens": 4041444,
+    "output_tokens": 63399,
+    "api_call_count": 47
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T03:57:30.059302227Z",
+    "agent_lines": 305,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 305,
+    "agent_percentage": 100
+  }
+}

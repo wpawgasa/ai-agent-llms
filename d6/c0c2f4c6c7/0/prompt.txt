@@ -1,0 +1,25 @@
+Look at the data in @data/output/benchmark/task_a and @data/output/sft/task_a_cleaned and how the prompt is enriched and processed before sending to model for benchmark and training with SFT and GRPO. Give a system prompt and user prompt samples that sent to models for benchmark and training.
+
+---
+
+What is the loss function and accuracy metric for SFT. We are inserting the whole conversation in, then what do we train to learn from the input?
+
+---
+
+Should SFT learn only assistance turns?
+
+---
+
+Think over this conversation again
+
+---
+
+I'm confused. What is the current SFT recipe? Does it learns to generate all tokens or just response tokens? Would it be better to learn to generate response tokens?
+
+---
+
+Document this in @docs/fine_tuning_recipes.md  I want another recipe to train on response tokens only but also want to keep all tokens recipe.
+
+---
+
+implement the training.loss_mask flag and the response_only masking path in sft.py
