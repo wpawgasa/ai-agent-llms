@@ -134,9 +134,13 @@ fi
 
 # ── Patch GRPO config ─────────────────────────────────────────────────────────
 # Inject the resolved SFT checkpoint + data dir so grpo.py picks them up.
-PATCHED_DIR="$PROJECT_ROOT/.runs/grpo_cat_a"
+# Preserve the original config's stem in the patched file path — grpo.py derives
+# the checkpoint dir from Path(config_path).stem, so renaming here would route
+# every run into checkpoints/grpo_cat_a/ regardless of --grpo-config.
+GRPO_STEM=$(basename "${GRPO_CONFIG%.*}")
+PATCHED_DIR="$PROJECT_ROOT/.runs/$GRPO_STEM"
 mkdir -p "$PATCHED_DIR"
-PATCHED_CFG="$PATCHED_DIR/grpo_cat_a.yaml"
+PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}.yaml"
 
 python3 -c "
 from pathlib import Path
@@ -154,7 +158,6 @@ with open('${PATCHED_CFG}', 'w') as f:
 "
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-GRPO_STEM=$(basename "${GRPO_CONFIG%.*}")
 echo "=== Task A GRPO — Phase 2 ==="
 echo "  Model config   : $MODEL_CONFIG"
 echo "  GRPO config    : $GRPO_CONFIG"
