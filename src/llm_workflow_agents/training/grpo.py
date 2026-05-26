@@ -302,6 +302,16 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
     return Dataset.from_list(rows)
 
 
+# Latest-step instrumentation stashed by _make_reward_adapter; consumed by
+# _UniqueCompletionsCallback on the next on_log. TRL 0.23.1 logs `entropy`,
+# `reward_std`, `frac_reward_zero_std`, `kl`, `completions/mean_length`, etc.
+# natively (trl/trainer/grpo_trainer.py around line 1500–1730), so this
+# module only adds `unique_completions_per_group` — the metric that would
+# have surfaced the 2026-05-25 5a5w4jqr stub-attractor drift at step ~10
+# instead of step 50. See docs/grpo_diagnosis_gemma4_26b.md.
+_LATEST_INSTRUMENTATION: dict[str, float] = {}
+
+
 def _make_reward_adapter(reward_fn: Callable) -> Callable:
     """Bridge project reward signature to TRL 0.23.1's keyword-only call.
 
@@ -358,6 +368,23 @@ def _make_reward_adapter(reward_fn: Callable) -> Callable:
                 flat_completions.append(c[-1].get("content", "") or "")
             else:
                 flat_completions.append(str(c))
+
+        # Stash unique-completions-per-group for the next on_log call.
+        # GRPO batches K rollouts per prompt; we group by the prompt content
+        # (str-coerce to handle list[dict] chat-formatted prompts) and count
+        # unique completion text per group, then average.
+        if flat_completions and prompts is not None:
+            groups: dict[str, list[str]] = {}
+            for p, c in zip(prompts, flat_completions):
+                key = str(p)[:512]
+                groups.setdefault(key, []).append(c.strip())
+            if groups:
+                uniques = [len(set(cs)) for cs in groups.values()]
+                sizes = [len(cs) for cs in groups.values()]
+                _LATEST_INSTRUMENTATION["unique_completions_per_group"] = (
+                    sum(uniques) / len(uniques)
+                )
+                _LATEST_INSTRUMENTATION["group_size"] = sum(sizes) / len(sizes)
 
         return reward_fn(prompts or [], flat_completions, gts)
 
@@ -538,9 +565,32 @@ def train_grpo(config_path: Path) -> GRPOResult:
     eval_held_out_every = monitoring_cfg.get("eval_held_out_every", 50)
     callbacks = []
 
-    if monitoring_cfg.get("reward_hacking_detector", False):
-        from transformers import TrainerCallback
+    # Always-on: surface unique_completions_per_group in W&B / TRL logs.
+    # TRL 0.23.1 already logs `entropy`, `reward_std`, `frac_reward_zero_std`
+    # natively; this adds the one metric that would have flagged the
+    # 2026-05-25 stub-attractor drift well before step 50.
+    from transformers import TrainerCallback
 
+    class _UniqueCompletionsCallback(TrainerCallback):
+        """Inject unique_completions_per_group into the standard log dict.
+
+        The reward adapter stashes the latest batch's value on
+        ``_LATEST_INSTRUMENTATION``; this callback copies it onto every
+        ``on_log`` event so the W&B integration picks it up alongside TRL's
+        native metrics. No direct ``wandb.log`` calls — transformers'
+        logger forwarder handles fan-out.
+        """
+
+        def on_log(self, args, state, control, logs=None, **kwargs):  # noqa: ANN001
+            if logs is None:
+                return
+            for key in ("unique_completions_per_group", "group_size"):
+                if key in _LATEST_INSTRUMENTATION:
+                    logs[f"train/{key}"] = _LATEST_INSTRUMENTATION[key]
+
+    callbacks.append(_UniqueCompletionsCallback())
+
+    if monitoring_cfg.get("reward_hacking_detector", False):
         class _RewardHackingCallback(TrainerCallback):
             """Monitor for reward hacking: reward ↑ + held-out ↓."""
 

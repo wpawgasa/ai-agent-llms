@@ -40,7 +40,12 @@ from llm_workflow_agents.training.rewards.reward_graph_extraction import (
     reward_graph_extraction,
 )
 from llm_workflow_agents.training.sft import SFTResult
-from llm_workflow_agents.training.grpo import GRPOResult, _resolve_reward_fn
+from llm_workflow_agents.training.grpo import (
+    GRPOResult,
+    _LATEST_INSTRUMENTATION,
+    _make_reward_adapter,
+    _resolve_reward_fn,
+)
 from llm_workflow_agents.training.pilot_check import PilotResult
 
 
@@ -558,6 +563,59 @@ class TestResolveRewardFn:
     def test_resolve_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown reward function"):
             _resolve_reward_fn("nonexistent")
+
+
+# --- Reward Adapter Instrumentation Tests (2026-05-26 addendum) ---
+
+
+class TestRewardAdapterInstrumentation:
+    """Locks the unique_completions_per_group stash in _make_reward_adapter.
+
+    The reward adapter groups completions by their corresponding prompt
+    (each prompt is duplicated K times for K rollouts in GRPO), counts
+    unique completion text per group, averages across groups, and pushes
+    the value onto _LATEST_INSTRUMENTATION for the
+    _UniqueCompletionsCallback to log on the next on_log. This metric
+    would have surfaced the 2026-05-25 5a5w4jqr stub-attractor drift at
+    step ~10 instead of step 50.
+    """
+
+    def _stub_reward(self, prompts, completions, gts):
+        return [0.0] * len(completions)
+
+    def test_unique_completions_counted_per_group(self) -> None:
+        adapter = _make_reward_adapter(self._stub_reward)
+        # Two prompts, K=4 rollouts each; group A has 4 unique, group B has 2.
+        adapter(
+            prompts=["A", "A", "A", "A", "B", "B", "B", "B"],
+            completions=["a1", "a2", "a3", "a4", "b1", "b1", "b2", "b2"],
+            ground_truth=[
+                "{}", "{}", "{}", "{}", "{}", "{}", "{}", "{}",
+            ],
+        )
+        assert _LATEST_INSTRUMENTATION["unique_completions_per_group"] == pytest.approx(3.0)
+        assert _LATEST_INSTRUMENTATION["group_size"] == pytest.approx(4.0)
+
+    def test_all_byte_identical_within_group(self) -> None:
+        # The 5a5w4jqr stub-attractor pattern: 8/8 byte-identical per group.
+        adapter = _make_reward_adapter(self._stub_reward)
+        adapter(
+            prompts=["P"] * 8,
+            completions=["stub"] * 8,
+            ground_truth=["{}"] * 8,
+        )
+        assert _LATEST_INSTRUMENTATION["unique_completions_per_group"] == pytest.approx(1.0)
+        assert _LATEST_INSTRUMENTATION["group_size"] == pytest.approx(8.0)
+
+    def test_strips_whitespace_when_counting_uniques(self) -> None:
+        # Trailing whitespace shouldn't inflate the unique count.
+        adapter = _make_reward_adapter(self._stub_reward)
+        adapter(
+            prompts=["P", "P", "P", "P"],
+            completions=["x", "x ", " x", "x\n"],
+            ground_truth=["{}"] * 4,
+        )
+        assert _LATEST_INSTRUMENTATION["unique_completions_per_group"] == pytest.approx(1.0)
 
 
 # --- Pilot Check Tests ---

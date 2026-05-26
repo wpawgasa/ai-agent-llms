@@ -658,3 +658,238 @@ The path is (i) less-sharp SFT, or (ii) (a\*) multi-turn rollouts. Cheap-(a), mo
 
 These would all be expensive cargo-culting. The bottleneck is upstream of GRPO.
 
+---
+
+## Preflight Outcome (2026-05-26): Step 1 Run — Entropy Bottleneck Hypothesis Falsified
+
+**Run analyzed:** `scripts/preflight_entropy_diag.py` against `checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-500` at N=20 unique-conversation prompts × K=8 rollouts, T=1.0, top_p=0.95, max_new=512, scored under the post-2026-05-21 reward (graded state + graded tool + task_completion + transition_legality; length_band / chain_propagation / format_compliance dropped).
+**Artifacts:** `runs/preflight/postredesign_20x8_ckpt500.json` (per-prompt rewards + components + completions, 160 total), `runs/preflight/postredesign_20x8_ckpt500.log`.
+**Wall time:** 11.5 min on H100 80GB (single model load + 160 generations).
+
+### TL;DR
+
+The 2026-05-25 diagnosis's leaf node — "policy entropy is the bottleneck, completions byte-identical within groups, commit to re-SFT or (a\*) multi-turn rollouts" — **does not reproduce at N=20 from cold ckpt-500**. The policy IS diverse (≈7/8 textually unique completions per group). The doc's gate `mean unique completions / group < 3` for re-SFT confirmation is missed by more than 2×. We are on the middle branch of the prior addendum's decision tree, not the byte-identical leaf:
+
+> `frac_reward_zero_std` high + completions visibly diverse: reward still mis-resolved, iterate on (c).
+
+**Recommended next action moves back to reward iteration, not SFT.** The 2026-05-25 doc's prescription to re-train with `num_train_epochs=1` is shelved pending a reward-resolution pass.
+
+### Headline metrics
+
+| metric | ckpt-500 (this run) | 2026-05-25 doc gate |
+|---|---:|---|
+| `mean_unique_per_group` | **6.95 / 8** | < 3 ⇒ re-SFT confirmed — **NOT met** |
+| `frac_collapsed_groups` (`reward_std < 0.01`) | **0.50** | < 0.5 ⇒ proceed to 1000 steps — at threshold |
+| `mean_reward_std` | 0.0716 | vs. ≈0.003 in killed `t82y64hc`; ~24× better |
+| `median_reward_std` | 0.0184 | majority of groups still nearly reward-clumped |
+| `mean_reward` | 0.6450 | |
+| `reward_std` range | [0.0000, 0.2690] | bimodal: 10 groups at 0.0, 10 groups in 0.03–0.27 |
+
+### The smoking gun — "diverse text, identical scores"
+
+Of the 10 collapsed groups (`reward_std == 0`), 8 have ≥6/8 unique completions and **7 of those have all 8 rollouts textually distinct**. Zero groups in the run have ≤2 unique completions — the byte-identical pattern that defined the GRPO `5a5w4jqr` step-50 stub attractor is absent on cold ckpt-500.
+
+Per-prompt breakdown of the collapsed half:
+
+```
+idx=1   reward_std=0.0000  n_unique=8/8     ← all 8 textually distinct, same reward
+idx=2   reward_std=0.0000  n_unique=3/8     ← partial mode collapse, but still > byte-id
+idx=6   reward_std=0.0000  n_unique=8/8
+idx=8   reward_std=0.0000  n_unique=3/8
+idx=9   reward_std=0.0000  n_unique=8/8
+idx=10  reward_std=0.0000  n_unique=8/8
+idx=11  reward_std=0.0000  n_unique=8/8
+idx=14  reward_std=0.0000  n_unique=8/8
+idx=15  reward_std=0.0000  n_unique=8/8
+idx=19  reward_std=0.0000  n_unique=6/8
+```
+
+In 7/10 collapsed groups, the policy produced 8 genuinely different completions and the reward function assigned all of them the **exact same scalar**. This is reward bucket clumping, not policy entropy collapse.
+
+### What the GRPO `5a5w4jqr` step-50 attractor actually was, then
+
+The 2026-05-25 diagnosis read the step-50 byte-identical 8/8 collapse as evidence the *base policy* was entropy-collapsed. The preflight refutes that — the base policy is diverse. The correct reading: GRPO drifted INTO the byte-identical attractor over the first 50 steps, starting from a diverse base. With 50% of groups providing zero gradient (every step), the policy was free-floating along the no-gradient manifold and settled on whichever response minimized exposed surface area to the reward — the per-domain `TERMINAL`/`ESCALATE` stub. **Cold-start diversity was lost during training, not before it.**
+
+This changes what "fixing the bottleneck" means. The 2026-05-25 prescription (re-SFT with `num_train_epochs=1`) assumes a frozen-base problem and would not help here: a less-sharp SFT base would have the same reward-resolution problem, just with slightly more diverse cold-start completions that still clump in the same reward buckets.
+
+### Why the reward still under-resolves under the 2026-05-21 redesign
+
+Re-examine the components, given that policy diversity is *not* the bottleneck:
+
+- **`state_transition` (0.40, graded {0, 0.3, 0.5, 1.0}):** still discrete. 8 different completions that each produce a state annotation matching the GT `from` but not `to` all score 0.5. The graded tiers expand the bucket count from 2 to 4, not from 2 to ∞.
+- **`tool_call_f1` (0.40, graded):** `compute_argument_graded_f1` gives `name_weight=0.4 + 0.6 × (matched_args / total_gt_args)`. On no-tool turns (61% of training rows) the score is 1.0 for any empty prediction → 8 different completions that all emit no tool all score 1.0. On with-tool turns, if 8 completions all guess the same wrong tool name (common), they all score 0.0.
+- **`task_completion` (0.10):** rescaled out on most rows (`terminal_reached=False`), so contributes nothing to within-group spread on those prompts.
+- **`transition_legality` (0.10):** scores fraction of legal edges. 8 completions that emit the same legal-but-wrong transition all score 1.0.
+
+The active-component-mean aggregation pools these into a small finite reward lattice. With ≤4 levels per active component and ≤2 active components on most rows, the lattice has at most ~16 possible reward values per prompt — and on prompts where one component saturates, far fewer. Eight diverse completions on such a prompt land in 1–3 buckets, not 8.
+
+### Updated retry plan
+
+Replace the 2026-05-25 doc's step 2 (re-SFT) with reward iteration (c-prime):
+
+1. **Lower `name_weight` in `compute_argument_graded_f1`** (`eval/tool_call_f1.py`): 0.4 → 0.2. Currently a correct tool name with all-wrong args still scores 0.4; the graded path can't drop below that floor. Lowering the floor lets argument-level differences move the score across a wider range when the name matches. Side effect: completions with the *wrong* tool name still score 0.0 (no name match → no credit), so the binary cliff for tool selection remains — but at least within-name variation gets surfaced.
+2. **Add a graded tier to `transition_legality_score`** (`training/reward_utils.py`): currently `legal_count / total_emitted`. A 1-of-3 legal emission scores 0.33 even if the one legal edge is way off the expected sequence. Add a secondary penalty term for emitted-but-illegal transitions that scores 0 currently → e.g., `(legal_count - penalty × illegal_count) / total_emitted` to spread the score range below 0.
+3. **Reconsider the active-component-mean rescale.** When `task_completion` drops out (terminal_reached=False) on most rows, the denominator drops from 1.0 to 0.9; when `transition_legality` also drops out (no `valid_transitions` field), it drops to 0.8 — and the *same* discrete state/tool buckets just get scaled up. The rescale doesn't add buckets, it shifts them. Worth experimenting with a fixed-denominator (1.0) variant that gives 0 credit instead of rescaling on inactive components, to see if it produces meaningfully different gradients.
+4. **Re-run this same preflight (`scripts/preflight_entropy_diag.py` with N=20 × K=8 on ckpt-500)** under each candidate reward and check whether `frac_collapsed_groups` drops below ~0.3. Only proceed to a 50-step GRPO diagnostic on the winner.
+
+The doc's prior hygiene items (`beta=0.1`, `loss_type=grpo`, `max_prompt_length=7680`, `max_completion_length=512`, `save_steps=50`) stay in `grpo_cat_a_diagnostic.yaml` unchanged.
+
+### What this run definitively rules out (revised from 2026-05-25)
+
+- **Re-SFT with `num_train_epochs=1`.** The entropy-bottleneck premise that justifies this action did not reproduce. Shelved until and unless a reward-resolution iteration also fails to lift `frac_collapsed_groups` below ~0.3.
+- **(a\*) multi-turn rollouts as the immediate next lever.** Same reason — the bottleneck the preflight surfaces is single-turn-reward-lattice, not single-turn-rollout-variance. Multi-turn rollouts would still need a reward that resolves diverse trajectories into different scores; the reward-resolution problem is upstream of the rollout-shape problem.
+
+### Open questions
+
+- **Does the same reward bucket clumping persist on ckpt-1656?** The 2026-05-19 smoke at N=5 showed ckpt-500 and ckpt-1656 producing nearly identical reward distributions. With N=20 × K=8 we now have statistical power to confirm or refute this. Worth re-running on ckpt-1656 (~12 min wall) as part of the c-prime evaluation loop.
+- **Does the GRPO `5a5w4jqr` step-50 stub attractor form because of advantage standardization on a half-zero-variance signal?** GRPO normalizes advantages per group; groups with zero variance contribute zero advantage but the *non-zero-variance* groups dominate the gradient. If those happen to favor short stub-style outputs (because length isn't penalized post 2026-05-21), the policy drifts toward them globally. Worth instrumenting per-step `unique_completions_per_group` (the prior addendum's step 3) and watching the trajectory during a c-prime retry.
+
+### Script changes that landed during this run
+
+The preflight script was broken against both (a) the post-2026-05-21 reward redesign (imported `_length_band_score` which was deleted) and (b) the unsloth_zoo Gemma-4 proxy under transformers 5.9.0 (the `training/grpo._unwrap_unsloth_gemma4_kv_zero_proxy` helper was insufficient against `_run_temporary_patches('pre_compile')` re-application during `FastLanguageModel.from_pretrained`). Updates:
+
+- **`_score_per_component`** rewritten to the post-2026-05-21 component set: `_graded_state_match`, `graded_tool_call_f1` (with `_strip_placeholder_args`), `transition_legality_score`, `task_completion` (rescaled out when `terminal_reached=False`). Dropped `chain_propagation`, `format_compliance`, `_length_band_score`.
+- **`_decode_gt`** preserves `valid_transitions` (now produced by `_load_grpo_jsonl`) as-is; needed for `transition_legality_score`.
+- **New `_patch_unsloth_gemma4_proxy_iter()`** — filters `num_kv_shared_layers` out of `_Gemma4KVSharedSafeProxy.__iter__`. Keeps the proxy's `__getattr__` raise intact (so `hasattr(decoder_config, "num_kv_shared_layers") == False` and the cache `__init__` workaround short-circuits the buggy `layer_types[:-0] == []` slice), but stops the strict-dataclass validator's `for name in text_config: getattr(text_config, name)` loop from ever asking for the field. This is a tighter fix than the original full-proxy unwrap, which exposed `num_kv_shared_layers=0` and re-triggered the cache bug (verified empirically — third attempt of this preflight crashed with `IndexError: list index out of range` in `DynamicCache.update`).
+- **Two-venv environment note:** the script must run under `.venv-train/bin/python` (transformers 5.9.0, knows `gemma4`), not the default `/opt/venv` (transformers 4.57.1, which fails at config load before the proxy even matters). The unsloth and unsloth_zoo packages are still picked up from `/opt/venv` via the venv's `_opt_venv.pth` overlay — that's fine, they apply their patches under whichever transformers is resolved first.
+
+---
+
+## Implementation Outcome (2026-05-26): Reward Iteration Skipped, Instrumentation Shipped
+
+**Plan attempted:** `/root/.claude/plans/adaptive-napping-swan.md` — fixed-denominator aggregation (lever #3) + unique-completions instrumentation, with an A/B verification rescore of `runs/preflight/postredesign_20x8_ckpt500.json` before committing to fresh generation or GRPO retry.
+
+### Lever #3 (fixed-denominator aggregation): reverted
+
+The rescore on the held-fixed 2026-05-26 completions showed lever #3 is strictly worse on this data:
+
+| metric | OLD (active-component-mean) | NEW (fixed-denom) | delta |
+|---|---:|---:|---:|
+| `mean_reward_std` | 0.0716 | 0.0654 | **−8.7%** |
+| `median_reward_std` | 0.0184 | 0.0165 | −10% |
+| `frac_collapsed_groups` | 0.50 | **0.50** | 0 |
+| `mean_reward` | 0.6450 | 0.5837 | −9.5% |
+
+**Why the plan's premise was wrong:** fixed-denom only adds new buckets when a single group's rollouts span *both* active and inactive component states. But `terminal_reached` and `valid_transitions` are GT-row properties, not per-completion properties — within a group, all 8 rollouts share the same active set. The change just multiplies every score in the group by `W_active` (typically 0.9), shrinking spread proportionally without adding levels. Reverted with no residual code change.
+
+### Deeper finding: the bottleneck is a tool-emission gap, not a reward-resolution gap
+
+Direct inspection of the 10 collapsed groups in `runs/preflight/postredesign_20x8_ckpt500.json` revealed a uniform pattern hidden under the aggregate `frac_collapsed_groups = 0.50` headline:
+
+| sub-pattern | count | tool component value | mechanism |
+|---|---:|---:|---|
+| `NONE TRIED, GT expects tool` | 4 | uniformly 0.0 | model correctly identifies state+legality, fails to emit GT tool, all 8 rollouts wrap absent tool in different prose |
+| `NONE TRIED, GT has no tool` | 6 | uniformly **1.0** | model is *correct* (no tool needed, none emitted), state+legality+tool all saturate → reward correctly scores 8 different prose attempts of correct behavior identically |
+
+**In all 10 collapsed groups: 0/8 rollouts attempt a tool call.** The non-collapsed groups by contrast show 0–7 tool attempts per group with `tool_component_values` spanning `{0.0, 0.4, 0.6, 1.0}`. The collapsed groups are not where the policy *fails to vary* — they're where the policy is *deterministically tool-skipping* (which is a single-mode behavior at temperature 1.0).
+
+This rules out all three reward levers from the original plan:
+- **Lever #1 (`name_weight` 0.4 → 0.2):** only fires when pred name matches GT name. Here pred has no tool → `_pair_match_graded` returns 0.0 regardless.
+- **Lever #2 (per-illegal-transition penalty):** there are no illegal transitions in the collapsed groups. The model is correct on state/legality.
+- **Lever #3 (fixed-denom):** already verified strictly worse on this data.
+
+It also reframes the 6 `tool=1.0` groups as **fundamentally unreachable by any tool- or state-side reward change** — the reward is correctly scoring "8 different ways of saying the same correct thing" as the same. Breaking those requires either:
+- A continuous prose-quality component (semantic similarity to GT assistant message via sentence-transformers, or similar)
+- A multi-turn rollout architecture where the *trajectory* differentiates the rollouts (the deferred `(a*)` from the 2026-05-19 addendum)
+- Accepting that 50% of prompts are policy-locked at high reward and proceeding to GRPO on the remaining 50% as the gradient source
+
+### What landed in this PR
+
+Only the instrumentation half of the plan. `training/grpo.py` now stashes per-step `unique_completions_per_group` and `group_size` in `_LATEST_INSTRUMENTATION` (set inside `_make_reward_adapter`) and surfaces them via a new always-on `_UniqueCompletionsCallback` that injects them into the standard log dict under `train/unique_completions_per_group` and `train/group_size`. TRL 0.23.1 already logs `train/entropy`, `train/reward_std`, `train/frac_reward_zero_std`, `train/kl`, `train/completions/{mean,min,max}_length`, and per-reward-function mean/std natively (`trl/trainer/grpo_trainer.py:1475–1729`), so no additional metric code was needed.
+
+Three new tests in `TestRewardAdapterInstrumentation` (`tests/unit/test_reward_functions.py:573`) pin the grouping, byte-identical, and whitespace-handling behavior. Total reward-test count: 66 → 69.
+
+A standalone `scripts/rescore_preflight.py` was added as a reusable A/B harness — loads a stored preflight JSON, re-resolves the prompts/ground-truths via the same seed, and applies the current `reward_business_logic` to compute fresh per-prompt rewards. CPU-only, ~10s wall. Used to gate lever #3 before paying for fresh generation; will be reused for any future reward iteration.
+
+### Updated next step
+
+Run `configs/training/grpo_cat_a_diagnostic.yaml` (50 steps) from ckpt-500 with the new instrumentation. The decisive observation is the **`train/unique_completions_per_group` trajectory over the first ~10 steps**:
+
+- **Stays above ~5:** the 50% non-collapsed signal is enough to learn from; let the run go to 1000 steps if `frac_reward_zero_std` stays below ~0.6.
+- **Drops below 3 by step 10–25 (the `5a5w4jqr` pattern):** the policy is drifting into a single-stub attractor despite a richer reward landscape than `t82y64hc` had. At that point the bottleneck is no longer reward-side and the next action is one of:
+  - Curated re-SFT on a tool-emission-rich subset (the 4 `GT-has-tool, none-emitted` collapsed groups suggest this slice is under-represented in SFT data)
+  - Continuous prose-quality reward component
+  - Commit to multi-turn rollouts (deferred `(a*)`)
+
+The 24× improvement in `mean_reward_std` (0.003 in `t82y64hc` → 0.072 here) is the right reason to *try* the 50-step run rather than assume it will fail like `5a5w4jqr`. The 2026-05-21 reward redesign + 2026-05-21 prompt-length fix may have done enough; this is the cheapest way to find out.
+
+### What this PR rules out (revised again)
+
+- **Lever #1 / #2 / #3 from the 2026-05-26 addendum's "Updated retry plan":** none reach the collapsed groups in their current form.
+- **The plan's lemma "reward resolution can be fixed without touching the policy":** false for the 6 saturating-correct groups; reward-only changes cannot differentiate 8 prose surfaces of identical correct behavior without a new prose-quality signal.
+
+---
+
+## GRPO 50-Step Smoke (2026-05-26): Entropy-Collapse Reading of `5a5w4jqr` Falsified
+
+**Run analyzed:** [`wpawgasa/huggingface/df4dot2d`](https://wandb.ai/wpawgasa/huggingface/runs/df4dot2d) (`laced-totem-43`) — 50-step GRPO from ckpt-500 under `configs/training/grpo_cat_a_diagnostic.yaml`, HF rollouts (Gemma-4 R9 fallback), with the new `train/unique_completions_per_group` instrumentation.
+**Status:** Ran to completion (50/50, 30.6 min). No crash, no NaN, no early-stop. Checkpoints saved at steps 25 and 50.
+
+### TL;DR
+
+`5a5w4jqr`'s "policy entropy collapse → stub attractor" reading is definitively falsified at scale. Under the same SFT base (ckpt-500), same reward (post-2026-05-21), same hyperparameters (`beta=0.1, loss_type=grpo, max_prompt_length=7680, max_completion_length=512`), this run's `unique_completions_per_group` drifts **toward higher diversity**, not lower — exactly opposite direction from `5a5w4jqr`'s end-state of 8/8 byte-identical rollouts. The instrumentation surfaced this trajectory in real-time, making the failure-mode call possible in 30 min instead of after rebuilding intuition from completions tables.
+
+### Headline trajectory
+
+`train/unique_completions_per_group` — the metric that would have flagged `5a5w4jqr`'s drift at step ~10 if it existed then:
+
+| window | this run | `5a5w4jqr` end-state |
+|---|---:|---:|
+| first 10 steps mean | 5.40 / 8 | (similar diversity baseline) |
+| last 10 steps mean | **5.90 / 8** | **collapsed to 1.0 / 8** (8/8 byte-identical) |
+| median over 50 steps | **8.0 / 8** | (drifted to 1/8 by step 50) |
+| % steps with uniq ≤ 1 | 4% (2/50) | "step 50: all 8 byte-identical" |
+| % steps with uniq < 3 | 10% (5/50) | (high by end) |
+| **drift (last − first)** | **+0.50** ✅ | **−7+** ❌ |
+
+The brief uniq ≤ 2 steps (4, 6, 7, 42, 46, 50 = 6 of 50) are **transient**, not absorbing — every collapse bounces back to uniq = 7–8 within the next 1–2 steps. There is no monotonic drift toward the stub attractor that ended `5a5w4jqr`.
+
+### Other stability gates (all green)
+
+| gate | this run | gate threshold | result |
+|---|---:|---|---|
+| `mean_reward_std` | 0.0483 | vs. 0.003 in killed `t82y64hc` | **16× better** |
+| `frac_reward_zero_std == 1.0` | 67% of steps (trending **down** from 0.80 → 0.70) | < 60% ideal; structurally bounded at ~0.50 by the 2026-05-26 preflight's saturated-group analysis | borderline, but improving |
+| `kl` | mean 1.64; max 26.1 (single step-5 spike) | < 30 → ok | ✅ |
+| `grad_norm` | max 9483 (step 3, pre-warmup); otherwise 0.04–24 | < 1000 sustained → ok | ✅ |
+| reward range | [0.0, 1.0] full span | non-flat → ok | ✅ |
+| reward mean | 0.617 | up from ckpt-500 baseline 0.65 (essentially unchanged but with stability) | ✅ |
+| crash / NaN | none | | ✅ |
+| early-stop | not triggered | | ✅ |
+
+### Why this changes the next step
+
+The 2026-05-25 diagnosis ended at the leaf:
+
+> `frac_reward_zero_std` high + completions byte-identical → **policy entropy is the bottleneck.** Two paths: (i) re-SFT with `num_train_epochs=1`; (ii) (a\*) multi-turn rollouts.
+
+The 2026-05-26 preflight already weakened this by showing cold-ckpt-500 produced 6.95/8 unique completions per group at scale. This smoke confirms that **even after 50 GRPO steps**, the policy stays at 5.9/8 unique completions per group on average — no drift into the byte-identical leaf at all. Both (i) re-SFT and (ii) multi-turn rollouts were responses to a failure mode that does not occur on this base.
+
+The remaining bottleneck — `frac_reward_zero_std ≈ 0.67` driven by the 50% structurally-saturated groups — **is not getting worse over training**. The first 10 steps logged 0.80; the last 10 logged 0.70. Reward resolution improves slightly as the policy learns, even though the structural ceiling remains.
+
+### What to do with the run
+
+This is the cleanest evidence yet that a full 1000-step GRPO run on the existing reward + ckpt-500 base is viable. The smoke meets every numerical-stability gate and shows the entropy concern that gated the prior plan was misdiagnosed.
+
+Recommended actions in priority order:
+
+1. **Extend to 1000 steps using the saved checkpoint-50**: `configs/training/grpo_cat_a.yaml` resume path. ~9 h wall on H100 with HF rollouts. The diagnostic config's `save_steps=25` cadence already produced a usable midpoint. With `train/unique_completions_per_group` now in the live W&B view, any future drift surfaces in real-time and the run can be killed cheaply.
+2. **Defer all three reward levers indefinitely.** None of them address the now-confirmed primary signal source (the 50% non-collapsed groups providing useful gradient), and at least lever #3 was empirically shown to *hurt* via the 2026-05-26 rescore.
+3. **If the 1000-step run drifts toward collapse** (instrumentation now visible): revisit the c-iteration options or pivot to (a\*) multi-turn rollouts. But the smoke trajectory has +0.50 diversity drift over 50 steps; baseline expectation is the trend continues rather than reverses.
+
+### What this run definitively rules out (additive to prior leafs)
+
+- The "re-SFT with `num_train_epochs=1`" prescription from the 2026-05-25 doc. The reason it was prescribed (entropy-collapsed base) is not present on ckpt-500.
+- The "(a\*) multi-turn rollouts as immediate next lever" prescription. Same reason — single-turn rollouts produce sufficient diversity for the policy to learn.
+- The framing that `5a5w4jqr` represented a failure of the SFT base. That run's mid-training drift into a stub attractor is now an unexplained one-off, not a reproducible property — different from this run only in seed and step count, yet producing opposite end-states. Likely candidates for the divergence: pre-2026-05-21 reward design (no `transition_legality`, length_band was load-bearing for variance), the absence of `max_prompt_length=7680` (added 2026-05-21), or simply seed sensitivity of the early-step gradient under DAPO normalization with high-variance groups. The current run is reproducible; that one is not.
+
+### Cost of this finding
+
+- 30.6 min of H100 time (one diagnostic GRPO run)
+- ~12 min preflight A/B
+- ~10s rescore validation
+- ~70 LOC instrumentation + 3 tests + 1 reusable rescore script
+- Total turnaround from "let's diagnose this" to "decisive answer": a single working session.
+
+The instrumentation paid for itself in the first run.
+

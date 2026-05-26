@@ -104,6 +104,41 @@ def _decode_gt(gt_str: str) -> dict[str, Any]:
     return d
 
 
+def _patch_unsloth_gemma4_proxy_iter() -> None:
+    """Filter ``num_kv_shared_layers`` out of ``_Gemma4KVSharedSafeProxy.__iter__``.
+
+    The proxy must stay alive: cache ``__init__`` short-circuits the buggy
+    ``layer_types[:-0] == []`` slice via ``hasattr(decoder_config,
+    "num_kv_shared_layers") == False``, which only holds while the proxy's
+    ``__getattr__`` raises on that name. So we cannot unwrap the proxy.
+
+    But transformers 5.9.0's strict-dataclass validator ``validate_token_ids``
+    does ``for name in text_config: getattr(text_config, name)`` — unconditional
+    iteration, raw ``getattr``. The proxy's ``__iter__`` forwards to the real
+    config's iterator, which yields ``num_kv_shared_layers`` — and the raw
+    ``getattr`` on the proxy then triggers the raise. Filtering the name out
+    of ``__iter__`` makes the validator skip it without disturbing ``hasattr``.
+    """
+    try:
+        from unsloth_zoo.temporary_patches.gemma4 import _Gemma4KVSharedSafeProxy
+    except ImportError:
+        return
+
+    _sentinel = "_unsloth_gemma4_proxy_iter_filtered"
+    orig_iter = _Gemma4KVSharedSafeProxy.__iter__
+    if getattr(orig_iter, _sentinel, False):
+        return
+
+    def __iter__(self):  # noqa: ANN001
+        return iter(
+            name for name in object.__getattribute__(self, "_real")
+            if name != "num_kv_shared_layers"
+        )
+
+    setattr(__iter__, _sentinel, True)
+    _Gemma4KVSharedSafeProxy.__iter__ = __iter__
+
+
 def _generate_for_checkpoint(
     checkpoint: str,
     prompts: list[dict[str, Any]],
@@ -123,6 +158,16 @@ def _generate_for_checkpoint(
     # Unsloth must be imported before torch so its monkey-patches take effect.
     from unsloth import FastLanguageModel  # noqa: I001
     import torch
+
+    # Importing unsloth installs unsloth_zoo's Gemma-4 KV-zero proxy. The
+    # proxy is load-bearing for the cache __init__ workaround (its raising
+    # __getattr__ on num_kv_shared_layers makes hasattr() return False, which
+    # bypasses transformers' buggy layer_types[:-0] == [] slice). But under
+    # transformers 5.9.0 the strict-dataclass validator iterates proxy
+    # attributes and raw-getattrs each name, hitting the raise. Patch only
+    # the proxy's __iter__ to skip num_kv_shared_layers — preserves cache
+    # behaviour, bypasses the validator.
+    _patch_unsloth_gemma4_proxy_iter()
 
     print(f"[load] {checkpoint}", flush=True)
     t0 = time.time()
@@ -201,53 +246,51 @@ def _generate_for_checkpoint(
 
 
 def _score_per_component(completion: str, gt: dict[str, Any]) -> dict[str, float]:
-    """Compute the 5 reward sub-components for one (completion, gt) pair.
+    """Compute the 4 reward sub-components (2026-05-21 redesign) for one (completion, gt) pair.
 
-    Mirrors reward_business_logic's body but returns the raw component scores
-    so we can see which one (if any) is saturating and squashing the
-    effective reward variance.
+    Mirrors the current reward_business_logic body: state_transition (graded),
+    tool_call_f1 (graded, placeholder-stripped), task_completion (active when
+    terminal_reached), transition_legality (active when valid_transitions
+    non-empty). chain_propagation / format_compliance / length_band were
+    dropped in the 2026-05-21 redesign and are no longer reported.
     """
     from llm_workflow_agents.training.reward_utils import (
-        chain_propagation_score,
         extract_state_annotations,
         extract_tool_calls,
-        format_compliance_check,
+        graded_tool_call_f1,
         reached_terminal,
-        tool_call_f1,
+        transition_legality_score,
     )
     from llm_workflow_agents.training.rewards.reward_business_logic import (
-        _length_band_score,
-        _partial_state_match,
+        _graded_state_match,
+        _strip_placeholder_args,
     )
 
     pred_states = extract_state_annotations(completion)
     gt_states = gt.get("state_annotations", [])
-    r_state = _partial_state_match(pred_states, gt_states)
+    r_state = _graded_state_match(pred_states, gt_states)
 
     pred_tools = extract_tool_calls(completion)
-    gt_tools = gt.get("tool_calls", [])
-    r_tool = tool_call_f1(pred_tools, gt_tools)
-
-    pred_msgs = [{"role": "assistant", "content": completion}]
-    gt_msgs = gt.get("messages", [])
-    r_chain = chain_propagation_score(pred_msgs, gt_msgs)
-
-    r_format = format_compliance_check(completion)
-    r_length = _length_band_score(completion)
+    gt_tools = _strip_placeholder_args(gt.get("tool_calls", []))
+    r_tool = graded_tool_call_f1(pred_tools, gt_tools)
 
     terminal = gt.get("terminal_state", "")
     if not gt.get("terminal_reached", True):
-        r_completion = None  # rescaled out
+        r_completion = None  # rescaled out (active-component mean)
     else:
         r_completion = 1.0 if reached_terminal(completion, terminal) else 0.0
+
+    valid_transitions = gt.get("valid_transitions", [])
+    if not valid_transitions:
+        r_legality = None  # rescaled out (active-component mean)
+    else:
+        r_legality = transition_legality_score(pred_states, valid_transitions)
 
     return {
         "state_transition": r_state,
         "tool_call_f1": r_tool,
-        "chain_propagation": r_chain,
-        "format_compliance": r_format,
         "task_completion": r_completion,
-        "length_band": r_length,
+        "transition_legality": r_legality,
     }
 
 
