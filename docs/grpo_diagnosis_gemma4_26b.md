@@ -560,3 +560,101 @@ The step-100 W&B completions table is conclusive: 8 completions to one prompt sc
 2. Keep `beta=0.1`, `loss_type=grpo`, `max_completion_length=512`, the `save_steps` cadence.
 3. **Still open, not addressed by this fix:** SFT over-training (policy entropy — same prompt + same policy = same completions, regardless of reward resolution), the one-prompt-per-step batch geometry (`generation_batch_size` 8 ÷ `num_generations` 8 = 1 unique prompt per step), and multi-turn rollouts (a\*). If the diagnostic still shows byte-identical completions within groups, the bottleneck is policy entropy — follow the decision tree in the prior addendum.
 
+---
+
+## Diagnostic Outcome (2026-05-25): Run `5a5w4jqr` — Numerics Tamed, Entropy Collapse Confirmed
+
+**Run analyzed:** [`wpawgasa/huggingface/5a5w4jqr`](https://wandb.ai/wpawgasa/huggingface/runs/5a5w4jqr) (`usual-dew-42`) — the 50-step diagnostic launched after the 2026-05-21 reward redesign (`grpo_cat_a_diagnostic.yaml`, `beta=0.1`, `loss_type=grpo`, `max_prompt_length=7680`, `max_completion_length=512`, HF rollouts via Gemma-4 R9 fallback, ckpt-500 base, length_band dropped, transition_legality added).
+**Status:** Ran to completion (50/50, 27.4 min). **No crash, no NaN, no learning.**
+
+### TL;DR
+
+The 2026-05-21 fixes stabilized the numerics but exposed the underlying failure: the policy is in an **entropy-collapsed stub attractor**, and the redesigned reward provides no within-group variance to escape it. **GRPO hyperparameter tuning has hit its ceiling on this SFT base.** Next action moves to the SFT side (re-train with `num_train_epochs=1`) or to (a\*) multi-turn rollouts.
+
+### Headline contrast vs the prior killed run
+
+| Symptom | `t82y64hc` (killed @100) | `5a5w4jqr` (this run, 50 steps) |
+|---|---|---|
+| KL spikes ≥30 | 4× | **0×** ✅ |
+| Grad norm >500 | 7× | 1× (step 19: 784) ✅ |
+| Max loss | 4.02 | 0.57 ✅ |
+| `frac_reward_zero_std = 1.0` | ~3% of steps | **70% of steps (35/50)** ❌ |
+| Byte-identical 8/8 within group | Rare | Steps 6, 7, 42, 46, **50** |
+| Reward trajectory | Flat 0.40→0.26 | Flat, oscillating 0.33–1.0 |
+
+The KL/loss-explosion problem is solved. A *different* failure surfaced: the policy converges to a fixed string with zero rollout variance.
+
+### The smoking-gun completions table — step 50
+
+At the final step, all 8 GRPO rollouts for the IT-troubleshoot prompt produced the identical 95-character string at T=1.0, top_p=0.95:
+
+```
+[STATE: CONFIRM_ACTION → ESCALATE]
+Handling it_troubleshoot_escalation in state CONFIRM_ACTION.
+```
+
+Reward 0.333 on every rollout; advantage 0.0 on every rollout. This is the "TERMINAL stub" pattern from the 2026-05-19 addendum (Prompt 4) generalized into a per-domain attractor. The reward gives this stub:
+- 0 from `tool_call_f1` (no tool emitted)
+- partial from `state_transition` (well-formed annotation, wrong transition)
+- 0 from `task_completion` (terminal not reached → rescaled out)
+- partial from `transition_legality` (`ESCALATE` is a legal edge somewhere in the graph)
+
+Net 0.333 — low enough that GRPO *should* penalize it, but `reward_std = 0` zeroes out the advantage, so there's no gradient toward escape. The stub is a stable fixed point.
+
+### Mid-run vs end-of-run — the collapse happened during training
+
+Same run, ~step 25 completions table (table file `completions_181_*.json`), same prompt schema — 4 sample rollouts:
+
+| len | reward | content sketch |
+|----:|------:|---|
+| 344 | 0.556 | `[STATE: ACTIVATE_SERVICE → TERMINAL]` + Thai summary, no tool |
+| 465 | 1.000 | Same state + actual `<tool_call>{"name":"activate_roaming",...}</tool_call>` + closing |
+| 341 | 0.556 | Same state + Thai summary, no tool |
+| 238 | 0.556 | Same state + shorter Thai summary, no tool |
+
+At step 25 the policy still produced diverse outputs of varying lengths, and one rollout in 4 actually emitted a tool call and scored 1.0. By step 50 all 8 rollouts are byte-identical. **GRPO trained the policy *toward* the collapse over 25 steps.** With nonzero `frac_reward_zero_std = 1.0` events at 35/50 steps and `length_band` no longer providing escape variance, the optimizer drifted the policy into the lowest-divergence solution that scored ≥0.33.
+
+### Why removing `length_band` made `frac_reward_zero_std` 25× worse
+
+`length_band` was the only smooth (continuous-valued) reward component. The remaining four components are all discrete:
+- `state_transition`: scores in {0.0, 0.3, 0.5, 1.0} per row
+- `tool_call_f1` (graded): rational fractions over arg counts; mostly 0.0 or 1.0 in practice
+- `task_completion`: rescaled out on ~86% of rows; otherwise {0, 1}
+- `transition_legality`: fraction of emitted `[STATE: X→Y]` annotations that are legal edges; granular but typically 0/1 on stub-style outputs
+
+When 8 rollouts cluster (e.g., all emit the same state-stub), every component lands in the same discrete bucket → `reward_std` = exactly 0 → GRPO advantage = 0 → no learning. `length_band` previously masked this by injecting 0.02–0.06 of always-present length noise, *but* that noise was task-irrelevant and was itself the prior collapse mechanism. There is no reward redesign that simultaneously (a) removes length-noise hacking and (b) maintains within-group variance on a policy that produces identical completions. The signal must come from the policy.
+
+### Updated decision-tree position
+
+We are now at the leaf of the prior addendum's tree:
+
+> `frac_reward_zero_std` high + completions byte-identical → **policy entropy is the bottleneck.** (b)+(c) cannot fix this.
+
+The path is (i) less-sharp SFT, or (ii) (a\*) multi-turn rollouts. Cheap-(a), more GRPO hyperparameter tuning, and further reward iteration are all ruled out by this run.
+
+### Recommended next steps (in execution order)
+
+1. **(Cheap, 1 hour) Re-run the pre-flight entropy diagnostic at scale.** `scripts/preflight_entropy_diag.py` with N=20+ prompts × K=8 rollouts, scoring under the *new* reward. Confirm `mean unique completions / group < 3` on ckpt-500 before committing to a re-SFT. If diversity is acceptable but reward_std is still ≈0, the bottleneck is reward resolution, not entropy — return to (c)-iteration.
+2. **(Required if step 1 confirms) Re-train SFT with `num_train_epochs=1` + early-stop at the loss elbow.** The 2026-05-19 addendum already located the elbow at step 340 / epoch 0.62 / loss 0.308. ckpt-500 (epoch 0.91) is past it. Config diff to `configs/training/sft_cat_a.yaml`:
+   ```yaml
+   num_train_epochs: 1
+   # add:
+   eval_steps: 100
+   metric_for_best_model: eval_loss
+   load_best_model_at_end: true
+   ```
+   Expected: 2–3× higher within-group reward variance at GRPO step 0.
+3. **(Add before re-launch) Instrument policy entropy.** Add a per-step token-level entropy log + `unique_completions_per_group` count to `training/grpo.py`. These are the metrics that would have surfaced this failure mode at step 10 instead of step 50.
+4. **(Defer until 2 fails) Commit to (a\*) multi-turn rollouts.** The diagnosis doc's deferred ~1-week engineering project. If a less-sharp SFT doesn't unlock variance, the reward function is structurally incapable of producing it on single-assistant-turn rows and (a\*) is the only remaining lever.
+
+### What this run definitively rules out
+
+- Further `beta` tuning (KL is already fine)
+- Further `loss_type` switching (numerics are stable)
+- Bumping `num_generations` (8 identical rollouts won't help by becoming 16 identical rollouts)
+- More LR-schedule iteration
+- Per-component reweighting that keeps the same discrete structure
+- The 2026-05-19 cheap-(a) per-conversation row-layout change (same prompt + same policy = same completion, regardless of row emission)
+
+These would all be expensive cargo-culting. The bottleneck is upstream of GRPO.
+
