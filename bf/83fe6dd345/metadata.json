@@ -1,0 +1,30 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "bf83fe6dd345",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".claude/skills/model-training-eval/SKILL.md",
+    ".claude/skills/model-training-eval/references/debugging-playbook.md",
+    ".claude/skills/model-training-eval/references/domain-recipes.md",
+    ".claude/skills/model-training-eval/references/evaluation-frameworks.md",
+    ".claude/skills/model-training-eval/references/pipeline-design.md",
+    ".claude/skills/model-training-eval/references/training-dynamics.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/bf/83fe6dd345/0/metadata.json",
+      "transcript": "/bf/83fe6dd345/0/full.jsonl",
+      "content_hash": "/bf/83fe6dd345/0/content_hash.txt",
+      "prompt": "/bf/83fe6dd345/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 110800,
+    "cache_read_tokens": 628066,
+    "output_tokens": 2930,
+    "api_call_count": 11
+  }
+}
