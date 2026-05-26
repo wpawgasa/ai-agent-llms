@@ -1,0 +1,10 @@
+Use /model-training-eval skill to analyze and investigate unstable GRPO training by exploring Wandb log
+  from https://wandb.ai/wpawgasa/huggingface/runs/5a5w4jqr
+
+---
+
+Document this
+
+---
+
+According to your analysis, is SFT model already sufficient without GRPO?
