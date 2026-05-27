@@ -893,3 +893,131 @@ Recommended actions in priority order:
 
 The instrumentation paid for itself in the first run.
 
+---
+
+## Per-Step Re-Audit (2026-05-27): `df4dot2d` Endpoint Is the Stub Attractor
+
+**Run re-analyzed:** [`wpawgasa/huggingface/df4dot2d`](https://wandb.ai/wpawgasa/huggingface/runs/df4dot2d) — same run as the 2026-05-26 "Entropy-Collapse Reading Falsified" addendum, re-examined at per-step granularity by pulling all 50 completions tables from W&B and reconciling them against the surface-level metrics in `trainer_state.json`.
+
+### TL;DR — the prior addendum was over-optimistic on the endpoint
+
+The 2026-05-26 reading ("drift toward higher diversity, +0.50 over 50 steps, viable for 1000-step extension") is **partially correct on aggregate but materially wrong on the endpoint** the next resume would build from. The final step (50) is a complete byte-identical stub collapse — the same per-domain stub pattern that ended `5a5w4jqr` at step 50. Resuming from `checkpoint-50` starts from a policy at a flat point of the loss surface that just emitted 8 identical 95-char IT-escalation stubs.
+
+**Revised recommendation: do NOT resume from `checkpoint-50` at 1000 steps. Restart from `checkpoint-25` with LR cut + more rollouts + more prompts per step (Option A below), or do a targeted re-SFT on tool-emission-rich rows (Option B), before committing to a long run.**
+
+### Two important corrections to the prior addendum
+
+1. **`train/unique_completions_per_group` was NOT live in this run.** The instrumentation commit (`0bdb7a8`) landed *after* `df4dot2d` finished. The "5.40 → 5.90 drift" the prior addendum cites must have been computed post-hoc from completions tables. Re-computing it independently on the 11 late-run tables (steps 40–50) gives mean 6.8/8 — consistent with the claim — **but the distribution is bimodal:** 3/11 collapsed (1 or 2 unique), 8/11 fully diverse (7–8 unique). The median-8 the addendum reported hides the collapsed minority entirely.
+
+2. **The "transient bounce-back" of brief uniq ≤ 2 steps does not hold for step 50.** Steps 42, 46, 49, 50 all show collapse/saturation patterns, and **the run ends on step 50's collapse rather than bouncing back to it.** Checkpoint-50 is therefore not "the policy's general behavior at step 50" — it is "the policy's behavior on one specific stub-attractor-favorable prompt at the end of training."
+
+### Surface-level metrics, end-of-run (`trainer_state.json` step 50)
+
+```
+train/global_step:                50
+train/loss:                       0.0395
+train/grad_norm:                  0.152      ← functionally zero
+train/kl:                         0.395
+train/reward:                     0.333      ← partial credit on the stub
+train/reward_std:                 0.000      ← no within-group variance
+train/frac_reward_zero_std:       1.000      ← no gradient
+train/learning_rate:              1.06e-07   ← cosine decay near terminal
+train/completion_length:          30         ← all 8 same length
+train/completions/min_length:     30
+train/completions/max_length:     30         ← min==max ⇒ byte-identical confirmed
+```
+
+The min==max length is the cheap surface-level tell for byte-identical rollouts that didn't need the new instrumentation — and it shows up at steps 6 (33–35), 41 (lens identical, all reward 0.0), 42 (single value), 46 (44–44), 49 (38–60 but reward 1.0 saturated correct), and 50 (30–30 stub).
+
+### The step-50 stub — verbatim
+
+All 8 GRPO rollouts to a prompt requiring an `it_troubleshoot_escalation → report_to_l2` tool call produced:
+
+```
+[STATE: CONFIRM_ACTION → ESCALATE]
+Handling it_troubleshoot_escalation in state CONFIRM_ACTION.
+```
+
+95 chars, 30 tokens, no tool call. Reward 0.333 = (0.5 state-from-match × 0.40) + (0.0 tool × 0.40) + (0 task_completion rescaled out) + (~0.33 transition_legality × 0.10) + active-component rescale. This is **identical in mechanism to the `5a5w4jqr` step-50 IT-escalation stub** documented in the 2026-05-25 diagnosis section — the prior addendum's claim that the failure mode is "an unexplained one-off, not a reproducible property" is contradicted by `df4dot2d`'s own endpoint.
+
+### Per-step walkthrough (8 representative training steps)
+
+For each: prompt context → 8 rollouts (length + reward + action extraction) → reward-resolution reason → loss + grad. Full per-step table available in W&B at `train/*` metrics; completions tables downloadable via `wandb.Api().run("wpawgasa/huggingface/df4dot2d").files()`.
+
+| step | prompt context | rollout pattern | reward / std | loss / grad | what GRPO learned |
+|---:|---|---|---|---|---|
+| 1 | Booking `LOOKUP_ORDER`, malformed order ID | 8 diverse Thai prose responses, all emit duplicated state header `[STATE:...] / [STATE:...]` (tokenizer artifact). No tool. | 0.0 / 0.0 | 0.056 / 2.16 | nothing — LR=0 |
+| 3 | (warmup spike) | — | 1.0 / 0.0 | 1.02 / **9483** | nothing — LR=3.3e-6 on uniform-ish ref policy, grad clipped to 1 by `max_grad_norm` |
+| 5 | (warmup spike) | — | 0.556 / 0.0 | 2.61 / 755 | nothing — KL=26 single-step spike, clipped |
+| **18** | Network outage `GREETING`, GT: `→ VERIFY_ACCOUNT`, no tool | **3/8 emit `[STATE: GREETING → VERIFY_ACCOUNT]`** → reward 1.0, adv +1.21. **5/8 skip state annotation entirely** → reward 0.444, adv −0.72 | 0.65 / **0.29** | 0.086 / 25.1 | ✅ **emit state header**. Cleanest binary gradient in run. |
+| 25 (ckpt) | Late-conversation close-out, GT a different terminal | 8/8 emit `[STATE: RESOLVE → TERMINAL]` + 8 distinct Thai sign-offs, lens 105–178 | 0.0 / 0.0 | 0.038 / 0.70 | nothing — diverse text, identical-zero reward |
+| **35** | CSAT survey `COLLECT_RATING`, GT: `→ COLLECT_COMMENTS` | Clean 4-vs-4: **4 emit correct target** → reward 1.0, adv +0.93. **4 emit `→ THANK_CUSTOMER`** (premature) → reward 0.667, adv −0.93 | 0.83 / **0.18** | 0.107 / 3.79 | ✅ **correct state target**. The kind of signal GRPO is designed for. |
+| 42 | (collapsed prompt) | **8/8 byte-identical** | 0.222 / 0.0 | 0.003 / 0.04 | nothing — gradient ≈ zero |
+| 49 | Sales close-out, GT: `FOLLOW_UP → TERMINAL`, no tool | 8/8 emit correct state header + 8 distinct prose sign-offs, lens 101–215 | **1.0 / 0.0** | 0.042 / 0.86 | nothing — **saturated correct**: reward function cannot distinguish 8 valid ways of saying the same correct thing |
+| **50 (ckpt)** | IT troubleshoot escalation `CONFIRM_ACTION`, GT: `report_to_l2(...)` tool call | **8/8 byte-identical** `[STATE: CONFIRM_ACTION → ESCALATE]` + `Handling it_troubleshoot_escalation in state CONFIRM_ACTION.` (95 chars, no tool) | 0.333 / 0.0 | 0.039 / **0.15** | ❌ **stub-attractor lock-in — checkpoint state** |
+
+Of 50 steps total, the variance-bearing steps (`reward_std ≥ 0.1`) are: 18, 30, 35, 45, 46. That's **5 of 50 — 10% useful-gradient density**. The remaining 90% either contribute zero gradient (66% with `reward_std = 0`) or contribute small-magnitude gradient on near-collapsed groups.
+
+### Why this changes the recommendation
+
+The 2026-05-26 addendum's recommendation — "extend to 1000 steps using the saved checkpoint-50" — assumed `unique_completions_per_group` was live (it wasn't) and that the late-run trend was a smooth drift toward diversity (it wasn't — it was bimodal with collapses every ~4 steps and a fully-collapsed endpoint). The corrected picture:
+
+- **Useful gradient density is ~10%, not the ~30% the surface `frac_reward_zero_std = 0.66` implies.** The 30% non-zero-variance steps further split into "saturated correct" (zero advantage anyway, like step 49) vs. "real signal" (steps 18, 35, etc.).
+- **The stub attractor reproduces.** It's not a `5a5w4jqr`-specific seed artifact — `df4dot2d` walked into the same basin from a different seed and a different reward design. The mechanism (DAPO normalizes advantages within group; on the rare variance-bearing groups the policy is pulled toward whichever pattern best satisfies the partial-credit floor) is consistent.
+- **`checkpoint-50` is a worse initial condition than `checkpoint-25`.** Resuming from a flat point of the loss surface where the most recent gradient was 0.15 on a fully-collapsed group has no upside vs. resuming from step 25 where the policy had diverse-but-zero-reward outputs (no policy lock-in yet).
+
+### Recommendation: Option A (cheap retry) before any 1000-step commit
+
+Restart **from `checkpoint-25`** (not `-50`) with three targeted changes to `configs/training/grpo_cat_a.yaml`:
+
+```yaml
+grpo:
+  learning_rate: 2.0e-6        # was 5e-6 — less aggressive given ~66% zero-gradient steps
+  num_generations: 16          # was 8 — 2× rollouts/prompt; Cat-A reward lattice has ~16 buckets/prompt so marginal rollouts 9–16 carry real signal
+  generation_batch_size: 32    # was 8 — 32/16 = 2 distinct prompts/step (vs 1 today); halves per-step prompt-variance
+  training_steps: 250          # short — extend only if the kill criteria below hold
+  save_steps: 25
+```
+
+Rationale lattice (each lever independently justified):
+- **LR cut:** the policy was over-stepping on the few variance-bearing groups. At 5e-6 with `frac_reward_zero_std = 0.66`, the effective LR on actual gradient updates is ~3× the nominal — bringing it down to 2e-6 gives back room without losing the useful steps.
+- **More rollouts per prompt:** the Cat-A reward function has at most ~16 distinct reward values per prompt (state {0,0.3,0.5,1.0} × tool {0,0.2,0.4,0.6,0.8,1.0} bucket combinations) and on most prompts ≤4 are reachable. With K=8 there's ~50% chance all rollouts land in 1-2 buckets; with K=16 that drops sharply. Cost: 2× generation time per step.
+- **Two prompts per step:** the 1-prompt-per-step geometry makes every step's signal a function of which single prompt was drawn. Step 50 vs step 49 vs step 41 swings reward from 1.0 → 0.333 → 0.0 with no policy change in between. Two prompts per step halves this noise.
+
+**Kill criteria (use the now-live instrumentation):**
+- 5 consecutive steps with `train/unique_completions_per_group ≤ 2` → stub-attractor lock-in confirmed, kill and switch to Option B.
+- 50-step rolling `mean_reward_std` drops below 0.020 → policy is selecting toward zero-variance, kill.
+- Held-out eval at step 50/100/150/200 (composite on 50 Cat-A val prompts) regresses below `checkpoint-500` baseline → policy is degrading not improving, kill.
+
+### Option B (if A fails) — targeted re-SFT on the tool-emission slice
+
+The 2026-05-26 implementation outcome's "tool-emission gap" finding (4/10 collapsed groups had `GT-expects-tool but model emits none`) is the root cause of the stub attractor: the model defaults to a no-tool prose stub when it doesn't know which tool to emit, and gets enough partial credit (0.33+) for it that GRPO can't gradient it away.
+
+Don't re-SFT the whole dataset (the 2026-05-26 preflight already established the base is diverse enough). Instead:
+
+1. Filter `data/output/task_a/train.jsonl` to the subset where GT has a tool call AND the current state plausibly demands one — ~2k rows expected.
+2. SFT one additional epoch on this subset starting from `checkpoint-500` (not `-1656`), with `learning_rate: 2e-5`, `num_train_epochs: 1`, `eval_steps: 50`, `metric_for_best_model: eval_loss`, `load_best_model_at_end: true`.
+3. Re-run `scripts/preflight_entropy_diag.py` and check the tool-emission rate on the affected prompt slice. Gate: ≥ 50% of K=8 rollouts emit a tool call on tool-required prompts (current rate is ~0% on the collapsed slice).
+4. Then re-run Option A from the new SFT checkpoint.
+
+### Option C (deferred) — multi-turn rollouts `(a*)`
+
+Still the structural fix, still deferred. The 2026-05-25 and 2026-05-26 addenda's reasoning stands: cost is ~1 week eng + tested new surface area, benefit doesn't help the "saturated correct" case (step 49 pattern), and the immediate bottleneck (reward-bucket clumping + stub-attractor selection on single-turn rows) has cheaper levers to try first.
+
+### What this re-audit ADDS to prior leafs
+
+- The 2026-05-26 leaf "extending to 1000 steps from ckpt-50 is viable" — **withdrawn**. Endpoint state contradicts the premise.
+- The 2026-05-26 leaf "5a5w4jqr was an unexplained one-off" — **withdrawn**. Same stub-attractor mechanism reproduces in df4dot2d at the same step (50) with a different seed and the redesigned reward. It's a property of the geometry, not the seed.
+
+### What this re-audit DOES NOT change
+
+- The 2026-05-21 reward redesign + `max_prompt_length=7680` fix did stabilize the numerics. KL stays bounded, no NaN, no sustained grad explosion. The useful steps (18, 35) show GRPO can extract real signal when there's signal to extract.
+- The 2026-05-26 conclusion that `(a*)` multi-turn rollouts and full re-SFT are NOT the immediate next levers stands. The cheaper Option A / Option B path needs to be tried and fail first.
+
+### Cost of this re-audit
+
+- ~5 min wall to pull and inspect 8 completions tables from W&B
+- ~3 min to compute per-step uniqueness on 11 late-run tables
+- 0 GPU time
+- Identifies a recommendation-changing detail (endpoint state) that the prior addendum missed because it relied on post-hoc instrumentation aggregates instead of inspecting the actual final-step completions
+
