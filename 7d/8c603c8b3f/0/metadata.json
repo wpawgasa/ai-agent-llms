@@ -1,0 +1,34 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "7d8c603c8b3f",
+  "session_id": "8cae2a09-4416-42f8-8690-d4d2dfab1c37",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T10:49:38.198630815Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/grpo_diagnosis_gemma4_26b.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "33eb5ae89e39",
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 242223,
+    "cache_read_tokens": 2064812,
+    "output_tokens": 34537,
+    "api_call_count": 22
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-27T10:49:37.724260523Z",
+    "agent_lines": 128,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 128,
+    "agent_percentage": 100
+  }
+}

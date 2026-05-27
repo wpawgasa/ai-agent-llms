@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "7d8c603c8b3f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/grpo_diagnosis_gemma4_26b.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7d/8c603c8b3f/0/metadata.json",
+      "transcript": "/7d/8c603c8b3f/0/full.jsonl",
+      "content_hash": "/7d/8c603c8b3f/0/content_hash.txt",
+      "prompt": "/7d/8c603c8b3f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 242223,
+    "cache_read_tokens": 2064812,
+    "output_tokens": 34537,
+    "api_call_count": 22
+  }
+}
