@@ -46,3 +46,47 @@ def test_list_models_parses_provider_slash_model(tmp_path):
 
 def test_list_models_missing_config_returns_empty(tmp_path):
     assert gateway.list_models(tmp_path / "nope.json") == []
+
+
+def test_build_chat_request_downgrades_tool_turns_and_sets_stream():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": '{"q": "x"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "result-text"},
+        {"role": "user", "content": "thanks"},
+    ]
+    tools = [{"type": "function", "function": {"name": "lookup"}}]
+    body = gateway.build_chat_request(
+        "openai/gpt-x", messages, temperature=0.3, max_tokens=256, tools=tools
+    )
+
+    assert body["model"] == "openai/gpt-x"
+    assert body["temperature"] == 0.3
+    assert body["max_tokens"] == 256
+    assert body["stream"] is True
+    assert body["tools"] == tools
+    # benchmark bifrost path: no vLLM-only field
+    assert "chat_template_kwargs" not in body
+    # past tool turns are textualized: no structured tool roles/fields survive
+    roles = [m["role"] for m in body["messages"]]
+    assert "tool" not in roles
+    assert all("tool_calls" not in m for m in body["messages"])
+    joined = " ".join(m.get("content", "") for m in body["messages"])
+    assert "<tool_call>" in joined
+    assert "result-text" in joined
+
+
+def test_build_chat_request_omits_tools_when_none():
+    body = gateway.build_chat_request("m", [{"role": "user", "content": "hi"}])
+    assert "tools" not in body

@@ -23,3 +23,28 @@ def list_models(config_path: Path) -> list[str]:
             for model in key_entry.get("models", []):
                 models.append(f"{provider_name}/{model}")
     return sorted(set(models))
+
+
+def build_chat_request(
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.0,
+    max_tokens: int = 1024,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build an OpenAI-compatible chat body matching the benchmark's bifrost path.
+
+    Mirrors ``eval.agent_benchmark._call_vllm`` with ``engine='bifrost'``:
+    past structured tool turns are rewritten to plain text and the
+    vLLM/SGLang-only ``chat_template_kwargs`` field is omitted.
+    """
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": _downgrade_tool_turns_to_text(messages),
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if tools:
+        body["tools"] = tools
+    return body
