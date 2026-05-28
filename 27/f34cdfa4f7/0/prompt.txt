@@ -1,0 +1,5 @@
+/superpowers:brainstorming Could workflow script be drawn as figure or diagram (Mermaid)?
+
+---
+
+/superpowers:using-superpowers
