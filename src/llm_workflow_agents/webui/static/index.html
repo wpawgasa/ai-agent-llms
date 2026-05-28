@@ -620,7 +620,7 @@
         <details>
           <summary>Workflow Diagram</summary>
           <div class="panel-body">
-            <div id="diagram"><span class="diagram-empty">Load a sample to render the state-machine diagram.</span></div>
+            <div id="diagram" tabindex="-1"><span class="diagram-empty">Load a sample to render the state-machine diagram.</span></div>
           </div>
         </details>
       </section>
@@ -661,11 +661,13 @@ function openModal() {
   if (!svg) return;
   $('diagram-modal-svg').innerHTML = svg.outerHTML;
   $('diagram-modal').classList.add('open');
+  $('diagram-modal-close').focus();
 }
 
 function closeModal() {
   $('diagram-modal').classList.remove('open');
   $('diagram-modal-svg').innerHTML = '';
+  $('diagram').focus();
 }
 
 async function renderDiagram(markup) {
