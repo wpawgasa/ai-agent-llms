@@ -641,6 +641,14 @@
     </div>
   </main>
 
+  <!-- Diagram fullscreen modal -->
+  <div id="diagram-modal" role="dialog" aria-modal="true" aria-label="Workflow diagram expanded view">
+    <div id="diagram-modal-box">
+      <button id="diagram-modal-close" title="Close (Esc)">✕</button>
+      <div id="diagram-modal-svg"></div>
+    </div>
+  </div>
+
 <script>
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
