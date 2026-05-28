@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BiFrost · Agent Console</title>
+<style>
+  /* ===========================================================================
+     BiFrost Agent Console — a precision instrument for LLM workflow-agent
+     inspection. Aesthetic: deep-slate observatory + phosphor signal accents.
+     Cool graphite base, amber reserved strictly for tool-call signal events,
+     cyan reserved for the live decode stream. Hairline grids, tabular metrics,
+     subtle grain + scanlines, a glowing decode caret. No external assets.
+     =========================================================================== */
+  :root {
+    /* base graphite — cool, deep, layered */
+    --void:      #07080c;
+    --bg:        #0a0c12;
+    --bg-grad-a: #0c0f17;
+    --bg-grad-b: #080910;
+    --panel:     #0e1119;
+    --panel-2:   #11141e;
+    --inset:     #070810;
+    --line:      #1b2030;
+    --line-soft: #161a27;
+    --hair:      rgba(120,140,180,.08);
+
+    /* type */
+    --txt:    #d7dce8;
+    --txt-hi: #f2f5fb;
+    --muted:  #69728c;
+    --faint:  #444b60;
+
+    /* signal palette — each color has ONE job */
+    --cyan:    #56e0d4;   /* live stream / assistant decode */
+    --cyan-dk: #1c5d59;
+    --amber:   #e9a23b;   /* tool calls only */
+    --amber-dk:#5c4017;
+    --violet:  #8d7bff;   /* user voice */
+    --violet-dk:#2c2752;
+    --rose:    #ff6b82;   /* error / fault */
+    --rose-dk: #43151f;
+
+    --radius: 4px;
+    --radius-lg: 8px;
+    --shadow: 0 1px 0 rgba(255,255,255,.02), 0 18px 50px -28px rgba(0,0,0,.9);
+
+    --mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Helvetica Neue", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font: 13.5px/1.55 var(--sans);
+    color: var(--txt);
+    background:
+      radial-gradient(1200px 700px at 18% -8%, rgba(86,224,212,.05), transparent 60%),
+      radial-gradient(900px 600px at 102% 110%, rgba(141,123,255,.05), transparent 55%),
+      linear-gradient(160deg, var(--bg-grad-a), var(--bg-grad-b));
+    background-attachment: fixed;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    letter-spacing: .1px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* atmospheric grain + scanline overlay — pure CSS, no assets */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+    opacity: .5;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background-image: radial-gradient(rgba(255,255,255,.022) .5px, transparent .5px);
+    background-size: 3px 3px;
+    opacity: .35;
+  }
+
+  ::selection { background: rgba(86,224,212,.28); color: var(--txt-hi); }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1c2233; border-radius: 20px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #283047; background-clip: padding-box; }
+
+  /* =================== SIDEBAR =================== */
+  #side {
+    width: 360px; min-width: 360px;
+    background:
+      linear-gradient(180deg, rgba(86,224,212,.025), transparent 140px),
+      var(--panel);
+    border-right: 1px solid var(--line);
+    box-shadow: inset -1px 0 0 var(--hair), 24px 0 60px -50px #000;
+    padding: 0;
+    overflow-y: auto;
+    position: relative;
+    z-index: 2;
+  }
+  #side::-webkit-scrollbar { width: 7px; }
+
+  .brand {
+    padding: 20px 22px 18px;
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 5;
+    background:
+      linear-gradient(180deg, var(--panel) 70%, rgba(14,17,25,.7));
+    backdrop-filter: blur(6px);
+  }
+  .brand-mark {
+    display: flex; align-items: center; gap: 11px;
+  }
+  .sigil {
+    width: 30px; height: 30px; flex: none; position: relative;
+    border-radius: 7px;
+    background: linear-gradient(150deg, #0f1420, #0a0d15);
+    border: 1px solid #23304a;
+    box-shadow: inset 0 0 0 1px rgba(86,224,212,.08), 0 4px 14px -6px #000;
+    display: grid; place-items: center;
+  }
+  .sigil::before {
+    /* a refracted prism arc — bifrost */
+    content: "";
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: conic-gradient(from 200deg, var(--violet), var(--cyan), var(--amber), var(--rose), var(--violet));
+    -webkit-mask: radial-gradient(circle, transparent 4.5px, #000 5px);
+            mask: radial-gradient(circle, transparent 4.5px, #000 5px);
+    filter: saturate(1.1) blur(.2px);
+    animation: spin 14s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  h1 {
+    font: 600 13px/1.1 var(--sans);
+    margin: 0;
+    color: var(--txt-hi);
+    letter-spacing: .35px;
+  }
+  .brand-sub {
+    font: 500 10px/1.2 var(--mono);
+    color: var(--faint);
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    margin-top: 3px;
+  }
+
+  .stack { padding: 18px 22px 26px; }
+
+  .group { margin-bottom: 20px; }
+  .group-head {
+    display: flex; align-items: center; gap: 8px;
+    font: 600 10px/1 var(--mono);
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .group-head::after {
+    content: ""; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--line), transparent);
+  }
+  .group-head .dot {
+    width: 5px; height: 5px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 8px currentColor;
+  }
+
+  label {
+    display: flex; align-items: baseline; justify-content: space-between;
+    font: 500 10.5px/1.4 var(--mono);
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 13px 0 6px;
+  }
+  label:first-of-type { margin-top: 0; }
+
+  select, input, textarea, button {
+    width: 100%;
+    background: var(--inset);
+    color: var(--txt);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 9px 11px;
+    font: 13px/1.4 var(--sans);
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+    outline: none;
+  }
+  select { font-family: var(--mono); font-size: 12px; appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 28px;
+  }
+  select:focus, input:focus, textarea:focus {
+    border-color: var(--cyan-dk);
+    box-shadow: 0 0 0 1px var(--cyan-dk), 0 0 18px -8px var(--cyan);
+    background: #080a11;
+  }
+  input[type=number] { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* range slider — instrument knob */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    padding: 0; height: 26px; background: transparent; border: none;
+    cursor: pointer;
+  }
+  input[type=range]:focus { box-shadow: none; }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 3px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--cyan-dk), #182033);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; margin-top: -5.5px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #bff4ee, var(--cyan) 55%, #157a73);
+    border: 1px solid #0a1413;
+    box-shadow: 0 0 0 3px rgba(86,224,212,.1), 0 0 12px -2px var(--cyan);
+    transition: box-shadow .15s ease;
+  }
+  input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(86,224,212,.16), 0 0 16px -1px var(--cyan); }
+  input[type=range]::-moz-range-track { height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--cyan-dk), #182033); }
+  input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #bff4ee, var(--cyan) 55%, #157a73);
+    border: 1px solid #0a1413;
+    box-shadow: 0 0 12px -2px var(--cyan);
+  }
+
+  .temp-val {
+    font: 600 11px/1 var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--cyan);
+    letter-spacing: .5px;
+    text-shadow: 0 0 10px rgba(86,224,212,.4);
+  }
+
+  button {
+    cursor: pointer;
+    font: 600 11px/1 var(--mono);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 11px;
+    border: 1px solid transparent;
+    background:
+      linear-gradient(180deg, #1a3b3a, #123230);
+    color: #c8f6f0;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px var(--cyan-dk);
+    position: relative;
+    overflow: hidden;
+  }
+  button::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.08) 50%, transparent 70%);
+    transform: translateX(-120%);
+    transition: transform .5s ease;
+  }
+  button:hover { color: #ffffff; box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px var(--cyan), 0 0 22px -8px var(--cyan); }
+  button:hover::after { transform: translateX(120%); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .42; cursor: not-allowed; filter: grayscale(.4); }
+  button:disabled::after { display: none; }
+
+  button.secondary {
+    background: linear-gradient(180deg, #161a26, #11141d);
+    color: var(--muted);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 0 0 1px var(--line);
+  }
+  button.secondary:hover { color: var(--txt-hi); box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 0 0 1px #2a3346; }
+
+  .row { display: flex; gap: 9px; }
+
+  /* collapsible panels */
+  details {
+    margin-top: 14px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-lg);
+    background: var(--panel-2);
+    overflow: hidden;
+    transition: border-color .18s ease;
+  }
+  details[open] { border-color: var(--line); }
+  summary {
+    cursor: pointer; list-style: none;
+    padding: 11px 13px;
+    font: 600 10.5px/1 var(--mono);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex; align-items: center; gap: 8px;
+    user-select: none;
+    transition: color .15s ease, background .15s ease;
+  }
+  summary:hover { color: var(--txt); background: rgba(255,255,255,.015); }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "›";
+    font-size: 14px; line-height: 0; color: var(--faint);
+    transition: transform .2s ease; transform: rotate(0deg);
+    display: inline-block;
+  }
+  details[open] summary::before { transform: rotate(90deg); color: var(--cyan); }
+  .panel-body { padding: 0 13px 13px; }
+
+  textarea#system {
+    height: 178px; resize: vertical;
+    font: 12.5px/1.6 var(--mono);
+    color: #c0c8d8;
+    background: var(--void);
+    border-color: var(--line-soft);
+    margin-top: 2px;
+  }
+  pre#tools {
+    margin: 2px 0 0;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow: auto;
+    font: 11.5px/1.55 var(--mono);
+    color: #93a8a4;
+    background: var(--void);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    padding: 11px 12px;
+  }
+  pre#tools::-webkit-scrollbar { width: 7px; }
+
+  /* =================== MAIN =================== */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; z-index: 1; }
+
+  .topbar {
+    height: 50px; flex: none;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 22px;
+    background: linear-gradient(180deg, rgba(14,17,25,.85), rgba(10,12,18,.6));
+    backdrop-filter: blur(6px);
+  }
+  .topbar .title {
+    font: 600 11px/1 var(--mono);
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--txt-hi);
+  }
+  .topbar .crumb { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  .topbar .spacer { flex: 1; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font: 600 10px/1 var(--mono); letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted);
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--inset);
+  }
+  .status-pill .led {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  #transcript {
+    flex: 1; overflow-y: auto;
+    padding: 26px 28px 30px;
+    display: flex; flex-direction: column; gap: 18px;
+    scroll-behavior: smooth;
+    /* faint engineering grid backdrop */
+    background-image:
+      linear-gradient(var(--hair) 1px, transparent 1px),
+      linear-gradient(90deg, var(--hair) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+  }
+
+  /* empty state */
+  .void-state {
+    margin: auto; text-align: center; max-width: 380px;
+    opacity: .85;
+    animation: rise .6s ease both;
+  }
+  .void-state .ring {
+    width: 64px; height: 64px; margin: 0 auto 18px;
+    border-radius: 50%;
+    background: conic-gradient(from 90deg, transparent, rgba(86,224,212,.35), transparent 70%);
+    -webkit-mask: radial-gradient(circle, transparent 26px, #000 27px);
+            mask: radial-gradient(circle, transparent 26px, #000 27px);
+    animation: spin 6s linear infinite;
+  }
+  .void-state h2 { font: 600 14px var(--sans); color: var(--txt-hi); margin: 0 0 6px; letter-spacing: .3px; }
+  .void-state p { font: 12.5px/1.6 var(--mono); color: var(--muted); margin: 0; }
+  .void-state kbd {
+    font: 600 11px var(--mono); color: var(--cyan);
+    border: 1px solid var(--cyan-dk); border-radius: 4px;
+    padding: 1px 6px; background: rgba(86,224,212,.06);
+  }
+
+  /* message bubbles */
+  .msg {
+    max-width: 78%;
+    border-radius: 12px;
+    padding: 12px 15px 13px;
+    position: relative;
+    animation: rise .32s cubic-bezier(.2,.8,.2,1) both;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--line);
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .msg .role {
+    font: 600 9.5px/1 var(--mono);
+    letter-spacing: 1.8px; text-transform: uppercase;
+    margin-bottom: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .msg .role::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 6px currentColor;
+  }
+  .msg .body { white-space: pre-wrap; word-break: break-word; color: var(--txt); }
+
+  .msg.user {
+    align-self: flex-end;
+    background: linear-gradient(170deg, #181530, #131129);
+    border-color: var(--violet-dk);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.user .role { color: var(--violet); }
+  .msg.user .body { color: #e6e3ff; }
+
+  .msg.assistant {
+    align-self: flex-start;
+    background: linear-gradient(170deg, #0e1620, #0b121a);
+    border-color: #142a2c;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.assistant .role { color: var(--cyan); }
+
+  .msg.error {
+    align-self: flex-start;
+    background: linear-gradient(170deg, #221016, #1a0c11);
+    border-color: var(--rose-dk);
+    border-left: 3px solid var(--rose);
+  }
+  .msg.error .role { color: var(--rose); }
+  .msg.error .body { color: #ffc0c8; font-family: var(--mono); font-size: 12.5px; }
+
+  /* streaming decode caret */
+  .msg.assistant.streaming .body::after {
+    content: "▍";
+    color: var(--cyan);
+    margin-left: 1px;
+    animation: blink 1s steps(1) infinite;
+    text-shadow: 0 0 8px var(--cyan);
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* tool-call signal cards — amber is reserved exclusively for these */
+  .toolcall {
+    margin-top: 10px;
+    border: 1px solid var(--amber-dk);
+    border-left: 3px solid var(--amber);
+    background:
+      linear-gradient(180deg, rgba(233,162,59,.06), rgba(233,162,59,.02));
+    border-radius: 7px;
+    padding: 10px 12px;
+    font: 11.5px/1.55 var(--mono);
+    color: #f3d7a6;
+    white-space: pre-wrap; word-break: break-word;
+    position: relative;
+    animation: rise .3s ease both;
+  }
+  .toolcall::before {
+    content: "TOOL_CALL";
+    position: absolute; top: -8px; left: 10px;
+    font: 600 8.5px/1 var(--mono); letter-spacing: 1.4px;
+    color: var(--amber);
+    background: var(--panel); padding: 2px 6px; border-radius: 3px;
+    border: 1px solid var(--amber-dk);
+  }
+
+  .meta {
+    margin-top: 9px;
+    font: 500 10px/1 var(--mono);
+    letter-spacing: .6px;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+    display: inline-flex; gap: 8px; align-items: center;
+    border-top: 1px dashed var(--line);
+    padding-top: 8px;
+  }
+  .meta::before { content: "◷"; color: var(--cyan); opacity: .7; }
+
+  /* =================== COMPOSER =================== */
+  #composer {
+    flex: none;
+    border-top: 1px solid var(--line);
+    padding: 14px 18px;
+    display: flex; gap: 11px; align-items: stretch;
+    background: linear-gradient(0deg, var(--panel), rgba(14,17,25,.7));
+    box-shadow: 0 -20px 40px -40px #000;
+  }
+  #input {
+    flex: 1; height: 50px; resize: none;
+    font: 13.5px/1.5 var(--sans);
+    padding: 13px 15px;
+    border-radius: var(--radius-lg);
+    background: var(--void);
+  }
+  #input::placeholder { color: var(--faint); }
+  #send {
+    width: auto; padding: 0 26px;
+    border-radius: var(--radius-lg);
+    flex: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    justify-content: center;
+  }
+  #send .arrow { font-size: 13px; line-height: 0; transform: translateY(.5px); }
+
+  @media (max-width: 860px) {
+    #side { width: 300px; min-width: 300px; }
+    .msg { max-width: 90%; }
+  }
+</style>
+</head>
+<body>
+  <aside id="side">
+    <div class="brand">
+      <div class="brand-mark">
+        <div class="sigil" aria-hidden="true"></div>
+        <div>
+          <h1>BiFrost Chatbot Test UI</h1>
+          <div class="brand-sub">Workflow Agent Console</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <section class="group">
+        <p class="group-head"><span class="dot" style="color:var(--cyan)"></span>Inference</p>
+        <label for="model">Model</label>
+        <select id="model"></select>
+
+        <label for="temperature">Temperature <span class="temp-val" id="tempVal">0.0</span></label>
+        <input id="temperature" type="range" min="0" max="2" step="0.1" value="0" />
+
+        <label for="maxTokens">Max&nbsp;Tokens</label>
+        <input id="maxTokens" type="number" value="1024" min="1" max="8192" />
+      </section>
+
+      <section class="group">
+        <p class="group-head"><span class="dot" style="color:var(--amber)"></span>Benchmark Fixture</p>
+        <label for="level">Complexity Level</label>
+        <select id="level">
+          <option>L1</option><option>L2</option><option>L3</option><option>L4</option><option>L5</option>
+        </select>
+
+        <label for="sample">Sample</label>
+        <select id="sample"></select>
+
+        <div class="row" style="margin-top:14px;">
+          <button id="load"><span class="arrow">⤓</span>&nbsp;Load</button>
+          <button id="reset" class="secondary">Reset</button>
+        </div>
+      </section>
+
+      <section class="group" style="margin-bottom:0;">
+        <p class="group-head"><span class="dot" style="color:var(--violet)"></span>Context</p>
+        <details open>
+          <summary>System Prompt · editable</summary>
+          <div class="panel-body">
+            <textarea id="system" placeholder="Load a sample to build the benchmark system prompt, or type your own."></textarea>
+          </div>
+        </details>
+        <details>
+          <summary>Tools Sent · read-only</summary>
+          <div class="panel-body">
+            <pre id="tools">[]</pre>
+          </div>
+        </details>
+      </section>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div class="topbar">
+      <span class="title">Decode Stream</span>
+      <span class="crumb">·&nbsp; /api/chat</span>
+      <span class="spacer"></span>
+      <span class="status-pill"><span class="led"></span>Gateway&nbsp;Live</span>
+    </div>
+    <div id="transcript"></div>
+    <div id="composer">
+      <textarea id="input" placeholder="Type a message and press Enter…"></textarea>
+      <button id="send"><span class="arrow">➤</span> Send</button>
+    </div>
+  </main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let tools = [];
+let history = [];  // assistant/user/tool turns AFTER the system message
+
+function showEmptyState() {
+  $('transcript').innerHTML =
+    '<div class="void-state">' +
+      '<div class="ring" aria-hidden="true"></div>' +
+      '<h2>Awaiting first transmission</h2>' +
+      '<p>Load a benchmark fixture or compose a message below.<br>Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for newline.</p>' +
+    '</div>';
+}
+
+async function loadModels() {
+  const r = await fetch('/api/models');
+  const { models } = await r.json();
+  $('model').innerHTML = models.length
+    ? models.map(m => `<option>${m}</option>`).join('')
+    : '<option value="">(no models in bifrost config)</option>';
+}
+
+async function loadSamples() {
+  const level = $('level').value;
+  const r = await fetch('/api/samples?level=' + encodeURIComponent(level));
+  const { samples } = await r.json();
+  $('sample').innerHTML = samples.length
+    ? samples.map(s => `<option value="${s.conversation_id}">${s.conversation_id} · ${s.domain} · ${s.num_states} states</option>`).join('')
+    : '<option value="">(no samples — generate benchmark data)</option>';
+}
+
+async function loadSample() {
+  const id = $('sample').value;
+  if (!id) return;
+  const r = await fetch('/api/samples/' + encodeURIComponent(id));
+  if (!r.ok) { addMsg('error', 'Failed to load sample ' + id); return; }
+  const data = await r.json();
+  $('system').value = data.system_prompt || '';
+  tools = data.tools || [];
+  $('tools').textContent = JSON.stringify(tools, null, 2);
+  if (data.seed_user) $('input').value = data.seed_user;
+  resetChat(false);
+}
+
+function resetChat(clearSystem) {
+  history = [];
+  $('transcript').innerHTML = '';
+  if (clearSystem) { $('system').value = ''; tools = []; $('tools').textContent = '[]'; }
+  showEmptyState();
+}
+
+function clearEmptyState() {
+  const vs = $('transcript').querySelector('.void-state');
+  if (vs) vs.remove();
+}
+
+function addMsg(role, text) {
+  clearEmptyState();
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `<div class="role">${role}</div>`;
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.textContent = text || '';
+  div.appendChild(body);
+  $('transcript').appendChild(div);
+  $('transcript').scrollTop = $('transcript').scrollHeight;
+  return div;
+}
+
+function renderToolCalls(container, toolCalls) {
+  for (const tc of toolCalls) {
+    const fn = tc.function || {};
+    let args = fn.arguments;
+    try { args = JSON.parse(args); } catch (e) {}
+    const card = document.createElement('div');
+    card.className = 'toolcall';
+    card.textContent = '<tool_call> ' + JSON.stringify({ name: fn.name, arguments: args });
+    container.appendChild(card);
+  }
+}
+
+async function send() {
+  const text = $('input').value.trim();
+  if (!text) return;
+  $('input').value = '';
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+
+  const messages = [{ role: 'system', content: $('system').value }, ...history];
+  const payload = {
+    model: $('model').value,
+    messages,
+    temperature: parseFloat($('temperature').value),
+    max_tokens: parseInt($('maxTokens').value, 10),
+    tools: tools.length ? tools : null,
+  };
+
+  const sendBtn = $('send');
+  sendBtn.disabled = true;
+
+  const bubble = addMsg('assistant', '');
+  bubble.classList.add('streaming');
+  const body = bubble.querySelector('.body');
+  const t0 = performance.now();
+  let ttft = null;
+  let content = '';
+  const toolAccum = {};
+
+  const finish = () => { bubble.classList.remove('streaming'); sendBtn.disabled = false; };
+
+  let resp;
+  try {
+    resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    body.textContent = 'Request failed: ' + e;
+    bubble.className = 'msg error';
+    finish();
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const dataStr = t.slice(5).trim();
+      if (dataStr === '[DONE]') continue;
+      let chunk;
+      try { chunk = JSON.parse(dataStr); } catch (e) { continue; }
+      if (chunk.error) {
+        body.textContent = 'Gateway error ' + chunk.error.status + ': ' + chunk.error.body;
+        bubble.className = 'msg error';
+        finish();
+        return;
+      }
+      const delta = (chunk.choices && chunk.choices[0] && chunk.choices[0].delta) || {};
+      if (ttft === null && (delta.content || delta.tool_calls)) ttft = performance.now() - t0;
+      if (delta.content) { content += delta.content; body.textContent = content; }
+      for (const tcd of delta.tool_calls || []) {
+        const i = tcd.index || 0;
+        toolAccum[i] = toolAccum[i] || { id: '', type: 'function', function: { name: '', arguments: '' } };
+        if (tcd.id) toolAccum[i].id = tcd.id;
+        const f = tcd.function || {};
+        if (f.name) toolAccum[i].function.name += f.name;
+        if (f.arguments) toolAccum[i].function.arguments += f.arguments;
+      }
+      $('transcript').scrollTop = $('transcript').scrollHeight;
+    }
+  }
+
+  finish();
+
+  const toolCalls = Object.keys(toolAccum).sort((a, b) => a - b).map(k => toolAccum[k]);
+  if (toolCalls.length) renderToolCalls(bubble, toolCalls);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const total = (performance.now() - t0).toFixed(0);
+  meta.textContent = `latency ${total} ms` + (ttft !== null ? ` · ttft ${ttft.toFixed(0)} ms` : '');
+  bubble.appendChild(meta);
+
+  const asstMsg = { role: 'assistant', content };
+  if (toolCalls.length) asstMsg.tool_calls = toolCalls;
+  history.push(asstMsg);
+}
+
+$('temperature').addEventListener('input', () => $('tempVal').textContent = $('temperature').value);
+$('level').addEventListener('change', loadSamples);
+$('load').addEventListener('click', loadSample);
+$('reset').addEventListener('click', () => resetChat(false));
+$('send').addEventListener('click', send);
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+showEmptyState();
+loadModels();
+loadSamples();
+</script>
+</body>
+</html>
