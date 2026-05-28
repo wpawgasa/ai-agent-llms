@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "da96bd964ce0",
+  "strategy": "manual-commit",
+  "branch": "feat/webui-bifrost-chatbot",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/da/96bd964ce0/0/metadata.json",
+      "transcript": "/da/96bd964ce0/0/full.jsonl",
+      "content_hash": "/da/96bd964ce0/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 193,
+    "cache_creation_tokens": 246631,
+    "cache_read_tokens": 12153232,
+    "output_tokens": 90370,
+    "api_call_count": 97
+  }
+}
