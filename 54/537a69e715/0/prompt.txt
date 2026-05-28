@@ -1,0 +1,33 @@
+/superpowers:brainstorming Could workflow script be drawn as figure or diagram (Mermaid)?
+
+---
+
+/superpowers:using-superpowers
+
+---
+
+push and create a pull request
+
+---
+
+/superpowers:using-superpowers make workflow diagram expandable
+
+---
+
+yes
+
+---
+
+good to go
+
+---
+
+I mean I'll go with approach #1
+
+---
+
+kill current server
+
+---
+
+The modal shows only small fraction @"Pasted image (3).png"
