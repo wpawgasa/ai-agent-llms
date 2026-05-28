@@ -48,3 +48,38 @@ def build_chat_request(
     if tools:
         body["tools"] = tools
     return body
+
+
+async def stream_chat(endpoint: str, body: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Proxy a streaming chat completion from BiFrost, forwarding raw SSE bytes.
+
+    On a gateway error (>=400) a single synthetic SSE ``error`` event is
+    emitted followed by ``[DONE]`` so the browser can surface it without the
+    stream hanging. No auth header is required by the gateway; a dummy bearer
+    is sent because the OpenAI-compatible surface expects the header to exist.
+    """
+    url = f"{endpoint.rstrip('/')}/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer not-needed",
+    }
+    timeout = httpx.Timeout(600.0, connect=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", url, json=body, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    raw = await resp.aread()
+                    detail = raw.decode("utf-8", errors="replace")[:1000]
+                    err = json.dumps(
+                        {"error": {"status": resp.status_code, "body": detail}}
+                    )
+                    yield f"data: {err}\n\n".encode()
+                    yield b"data: [DONE]\n\n"
+                    return
+                async for chunk in resp.aiter_bytes():
+                    if chunk:
+                        yield chunk
+    except httpx.HTTPError as exc:
+        err = json.dumps({"error": {"status": 0, "body": f"gateway unreachable: {exc}"}})
+        yield f"data: {err}\n\n".encode()
+        yield b"data: [DONE]\n\n"
