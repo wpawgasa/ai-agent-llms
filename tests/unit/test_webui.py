@@ -90,3 +90,55 @@ def test_build_chat_request_downgrades_tool_turns_and_sets_stream():
 def test_build_chat_request_omits_tools_when_none():
     body = gateway.build_chat_request("m", [{"role": "user", "content": "hi"}])
     assert "tools" not in body
+
+
+from llm_workflow_agents.webui import samples
+
+
+def _write_sample(path: Path, conv_id: str, domain: str) -> None:
+    sample = {
+        "conversation_id": conv_id,
+        "domain": domain,
+        "num_states": 4,
+        "num_tools": 1,
+        "workflow_graph": {"initial": "GREETING", "terminal": ["TERMINAL"]},
+        "tool_schemas": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "d",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            }
+        ],
+        "messages": [
+            {"role": "system", "content": "You are a helpful agent."},
+            {"role": "user", "content": f"hello from {conv_id}"},
+        ],
+    }
+    with open(path, "a") as f:
+        f.write(json.dumps(sample) + "\n")
+
+
+def test_list_samples_filters_by_level(tmp_path):
+    _write_sample(tmp_path / "l1_a.jsonl", "L1_001", "faq")
+    _write_sample(tmp_path / "l2_b.jsonl", "L2_001", "booking")
+    result = samples.list_samples(tmp_path, "L2")
+    assert len(result) == 1
+    assert result[0]["conversation_id"] == "L2_001"
+    assert result[0]["domain"] == "booking"
+    assert result[0]["preview"] == "hello from L2_001"
+
+
+def test_list_samples_unknown_level_returns_empty(tmp_path):
+    assert samples.list_samples(tmp_path, "L9") == []
+
+
+def test_get_sample_finds_across_files(tmp_path):
+    _write_sample(tmp_path / "l1_a.jsonl", "L1_001", "faq")
+    _write_sample(tmp_path / "l2_b.jsonl", "L2_001", "booking")
+    found = samples.get_sample(tmp_path, "L2_001")
+    assert found is not None
+    assert found["conversation_id"] == "L2_001"
+    assert samples.get_sample(tmp_path, "NOPE") is None
