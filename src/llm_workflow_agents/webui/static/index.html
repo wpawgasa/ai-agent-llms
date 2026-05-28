@@ -533,8 +533,31 @@
   }
 
   /* Workflow diagram panel */
-  #diagram svg { width: 100%; height: auto; max-height: 340px; overflow: hidden; }
+  #diagram svg { width: 100%; height: auto; max-height: 340px; overflow: hidden; cursor: pointer; }
+  #diagram svg:hover { opacity: .85; }
   #diagram .diagram-empty { font-size: 11px; color: var(--faint); padding: 6px 0; }
+
+  /* Diagram fullscreen modal */
+  #diagram-modal {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(8,10,15,.88); backdrop-filter: blur(3px);
+    align-items: center; justify-content: center;
+  }
+  #diagram-modal.open { display: flex; }
+  #diagram-modal-box {
+    position: relative; max-width: 92vw; max-height: 90vh;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; overflow: auto;
+    box-shadow: 0 24px 80px rgba(0,0,0,.7);
+  }
+  #diagram-modal-box svg { width: auto; height: auto; max-width: 88vw; max-height: 82vh; display: block; }
+  #diagram-modal-close {
+    position: absolute; top: 10px; right: 12px;
+    background: none; border: none; color: var(--muted);
+    font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 6px;
+    border-radius: 6px; width: auto;
+  }
+  #diagram-modal-close:hover { color: var(--txt); background: rgba(255,255,255,.06); }
 </style>
 <!-- mermaid 10.9.3 UMD — vendored for offline use -->
 <script src="/static/vendor/mermaid.min.js"></script>
