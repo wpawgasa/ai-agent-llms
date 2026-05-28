@@ -54,3 +54,26 @@ def get_sample(data_dir: Path, conversation_id: str) -> dict[str, Any] | None:
         if s.get("conversation_id") == conversation_id:
             return s
     return None
+
+
+def build_sample_prompt(sample: dict[str, Any]) -> dict[str, Any]:
+    """Build the benchmark's enriched system prompt + tools + seed user message.
+
+    Reuses ``build_enriched_system_prompt`` so the prompt is identical to what
+    ``eval.agent_benchmark`` sends for this sample.
+    """
+    system_msg = next(
+        (m for m in sample.get("messages", []) if m.get("role") == "system"),
+        None,
+    )
+    original = system_msg.get("content", "") if system_msg else ""
+    enriched = build_enriched_system_prompt(sample, original)
+    seed_user = next(
+        (m.get("content", "") for m in sample.get("messages", []) if m.get("role") == "user"),
+        "",
+    )
+    return {
+        "system_prompt": enriched,
+        "tools": sample.get("tool_schemas", []),
+        "seed_user": seed_user,
+    }

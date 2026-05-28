@@ -142,3 +142,31 @@ def test_get_sample_finds_across_files(tmp_path):
     assert found is not None
     assert found["conversation_id"] == "L2_001"
     assert samples.get_sample(tmp_path, "NOPE") is None
+
+
+def test_build_sample_prompt_uses_enriched_builder():
+    sample = {
+        "conversation_id": "L1_TEST",
+        "workflow_graph": {"initial": "GREETING", "terminal": ["TERMINAL"]},
+        "tool_schemas": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "d",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            }
+        ],
+        "messages": [
+            {"role": "system", "content": "You are a helpful agent."},
+            {"role": "user", "content": "hi there"},
+        ],
+    }
+    result = samples.build_sample_prompt(sample)
+    # enriched prompt keeps the original persona and appends FORMAT_RULES + tool schemas
+    assert "You are a helpful agent." in result["system_prompt"]
+    assert "Rules:" in result["system_prompt"]
+    assert "Tool schemas" in result["system_prompt"]
+    assert result["tools"] == sample["tool_schemas"]
+    assert result["seed_user"] == "hi there"
