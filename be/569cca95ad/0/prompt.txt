@@ -1,0 +1,9 @@
+Install frontend design skill
+
+---
+
+/superpowers:using-superpowers with /frontend-design:frontend-design Design and implement simple chatbot UI to test LLM with OpenAI API through bifrost gateway. Mimic how prompt is setup in benchmark pipeline.
+
+---
+
+yes
