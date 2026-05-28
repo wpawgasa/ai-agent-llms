@@ -170,3 +170,49 @@ def test_build_sample_prompt_uses_enriched_builder():
     assert "Tool schemas" in result["system_prompt"]
     assert result["tools"] == sample["tool_schemas"]
     assert result["seed_user"] == "hi there"
+
+
+from starlette.testclient import TestClient
+
+
+def test_api_models_endpoint(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.json"
+    _write_bifrost_config(cfg)
+    monkeypatch.setenv("BIFROST_CONFIG", str(cfg))
+    from llm_workflow_agents.webui.app import app
+
+    client = TestClient(app)
+    resp = client.get("/api/models")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == [
+        "anthropic/claude-z",
+        "openai/gpt-x",
+        "openai/gpt-y",
+    ]
+
+
+def test_api_samples_endpoint(tmp_path, monkeypatch):
+    _write_sample(tmp_path / "l1_a.jsonl", "L1_001", "faq")
+    monkeypatch.setenv("BENCHMARK_DATA_DIR", str(tmp_path))
+    from llm_workflow_agents.webui.app import app
+
+    client = TestClient(app)
+    resp = client.get("/api/samples", params={"level": "L1"})
+    assert resp.status_code == 200
+    ids = [s["conversation_id"] for s in resp.json()["samples"]]
+    assert ids == ["L1_001"]
+
+
+def test_api_sample_detail_and_404(tmp_path, monkeypatch):
+    _write_sample(tmp_path / "l1_a.jsonl", "L1_001", "faq")
+    monkeypatch.setenv("BENCHMARK_DATA_DIR", str(tmp_path))
+    from llm_workflow_agents.webui.app import app
+
+    client = TestClient(app)
+    ok = client.get("/api/samples/L1_001")
+    assert ok.status_code == 200
+    assert "Rules:" in ok.json()["system_prompt"]
+    assert ok.json()["seed_user"] == "hello from L1_001"
+
+    missing = client.get("/api/samples/NOPE")
+    assert missing.status_code == 404
