@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cd93d4bbd7d8",
+  "session_id": "8b570651-3311-4624-b0cc-68c1439d37ef",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-28T06:52:42.806927127Z",
+  "branch": "feat/webui-bifrost-chatbot",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "33d946e2f206",
+  "token_usage": {
+    "input_tokens": 181,
+    "cache_creation_tokens": 234339,
+    "cache_read_tokens": 10985550,
+    "output_tokens": 88122,
+    "api_call_count": 91
+  },
+  "session_metrics": {
+    "turn_count": 4
+  }
+}
