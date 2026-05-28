@@ -22,3 +22,27 @@ def test_config_env_override(monkeypatch):
     assert config.bifrost_endpoint() == "http://example:9999"
     assert config.bifrost_config_path() == Path("/tmp/cfg.json")
     assert config.benchmark_data_dir() == Path("/tmp/data")
+
+
+from llm_workflow_agents.webui import gateway
+
+
+def _write_bifrost_config(path: Path) -> None:
+    cfg = {
+        "providers": {
+            "openai": {"keys": [{"models": ["gpt-x", "gpt-y"]}]},
+            "anthropic": {"keys": [{"models": ["claude-z"]}]},
+        }
+    }
+    path.write_text(json.dumps(cfg))
+
+
+def test_list_models_parses_provider_slash_model(tmp_path):
+    cfg = tmp_path / "config.json"
+    _write_bifrost_config(cfg)
+    models = gateway.list_models(cfg)
+    assert models == ["anthropic/claude-z", "openai/gpt-x", "openai/gpt-y"]
+
+
+def test_list_models_missing_config_returns_empty(tmp_path):
+    assert gateway.list_models(tmp_path / "nope.json") == []
