@@ -656,6 +656,18 @@ const $ = (id) => document.getElementById(id);
 let tools = [];
 let history = [];  // assistant/user/tool turns AFTER the system message
 
+function openModal() {
+  const svg = $('diagram').querySelector('svg');
+  if (!svg) return;
+  $('diagram-modal-svg').innerHTML = svg.outerHTML;
+  $('diagram-modal').classList.add('open');
+}
+
+function closeModal() {
+  $('diagram-modal').classList.remove('open');
+  $('diagram-modal-svg').innerHTML = '';
+}
+
 async function renderDiagram(markup) {
   const el = $('diagram');
   if (!markup) {
@@ -856,6 +868,10 @@ $('send').addEventListener('click', send);
 $('input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
+$('diagram').addEventListener('click', () => openModal());
+$('diagram-modal-close').addEventListener('click', closeModal);
+$('diagram-modal').addEventListener('click', (e) => { if (e.target === $('diagram-modal')) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
 showEmptyState();
 loadModels();
