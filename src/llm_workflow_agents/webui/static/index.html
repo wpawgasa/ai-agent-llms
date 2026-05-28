@@ -531,7 +531,13 @@
     #side { width: 300px; min-width: 300px; }
     .msg { max-width: 90%; }
   }
+
+  /* Workflow diagram panel */
+  #diagram svg { width: 100%; height: auto; max-height: 340px; overflow: hidden; }
+  #diagram .diagram-empty { font-size: 11px; color: var(--faint); padding: 6px 0; }
 </style>
+<!-- mermaid 10.9.3 UMD — vendored for offline use -->
+<script src="/static/vendor/mermaid.min.js"></script>
 </head>
 <body>
   <aside id="side">
@@ -588,6 +594,12 @@
             <pre id="tools">[]</pre>
           </div>
         </details>
+        <details>
+          <summary>Workflow Diagram</summary>
+          <div class="panel-body">
+            <div id="diagram"><span class="diagram-empty">Load a sample to render the state-machine diagram.</span></div>
+          </div>
+        </details>
       </section>
     </div>
   </aside>
@@ -607,9 +619,26 @@
   </main>
 
 <script>
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+
 const $ = (id) => document.getElementById(id);
 let tools = [];
 let history = [];  // assistant/user/tool turns AFTER the system message
+
+async function renderDiagram(markup) {
+  const el = $('diagram');
+  if (!markup) {
+    el.innerHTML = '<span class="diagram-empty">No workflow graph in this sample.</span>';
+    return;
+  }
+  try {
+    const { svg } = await mermaid.render('wfDiagram', markup);
+    el.innerHTML = svg;
+  } catch (e) {
+    el.innerHTML = '<span class="diagram-empty">Diagram error: ' + e.message + '</span>' +
+      '<pre style="font-size:10px;margin-top:6px;white-space:pre-wrap">' + markup + '</pre>';
+  }
+}
 
 function showEmptyState() {
   $('transcript').innerHTML =
@@ -648,12 +677,16 @@ async function loadSample() {
   $('tools').textContent = JSON.stringify(tools, null, 2);
   if (data.seed_user) $('input').value = data.seed_user;
   resetChat(false);
+  renderDiagram(data.mermaid || '');
 }
 
 function resetChat(clearSystem) {
   history = [];
   $('transcript').innerHTML = '';
-  if (clearSystem) { $('system').value = ''; tools = []; $('tools').textContent = '[]'; }
+  if (clearSystem) {
+    $('system').value = ''; tools = []; $('tools').textContent = '[]';
+    $('diagram').innerHTML = '<span class="diagram-empty">Load a sample to render the state-machine diagram.</span>';
+  }
   showEmptyState();
 }
 

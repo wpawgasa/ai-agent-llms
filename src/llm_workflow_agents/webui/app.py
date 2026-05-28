@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from llm_workflow_agents.webui import config, gateway, samples
@@ -56,3 +57,6 @@ async def api_chat(req: ChatRequest) -> StreamingResponse:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(_STATIC / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")

@@ -234,3 +234,70 @@ def test_api_chat_unreachable_gateway_streams_error_event(monkeypatch):
     body = resp.text
     assert "error" in body
     assert "[DONE]" in body
+
+
+def _graph_sample() -> dict:
+    return {
+        "conversation_id": "GRAPH_TEST",
+        "workflow_graph": {
+            "states": ["GREETING", "VERIFY", "TERMINAL"],
+            "transitions": [
+                {"from": "GREETING", "to": "VERIFY", "condition": "proceed"},
+                {"from": "VERIFY", "to": "TERMINAL", "condition": "verified"},
+            ],
+            "initial": "GREETING",
+            "terminal": ["TERMINAL"],
+        },
+        "tool_schemas": [],
+        "messages": [
+            {"role": "system", "content": "You are a helpful agent."},
+            {"role": "user", "content": "hi"},
+        ],
+    }
+
+
+def test_build_workflow_mermaid_renders_states_edges_and_highlights():
+    markup = samples.build_workflow_mermaid(_graph_sample())
+    assert markup.startswith("graph TD")
+    # one node line per state
+    for state in ("GREETING", "VERIFY", "TERMINAL"):
+        assert f"{state}[{state}]" in markup
+    # edges carry the condition label
+    assert "GREETING -->|proceed| VERIFY" in markup
+    assert "VERIFY -->|verified| TERMINAL" in markup
+    # highlight styling for initial + terminal
+    assert "classDef initial" in markup
+    assert "classDef terminal" in markup
+    assert "class GREETING initial" in markup
+    assert "class TERMINAL terminal" in markup
+
+
+def test_build_workflow_mermaid_empty_graph_returns_empty():
+    assert samples.build_workflow_mermaid({"conversation_id": "X", "messages": []}) == ""
+
+
+def test_build_sample_prompt_includes_mermaid():
+    result = samples.build_sample_prompt(_graph_sample())
+    assert "mermaid" in result
+    assert result["mermaid"].startswith("graph TD")
+
+
+def test_api_sample_detail_includes_mermaid(tmp_path, monkeypatch):
+    path = tmp_path / "l2_a.jsonl"
+    with open(path, "w") as f:
+        f.write(json.dumps(_graph_sample()) + "\n")
+    monkeypatch.setenv("BENCHMARK_DATA_DIR", str(tmp_path))
+    from llm_workflow_agents.webui.app import app
+
+    client = TestClient(app)
+    resp = client.get("/api/samples/GRAPH_TEST")
+    assert resp.status_code == 200
+    assert resp.json()["mermaid"].startswith("graph TD")
+
+
+def test_static_mount_serves_vendor_dir(tmp_path, monkeypatch):
+    # The /static mount must exist so the vendored mermaid lib is reachable.
+    from llm_workflow_agents.webui.app import app
+
+    routes = [getattr(r, "path", "") for r in app.routes]
+    assert any(p == "/static" or p.startswith("/static") for p in routes)

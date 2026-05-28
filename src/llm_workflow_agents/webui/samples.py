@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
+from llm_workflow_agents.eval.graph_extraction_eval import WorkflowGraph, graph_to_mermaid
 
 _LEVELS = {"L1", "L2", "L3", "L4", "L5"}
 
@@ -76,4 +77,39 @@ def build_sample_prompt(sample: dict[str, Any]) -> dict[str, Any]:
         "system_prompt": enriched,
         "tools": sample.get("tool_schemas", []),
         "seed_user": seed_user,
+        "mermaid": build_workflow_mermaid(sample),
     }
+
+
+def build_workflow_mermaid(sample: dict[str, Any]) -> str:
+    """Render the sample's workflow_graph state machine as Mermaid markup.
+
+    Reuses ``eval.graph_extraction_eval.graph_to_mermaid`` for the base
+    node/edge markup, then appends classDef/class lines to highlight the
+    initial and terminal states. Returns ``""`` when the sample has no states.
+    """
+    g = sample.get("workflow_graph") or {}
+    states = g.get("states") or []
+    if not states:
+        return ""
+    wg = WorkflowGraph(
+        nodes=[{"id": s, "name": s} for s in states],
+        edges=[
+            {
+                "from_state": t.get("from", ""),
+                "to_state": t.get("to", ""),
+                "condition": t.get("condition", ""),
+            }
+            for t in (g.get("transitions") or [])
+        ],
+    )
+    lines = [graph_to_mermaid(wg)]
+    lines.append("    classDef initial fill:#1f6feb,stroke:#79c0ff,color:#fff;")
+    lines.append("    classDef terminal fill:#238636,stroke:#56d364,color:#fff;")
+    initial = g.get("initial")
+    if initial in states:
+        lines.append(f"    class {initial} initial")
+    terms = [t for t in (g.get("terminal") or []) if t in states]
+    if terms:
+        lines.append(f"    class {','.join(terms)} terminal")
+    return "\n".join(lines)
