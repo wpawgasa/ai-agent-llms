@@ -216,3 +216,21 @@ def test_api_sample_detail_and_404(tmp_path, monkeypatch):
 
     missing = client.get("/api/samples/NOPE")
     assert missing.status_code == 404
+
+
+def test_api_chat_unreachable_gateway_streams_error_event(monkeypatch):
+    # Point the gateway at a closed port so stream_chat hits httpx.HTTPError
+    # and emits a synthetic SSE error event instead of hanging.
+    monkeypatch.setenv("BIFROST_ENDPOINT", "http://127.0.0.1:1")
+    from llm_workflow_agents.webui.app import app
+
+    client = TestClient(app)
+    payload = {
+        "model": "openai/gpt-x",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    resp = client.post("/api/chat", json=payload)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "error" in body
+    assert "[DONE]" in body
