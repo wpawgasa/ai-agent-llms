@@ -4,20 +4,28 @@
   "strategy": "manual-commit",
   "branch": "feat/webui-bifrost-chatbot",
   "checkpoints_count": 1,
-  "files_touched": null,
+  "files_touched": [
+    "pyproject.toml"
+  ],
   "sessions": [
     {
       "metadata": "/e0/9cd68c5703/0/metadata.json",
       "transcript": "/e0/9cd68c5703/0/full.jsonl",
       "content_hash": "/e0/9cd68c5703/0/content_hash.txt",
       "prompt": "/e0/9cd68c5703/0/prompt.txt"
+    },
+    {
+      "metadata": "/e0/9cd68c5703/1/metadata.json",
+      "transcript": "/e0/9cd68c5703/1/full.jsonl",
+      "content_hash": "/e0/9cd68c5703/1/content_hash.txt",
+      "prompt": "/e0/9cd68c5703/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 451,
-    "cache_creation_tokens": 646048,
-    "cache_read_tokens": 42485084,
-    "output_tokens": 181962,
-    "api_call_count": 273
+    "input_tokens": 4407,
+    "cache_creation_tokens": 1110256,
+    "cache_read_tokens": 49156246,
+    "output_tokens": 256989,
+    "api_call_count": 355
   }
 }

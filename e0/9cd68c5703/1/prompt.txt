@@ -1,0 +1,18 @@
+Use codex to re-audit with Use /model-training-eval skill to analyze GRPO training diagnostic run
+  https://wandb.ai/wpawgasa/huggingface/runs/df4dot2d Provide in-depth analysis of each
+  training step, i.e. show the sample, rollout responses, reward, selected action
+  (response and tool call), reason for selected action, loss, and gradient. Decide
+  whether we resume training or go through different approach like re-SFT or multi-turn
+  rollout
+
+---
+
+use OPENAI_API_KEY from .env
+
+---
+
+The API key is allowed to all permissions
+
+---
+
+use /model-training-eval skill to proceed with the analysis directly
