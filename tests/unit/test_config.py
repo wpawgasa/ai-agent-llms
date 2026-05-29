@@ -131,4 +131,4 @@ class TestConfigLoader:
         model_dir = configs_dir / "models" / "cat_bc"
         assert model_dir.exists(), f"Expected model dir at {model_dir}"
         configs = load_all_model_configs(model_dir)
-        assert len(configs) == 7
+        assert len(configs) == 9
