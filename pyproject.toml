@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "LLM workflow-orchestrating agents with KV cache quantization on H100"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.14"  # flash-attn-4 / sglang have no wheels for 3.14-alpha yet
 authors = [{ name = "wpawgasa" }]
 
 dependencies = [
@@ -100,6 +100,9 @@ sglang = [
     "sglang>=0.5.11",
     "torch>=2.11.0",
     "transformers>=5.6.0",
+    # sglang 0.5.11+ requires flash-attn-4 which only has pre-release wheels;
+    # listing it directly here tells uv to consider pre-releases for this package.
+    "flash-attn-4>=4.0.0b9",
 ]
 
 # TensorRT-LLM serving venv (.venv-trtllm). Bootstrapped by scripts/install_trtllm.sh.
@@ -107,7 +110,10 @@ sglang = [
 # satisfy this. Cannot coexist with .venv-infer or .venv-train (torch pin conflicts).
 trtllm = [
     "tensorrt-llm==1.2.1",
-    "torch==2.10.0",
+    # torch intentionally omitted: tensorrt-llm==1.2.1 pins torch<=2.10.0a0 (its
+    # own upper bound is a PEP 440 pre-release), which is incompatible with an
+    # explicit torch==2.10.0 (stable). tensorrt-llm brings the right torch build
+    # as a transitive dep. Install via scripts/install_trtllm.sh, not uv sync.
 ]
 
 # vLLM plugin entry point. Auto-loaded by vllm.plugins.load_general_plugins()
@@ -118,6 +124,18 @@ llm_workflow_agents_turboquant = "llm_workflow_agents.vllm_plugin:register"
 
 [tool.uv]
 index-strategy = "unsafe-best-match"
+# Declare mutually exclusive extras so uv's universal resolver doesn't try to
+# unify them into a single environment (they pin incompatible vllm / torch
+# versions). Each pair is resolved independently; `uv sync --extra dev` then
+# only needs to resolve the `dev` branch, which has no conflicts.
+conflicts = [
+  [{extra = "train"}, {extra = "infer"}],
+  [{extra = "train"}, {extra = "sglang"}],
+  [{extra = "train"}, {extra = "trtllm"}],
+  [{extra = "infer"}, {extra = "sglang"}],
+  [{extra = "infer"}, {extra = "trtllm"}],
+  [{extra = "sglang"}, {extra = "trtllm"}],
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
