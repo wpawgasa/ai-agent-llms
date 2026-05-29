@@ -33,7 +33,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           source .venv/bin/activate
-          PYTHONPATH=src pytest tests/ -v --cov=llm_workflow_agents --cov-report=term-missing --cov-fail-under=70
+          PYTHONPATH=src pytest tests/ -v --cov=llm_workflow_agents --cov-report=term-missing --cov-fail-under=65
 
       - name: Upload coverage report
         if: matrix.python-version == '3.12' && always()

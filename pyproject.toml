@@ -176,6 +176,14 @@ warn_unused_configs = true
 module = ["torch.*", "transformers.*", "peft.*", "trl.*", "vllm.*", "triton.*", "wandb.*", "outlines.*"]
 ignore_missing_imports = true
 
+[tool.coverage.run]
+omit = [
+    # Visualization modules call matplotlib/seaborn — require a display; untestable headlessly
+    "*/analysis/plot_*.py",
+    # External teacher-model API calls (GPT-4o / Claude) — untestable in CI without live keys
+    "*/data/_teacher_client.py",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
