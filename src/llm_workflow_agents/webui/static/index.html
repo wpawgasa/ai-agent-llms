@@ -540,24 +540,37 @@
   /* Diagram fullscreen modal */
   #diagram-modal {
     display: none; position: fixed; inset: 0; z-index: 10000;
-    background: rgba(8,10,15,.88); backdrop-filter: blur(3px);
-    align-items: center; justify-content: center;
+    background: #080a0f; flex-direction: column;
   }
   #diagram-modal.open { display: flex; }
-  #diagram-modal-box {
-    position: relative; max-width: 92vw; max-height: 90vh;
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 16px; overflow: auto;
-    box-shadow: 0 24px 80px rgba(0,0,0,.7);
+  #diagram-modal-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-shrink: 0; height: 44px;
   }
-  #diagram-modal-box svg { width: 100% !important; height: auto !important; max-width: 100% !important; max-height: 80vh; display: block; }
+  #diagram-zoom-controls { display: flex; align-items: center; gap: 4px; }
+  #diagram-zoom-controls button {
+    background: rgba(255,255,255,.06); border: 1px solid var(--line);
+    color: var(--txt); font-size: 15px; line-height: 1; cursor: pointer;
+    padding: 4px 10px; border-radius: 6px; width: auto;
+  }
+  #diagram-zoom-controls button:hover { background: rgba(255,255,255,.14); }
+  #diagram-zoom-label { font-size: 12px; color: var(--muted); min-width: 42px; text-align: center; }
   #diagram-modal-close {
-    position: absolute; top: 10px; right: 12px;
     background: none; border: none; color: var(--muted);
-    font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 6px;
+    font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 8px;
     border-radius: 6px; width: auto;
   }
   #diagram-modal-close:hover { color: var(--txt); background: rgba(255,255,255,.06); }
+  #diagram-modal-viewport {
+    flex: 1; overflow: hidden; position: relative; cursor: grab;
+  }
+  #diagram-modal-viewport.panning { cursor: grabbing; }
+  #diagram-modal-svg {
+    position: absolute; top: 0; left: 0; width: 100%;
+    transform-origin: 0 0; user-select: none;
+  }
+  #diagram-modal-svg svg { display: block; width: 100% !important; height: auto !important; max-width: none !important; max-height: none !important; }
 </style>
 <!-- mermaid 10.9.3 UMD — vendored for offline use -->
 <script src="/static/vendor/mermaid.min.js"></script>
@@ -643,8 +656,16 @@
 
   <!-- Diagram fullscreen modal -->
   <div id="diagram-modal" role="dialog" aria-modal="true" aria-label="Workflow diagram expanded view">
-    <div id="diagram-modal-box">
+    <div id="diagram-modal-toolbar">
+      <div id="diagram-zoom-controls">
+        <button id="diagram-zoom-out" title="Zoom out (−)">−</button>
+        <span id="diagram-zoom-label">100%</span>
+        <button id="diagram-zoom-in" title="Zoom in (+)">+</button>
+        <button id="diagram-zoom-reset" title="Reset zoom (0)">⊡</button>
+      </div>
       <button id="diagram-modal-close" title="Close (Esc)">✕</button>
+    </div>
+    <div id="diagram-modal-viewport">
       <div id="diagram-modal-svg"></div>
     </div>
   </div>
@@ -655,23 +676,37 @@ mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' 
 const $ = (id) => document.getElementById(id);
 let tools = [];
 let history = [];  // assistant/user/tool turns AFTER the system message
+let zoomScale = 1, panX = 0, panY = 0;
+let isPanning = false, panStart = {x: 0, y: 0}, pinchDist = null;
+
+function applyTransform() {
+  $('diagram-modal-svg').style.transform = `translate(${panX}px,${panY}px) scale(${zoomScale})`;
+  $('diagram-zoom-label').textContent = Math.round(zoomScale * 100) + '%';
+}
+
+function zoomToward(cx, cy, factor) {
+  const newScale = Math.max(0.1, Math.min(10, zoomScale * factor));
+  const f = newScale / zoomScale;
+  panX = panX + (cx - panX) * (1 - f);
+  panY = panY + (cy - panY) * (1 - f);
+  zoomScale = newScale;
+  applyTransform();
+}
 
 function openModal() {
   const svg = $('diagram').querySelector('svg');
   if (!svg) return;
   $('diagram-modal-svg').innerHTML = svg.outerHTML;
   // Mermaid bakes inline style="max-width:Npx" and explicit width/height attrs
-  // onto the SVG — strip them so our CSS can size it to fill the modal.
+  // onto the SVG — strip them so our CSS controls sizing.
   const clone = $('diagram-modal-svg').querySelector('svg');
   if (clone) {
     clone.removeAttribute('width');
     clone.removeAttribute('height');
-    clone.style.removeProperty('max-width');
-    clone.style.removeProperty('width');
-    clone.style.removeProperty('height');
-    clone.style.width = '100%';
-    clone.style.height = 'auto';
+    clone.style.cssText = 'display:block;width:100%;height:auto;max-width:none;max-height:none;';
   }
+  zoomScale = 1; panX = 0; panY = 0;
+  applyTransform();
   $('diagram-modal').classList.add('open');
   $('diagram-modal-close').focus();
 }
@@ -679,6 +714,8 @@ function openModal() {
 function closeModal() {
   $('diagram-modal').classList.remove('open');
   $('diagram-modal-svg').innerHTML = '';
+  $('diagram-modal-viewport').classList.remove('panning');
+  isPanning = false;
   $('diagram').focus();
 }
 
@@ -884,8 +921,87 @@ $('input').addEventListener('keydown', (e) => {
 });
 $('diagram').addEventListener('click', () => openModal());
 $('diagram-modal-close').addEventListener('click', closeModal);
-$('diagram-modal').addEventListener('click', (e) => { if (e.target === $('diagram-modal')) closeModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+$('diagram-modal-viewport').addEventListener('click', (e) => { if (e.target === $('diagram-modal-viewport')) closeModal(); });
+
+// Zoom buttons
+$('diagram-zoom-in').addEventListener('click', () => {
+  const r = $('diagram-modal-viewport').getBoundingClientRect();
+  zoomToward(r.width / 2, r.height / 2, 1.25);
+});
+$('diagram-zoom-out').addEventListener('click', () => {
+  const r = $('diagram-modal-viewport').getBoundingClientRect();
+  zoomToward(r.width / 2, r.height / 2, 0.8);
+});
+$('diagram-zoom-reset').addEventListener('click', () => { zoomScale = 1; panX = 0; panY = 0; applyTransform(); });
+
+// Scroll-wheel zoom toward cursor
+$('diagram-modal-viewport').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const r = $('diagram-modal-viewport').getBoundingClientRect();
+  zoomToward(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+}, { passive: false });
+
+// Mouse drag/pan
+$('diagram-modal-viewport').addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  isPanning = true;
+  panStart = { x: e.clientX - panX, y: e.clientY - panY };
+  $('diagram-modal-viewport').classList.add('panning');
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!isPanning) return;
+  panX = e.clientX - panStart.x;
+  panY = e.clientY - panStart.y;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => {
+  if (!isPanning) return;
+  isPanning = false;
+  $('diagram-modal-viewport').classList.remove('panning');
+});
+
+// Touch pinch-to-zoom + single-finger pan
+$('diagram-modal-viewport').addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchDist = Math.hypot(dx, dy);
+    e.preventDefault();
+  } else if (e.touches.length === 1) {
+    isPanning = true;
+    panStart = { x: e.touches[0].clientX - panX, y: e.touches[0].clientY - panY };
+  }
+}, { passive: false });
+$('diagram-modal-viewport').addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2 && pinchDist !== null) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const newDist = Math.hypot(dx, dy);
+    const r = $('diagram-modal-viewport').getBoundingClientRect();
+    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+    zoomToward(cx, cy, newDist / pinchDist);
+    pinchDist = newDist;
+    e.preventDefault();
+  } else if (e.touches.length === 1 && isPanning) {
+    panX = e.touches[0].clientX - panStart.x;
+    panY = e.touches[0].clientY - panStart.y;
+    applyTransform();
+    e.preventDefault();
+  }
+}, { passive: false });
+$('diagram-modal-viewport').addEventListener('touchend', () => { pinchDist = null; isPanning = false; });
+
+// Keyboard: Esc closes; +/= zooms in; - zooms out; 0 resets
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeModal(); return; }
+  if (!$('diagram-modal').classList.contains('open')) return;
+  const r = $('diagram-modal-viewport').getBoundingClientRect();
+  if (e.key === '+' || e.key === '=') { zoomToward(r.width / 2, r.height / 2, 1.25); e.preventDefault(); }
+  else if (e.key === '-') { zoomToward(r.width / 2, r.height / 2, 0.8); e.preventDefault(); }
+  else if (e.key === '0') { zoomScale = 1; panX = 0; panY = 0; applyTransform(); e.preventDefault(); }
+});
 
 showEmptyState();
 loadModels();
