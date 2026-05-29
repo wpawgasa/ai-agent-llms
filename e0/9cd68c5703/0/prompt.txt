@@ -1,0 +1,59 @@
+/superpowers:brainstorming Could workflow script be drawn as figure or diagram (Mermaid)?
+
+---
+
+/superpowers:using-superpowers
+
+---
+
+push and create a pull request
+
+---
+
+/superpowers:using-superpowers make workflow diagram expandable
+
+---
+
+yes
+
+---
+
+good to go
+
+---
+
+I mean I'll go with approach #1
+
+---
+
+kill current server
+
+---
+
+The modal shows only small fraction @"Pasted image (3).png"
+
+---
+
+/superpowers:brainstorming Modal is shown but it is the same size as in the diagram pane. Make it expand to full screen and make it zoomable in the modal.
+
+---
+
+implement C
+
+---
+
+/superpowers:systematic-debugging Run # Use only the `dev` extra in CI. `train` and `infer` pin
+Using CPython 3.12.13
+Creating virtual environment at: .venv
+  × No solution found when resolving dependencies for split (markers:
+  │ python_full_version >= '3.14' and sys_platform == 'win32'):
+  ╰─▶ Because llm-workflow-agents[train] depends on vllm==0.19.1 and
+      llm-workflow-agents[infer] depends on vllm==0.20.0, we can conclude
+      that llm-workflow-agents[infer] and llm-workflow-agents[train] are
+      incompatible.
+      And because your project requires llm-workflow-agents[infer] and
+      llm-workflow-agents[train], we can conclude that your project's
+      requirements are unsatisfiable.
+
+hint: While the active Python version is 3.12, the resolution failed for other Python versions supported by your project. Consider limiting your project's supported Python versions using `requires-python`.
+Error: Process completed with exit code 1.
