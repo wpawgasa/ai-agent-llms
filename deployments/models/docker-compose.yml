@@ -1,0 +1,97 @@
+# =============================================================================
+# vLLM Model Serving — NVIDIA H100 80GB
+# =============================================================================
+# Serves ONE model at a time via vLLM's OpenAI-compatible API. The single H100
+# holds one model, so this stack defines a single generic `vllm` service whose
+# model and flags are configured entirely through `.env`:
+#
+#   cd deployments/models
+#   cp .env.example .env        # set HF_TOKEN, VLLM_MODEL, VLLM_TOOL_CALL_PARSER
+#   docker compose up
+#
+# Switch models by editing `.env` (VLLM_MODEL + the matching parser/overrides —
+# see the per-model preset blocks in .env.example) and re-running `up`.
+#
+# The OpenAI API is then at http://localhost:${VLLM_PORT:-8000}/v1
+# Flags mirror `serving/launch_vllm.sh` (the project's authoritative launcher)
+# for the matching configs/models/**/<model>.yaml.
+#
+# Prerequisite: the shared network must exist first (created by the
+# deployments/local/ stack, or once via: docker network create llm-benchmark-network).
+# =============================================================================
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 600s          # first run downloads + loads weights (can be minutes)
+
+services:
+
+  vllm:
+    image: vllm/vllm-openai:v0.20.0
+    container_name: vllm-model
+    ipc: host                   # vLLM needs host shared memory
+    restart: unless-stopped
+    ports:
+      - "${VLLM_PORT:-8000}:8000"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      # --- served model + flags (configured in .env) -----------------------
+      VLLM_MODEL: ${VLLM_MODEL:?set VLLM_MODEL in .env (e.g. Qwen/Qwen3.6-35B-A3B-FP8)}
+      VLLM_DTYPE: ${VLLM_DTYPE:-bfloat16}
+      VLLM_TOOL_CALL_PARSER: ${VLLM_TOOL_CALL_PARSER:?set VLLM_TOOL_CALL_PARSER in .env (e.g. qwen3_coder or gemma4)}
+      VLLM_GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      VLLM_MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-8192}
+      VLLM_HF_OVERRIDES: ${VLLM_HF_OVERRIDES:-}
+      VLLM_KV_CACHE_DTYPE: ${VLLM_KV_CACHE_DTYPE:-}
+      VLLM_ENFORCE_EAGER: ${VLLM_ENFORCE_EAGER:-}
+      VLLM_EXTRA_ARGS: ${VLLM_EXTRA_ARGS:-}
+    volumes:
+      - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
+    networks:
+      - llm-benchmark-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+    # Build the vLLM arg list at runtime so optional flags (hf-overrides,
+    # kv-cache-dtype, enforce-eager) are only passed when their var is non-empty.
+    # `$$` keeps expansion in the container shell, not docker-compose substitution.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        args=(
+          --model "$${VLLM_MODEL}"
+          --dtype "$${VLLM_DTYPE}"
+          --tool-call-parser "$${VLLM_TOOL_CALL_PARSER}"
+          --gpu-memory-utilization "$${VLLM_GPU_MEMORY_UTILIZATION}"
+          --max-model-len "$${VLLM_MAX_MODEL_LEN}"
+          --enable-auto-tool-choice
+          --port 8000
+        )
+        if [ -n "$${VLLM_HF_OVERRIDES}" ];  then args+=(--hf-overrides "$${VLLM_HF_OVERRIDES}"); fi
+        if [ -n "$${VLLM_KV_CACHE_DTYPE}" ]; then args+=(--kv-cache-dtype "$${VLLM_KV_CACHE_DTYPE}"); fi
+        if [ -n "$${VLLM_ENFORCE_EAGER}" ];  then args+=(--enforce-eager); fi
+        if [ -n "$${VLLM_EXTRA_ARGS}" ];     then args+=($${VLLM_EXTRA_ARGS}); fi
+        echo "Launching: python3 -m vllm.entrypoints.openai.api_server $${args[*]}"
+        exec python3 -m vllm.entrypoints.openai.api_server "$${args[@]}"
+
+networks:
+  llm-benchmark-network:
+    external: true
+    name: llm-benchmark-network
