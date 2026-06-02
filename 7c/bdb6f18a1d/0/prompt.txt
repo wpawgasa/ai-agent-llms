@@ -3,3 +3,7 @@ Only one model will be served at a time. Edit @deployments/models/docker-compose
 ---
 
 Add Bifrost vLLM provider in @deployments/local/data/bifrost/config.json
+
+---
+
+commit and push
