@@ -1,17 +1,26 @@
 # 50-step GRPO diagnostic — see docs/grpo_diagnosis_gemma4_26b.md addendum
-# "Updated retry plan" for what to read off this run.
+# "Full Per-Step Re-Audit (2026-05-29)" for what to read off this run and why
+# these settings changed.
 #
-# Mirrors grpo_cat_a.yaml exactly except:
+# This config is the STABILIZED re-launch after df4dot2d died from gradient/KL
+# explosion (grad-norm 1126, KL 40 — NOT a zero-gradient stub attractor). Three
+# fixes vs grpo_cat_a.yaml: scale_rewards=none (primary), loss_type=dr_grpo,
+# max_grad_norm=0.2; plus LR 5e-6→1e-6, num_generations 8→16, 2 prompts/step,
+# temperature 1.0→0.8, beta 0.1→0.05.
+#
+# Mirrors grpo_cat_a.yaml except:
 #   training_steps: 50   (vs 1000)  — fast triage; ~10 min on H100 with HF rollouts
-#   save_steps: 25       (vs 50)    — save twice during the run (steps 25 and 50)
-#                                     so we have an artifact if signal looks promising
+#   save_steps: 10       (vs 50)    — frequent artifacts during the short run
 #
-# Decision rule on completion (from the diagnosis doc):
-#   frac_reward_zero_std < ~0.5                    → proceed to full 1000 steps
-#   frac_reward_zero_std high + diverse completions → reward still under-resolved,
-#                                                     iterate on (c)
-#   frac_reward_zero_std high + identical completions → policy entropy collapse;
-#                                                       SFT reset or (a*) needed
+# Kill criteria on this run (stability first — NOT diversity):
+#   grad_norm > 50 for 3 consecutive steps  → kill, halve LR again
+#   kl > 10 at any step                      → kill, halve LR again
+#   stable but reward_std < 0.02 across run  → optimization fixed, but reward
+#       under-resolves; next ticket is reward-resolution / tool-emission data slice
+#   stable + reward_std climbing             → proceed to full 1000 steps
+#
+# IMPORTANT: launch from the SFT base (checkpoint-500), NOT a df4dot2d GRPO
+# checkpoint — those sit on the destabilized trajectory.
 #
 # Launch:
 #   ./scripts/run_phase2_grpo.sh \
@@ -27,21 +36,37 @@ model:
 grpo:
   algorithm: "GRPO"
   normalization: "DAPO"
-  num_generations: 8
-  beta: 0.1
+  num_generations: 16          # was 8 — better within-group std estimate, fewer
+                               #   near-zero-std groups that triggered amplification
+  generation_batch_size: 32    # 32/16 = 2 unique prompt-groups per generation
+                               #   round (was 1) — halves prompt-draw noise.
+                               #   TRL constraints (num_processes=1):
+                               #     32 % per_device_train_batch_size(8) == 0  ✓
+                               #     32 % num_generations(16)            == 0  ✓
+                               #   → steps_per_generation = 32/8 = 4
+  per_device_train_batch_size: 8   # explicit (matches prior run's train-side VRAM);
+                                   #   advantages are computed over full 16-gen groups
+                                   #   at generation time, so the 4 micro-steps are safe
+  gradient_accumulation_steps: 1
+  beta: 0.05                   # was 0.1 — safe to relax once advantages are bounded
   epsilon: 0.2
-  learning_rate: 5.0e-6
+  learning_rate: 1.0e-6        # was 5e-6 — halve step size while stabilizing
+  max_grad_norm: 0.2           # explicit tight clip (TRL default 1.0); df4dot2d
+                               #   pre-clip grad-norm hit 1126
+  scale_rewards: "none"        # PRIMARY FIX: stop dividing advantages by group std
+                               #   (TRL default "group" caused the 60–1060× blowup)
   training_steps: 50           # ← diagnostic override
   warmup_ratio: 0.05
-  loss_type: "grpo"
+  loss_type: "dr_grpo"         # was "grpo" — TRL "grpo" has a documented
+                               #   short-completion length bias (211→29 collapse)
   max_completion_length: 512
   max_prompt_length: 7680      # 7680 + 512 completion = 8192 (grpo.py max_seq_length)
   log_completions: true
   num_completions_to_print: 4
-  save_steps: 25               # ← diagnostic override (save at steps 25 and 50)
+  save_steps: 10               # ← diagnostic override (save every 10 steps)
   save_total_limit: 3
   sampling:
-    temperature: 1.0
+    temperature: 0.8           # was 1.0 — completions already diverse (mean uniq 6.8/8)
     top_p: 0.95
   generation_backend: "vllm"   # auto-falls back to HF for Gemma-4 (Risk R9)
   vllm_gpu_memory_utilization: 0.55

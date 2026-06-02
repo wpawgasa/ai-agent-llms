@@ -536,18 +536,39 @@ def train_grpo(config_path: Path) -> GRPOResult:
     # Optional GRPOConfig kwargs — only set when present in YAML so existing
     # configs that don't specify them keep TRL's defaults. The diagnosis
     # doc (docs/grpo_diagnosis_gemma4_26b.md) recommends:
-    #   loss_type=grpo (over TRL's dapo default; BNPO was too sensitive in
-    #     the killed run with a low-entropy ref policy)
+    #   loss_type=dr_grpo (TRL's "grpo" carries a documented short-completion
+    #     length bias that drove the df4dot2d 211→29-token collapse; "dr_grpo"
+    #     is length-bias-free — see the 2026-05-29 re-audit)
     #   max_completion_length=512 (TRL default 256 caused 16% truncation rate)
     #   log_completions=true / num_completions_to_print=4 (sample groups land
     #     in W&B alongside frac_reward_zero_std — load-bearing for the
     #     50-step diagnostic).
+    #   scale_rewards=none — STOP dividing advantages by the per-group reward
+    #     std. TRL's default "group" divided by std≈0.003–0.04 on near-constant
+    #     groups, amplifying advantages 60–1060× → grad-norm 1126, KL 40 in
+    #     df4dot2d. This is the primary instability fix (2026-05-29 re-audit).
+    #   max_grad_norm=0.2 — explicit tight gradient clip (TRL default 1.0 left
+    #     the clipped direction dominated by exploding components).
+    #   generation_batch_size — set >num_generations to get >1 unique prompt
+    #     per step (df4dot2d ran 8/8 = 1 prompt/step → high prompt-draw noise).
     for key in (
         "loss_type",
         "max_completion_length",
         "max_prompt_length",
         "log_completions",
         "num_completions_to_print",
+        "scale_rewards",
+        "max_grad_norm",
+        "generation_batch_size",
+        "epsilon",
+        # Batch geometry — explicit so the TRL divisibility constraints are
+        # satisfied deterministically rather than relying on defaults. TRL
+        # 0.23.1 requires generation_batch_size % (per_device_train_batch_size
+        # * num_processes) == 0 and generation_batch_size % num_generations
+        # == 0; steps_per_generation is then derived. See grpo_config.py
+        # __post_init__ (lines 882-918).
+        "per_device_train_batch_size",
+        "gradient_accumulation_steps",
     ):
         if key in grpo_cfg:
             grpo_kwargs[key] = grpo_cfg[key]

@@ -774,11 +774,24 @@ class TestLossMaskResponseOnly:
         from llm_workflow_agents.training.sft import render_response_only_sample
 
         tok = _load_tokenizer_or_skip("google/gemma-2-2b-it")
-        # Gemma uses role "model" instead of "assistant" in its template, but
-        # our masking key is the input role string — apply_chat_template
-        # accepts "assistant" and remaps it. Decoded output uses "model".
-        sample = render_response_only_sample(SAMPLE_CONVERSATION, tok, max_seq_length=2048)
-        self._check_masking_invariants(sample, tok)
+        # Gemma-2's chat template requires strict user/assistant alternation — no
+        # system or tool roles. It also remaps "assistant" → "model" internally;
+        # our masking key is the input role string so no change needed on our side.
+        gemma_conv = [
+            {"role": "user", "content": "I need to reset my password."},
+            {"role": "assistant", "content": "[STATE: greeting → authenticating] Sure — please confirm your email."},
+            {"role": "user", "content": "alice@example.com"},
+            {"role": "assistant", "content": "[STATE: resetting → done] A reset link was emailed."},
+        ]
+        sample = render_response_only_sample(gemma_conv, tok, max_seq_length=2048)
+        ids, labels, attn = sample["input_ids"], sample["labels"], sample["attention_mask"]
+        assert len(ids) == len(labels) == len(attn)
+        assert any(lab == -100 for lab in labels), "no masked labels"
+        assert any(lab != -100 for lab in labels), "no unmasked labels"
+        unmasked = tok.decode([i for i, lab in zip(ids, labels) if lab != -100], skip_special_tokens=False)
+        assert "[STATE: resetting → done]" in unmasked
+        assert "reset link was emailed" in unmasked
+        assert "I need to reset my password" not in unmasked
 
     def test_left_truncation_preserves_final_assistant_turn(self) -> None:
         from llm_workflow_agents.training.sft import render_response_only_sample

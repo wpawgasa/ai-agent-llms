@@ -1021,3 +1021,102 @@ Still the structural fix, still deferred. The 2026-05-25 and 2026-05-26 addenda'
 - 0 GPU time
 - Identifies a recommendation-changing detail (endpoint state) that the prior addendum missed because it relied on post-hoc instrumentation aggregates instead of inspecting the actual final-step completions
 
+---
+
+## Full Per-Step Re-Audit (2026-05-29): It Was Gradient/KL Explosion, Not a Zero-Gradient Stub Attractor
+
+**Run re-analyzed:** [`wpawgasa/huggingface/df4dot2d`](https://wandb.ai/wpawgasa/huggingface/runs/df4dot2d) — same run, re-examined a third time by pulling **all 51** completions tables from W&B *and* reconciling every step against the authoritative scalar log in `checkpoints/grpo_cat_a/gemma-4-26B-A4B-it/checkpoint-50/trainer_state.json` (50 `log_history` entries, one per optimizer step). The two prior addenda (2026-05-26, 2026-05-27) read the failure off the **W&B `completions` tables**. This audit proves those tables are **not the gradient-producing rollout group**, and that the real `trainer_state.json` tells the opposite story.
+
+### TL;DR — the "zero-gradient stub attractor" framing is withdrawn
+
+`df4dot2d` did **not** die from too little gradient. It died from **gradient and KL explosions**: grad-norm reached **1126** (mean 149, median 24), KL reached **40.16** (mean 4.4), with 7 steps over grad-norm 500. The 29-token byte-identical stub at step 50 is the **burnt-out endpoint** of that oscillation, not a stable low-energy basin the policy "fell into" for lack of signal. `frac_reward_zero_std = 1.0` at **only 2 of 50 steps** (18 and 50) — **not 66%, not 90%**. The reward signal was working on ~46/50 steps; the optimizer destroyed the policy anyway.
+
+**Revised recommendation: do NOT resume from any `df4dot2d` checkpoint (ckpt-25 *or* ckpt-50 — both prior options are wrong). Re-launch a stabilized 50-step diagnostic from SFT `checkpoint-500` with three optimization-stability fixes (below). Re-SFT (Option B) is demoted to fallback; the reward signal is not the first-order problem.**
+
+### The proof that the completions tables are a logging artifact
+
+The table-derived within-group reward_std and the trainer-logged reward_std are **inverted** — they cannot be the same group of rollouts:
+
+| step | table reward_std | `trainer_state` reward_std | `trainer_state` grad_norm | note |
+|---:|---|---|---|---|
+| 1  | 0.000 (8× identical text) | **0.262** | 25.9 | table says collapsed, trainer says diverse |
+| 18 | 0.269 (diverse, adv ±1.2 in table) | **0.000** (`frac0=1.0`) | 0.19 | table says diverse, trainer says zero-variance |
+| 28 | 0.000 | **0.007** | **1126.1** | the worst explosion step looks calm in the table |
+
+Correlation between table-reward_std and trainer grad_norm across all 50 steps is **−0.155** (essentially uncorrelated). **Conclusion:** every per-step "selected action / advantage / which rollout won" claim in the 2026-05-26 and 2026-05-27 addenda is built on a reshuffled logging view and is unreliable. The tables are still useful to see *what kinds of text the model emits*; they are useless for reconstructing the gradient.
+
+### Authoritative per-step metrics (`trainer_state.json`)
+
+```
+ st reward_std    loss     grad      kl   | mechanism
+  3     0.007    0.041     5.2    0.41
+  4     0.078    0.080    51.3    0.80    text-collapse (all-8 stub), modest grad
+ 12     0.237    3.794   848.8   37.94    *** KL BLOWUP ***
+ 13     0.015    3.342   745.8   33.42    *** KL BLOWUP ***
+ 20     0.185    3.649   752.3   36.49    *** KL BLOWUP ***
+ 26     0.124    0.975   603.9    9.75    *** KL BLOWUP ***
+ 27     0.023    1.264   295.6   12.64    *** KL BLOWUP ***
+ 28     0.007    4.016  1126.1   40.16    *** WORST: std 0.007 → ~150× amp → KL 40 ***
+ 36     0.016    0.224   809.8    2.24    small-std amplification, big grad
+ 50     0.000    0.067     0.2    0.67    collapsed endpoint (the "stub")
+```
+
+Aggregates over 50 steps: grad-norm mean **149.0** / median 23.9 / **max 1126.1**; 14 steps > 100, 7 steps > 500. KL mean **4.42** / max **40.16**; 4 steps > 20. `frac_reward_zero_std = 1.0` only at steps **18, 50**. `reward_std == 0` only at steps **18, 50**. `loss ≡ 0.1·kl` at every step (ratio 1.00 — the loss scalar is a KL thermometer; that equality is expected in GRPO since within-group advantages have zero mean, so KL = 40 is the alarm, not the loss number).
+
+Completion length is **not** pinned — it thrashes 211 → 106 → 50 → **15** (step 18) → 154 (step 42) → **29** (step 50). The "30, min == max" the 2026-05-27 addendum reported is the endpoint only.
+
+### Correction of specific 2026-05-27 claims
+
+| 2026-05-27 claim | Reality (`trainer_state.json`) |
+|---|---|
+| "grad_norm 0.152 ← functionally zero" (framed as representative) | True at step 50 *only*; run mean 149, max 1126 |
+| Walkthrough table: step 3 grad "9483"; step 1 "loss 0.056 / grad 2.16"; step 18 "loss 0.086 / grad 25.1" | step 3 grad **5.2**; step 1 loss 0.073 / grad 25.9; step 18 loss 0.005 / grad **0.19**. The walkthrough grad/loss values were misattributed (also read off the misaligned tables). |
+| "66% of steps with reward_std = 0"; "10% useful-gradient density" | `reward_std = 0` at **2/50 steps**; ~46/50 steps carry nonzero within-group variance |
+| "DAPO normalizes advantages within group → pulls policy toward partial-credit floor" (collapse story) | Mechanism is real but the *effect* is the opposite: std-normalization on near-zero std **amplifies** advantages → explosion |
+
+### Root cause — three compounding bugs
+
+1. **`scale_rewards` left at TRL default `"group"` (primary).** `grpo.py` never sets `scale_rewards`, so advantages are divided by the per-group reward std. With std at 0.003–0.04 on most steps, that multiplies advantages by **60–1060×**. Step 28: std 0.007 → ~150× → exploding advantage → grad 1126 → KL 40. TRL's own docstring: *"`False`/`'none'`: the Dr. GRPO paper recommends not scaling rewards, as scaling by the standard deviation introduces a … bias."* The docstring's "DAPO normalization" intent (`grpo.py:403`) was never wired to the actual knob.
+2. **`loss_type: "grpo"` carries a documented short-completion bias (secondary).** TRL docs this value as *"Not recommended due to length bias — tends to prefer shorter completions with positive advantages."* This is why length collapsed 211 → 29 and the endpoint is a terse stub. The choice was made in the 2026-05-21 redesign to dodge BNPO sensitivity; it introduced the very short-stub pathology the later audits chased.
+3. **No explicit `max_grad_norm` (amplifier).** Defaults to 1.0; logged grad-norm is the **pre-clip** value, so norms of 1126 mean the clip fires every step but the surviving update direction is dominated by exploding components — clipping without damping.
+
+**Unified chain:** near-zero within-group reward variance → `scale_rewards="group"` divides by it → giant normalized advantages → giant update → KL explodes → KL-penalty gradient explodes (grad 1126) → clip-to-1.0 keeps a noisy direction → policy thrashes (length 211↔15) → `loss_type="grpo"` length-bias steers the thrash short → collapse to a 29-token stub by step 50. The reward-lattice / tool-emission story from prior addenda is **real but secondary** — it explains *why std is small*; the small std only became fatal through bug #1.
+
+### Recommendation: stabilized re-launch from SFT `checkpoint-500`
+
+Not from ckpt-25 (2026-05-27 Option A) or ckpt-50 (2026-05-26) — both are points on the already-destabilized trajectory, and neither prior option touches any of the three real bugs.
+
+```yaml
+# configs/training/grpo_cat_a_diagnostic.yaml  — stabilized 50-step diagnostic
+grpo:
+  scale_rewards: "none"        # BUG 1 FIX (primary): stop dividing advantages by group std
+  loss_type: "dr_grpo"         # BUG 2 FIX: length-bias-free; NOT "grpo"
+  max_grad_norm: 0.2           # BUG 3 FIX: explicit tight clip
+  learning_rate: 1.0e-6        # was 5e-6 — halve step size while stabilizing
+  beta: 0.05                   # was 0.1 — safe to relax once advantages are bounded
+  num_generations: 16          # was 8 — better std estimate, fewer near-zero-std groups
+  generation_batch_size: 32    # 2 unique prompts/step (was 1) — lower prompt-draw noise
+  sampling:
+    temperature: 0.8           # was 1.0 — completions already diverse (mean uniq 6.8/8)
+  training_steps: 50
+  save_steps: 10
+```
+
+**Passthrough gap (load-bearing):** `grpo.py`'s optional-kwargs loop (`grpo.py:545-553`) forwards only `loss_type, max_completion_length, max_prompt_length, log_completions, num_completions_to_print`. `scale_rewards` and `max_grad_norm` are **not** forwarded — they must be added to that list or the two primary fixes are silently ignored (this is exactly how `scale_rewards` stayed at its explosive default through three runs).
+
+**Kill criteria (primary = stability, not diversity):**
+- grad-norm > 50 for 3 consecutive steps, OR KL > 10 at any step → stop, halve LR again.
+- If stable but `reward_std` stays < 0.02 across the run → *then* reward-resolution work (finer continuous reward components; the tool-emission-rich data slice from the 2026-05-26 Option B) becomes the next ticket. That is the real remaining bottleneck — but it is unreachable until the optimization is stable.
+
+### What this re-audit ADDS / WITHDRAWS
+
+- **Withdrawn:** 2026-05-27 "restart from checkpoint-25" (Option A) and 2026-05-26 "extend to 1000 steps from checkpoint-50" — both build on a destabilized trajectory and ignore the three bugs.
+- **Withdrawn:** the "zero-gradient stub attractor / ~10% useful-gradient density / 66% zero-variance" characterization — contradicted by `trainer_state.json`.
+- **Withdrawn:** 2026-05-27 leaf "the 2026-05-21 redesign stabilized the numerics — KL bounded, no sustained grad explosion." KL hit 40 and grad hit 1126; numerics were never stable.
+- **Added:** the failure is optimization instability (`scale_rewards="group"` × near-zero std, `loss_type="grpo"` length bias, no `max_grad_norm`), fixable in config + a 2-line passthrough patch.
+- **Unchanged:** Option C (multi-turn rollouts) stays deferred; the reward-resolution / tool-emission work remains the correct *second* step once the run is stable.
+
+### Method note
+
+Run directly via the `model-training-eval` skill (not Codex — Codex CLI v0.134.0 requires the Responses **WebSocket** endpoint, which 401s for this `sk-proj-*` key; the HTTP Responses API and the key itself are fine, so it is a CLI transport limitation in this container, not an auth problem). Evidence base: all 51 W&B completions tables + the 50-entry `trainer_state.json` scalar log. GPU time: 0.
+
