@@ -27,7 +27,11 @@ class ChatRequest(BaseModel):
 
 @app.get("/api/models")
 def api_models() -> dict[str, Any]:
-    return {"models": gateway.list_models(config.bifrost_config_path())}
+    return {
+        "models": gateway.list_models(
+            config.bifrost_config_path(), config.served_vllm_model()
+        )
+    }
 
 
 @app.get("/api/samples")

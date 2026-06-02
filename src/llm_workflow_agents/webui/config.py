@@ -27,3 +27,15 @@ def bifrost_config_path() -> Path:
 def benchmark_data_dir() -> Path:
     default = _project_root() / "data/output/benchmark/task_a"
     return Path(os.environ.get("BENCHMARK_DATA_DIR", str(default)))
+
+
+def served_vllm_model() -> str | None:
+    """Resolve the wildcard (``"*"``) model in the BiFrost vllm-local provider.
+
+    The deployment serves a single, configurable vLLM model whose name lives in
+    ``VLLM_MODEL`` (deployments/models/.env), so BiFrost's config uses ``["*"]``
+    as a pass-through. BiFrost cannot enumerate it (``list_models`` unsupported
+    for the vllm provider), so the UI substitutes this name for the ``*`` entry.
+    Returns ``None`` when unset, in which case the unusable wildcard is dropped.
+    """
+    return os.environ.get("VLLM_MODEL") or None

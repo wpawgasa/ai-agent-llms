@@ -48,6 +48,40 @@ def test_list_models_missing_config_returns_empty(tmp_path):
     assert gateway.list_models(tmp_path / "nope.json") == []
 
 
+def _write_wildcard_bifrost_config(path: Path) -> None:
+    cfg = {
+        "providers": {
+            "anthropic": {"keys": [{"models": ["claude-z"]}]},
+            "vllm-local": {"keys": [{"models": ["*"]}]},
+        }
+    }
+    path.write_text(json.dumps(cfg))
+
+
+def test_list_models_drops_wildcard_when_unresolved(tmp_path):
+    cfg = tmp_path / "config.json"
+    _write_wildcard_bifrost_config(cfg)
+    # No served model name -> the unusable "*" entry is omitted entirely.
+    assert gateway.list_models(cfg) == ["anthropic/claude-z"]
+
+
+def test_list_models_substitutes_wildcard_with_served_model(tmp_path):
+    cfg = tmp_path / "config.json"
+    _write_wildcard_bifrost_config(cfg)
+    models = gateway.list_models(cfg, wildcard_model="google/gemma-4-26B-A4B-it")
+    assert models == [
+        "anthropic/claude-z",
+        "vllm-local/google/gemma-4-26B-A4B-it",
+    ]
+
+
+def test_served_vllm_model_reads_env(monkeypatch):
+    monkeypatch.delenv("VLLM_MODEL", raising=False)
+    assert config.served_vllm_model() is None
+    monkeypatch.setenv("VLLM_MODEL", "Qwen/Qwen3.6-27B")
+    assert config.served_vllm_model() == "Qwen/Qwen3.6-27B"
+
+
 def test_build_chat_request_downgrades_tool_turns_and_sets_stream():
     messages = [
         {"role": "system", "content": "sys"},
