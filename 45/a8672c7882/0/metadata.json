@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "45a8672c7882",
+  "session_id": "72e48723-181b-4535-9260-e38fd6f3cea6",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T03:26:04.994961695Z",
+  "branch": "fix/grpo-stabilization-and-test-fixes",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "configs/training/grpo_cat_a_diagnostic.yaml",
+    "docs/grpo_diagnosis_gemma4_26b.md",
+    "src/llm_workflow_agents/training/grpo.py",
+    "uv.lock"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "35b5c3a307d7",
+  "token_usage": {
+    "input_tokens": 13297,
+    "cache_creation_tokens": 138448,
+    "cache_read_tokens": 2363029,
+    "output_tokens": 30123,
+    "api_call_count": 33
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T03:26:04.722601537Z",
+    "agent_lines": 7029,
+    "human_added": 18,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 7047,
+    "agent_percentage": 99.74457215836526
+  }
+}

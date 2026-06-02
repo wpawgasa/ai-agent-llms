@@ -1,0 +1,13 @@
+Only one model will be served at a time. Edit @deployments/models/docker-compose.yml and @deployments/models/docker-compose.l4.yml to serve one model but allow the served model to be specified and configurable through `.env` file.
+
+---
+
+Add Bifrost vLLM provider in @deployments/local/data/bifrost/config.json
+
+---
+
+commit and push
+
+---
+
+yes
