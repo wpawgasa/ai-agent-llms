@@ -52,13 +52,12 @@ services:
       - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
     networks:
       - llm-benchmark-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU access via CDI. The host's NVIDIA Container Toolkit runs in CDI mode
+    # (see /etc/cdi/nvidia.yaml); the legacy `deploy.resources.reservations.devices`
+    # nvidia-driver hook is rejected in that mode ("invoking the NVIDIA Container
+    # Runtime Hook directly ... is not supported"). Reference the CDI device instead.
+    devices:
+      - "nvidia.com/gpu=all"
     logging:
       driver: json-file
       options:
