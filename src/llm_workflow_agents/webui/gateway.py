@@ -11,8 +11,14 @@ import httpx
 from llm_workflow_agents.eval.agent_benchmark import _downgrade_tool_turns_to_text
 
 
-def list_models(config_path: Path) -> list[str]:
-    """Return sorted ``provider/model`` strings from a BiFrost config.json."""
+def list_models(config_path: Path, wildcard_model: str | None = None) -> list[str]:
+    """Return sorted ``provider/model`` strings from a BiFrost config.json.
+
+    A ``"*"`` entry is a pass-through wildcard (used by the vllm-local provider,
+    whose served model varies), not a usable model id — forwarding it to the
+    backend 404s. When ``wildcard_model`` is given it is substituted for ``"*"``;
+    otherwise the wildcard entry is dropped so the UI never offers a broken model.
+    """
     if not config_path.exists():
         return []
     with open(config_path) as f:
@@ -21,6 +27,10 @@ def list_models(config_path: Path) -> list[str]:
     for provider_name, provider in cfg.get("providers", {}).items():
         for key_entry in provider.get("keys", []):
             for model in key_entry.get("models", []):
+                if model == "*":
+                    if wildcard_model:
+                        models.append(f"{provider_name}/{wildcard_model}")
+                    continue
                 models.append(f"{provider_name}/{model}")
     return sorted(set(models))
 
