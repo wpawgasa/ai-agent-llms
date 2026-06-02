@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "7cbdb6f18a1d",
+  "session_id": "72e48723-181b-4535-9260-e38fd6f3cea6",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T02:47:40.027348454Z",
+  "branch": "feat/configurable-model-serving",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "deployments/local/data/bifrost/config.json",
+    "deployments/models/.env.example",
+    "deployments/models/docker-compose.l4.yml",
+    "deployments/models/docker-compose.yml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "9af55c70171e",
+  "token_usage": {
+    "input_tokens": 13158,
+    "cache_creation_tokens": 133559,
+    "cache_read_tokens": 1906398,
+    "output_tokens": 26844,
+    "api_call_count": 28
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T02:47:39.747742014Z",
+    "agent_lines": 0,
+    "human_added": 403,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 403,
+    "agent_percentage": 0
+  }
+}
