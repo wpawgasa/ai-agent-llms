@@ -26,6 +26,12 @@ services:
   llm-gateway:
     image: maximhq/bifrost:latest
     container_name: llm-benchmark-gateway
+    # Run as the host user so the bind-mounted ./data/bifrost (owned by whoever
+    # checked out the repo) is writable. The bifrost entrypoint runs as a non-root
+    # user and aborts if it cannot create /app/data/logs. Export UID/GID before
+    # `docker compose up` (e.g. `export UID=$(id -u) GID=$(id -g)`), or set them in
+    # .env; falls back to 1000:1000 (the image's default appuser) if unset.
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
     - 23040:8080      # BiFrost API (OpenAI-compatible at /v1/chat/completions)
     environment:
