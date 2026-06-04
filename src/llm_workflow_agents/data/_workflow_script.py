@@ -26,6 +26,7 @@ _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
         "header": "### [{section}]",
         "initial_marker": "(initial state)",
         "terminal_marker": "This is the terminal state — end the conversation here.",
+        "instruction": "Instruction: {text}",
         "tools_intro": "Available tools: {tools}",
         "no_tools": "No tools available in this state.",
         "primary_branch": "- On success: proceed to [{to}]",
@@ -36,6 +37,7 @@ _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
         "header": "### [{section}]",
         "initial_marker": "(สถานะเริ่มต้น)",
         "terminal_marker": "นี่คือสถานะสิ้นสุด — จบการสนทนาที่นี่",
+        "instruction": "คำแนะนำ: {text}",
         "tools_intro": "เครื่องมือที่ใช้ได้: {tools}",
         "no_tools": "ไม่มีเครื่องมือในสถานะนี้",
         "primary_branch": "- เมื่อสำเร็จ: ดำเนินการต่อที่ [{to}]",
@@ -108,6 +110,45 @@ def infer_state_tools_from_messages(
     return inferred
 
 
+def find_tool_placement_violations(
+    allowed_tools_by_state: dict[str, Any],
+    messages: list[dict[str, Any]],
+    schema_names: set[str] | None = None,
+) -> list[str]:
+    """Find ground-truth tool calls that violate the curated tool placement.
+
+    A conversation is *coherent* when every tool it calls is allowed in the state
+    it is called from. This walks the GT conversation (via
+    :func:`infer_state_tools_from_messages`) and returns one human-readable
+    description per violation:
+
+    * a tool called in a state whose ``allowed_tools_by_state`` set does not list
+      it, or
+    * (when ``schema_names`` is provided) a tool not present in the sample's tool
+      schemas at all (e.g. a hallucinated tool).
+
+    States not present in ``allowed_tools_by_state`` are skipped — there is no
+    curated expectation to judge them against. An empty list means coherent.
+
+    Single source of truth shared by the data validator and the generator's
+    inline repair loop.
+    """
+    violations: list[str] = []
+    for state, called in infer_state_tools_from_messages(messages).items():
+        allowed = allowed_tools_by_state.get(state)
+        for tool in called:
+            if schema_names is not None and tool not in schema_names:
+                violations.append(
+                    f"tool '{tool}' called in state '{state}' is not in tool_schemas"
+                )
+            elif allowed is not None and tool not in allowed:
+                violations.append(
+                    f"tool '{tool}' called in state '{state}' is not listed in "
+                    f"that state's tools"
+                )
+    return violations
+
+
 def build_workflow_script(
     workflow_graph: dict[str, Any],
     tool_schemas: list[dict[str, Any]] | None = None,
@@ -158,6 +199,10 @@ def build_workflow_script(
             lines.append(t["terminal_marker"])
             lines.append("")
             continue
+
+        instruction = (sd.get("instruction") or "").strip()
+        if instruction:
+            lines.append(t["instruction"].format(text=instruction))
 
         tools = inferred_tools.get(name) or sd.get("tools") or []
         if tools:

@@ -8,12 +8,15 @@
 #   ./scripts/generate_benchmark_data.sh [OPTIONS]
 #
 # Options:
-#   --output-dir <path>   Base output directory (default: data/output)
-#   --seed <n>            Random seed (default: 100)
-#   --dry-run             Print commands without executing
+#   --output-dir <path>       Base output directory (default: data/output)
+#   --seed <n>                Random seed (default: 100)
+#   --intent-category <p>     Intent mix preset: default (70/30 service/upsell),
+#                             service_only, upsell_heavy (default: default)
+#   --dry-run                 Print commands without executing
 #
 # Examples:
 #   ./scripts/generate_benchmark_data.sh
+#   ./scripts/generate_benchmark_data.sh --intent-category service_only
 #   ./scripts/generate_benchmark_data.sh --output-dir /mnt/data/output --dry-run
 
 set -euo pipefail
@@ -23,19 +26,26 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 OUTPUT_DIR="$PROJECT_ROOT/data/output"
 SEED=100
+INTENT_CATEGORY="default"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
-        --seed)       SEED="$2";       shift 2 ;;
-        --dry-run)    DRY_RUN=true;    shift ;;
+        --output-dir)      OUTPUT_DIR="$2";      shift 2 ;;
+        --seed)            SEED="$2";            shift 2 ;;
+        --intent-category) INTENT_CATEGORY="$2"; shift 2 ;;
+        --dry-run)         DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1" >&2
             exit 1
             ;;
     esac
 done
+
+case "$INTENT_CATEGORY" in
+    default|service_only|upsell_heavy) ;;
+    *) echo "Unknown --intent-category: $INTENT_CATEGORY (expected default, service_only, upsell_heavy)" >&2; exit 1 ;;
+esac
 
 run() {
     if [[ "$DRY_RUN" = true ]]; then
@@ -54,6 +64,7 @@ echo "Levels:       L1-L5, 200 samples each (1000 total)"
 echo "Language:     mixed (en/th)"
 echo "Model:        placeholder (no API key needed)"
 echo "Distribution: default"
+echo "Intent mix:   $INTENT_CATEGORY"
 echo "================================="
 
 for LEVEL in L1 L2 L3 L4 L5; do
@@ -67,6 +78,7 @@ meta = generate_workflow_dataset(
     num_samples=200,
     output_dir=Path('$DEST'),
     seed=$SEED,
+    intent_category_preset='$INTENT_CATEGORY',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "

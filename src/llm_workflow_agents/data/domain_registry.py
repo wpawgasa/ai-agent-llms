@@ -15,7 +15,19 @@ from typing import Any
 
 @dataclass(frozen=True)
 class DomainSpec:
-    """Specification for a single call center domain."""
+    """Specification for a single call center domain.
+
+    ``state_tools`` and ``state_instructions`` make tool placement and per-state
+    guidance *rational* (curated), replacing the old random tool assignment in
+    ``generate_workflows._generate_workflow_graph``. Both are keyed by the state
+    names in ``state_templates``:
+
+    * ``state_tools[name]`` — the tools that semantically belong in that state
+      (empty tuple for greeting / terminal / pure-decision states).
+    * ``state_instructions[name]`` — a one-line goal/instruction for that state.
+
+    Tool names must match the ``function.name`` of an entry in ``tools``.
+    """
 
     name: str
     category: str
@@ -23,6 +35,8 @@ class DomainSpec:
     state_templates: tuple[str, ...]
     intents: tuple[str, ...]
     entity_slots: tuple[str, ...] = ()
+    state_tools: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    state_instructions: dict[str, str] = field(default_factory=dict)
 
 
 def _tool(name: str, desc: str, params: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -87,6 +101,31 @@ ACCOUNT_MANAGEMENT = DomainSpec(
         "verification_request", "premium_plan_offer",
     ),
     entity_slots=("customer_id", "email", "phone", "account_type", "field", "new_value"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_IDENTITY": ("verify_identity",),
+        "AUTHENTICATE": ("verify_identity",),
+        "LOOKUP_ACCOUNT": ("lookup_rewards",),
+        "PROCESS_REQUEST": ("create_account", "update_profile", "reset_password",
+                            "close_account", "manage_subscription"),
+        "CONFIRM_CHANGES": (),
+        "UPDATE_RECORDS": ("update_profile",),
+        "NOTIFY_CUSTOMER": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask what account assistance they need.",
+        "VERIFY_IDENTITY": "Verify the customer's identity before accessing any account details.",
+        "AUTHENTICATE": "Authenticate the customer with OTP, PIN, or a security question.",
+        "LOOKUP_ACCOUNT": "Retrieve the customer's account record and confirm the details on file.",
+        "PROCESS_REQUEST": "Carry out the requested account change with the matching tool.",
+        "CONFIRM_CHANGES": "Summarise the pending change and ask the customer to confirm.",
+        "UPDATE_RECORDS": "Persist the confirmed changes to the customer's profile.",
+        "NOTIFY_CUSTOMER": "Notify the customer that the change is complete and what happens next.",
+        "RESOLVE": "Confirm the request is resolved and ask if anything else is needed.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 BILLING_PAYMENTS = DomainSpec(
@@ -131,6 +170,32 @@ BILLING_PAYMENTS = DomainSpec(
         "receipt_request", "chargeback", "payment_plan_offer",
     ),
     entity_slots=("invoice_id", "amount", "payment_method", "transaction_id", "customer_id"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_IDENTITY": (),
+        "LOOKUP_BILLING": ("lookup_invoice",),
+        "REVIEW_CHARGES": ("lookup_invoice", "dispute_charge"),
+        "PROCESS_PAYMENT": ("process_payment", "setup_payment_plan"),
+        "APPLY_ADJUSTMENT": ("issue_refund", "waive_late_fee"),
+        "CONFIRM_ACTION": (),
+        "GENERATE_DOCUMENT": ("generate_receipt",),
+        "ESCALATE": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask about their billing or payment need.",
+        "VERIFY_IDENTITY": "Confirm the customer's identity and the account in question.",
+        "LOOKUP_BILLING": "Look up the relevant invoice or billing record.",
+        "REVIEW_CHARGES": "Review the charges with the customer and note any disputes.",
+        "PROCESS_PAYMENT": "Process the payment or set up an installment plan.",
+        "APPLY_ADJUSTMENT": "Apply any approved refund or fee waiver.",
+        "CONFIRM_ACTION": "Summarise the billing action and ask the customer to confirm.",
+        "GENERATE_DOCUMENT": "Generate the requested receipt, statement, or tax document.",
+        "ESCALATE": "Escalate unresolved billing issues to a specialist.",
+        "RESOLVE": "Confirm the billing matter is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 ORDER_MANAGEMENT = DomainSpec(
@@ -175,6 +240,32 @@ ORDER_MANAGEMENT = DomainSpec(
         "delivery_reschedule", "warranty_claim", "accessory_upsell",
     ),
     entity_slots=("order_id", "tracking_number", "item_id", "return_type"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_IDENTITY": (),
+        "LOOKUP_ORDER": ("lookup_order",),
+        "CHECK_STATUS": ("track_delivery",),
+        "PROCESS_MODIFICATION": ("modify_order", "cancel_order"),
+        "INITIATE_RETURN": ("initiate_return", "report_damaged_item"),
+        "ARRANGE_DELIVERY": ("reschedule_delivery", "track_delivery"),
+        "CONFIRM_ACTION": (),
+        "ESCALATE": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask which order they need help with.",
+        "VERIFY_IDENTITY": "Confirm the customer's identity and the order owner.",
+        "LOOKUP_ORDER": "Look up the order by its ID.",
+        "CHECK_STATUS": "Check the order's current status or delivery tracking.",
+        "PROCESS_MODIFICATION": "Modify or cancel the order as requested.",
+        "INITIATE_RETURN": "Start a return, exchange, or damaged-item report.",
+        "ARRANGE_DELIVERY": "Reschedule or re-track delivery as needed.",
+        "CONFIRM_ACTION": "Summarise the order action and ask the customer to confirm.",
+        "ESCALATE": "Escalate unresolved order issues to a specialist.",
+        "RESOLVE": "Confirm the order matter is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 TECHNICAL_SUPPORT = DomainSpec(
@@ -220,6 +311,32 @@ TECHNICAL_SUPPORT = DomainSpec(
         "extended_warranty_offer",
     ),
     entity_slots=("system_name", "device_model", "fix_id", "severity", "ticket_id"),
+    state_tools={
+        "GREETING": (),
+        "IDENTIFY_ISSUE": ("check_system_status", "check_compatibility"),
+        "COLLECT_DIAGNOSTICS": ("check_system_status",),
+        "RUN_TESTS": ("run_diagnostic",),
+        "ATTEMPT_FIX": ("apply_fix", "restart_service"),
+        "VERIFY_RESOLUTION": ("check_system_status",),
+        "ESCALATE_ENGINEERING": ("escalate_to_engineer", "create_bug_report"),
+        "REMOTE_ASSIST": ("restart_service",),
+        "CONFIRM_FIX": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask what technical problem they're facing.",
+        "IDENTIFY_ISSUE": "Identify the affected system and check its status or compatibility.",
+        "COLLECT_DIAGNOSTICS": "Collect diagnostic information about the issue.",
+        "RUN_TESTS": "Run the appropriate diagnostic test.",
+        "ATTEMPT_FIX": "Apply a known fix or restart the affected service.",
+        "VERIFY_RESOLUTION": "Verify the issue is resolved after the fix.",
+        "ESCALATE_ENGINEERING": "Escalate to engineering and file a bug report if unresolved.",
+        "REMOTE_ASSIST": "Guide the customer through remote assistance steps.",
+        "CONFIRM_FIX": "Confirm with the customer that the fix worked.",
+        "RESOLVE": "Confirm the technical issue is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 PRODUCT_INFO = DomainSpec(
@@ -256,6 +373,30 @@ PRODUCT_INFO = DomainSpec(
         "feature_comparison", "upgrade_recommendation", "promotion_inquiry",
     ),
     entity_slots=("product_id", "category", "price_range", "customer_tier"),
+    state_tools={
+        "GREETING": (),
+        "UNDERSTAND_NEEDS": (),
+        "SEARCH_CATALOG": ("search_products",),
+        "PRESENT_OPTIONS": ("get_product_details",),
+        "COMPARE_FEATURES": ("compare_products",),
+        "CHECK_AVAILABILITY": ("check_availability",),
+        "QUOTE_PRICING": ("get_pricing",),
+        "RECOMMEND_UPGRADE": ("recommend_upgrade",),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask what product information they need.",
+        "UNDERSTAND_NEEDS": "Clarify the customer's requirements and use case.",
+        "SEARCH_CATALOG": "Search the product catalog for matching items.",
+        "PRESENT_OPTIONS": "Present the matching products with their key details.",
+        "COMPARE_FEATURES": "Compare the shortlisted products' features.",
+        "CHECK_AVAILABILITY": "Check availability for the chosen product.",
+        "QUOTE_PRICING": "Provide current pricing and any promotions.",
+        "RECOMMEND_UPGRADE": "Recommend a suitable upgrade path if relevant.",
+        "RESOLVE": "Confirm the customer has the information they need.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 # ---------------------------------------------------------------------------
@@ -302,6 +443,32 @@ HEALTHCARE = DomainSpec(
         "wellness_program_offer",
     ),
     entity_slots=("patient_id", "claim_id", "prescription_id", "procedure_code", "provider_id"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_PATIENT": (),
+        "CHECK_ELIGIBILITY": ("verify_coverage",),
+        "REVIEW_RECORDS": ("check_claim_status",),
+        "SCHEDULE_SERVICE": ("schedule_appointment",),
+        "PROCESS_REQUEST": ("request_prescription_refill", "request_referral"),
+        "SUBMIT_AUTHORIZATION": ("submit_prior_auth",),
+        "CONFIRM_DETAILS": (),
+        "ESCALATE_CLINICAL": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the patient and ask how you can help.",
+        "VERIFY_PATIENT": "Verify the patient's identity before accessing records.",
+        "CHECK_ELIGIBILITY": "Verify the patient's insurance coverage and benefits.",
+        "REVIEW_RECORDS": "Review the patient's records or claim status.",
+        "SCHEDULE_SERVICE": "Schedule the requested appointment.",
+        "PROCESS_REQUEST": "Process the prescription refill or specialist referral.",
+        "SUBMIT_AUTHORIZATION": "Submit the prior-authorization request.",
+        "CONFIRM_DETAILS": "Confirm the appointment or request details with the patient.",
+        "ESCALATE_CLINICAL": "Escalate clinical questions to a qualified provider.",
+        "RESOLVE": "Confirm the patient's request is resolved.",
+        "TERMINAL": "Thank the patient and close the conversation.",
+    },
 )
 
 BANKING = DomainSpec(
@@ -344,6 +511,35 @@ BANKING = DomainSpec(
         "loan_inquiry", "card_activation", "rate_inquiry", "wire_request",
     ),
     entity_slots=("account_id", "card_id", "transaction_id", "amount", "loan_type"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_IDENTITY": (),
+        "AUTHENTICATE_2FA": (),
+        "LOOKUP_ACCOUNT": ("check_balance",),
+        "REVIEW_TRANSACTIONS": ("check_balance",),
+        "PROCESS_REQUEST": ("transfer_funds", "apply_for_loan", "activate_card",
+                            "inquiry_interest_rate", "block_card"),
+        "FRAUD_INVESTIGATION": ("report_fraud", "block_card"),
+        "APPROVAL_CHECK": (),
+        "CONFIRM_ACTION": (),
+        "ESCALATE_COMPLIANCE": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask how you can help with their banking.",
+        "VERIFY_IDENTITY": "Verify the customer's identity before discussing the account.",
+        "AUTHENTICATE_2FA": "Complete two-factor authentication for sensitive actions.",
+        "LOOKUP_ACCOUNT": "Look up the account balance and details.",
+        "REVIEW_TRANSACTIONS": "Review recent transactions with the customer.",
+        "PROCESS_REQUEST": "Carry out the requested banking transaction.",
+        "FRAUD_INVESTIGATION": "Investigate suspected fraud and secure the card if needed.",
+        "APPROVAL_CHECK": "Check whether the request requires additional approval.",
+        "CONFIRM_ACTION": "Summarise the transaction and ask the customer to confirm.",
+        "ESCALATE_COMPLIANCE": "Escalate to compliance for flagged cases.",
+        "RESOLVE": "Confirm the banking request is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 TELECOM = DomainSpec(
@@ -383,6 +579,32 @@ TELECOM = DomainSpec(
         "device_unlock", "roaming_activation", "sim_replacement",
     ),
     entity_slots=("account_id", "phone_number", "device_imei", "plan_id"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_ACCOUNT": (),
+        "CHECK_ELIGIBILITY": (),
+        "REVIEW_PLAN": ("check_data_usage",),
+        "PROCESS_CHANGE": ("change_plan", "port_number"),
+        "TECHNICAL_CHECK": ("report_outage",),
+        "ACTIVATE_SERVICE": ("activate_roaming", "unlock_device"),
+        "CONFIRM_CHANGES": (),
+        "ESCALATE": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask what telecom service they need.",
+        "VERIFY_ACCOUNT": "Verify the customer's account before making changes.",
+        "CHECK_ELIGIBILITY": "Check whether the customer is eligible for the requested change.",
+        "REVIEW_PLAN": "Review the current plan and data usage with the customer.",
+        "PROCESS_CHANGE": "Apply the plan change or number port as requested.",
+        "TECHNICAL_CHECK": "Check for network outages or technical issues.",
+        "ACTIVATE_SERVICE": "Activate roaming or unlock the device as requested.",
+        "CONFIRM_CHANGES": "Summarise the changes and ask the customer to confirm.",
+        "ESCALATE": "Escalate unresolved telecom issues to a specialist.",
+        "RESOLVE": "Confirm the telecom request is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 UTILITIES = DomainSpec(
@@ -423,6 +645,32 @@ UTILITIES = DomainSpec(
         "green_energy_upgrade",
     ),
     entity_slots=("account_id", "address", "meter_type", "reading_value"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_ACCOUNT": (),
+        "REVIEW_BILLING": ("dispute_bill", "analyze_usage"),
+        "CHECK_METER": ("submit_meter_reading",),
+        "PROCESS_REQUEST": ("request_connection", "enroll_green_energy"),
+        "DISPATCH_TECHNICIAN": ("report_outage",),
+        "CONFIRM_ACTION": (),
+        "SCHEDULE_SERVICE": ("request_connection",),
+        "ESCALATE": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask about their utility service.",
+        "VERIFY_ACCOUNT": "Verify the customer's utility account.",
+        "REVIEW_BILLING": "Review the bill and usage, noting any disputes.",
+        "CHECK_METER": "Record or check the customer's meter reading.",
+        "PROCESS_REQUEST": "Process the connection or program-enrollment request.",
+        "DISPATCH_TECHNICIAN": "Report the outage and dispatch a technician if needed.",
+        "CONFIRM_ACTION": "Summarise the action and ask the customer to confirm.",
+        "SCHEDULE_SERVICE": "Schedule the service connection or visit.",
+        "ESCALATE": "Escalate unresolved utility issues to a specialist.",
+        "RESOLVE": "Confirm the utility request is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 TRAVEL = DomainSpec(
@@ -468,6 +716,34 @@ TRAVEL = DomainSpec(
         "visa_inquiry", "checkin_help",
     ),
     entity_slots=("reservation_id", "origin", "destination", "departure_date", "loyalty_id"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_TRAVELER": (),
+        "SEARCH_OPTIONS": ("search_flights", "check_visa_requirements"),
+        "PRESENT_ITINERARY": (),
+        "PROCESS_BOOKING": ("book_reservation",),
+        "PAYMENT_PROCESSING": ("redeem_points",),
+        "ISSUE_DOCUMENTS": ("check_visa_requirements",),
+        "HANDLE_CHANGES": ("modify_reservation", "cancel_reservation"),
+        "FILE_CLAIM": ("file_travel_claim",),
+        "CONFIRM_DETAILS": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the traveler and ask about their trip needs.",
+        "VERIFY_TRAVELER": "Verify the traveler's identity and booking.",
+        "SEARCH_OPTIONS": "Search flights and check any visa requirements.",
+        "PRESENT_ITINERARY": "Present the proposed itinerary to the traveler.",
+        "PROCESS_BOOKING": "Book the selected reservation.",
+        "PAYMENT_PROCESSING": "Process payment, applying loyalty points if requested.",
+        "ISSUE_DOCUMENTS": "Issue travel documents and confirm requirements.",
+        "HANDLE_CHANGES": "Modify or cancel the reservation as requested.",
+        "FILE_CLAIM": "File the travel insurance claim.",
+        "CONFIRM_DETAILS": "Confirm the booking details with the traveler.",
+        "RESOLVE": "Confirm the travel request is resolved.",
+        "TERMINAL": "Thank the traveler and close the conversation.",
+    },
 )
 
 ECOMMERCE = DomainSpec(
@@ -506,6 +782,30 @@ ECOMMERCE = DomainSpec(
         "bundle_promotion",
     ),
     entity_slots=("product_id", "coupon_code", "store_id", "order_id"),
+    state_tools={
+        "GREETING": (),
+        "UNDERSTAND_NEEDS": ("recommend_products",),
+        "SEARCH_CATALOG": ("search_products",),
+        "CHECK_AVAILABILITY": ("check_stock", "check_backorder"),
+        "APPLY_PROMOTIONS": ("apply_coupon", "price_match"),
+        "PROCESS_ORDER": (),
+        "CONFIRM_PURCHASE": (),
+        "ARRANGE_DELIVERY": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the shopper and ask what they're looking for.",
+        "UNDERSTAND_NEEDS": "Clarify the shopper's needs and suggest relevant products.",
+        "SEARCH_CATALOG": "Search the catalog for matching products.",
+        "CHECK_AVAILABILITY": "Check stock or back-order status for the chosen item.",
+        "APPLY_PROMOTIONS": "Apply coupons or a price match if eligible.",
+        "PROCESS_ORDER": "Place the order for the shopper.",
+        "CONFIRM_PURCHASE": "Summarise the purchase and ask the shopper to confirm.",
+        "ARRANGE_DELIVERY": "Arrange delivery details for the order.",
+        "RESOLVE": "Confirm the shopping request is resolved.",
+        "TERMINAL": "Thank the shopper and close the conversation.",
+    },
 )
 
 GOVERNMENT = DomainSpec(
@@ -545,6 +845,32 @@ GOVERNMENT = DomainSpec(
         "document_verification", "appointment_scheduling", "tax_inquiry",
     ),
     entity_slots=("citizen_id", "application_id", "document_number", "taxpayer_id"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_CITIZEN": (),
+        "CHECK_ELIGIBILITY": ("check_benefit_eligibility",),
+        "REVIEW_APPLICATION": ("check_application_status",),
+        "PROCESS_REQUEST": ("file_complaint", "submit_tax_inquiry"),
+        "VERIFY_DOCUMENTS": ("verify_document",),
+        "SUBMIT_FORM": ("submit_tax_inquiry",),
+        "SCHEDULE_VISIT": ("schedule_appointment",),
+        "ESCALATE_SUPERVISOR": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the citizen and ask which public service they need.",
+        "VERIFY_CITIZEN": "Verify the citizen's identity.",
+        "CHECK_ELIGIBILITY": "Check eligibility for the requested benefit.",
+        "REVIEW_APPLICATION": "Review the status of the citizen's application.",
+        "PROCESS_REQUEST": "Process the complaint or tax inquiry.",
+        "VERIFY_DOCUMENTS": "Verify the authenticity of submitted documents.",
+        "SUBMIT_FORM": "Submit the required form on the citizen's behalf.",
+        "SCHEDULE_VISIT": "Schedule an in-person office appointment.",
+        "ESCALATE_SUPERVISOR": "Escalate complex cases to a supervisor.",
+        "RESOLVE": "Confirm the citizen's request is resolved.",
+        "TERMINAL": "Thank the citizen and close the conversation.",
+    },
 )
 
 INSURANCE = DomainSpec(
@@ -598,6 +924,32 @@ INSURANCE = DomainSpec(
     ),
     entity_slots=("policy_id", "claim_id", "policyholder_id", "coverage_type",
                   "incident_date", "vin", "beneficiary"),
+    state_tools={
+        "GREETING": (),
+        "VERIFY_POLICYHOLDER": ("verify_policy",),
+        "REVIEW_POLICY": ("update_policy", "renew_policy", "cancel_policy", "quote_premium"),
+        "CLAIM_INTAKE": ("file_claim",),
+        "ASSESS_COVERAGE": ("check_claim_status",),
+        "REQUEST_DOCUMENTATION": ("request_claim_documents",),
+        "EVALUATE_CLAIM": ("check_claim_status",),
+        "APPROVE_OR_DENY": (),
+        "PROCESS_PAYOUT": (),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the policyholder and ask how you can help.",
+        "VERIFY_POLICYHOLDER": "Verify the policyholder and active coverage.",
+        "REVIEW_POLICY": "Review the policy, including any updates, renewals, or quotes.",
+        "CLAIM_INTAKE": "Take down the details of the new claim.",
+        "ASSESS_COVERAGE": "Assess coverage and current claim status.",
+        "REQUEST_DOCUMENTATION": "Request supporting documents for the claim.",
+        "EVALUATE_CLAIM": "Evaluate the claim against the policy terms.",
+        "APPROVE_OR_DENY": "Decide whether to approve or deny the claim.",
+        "PROCESS_PAYOUT": "Process the approved claim payout.",
+        "RESOLVE": "Confirm the insurance request is resolved.",
+        "TERMINAL": "Thank the policyholder and close the conversation.",
+    },
 )
 
 # ---------------------------------------------------------------------------
@@ -638,6 +990,30 @@ COMPLAINTS = DomainSpec(
         "sla_inquiry", "case_followup", "case_closure", "goodwill_upgrade_offer",
     ),
     entity_slots=("case_id", "customer_id", "severity", "gesture_type"),
+    state_tools={
+        "GREETING": (),
+        "LISTEN_COMPLAINT": ("register_complaint",),
+        "ACKNOWLEDGE_ISSUE": (),
+        "INVESTIGATE": ("check_sla_status",),
+        "OFFER_RESOLUTION": ("offer_goodwill",),
+        "ESCALATE_SUPERVISOR": ("escalate_to_supervisor",),
+        "APPLY_COMPENSATION": ("offer_goodwill",),
+        "VERIFY_SATISFACTION": (),
+        "CLOSE_CASE": ("close_case",),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and invite them to share their concern.",
+        "LISTEN_COMPLAINT": "Listen to the complaint and register it formally.",
+        "ACKNOWLEDGE_ISSUE": "Acknowledge the issue and empathise with the customer.",
+        "INVESTIGATE": "Investigate the case and check SLA status.",
+        "OFFER_RESOLUTION": "Offer a resolution or goodwill gesture.",
+        "ESCALATE_SUPERVISOR": "Escalate the case to a supervisor when needed.",
+        "APPLY_COMPENSATION": "Apply the agreed compensation.",
+        "VERIFY_SATISFACTION": "Confirm the customer is satisfied with the resolution.",
+        "CLOSE_CASE": "Close the complaint case with a resolution summary.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 SCHEDULING = DomainSpec(
@@ -678,6 +1054,30 @@ SCHEDULING = DomainSpec(
         "premium_slot_offer",
     ),
     entity_slots=("appointment_id", "service_type", "date", "time", "location"),
+    state_tools={
+        "GREETING": (),
+        "IDENTIFY_SERVICE": (),
+        "CHECK_AVAILABILITY": ("check_availability",),
+        "SELECT_SLOT": ("book_appointment",),
+        "CONFIRM_BOOKING": ("book_appointment",),
+        "SEND_CONFIRMATION": ("send_reminder",),
+        "HANDLE_RESCHEDULE": ("reschedule_appointment", "cancel_appointment"),
+        "MANAGE_WAITLIST": ("join_waitlist",),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and ask what they'd like to schedule.",
+        "IDENTIFY_SERVICE": "Identify the service the customer wants to book.",
+        "CHECK_AVAILABILITY": "Check available time slots for the service.",
+        "SELECT_SLOT": "Help the customer select a slot and book it.",
+        "CONFIRM_BOOKING": "Confirm the booking details with the customer.",
+        "SEND_CONFIRMATION": "Send a confirmation or reminder.",
+        "HANDLE_RESCHEDULE": "Reschedule or cancel the appointment as requested.",
+        "MANAGE_WAITLIST": "Add the customer to the waitlist if no slot is open.",
+        "RESOLVE": "Confirm the scheduling request is resolved.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 SALES = DomainSpec(
@@ -717,6 +1117,32 @@ SALES = DomainSpec(
         "upsell_offer", "proposal_request", "pricing_negotiation",
     ),
     entity_slots=("contact_name", "company", "contract_id", "quote_id", "product"),
+    state_tools={
+        "GREETING": (),
+        "QUALIFY_PROSPECT": ("qualify_lead",),
+        "IDENTIFY_NEEDS": (),
+        "PRESENT_SOLUTION": ("schedule_demo",),
+        "HANDLE_OBJECTIONS": (),
+        "CREATE_PROPOSAL": ("create_quote", "send_proposal"),
+        "NEGOTIATE_TERMS": ("process_upsell",),
+        "CLOSE_DEAL": ("check_contract_renewal",),
+        "FOLLOW_UP": ("send_proposal",),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the prospect and open the conversation.",
+        "QUALIFY_PROSPECT": "Qualify the lead's budget, timeline, and fit.",
+        "IDENTIFY_NEEDS": "Identify the prospect's needs and pain points.",
+        "PRESENT_SOLUTION": "Present the solution, offering a demo if useful.",
+        "HANDLE_OBJECTIONS": "Address the prospect's objections.",
+        "CREATE_PROPOSAL": "Create a quote and send a proposal.",
+        "NEGOTIATE_TERMS": "Negotiate terms, including any upsell.",
+        "CLOSE_DEAL": "Close the deal and check renewal terms.",
+        "FOLLOW_UP": "Follow up with the prospect after the meeting.",
+        "RESOLVE": "Confirm next steps are agreed.",
+        "TERMINAL": "Thank the prospect and close the conversation.",
+    },
 )
 
 SURVEYS = DomainSpec(
@@ -749,6 +1175,26 @@ SURVEYS = DomainSpec(
         "service_feedback", "complaint_trend_report",
     ),
     entity_slots=("interaction_id", "score", "feedback_type", "sentiment"),
+    state_tools={
+        "GREETING": (),
+        "EXPLAIN_SURVEY": (),
+        "COLLECT_RATING": ("collect_csat", "collect_nps"),
+        "COLLECT_COMMENTS": ("submit_feedback",),
+        "THANK_CUSTOMER": (),
+        "ESCALATE_LOW_SCORE": ("log_complaint_trend",),
+        "RESOLVE": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "GREETING": "Greet the customer and introduce the survey.",
+        "EXPLAIN_SURVEY": "Explain the survey's purpose and length.",
+        "COLLECT_RATING": "Collect the customer's satisfaction or NPS rating.",
+        "COLLECT_COMMENTS": "Collect any additional comments or feedback.",
+        "THANK_CUSTOMER": "Thank the customer for their feedback.",
+        "ESCALATE_LOW_SCORE": "Log low scores for trend analysis and follow-up.",
+        "RESOLVE": "Confirm the survey is complete.",
+        "TERMINAL": "Thank the customer and close the conversation.",
+    },
 )
 
 EMERGENCY = DomainSpec(
@@ -787,6 +1233,30 @@ EMERGENCY = DomainSpec(
         "mass_notification", "backup_activation", "status_update",
     ),
     entity_slots=("location", "emergency_type", "severity", "incident_type"),
+    state_tools={
+        "ALERT_RECEIVED": ("report_incident",),
+        "ASSESS_SEVERITY": ("check_safety_status",),
+        "DISPATCH_RESPONSE": ("dispatch_emergency",),
+        "COORDINATE_TEAMS": (),
+        "NOTIFY_STAKEHOLDERS": ("send_mass_notification",),
+        "MONITOR_STATUS": ("check_safety_status",),
+        "ACTIVATE_BACKUP": ("activate_backup_systems",),
+        "CONFIRM_RESOLUTION": (),
+        "POST_INCIDENT_REVIEW": (),
+        "TERMINAL": (),
+    },
+    state_instructions={
+        "ALERT_RECEIVED": "Receive the alert and record the incident details.",
+        "ASSESS_SEVERITY": "Assess the severity and safety status.",
+        "DISPATCH_RESPONSE": "Dispatch the appropriate emergency response team.",
+        "COORDINATE_TEAMS": "Coordinate the responding teams.",
+        "NOTIFY_STAKEHOLDERS": "Send notifications to affected stakeholders.",
+        "MONITOR_STATUS": "Monitor the ongoing status of the incident.",
+        "ACTIVATE_BACKUP": "Activate backup or failover systems if required.",
+        "CONFIRM_RESOLUTION": "Confirm the incident is resolved.",
+        "POST_INCIDENT_REVIEW": "Conduct a post-incident review.",
+        "TERMINAL": "Close out the incident record.",
+    },
 )
 
 # ---------------------------------------------------------------------------

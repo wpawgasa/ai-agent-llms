@@ -29,6 +29,8 @@ from llm_workflow_agents.data.domain_registry import (
     classify_intent,
 )
 from llm_workflow_agents.data.generate_workflows import INTENT_CATEGORY_PRESETS
+import llm_workflow_agents.data.generate_workflows as gw
+from llm_workflow_agents.data.data_validator import validate_dataset
 from llm_workflow_agents.data.generate_tool_call_data import (
     DatasetSplits,
     generate_tool_call_dataset,
@@ -130,6 +132,56 @@ class TestWorkflowGeneration:
                 messages = sample["messages"]
                 assert messages[0]["role"] == "system"
 
+    def test_state_tools_are_rational(self, tmp_output_dir: Path) -> None:
+        """Every tool placed in a state must come from that domain's curated
+        state→tools map and must be present in the sample's tool_schemas."""
+        result = generate_workflow_dataset(
+            complexity_level="L4",
+            num_samples=8,
+            output_dir=tmp_output_dir,
+            seed=7,
+        )
+        with open(result.output_files[0]) as f:
+            for line in f:
+                sample = json.loads(line)
+                spec = DOMAIN_REGISTRY[sample["domain"]]
+                schema_names = {
+                    ts["function"]["name"] for ts in sample["tool_schemas"]
+                }
+                for sd in sample["workflow_graph"]["state_details"]:
+                    curated = set(spec.state_tools.get(sd["name"], ()))
+                    for tool in sd["tools"]:
+                        assert tool in curated, (
+                            f"{sample['domain']}: '{tool}' placed in '{sd['name']}' "
+                            f"is not in the curated map"
+                        )
+                        assert tool in schema_names, (
+                            f"{sample['domain']}: '{tool}' not in tool_schemas"
+                        )
+
+    def test_every_working_state_has_instruction(self, tmp_output_dir: Path) -> None:
+        """Every non-terminal state carries an instruction in both the graph
+        and the rendered workflow_script."""
+        result = generate_workflow_dataset(
+            complexity_level="L3",
+            num_samples=8,
+            output_dir=tmp_output_dir,
+            seed=11,
+        )
+        with open(result.output_files[0]) as f:
+            for line in f:
+                sample = json.loads(line)
+                terminals = set(sample["workflow_graph"]["terminal"])
+                for sd in sample["workflow_graph"]["state_details"]:
+                    if sd["name"] in terminals:
+                        continue
+                    assert sd.get("instruction", "").strip(), (
+                        f"{sample['domain']}: state '{sd['name']}' has no instruction"
+                    )
+                # Instruction line is rendered with a language-specific marker.
+                script = sample["workflow_script"]
+                assert "Instruction:" in script or "คำแนะนำ:" in script
+
 
 class TestToolCallDataGeneration:
     """Tests for Experiment B data generation."""
@@ -229,6 +281,23 @@ class TestDomainRegistry:
             assert spec.state_templates[-1] in ("TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW"), (
                 f"{name} last state template is {spec.state_templates[-1]}"
             )
+
+    def test_all_domains_have_curated_state_maps(self) -> None:
+        """Every state template must have a curated instruction + tools entry,
+        and every referenced tool must exist in the domain's tool list."""
+        for name, spec in DOMAIN_REGISTRY.items():
+            tool_names = {t["function"]["name"] for t in spec.tools}
+            states = set(spec.state_templates)
+            for state in spec.state_templates:
+                assert state in spec.state_instructions, f"{name}: {state} has no instruction"
+                assert spec.state_instructions[state].strip(), f"{name}: {state} empty instruction"
+                assert state in spec.state_tools, f"{name}: {state} missing state_tools entry"
+            for state, tools in spec.state_tools.items():
+                assert state in states, f"{name}: state_tools key {state} is not a state"
+                for tool in tools:
+                    assert tool in tool_names, f"{name}: {state} references unknown tool {tool}"
+            for state in spec.state_instructions:
+                assert state in states, f"{name}: instruction key {state} is not a state"
 
     def test_all_domains_have_intents(self) -> None:
         for name, spec in DOMAIN_REGISTRY.items():
@@ -377,3 +446,84 @@ class TestWorkflowGraphModel:
         assert d["terminal"] == ["B"]
         assert len(d["states"]) == 2
         assert len(d["transitions"]) == 1
+
+
+class TestPostGenerationRepair:
+    """The inline repair loop guarantees teacher-generated samples respect the
+    curated tool placement (regenerate, then placeholder fallback)."""
+
+    @staticmethod
+    def _incoherent_conversation(workflow, *args, **kwargs):
+        """A teacher conversation that calls an off-schema tool → always violates."""
+        s0 = workflow.states[0].name
+        s1 = workflow.states[1].name if len(workflow.states) > 1 else s0
+        return [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": f"[STATE: {s0} → {s1}]\n"
+                           "<tool_call>{\"name\": \"ghost_tool\", \"arguments\": {}}</tool_call>",
+            },
+            {"role": "tool", "content": "{\"status\": \"ok\"}"},
+        ]
+
+    def test_irreparable_teacher_falls_back_to_placeholder(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", self._incoherent_conversation)
+        result = generate_workflow_dataset(
+            complexity_level="L3",
+            num_samples=4,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        # Every requested sample is still emitted...
+        assert result.num_samples == 4
+        # ...all fell back to the placeholder generator...
+        assert result.stats["repair_fallbacks"] == 4
+        assert result.stats["repair_retries"] == 4 * 2  # max_repair_retries default
+        # ...and the output is fully coherent under the validator.
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
+
+    def test_retry_succeeds_without_fallback(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        calls = {"n": 0}
+
+        def flaky(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return TestPostGenerationRepair._incoherent_conversation(workflow)
+            # Coherent: an assistant turn with no tool calls has zero violations.
+            s0 = workflow.states[0].name
+            s1 = workflow.states[1].name if len(workflow.states) > 1 else s0
+            return [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": f"[STATE: {s0} → {s1}]\nLet me help."},
+            ]
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", flaky)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.stats["repair_retries"] >= 1
+        assert result.stats["repair_fallbacks"] == 0
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
+
+    def test_placeholder_path_needs_no_repair(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L3",
+            num_samples=5,
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.num_samples == 5
+        assert result.stats["repair_retries"] == 0
+        assert result.stats["repair_fallbacks"] == 0
