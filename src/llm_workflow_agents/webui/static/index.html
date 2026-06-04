@@ -489,6 +489,42 @@
     border: 1px solid var(--amber-dk);
   }
 
+  /* mock tool-result composer — appears under a tool call so the user can
+     feed a synthetic result back into the conversation (no real execution) */
+  .toolresult-form {
+    margin-top: 10px;
+    border: 1px dashed var(--amber-dk);
+    border-radius: 7px;
+    padding: 11px 12px 12px;
+    display: flex; flex-direction: column; gap: 9px;
+    background: rgba(233,162,59,.03);
+    animation: rise .3s ease both;
+  }
+  .toolresult-form.submitted { opacity: .55; border-style: solid; }
+  .toolresult-field { display: flex; flex-direction: column; gap: 4px; }
+  .toolresult-name {
+    font: 600 8.5px/1 var(--mono); letter-spacing: 1.2px;
+    color: var(--amber); text-transform: uppercase;
+  }
+  .toolresult-input {
+    width: 100%; resize: vertical;
+    font: 11.5px/1.5 var(--mono); color: #f3d7a6;
+    background: var(--void);
+    border: 1px solid var(--amber-dk); border-radius: 5px;
+    padding: 7px 9px;
+  }
+  .toolresult-input::placeholder { color: var(--faint); }
+  .toolresult-input:disabled { opacity: .6; }
+  .toolresult-send {
+    align-self: flex-start;
+    padding: 7px 16px; border-radius: var(--radius-lg);
+    font: 600 11px/1 var(--mono); letter-spacing: .5px;
+    cursor: pointer;
+    background: linear-gradient(180deg, rgba(233,162,59,.18), rgba(233,162,59,.08));
+    border: 1px solid var(--amber-dk); color: #f6dcab;
+  }
+  .toolresult-send:disabled { cursor: default; opacity: .7; }
+
   .meta {
     margin-top: 9px;
     font: 500 10px/1 var(--mono);
@@ -815,17 +851,92 @@ function renderToolCalls(container, toolCalls) {
   }
 }
 
-async function send() {
-  const text = $('input').value.trim();
-  if (!text) return;
-  $('input').value = '';
-  addMsg('user', text);
-  history.push({ role: 'user', content: text });
+// Parse tool calls emitted as inline *text* — the form a vLLM model produces
+// when no structured tool-call parser is active. Mirrors eval/tool_call_f1.py
+// parse_tool_calls(): standard <tool_call>{...}</tool_call> first, then the
+// Hermes <|tool_call|>{...} variant. Returns structured-call-shaped objects so
+// the rest of the pipeline (cards, result form) treats them identically.
+function parseTextToolCalls(content) {
+  const out = [];
+  let m;
+  const std = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
+  while ((m = std.exec(content)) !== null) {
+    try { out.push(normalizeTextToolCall(JSON.parse(m[1]))); } catch (e) {}
+  }
+  if (out.length) return out;
+  const hermes = /<\|tool_call\|>\s*(\{[\s\S]*?\})\s*(?:<\|\/tool_call\|>|$)/g;
+  while ((m = hermes.exec(content)) !== null) {
+    try { out.push(normalizeTextToolCall(JSON.parse(m[1]))); } catch (e) {}
+  }
+  return out;
+}
 
-  const messages = [{ role: 'system', content: $('system').value }, ...history];
+function normalizeTextToolCall(raw) {
+  let name = '', args = {};
+  if (raw && typeof raw.function === 'object' && raw.function) {
+    name = raw.function.name || '';
+    args = raw.function.arguments != null ? raw.function.arguments : (raw.function.parameters || {});
+  } else if (raw) {
+    name = raw.name || '';
+    args = raw.arguments != null ? raw.arguments : (raw.parameters || {});
+  }
+  return { id: '', type: 'function', function: { name, arguments: args } };
+}
+
+// Render an inline composer beneath a tool-call so the user can supply a
+// *mocked* tool result. There is no real tool execution — the typed value is
+// pushed to history as a role:tool turn (matched by tool_call_id) and the model
+// is re-invoked so the conversation continues. One result field per tool call.
+function renderToolResultForm(container, toolCalls) {
+  const form = document.createElement('div');
+  form.className = 'toolresult-form';
+
+  const fields = toolCalls.map((tc) => {
+    const fn = tc.function || {};
+    const field = document.createElement('label');
+    field.className = 'toolresult-field';
+    const name = document.createElement('span');
+    name.className = 'toolresult-name';
+    name.textContent = (fn.name || 'tool') + (tc.id ? ' · ' + tc.id : '');
+    const ta = document.createElement('textarea');
+    ta.className = 'toolresult-input';
+    ta.rows = 2;
+    ta.placeholder = 'Mocked result for ' + (fn.name || 'tool') + ' — e.g. {"status":"ok"}';
+    field.appendChild(name);
+    field.appendChild(ta);
+    form.appendChild(field);
+    return { tc, ta };
+  });
+
+  const btn = document.createElement('button');
+  btn.className = 'toolresult-send';
+  btn.textContent = 'Send tool result' + (toolCalls.length > 1 ? 's' : '') + ' ▸';
+  btn.addEventListener('click', async () => {
+    for (const { tc, ta } of fields) {
+      history.push({
+        role: 'tool',
+        tool_call_id: tc.id || '',
+        name: (tc.function || {}).name || '',
+        content: ta.value,
+      });
+    }
+    form.classList.add('submitted');
+    btn.disabled = true;
+    btn.textContent = 'tool result' + (toolCalls.length > 1 ? 's' : '') + ' sent ✓';
+    fields.forEach(({ ta }) => { ta.disabled = true; });
+    await streamAssistantTurn();
+  });
+  form.appendChild(btn);
+  container.appendChild(form);
+}
+
+// Stream one assistant turn from the current `history`, render its content +
+// any tool calls, push the assistant message, and — if it requested tools —
+// surface the mock-result composer. Shared by send() and tool-result replies.
+async function streamAssistantTurn() {
   const payload = {
     model: $('model').value,
-    messages,
+    messages: [{ role: 'system', content: $('system').value }, ...history],
     temperature: parseFloat($('temperature').value),
     max_tokens: parseInt($('maxTokens').value, 10),
     tools: tools.length ? tools : null,
@@ -897,7 +1008,11 @@ async function send() {
 
   finish();
 
-  const toolCalls = Object.keys(toolAccum).sort((a, b) => a - b).map(k => toolAccum[k]);
+  // Tool calls arrive two ways: structured `delta.tool_calls` (vLLM tool-call
+  // parser active) or inline `<tool_call>{...}</tool_call>` text in the content.
+  // Mirror the eval's `pred.tool_calls or parse_tool_calls(content)` precedence.
+  const structuredCalls = Object.keys(toolAccum).sort((a, b) => a - b).map(k => toolAccum[k]);
+  const toolCalls = structuredCalls.length ? structuredCalls : parseTextToolCalls(content);
   if (toolCalls.length) renderToolCalls(bubble, toolCalls);
 
   const meta = document.createElement('div');
@@ -907,8 +1022,22 @@ async function send() {
   bubble.appendChild(meta);
 
   const asstMsg = { role: 'assistant', content };
-  if (toolCalls.length) asstMsg.tool_calls = toolCalls;
+  // Only attach a structured tool_calls field for the structured path. Text-form
+  // calls already live in `content` as tags; re-attaching would duplicate them
+  // when the gateway re-textualizes past turns (_downgrade_tool_turns_to_text).
+  if (structuredCalls.length) asstMsg.tool_calls = structuredCalls;
   history.push(asstMsg);
+
+  if (toolCalls.length) renderToolResultForm(bubble, toolCalls);
+}
+
+async function send() {
+  const text = $('input').value.trim();
+  if (!text) return;
+  $('input').value = '';
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+  await streamAssistantTurn();
 }
 
 $('temperature').addEventListener('input', () => $('tempVal').textContent = $('temperature').value);
