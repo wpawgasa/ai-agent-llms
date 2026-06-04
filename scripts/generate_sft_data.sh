@@ -24,6 +24,8 @@
 #   --samples-per-leg <n>      Override per-leg sample count for all levels
 #   --smoke-test               Shorthand for --samples-per-leg 3 (quick pipeline check)
 #   --behavior-preset <preset> User behavior distribution (default: adversarial)
+#   --intent-category <preset> Intent mix: default (70/30 service/upsell),
+#                              service_only, upsell_heavy (default: default)
 #   --dry-run                  Print commands without executing
 #
 # Examples:
@@ -41,6 +43,7 @@ SEED=42
 DRY_RUN=false
 SAMPLES_PER_LEG=""  # empty = use curriculum defaults
 BEHAVIOR_PRESET="adversarial"
+INTENT_CATEGORY="default"
 
 # Load .env if present (mirrors python-dotenv behaviour in _teacher_client.py)
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
@@ -57,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --samples-per-leg)  SAMPLES_PER_LEG="$2"; shift 2 ;;
         --smoke-test)       SAMPLES_PER_LEG=3;    shift ;;
         --behavior-preset)  BEHAVIOR_PRESET="$2"; shift 2 ;;
+        --intent-category)  INTENT_CATEGORY="$2"; shift 2 ;;
         --dry-run)          DRY_RUN=true;          shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -64,6 +68,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$INTENT_CATEGORY" in
+    default|service_only|upsell_heavy) ;;
+    *) echo "Unknown --intent-category: $INTENT_CATEGORY (expected default, service_only, upsell_heavy)" >&2; exit 1 ;;
+esac
 
 if [[ "$DRY_RUN" = false ]]; then
     [[ -z "${OPENAI_API_KEY:-}" ]]     && { echo "Error: OPENAI_API_KEY is not set"     >&2; exit 1; }
@@ -100,6 +109,7 @@ echo "=== SFT Data Generation ==="
 echo "Output dir:    $DEST"
 echo "Seed:          $SEED"
 echo "Behavior:      $BEHAVIOR_PRESET"
+echo "Intent mix:    $INTENT_CATEGORY"
 echo "Totals:        $TOTALS_MSG"
 echo "Split:         1/3 gpt-5.4-mini-2026-03-17/en  +  1/3 gemini-3-flash-preview/th  +  1/3 gpt-5.4-nano-2026-03-17/code_switch per level"
 echo "==========================="
@@ -122,6 +132,7 @@ meta = generate_workflow_dataset(
     seed=$SEED,
     language='en',
     behavior_preset='$BEHAVIOR_PRESET',
+    intent_category_preset='$INTENT_CATEGORY',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
@@ -138,6 +149,7 @@ meta = generate_workflow_dataset(
     seed=$SEED,
     language='th',
     behavior_preset='$BEHAVIOR_PRESET',
+    intent_category_preset='$INTENT_CATEGORY',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
@@ -154,6 +166,7 @@ meta = generate_workflow_dataset(
     seed=$SEED,
     language='code_switch',
     behavior_preset='$BEHAVIOR_PRESET',
+    intent_category_preset='$INTENT_CATEGORY',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
