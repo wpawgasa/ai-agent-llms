@@ -27,6 +27,7 @@ from typing import Any, Literal
 import structlog
 
 from llm_workflow_agents.data._teacher_client import call_teacher_model
+from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
 from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES, build_enriched_system_prompt
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
@@ -99,6 +100,7 @@ class WorkflowState:
     name: str
     tools: list[str] = field(default_factory=list)
     entry_actions: list[str] = field(default_factory=list)
+    instruction: str = ""
 
 
 @dataclass
@@ -125,7 +127,12 @@ class WorkflowGraph:
         return {
             "states": [s.name for s in self.states],
             "state_details": [
-                {"name": s.name, "tools": s.tools, "entry_actions": s.entry_actions}
+                {
+                    "name": s.name,
+                    "tools": s.tools,
+                    "entry_actions": s.entry_actions,
+                    "instruction": s.instruction,
+                }
                 for s in self.states
             ],
             "transitions": [
@@ -388,13 +395,20 @@ def _generate_tool_schemas(
 ) -> list[dict[str, Any]]:
     """Select tool schemas from the domain registry for the given complexity.
 
-    Picks ``spec.num_tools`` tools from the domain's tool list. If the domain
-    has fewer tools than needed, supplements with cross-cutting tools.
+    Picks ``spec.num_tools`` tools from the domain's tool list, biased toward
+    tools that have a curated home state in ``domain_spec.state_tools`` so the
+    selected tools survive the per-state ``t in tool_names`` filter in
+    ``_generate_workflow_graph`` and end up rendered in a sensible state. If the
+    domain has fewer tools than needed, supplements with cross-cutting tools.
     """
+    placed = {t for tools in domain_spec.state_tools.values() for t in tools}
     available = list(domain_spec.tools)
+    rng.shuffle(available)
+    # Stable sort: tools with a curated home state come first (shuffled order
+    # preserved within each group), so the random budget prefers placeable tools.
+    available.sort(key=lambda t: 0 if t["function"]["name"] in placed else 1)
     if len(available) < spec.num_tools:
         available.extend(CROSS_CUTTING_TOOLS)
-    rng.shuffle(available)
     return available[: spec.num_tools]
 
 
@@ -783,13 +797,18 @@ def _generate_workflow_graph(
             middle_templates = templates[1:-1] if len(templates) > 2 else [f"STATE_{i + 1}"]
             name = middle_templates[(i - 1) % len(middle_templates)] if middle_templates else f"STATE_{i + 1}"
 
-        # Assign tools to non-terminal states
-        state_tools: list[str] = []
-        if i > 0 and i < num_states - 1 and tool_names:
-            n_tools = rng.randint(0, min(2, len(tool_names)))
-            state_tools = rng.sample(tool_names, n_tools) if n_tools > 0 else []
+        # Assign tools to states from the domain's curated state→tools map,
+        # filtered to the tools actually selected into this sample's schemas so
+        # the script never lists a tool absent from ``tool_schemas``. This
+        # replaces the old random ``rng.sample`` placement that put tools in
+        # semantically unrelated states.
+        curated_tools = domain_spec.state_tools.get(name, ()) if domain_spec else ()
+        state_tools = [t for t in curated_tools if t in tool_names]
+        instruction = domain_spec.state_instructions.get(name, "") if domain_spec else ""
 
-        states.append(WorkflowState(id=state_id, name=name, tools=state_tools))
+        states.append(
+            WorkflowState(id=state_id, name=name, tools=state_tools, instruction=instruction)
+        )
 
     # Generate transitions ensuring connectivity
     transitions: list[WorkflowTransition] = []
@@ -1161,6 +1180,8 @@ def generate_workflow_dataset(
     behavior_preset: str = "default",
     rich_prompt_rate: float = 0.30,
     intent_category_preset: str = "default",
+    repair_incoherent: bool = True,
+    max_repair_retries: int = 2,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1195,6 +1216,14 @@ def generate_workflow_dataset(
             conversations. ``"default"`` targets 70% service / 30% upsell_promo.
             ``"service_only"`` disables upsell biasing entirely.
             ``"upsell_heavy"`` uses a 50/50 split.
+        repair_incoherent: When True (default), teacher-generated conversations
+            that call a tool in a state the curated map disallows are retried and,
+            if still incoherent, replaced by the deterministic placeholder
+            conversation so every emitted sample respects the curated tool
+            placement. No-op for placeholder generation (already coherent).
+        max_repair_retries: Maximum teacher regenerations per sample before the
+            placeholder fallback is used. Reported via the ``repair_retries`` and
+            ``repair_fallbacks`` stats.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1242,6 +1271,8 @@ def generate_workflow_dataset(
     tool_error_count = 0
     total_tool_calls = 0
     rich_prompt_count = 0
+    repair_retries = 0
+    repair_fallbacks = 0
 
     for i in range(num_samples):
         behavior = _select_user_behavior(rng, active_distribution)
@@ -1262,16 +1293,39 @@ def generate_workflow_dataset(
         tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
         workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
 
+        def _placeholder() -> list[dict[str, Any]]:
+            return _generate_placeholder_conversation(
+                workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
+                intent_category,
+            )
+
         if teacher_model:
             messages = _generate_teacher_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
                 sample_language, intent_category,
             )
+            # Post-generation repair: the teacher is only *prompted* with the
+            # curated tool placement, so it may still call a tool in a state that
+            # does not allow it. Retry, then fall back to the deterministic
+            # placeholder conversation (always coherent) so every emitted sample
+            # respects the curated map without shrinking the dataset.
+            if repair_incoherent:
+                allowed = {s.name: set(s.tools) for s in workflow.states}
+                schema_names = {t["function"]["name"] for t in tool_schemas}
+                tries = 0
+                while find_tool_placement_violations(allowed, messages, schema_names):
+                    if tries >= max_repair_retries:
+                        messages = _placeholder()
+                        repair_fallbacks += 1
+                        break
+                    tries += 1
+                    repair_retries += 1
+                    messages = _generate_teacher_conversation(
+                        workflow, tool_schemas, behavior, spec, rng, domain_spec,
+                        teacher_model, sample_language, intent_category,
+                    )
         else:
-            messages = _generate_placeholder_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
-                intent_category,
-            )
+            messages = _placeholder()
 
         # Optionally replace the bare role line with a teacher-authored rich
         # natural-language system prompt (persona + named sections + dialogue
@@ -1350,6 +1404,8 @@ def generate_workflow_dataset(
         "num_domains": len(domain_counts),
         "rich_prompt_count": rich_prompt_count,
         "rich_prompt_rate_effective": rich_prompt_count / max(len(samples), 1),
+        "repair_retries": repair_retries,
+        "repair_fallbacks": repair_fallbacks,
     }
 
     logger.info("dataset_generated", output_file=str(output_file), **stats)

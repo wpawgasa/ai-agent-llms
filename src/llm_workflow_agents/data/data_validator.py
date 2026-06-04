@@ -87,6 +87,92 @@ def _validate_workflow_sample(sample: dict[str, Any], idx: int) -> list[str]:
     if level not in ("L1", "L2", "L3", "L4", "L5"):
         errors.append(f"Sample {idx}: invalid complexity_level '{level}'")
 
+    # Rationality checks (only when per-state detail is present; older/minimal
+    # samples that carry just a flat ``states`` list are skipped).
+    errors.extend(_check_workflow_rationality(sample, graph, messages, idx))
+
+    return errors
+
+
+def _check_workflow_rationality(
+    sample: dict[str, Any],
+    graph: dict[str, Any],
+    messages: list[dict[str, Any]],
+    idx: int,
+) -> list[str]:
+    """Enforce that workflow data is semantically coherent.
+
+    Three checks (see ``.claude/rules/02-data-generation.md``):
+
+    1. Tool-state coherence — every tool listed in a state exists in the
+       sample's ``tool_schemas``, and every tool *called* in the ground-truth
+       conversation for a state is listed in that state's tools.
+    2. Instruction completeness — every non-terminal state has an instruction.
+    3. Terminal reachability — at least one terminal is reachable from the
+       initial state by following the transitions.
+    """
+    errors: list[str] = []
+
+    state_details = graph.get("state_details") or []
+    terminals = set(graph.get("terminal") or [])
+    initial = graph.get("initial", "")
+
+    # 1a. Tool-state coherence: listed tools must exist in tool_schemas.
+    if state_details:
+        schema_names = set()
+        for ts in sample.get("tool_schemas") or []:
+            fn = ts.get("function") or ts
+            if fn.get("name"):
+                schema_names.add(fn["name"])
+        if schema_names:
+            for sd in state_details:
+                sname = sd.get("name", "")
+                for tool in sd.get("tools") or []:
+                    if tool not in schema_names:
+                        errors.append(
+                            f"Sample {idx}: state '{sname}' lists tool '{tool}' "
+                            f"not present in tool_schemas"
+                        )
+
+    # 1b. Tool-state coherence: GT-called tools must be listed in their state.
+    if state_details and messages:
+        from llm_workflow_agents.data._workflow_script import (
+            find_tool_placement_violations,
+        )
+
+        listed_by_state = {
+            sd.get("name", ""): set(sd.get("tools") or []) for sd in state_details
+        }
+        for violation in find_tool_placement_violations(listed_by_state, messages):
+            errors.append(f"Sample {idx}: ground-truth {violation}")
+
+    # 2. Instruction completeness: every non-terminal state needs an instruction.
+    for sd in state_details:
+        sname = sd.get("name", "")
+        if sname in terminals:
+            continue
+        if not (sd.get("instruction") or "").strip():
+            errors.append(f"Sample {idx}: state '{sname}' has no instruction")
+
+    # 3. Terminal reachability via BFS over transitions (state names).
+    transitions = graph.get("transitions") or []
+    if initial and terminals and transitions:
+        adjacency: dict[str, list[str]] = {}
+        for tr in transitions:
+            adjacency.setdefault(tr.get("from", ""), []).append(tr.get("to", ""))
+        seen = {initial}
+        stack = [initial]
+        while stack:
+            cur = stack.pop()
+            for nxt in adjacency.get(cur, []):
+                if nxt and nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        if not (seen & terminals):
+            errors.append(
+                f"Sample {idx}: no terminal state reachable from initial '{initial}'"
+            )
+
     return errors
 
 
