@@ -23,3 +23,7 @@ How to make generated workflow semantically correct? Should we revise DomainSpec
 ---
 
 Should we expand states in some domains as well? Verify that the plan complied with @docs/data_generation_recipes.md Does the DomainSpec cover support and upsale intent?
+
+---
+
+Look good to me. Let's write it up as a spec.
