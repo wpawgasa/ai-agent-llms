@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "a61ff6fd5c12",
+  "strategy": "manual-commit",
+  "branch": "feat/semantic-workflow-graph",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/a6/1ff6fd5c12/0/metadata.json",
+      "transcript": "/a6/1ff6fd5c12/0/full.jsonl",
+      "content_hash": "/a6/1ff6fd5c12/0/content_hash.txt",
+      "prompt": "/a6/1ff6fd5c12/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 225,
+    "cache_creation_tokens": 477789,
+    "cache_read_tokens": 26082805,
+    "output_tokens": 187432,
+    "api_call_count": 217
+  }
+}
