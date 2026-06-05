@@ -701,3 +701,58 @@ class TestDomainSchema:
             except (ValueError, Exception) as e:
                 errors.append(f"{key}: {e}")
         assert not errors, "\n".join(errors)
+
+
+class TestSelectSubgraph:
+    def test_l1_subgraph_has_3_to_4_states(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(42)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        domain = DOMAIN_REGISTRY["account_management"]
+        graph = select_subgraph(domain, spec, rng)
+        assert 3 <= len(graph.states) <= 4
+
+    def test_subgraph_no_duplicate_state_names(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        for level in [ComplexityLevel.L1, ComplexityLevel.L2, ComplexityLevel.L3]:
+            spec = COMPLEXITY_SPECS[level]
+            for key, domain in DOMAIN_REGISTRY.items():
+                rng = random.Random(0)
+                graph = select_subgraph(domain, spec, rng)
+                names = [s.name for s in graph.states]
+                assert len(names) == len(set(names)), f"duplicate names in {key} {level}: {names}"
+
+    def test_subgraph_terminal_always_reachable(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L3]
+        for key, domain in DOMAIN_REGISTRY.items():
+            rng = random.Random(7)
+            graph = select_subgraph(domain, spec, rng)
+            terminal_names = set(graph.terminal_states)
+            terminal_state_names = {
+                s.name for s in graph.states
+                if s.id in terminal_names or s.name in terminal_names
+            }
+            assert terminal_state_names, f"no terminal in subgraph for {key}"
+
+    def test_subgraph_transitions_carry_label_and_trigger(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        domain = DOMAIN_REGISTRY["billing_payments"]
+        rng = random.Random(1)
+        graph = select_subgraph(domain, spec, rng)
+        for t in graph.transitions:
+            assert t.label, f"transition {t.from_state}->{t.to_state} missing label"
+            assert t.trigger, f"transition {t.from_state}->{t.to_state} missing trigger"

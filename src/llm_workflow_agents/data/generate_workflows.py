@@ -109,8 +109,12 @@ class WorkflowTransition:
 
     from_state: str
     to_state: str
-    condition: str
+    condition: str          # legacy field; rendered from label at to_dict()
     priority: int = 0
+    label: str = ""         # authored human-readable label
+    trigger: str = "always" # one of _VALID_TRIGGERS
+    optional: bool = False
+    intent_category: str | None = None
 
 
 @dataclass
@@ -139,7 +143,7 @@ class WorkflowGraph:
                 {
                     "from": name_of.get(t.from_state, t.from_state),
                     "to": name_of.get(t.to_state, t.to_state),
-                    "condition": t.condition,
+                    "condition": t.label if t.label else t.condition,
                     "priority": t.priority,
                 }
                 for t in self.transitions
@@ -147,6 +151,203 @@ class WorkflowGraph:
             "initial": name_of.get(self.initial_state, self.initial_state),
             "terminal": [name_of.get(t, t) for t in self.terminal_states],
         }
+
+
+def select_subgraph(
+    domain: "DomainSpec",
+    spec: "ComplexitySpec",
+    rng: random.Random,
+    intent_category: str = "service",
+) -> WorkflowGraph:
+    """Build a semantically-valid subgraph of domain's canonical edge graph.
+
+    Algorithm:
+    1. Walk the spine (optional=False edges) from initial, reserving one slot for the
+       terminal so the total state count stays within target_path_len.
+    2. Add num_branches optional edges (+ their dst states if not yet included).
+    3. Add num_loops back-edges to earlier distinct states.
+    4. Add tool_error recovery arcs if include_recovery.
+    5. Add upsell arc when intent_category == 'upsell_promo' and domain has one.
+    """
+    # Build lookup structures
+    state_map = {s.name: s for s in domain.states}
+    spine_edges: dict[str, list] = {}
+    branch_edges: dict[str, list] = {}
+    for e in domain.edges:
+        if not e.optional:
+            spine_edges.setdefault(e.src, []).append(e)
+        else:
+            branch_edges.setdefault(e.src, []).append(e)
+
+    terminal_set = set(domain.terminals)
+
+    # Step 1: walk spine for target_len - 1 non-terminal states, then add terminal.
+    # The last slot is reserved for the terminal so total count == target_len.
+    target_len = rng.randint(*spec.target_path_len)
+    spine_states: list[str] = [domain.initial]
+    current = domain.initial
+
+    while len(spine_states) < target_len - 1 and current not in terminal_set:
+        candidates = spine_edges.get(current, [])
+        if not candidates:
+            break
+        nxt = candidates[0].dst
+        if nxt in set(spine_states):
+            break
+        spine_states.append(nxt)
+        current = nxt
+        if current in terminal_set:
+            break
+
+    # Ensure the last state is a terminal (may be a shortcut over intermediate states)
+    if spine_states[-1] not in terminal_set:
+        spine_states.append(domain.terminals[0])
+
+    included_names: set[str] = set(spine_states)
+    selected_states: list[str] = list(spine_states)
+
+    # Collect spine transitions; use a synthetic edge where we jumped over spine states
+    selected_transitions: list[WorkflowTransition] = []
+    for i in range(len(spine_states) - 1):
+        src, dst = spine_states[i], spine_states[i + 1]
+        edge = next(
+            (e for e in spine_edges.get(src, []) if e.dst == dst),
+            None,
+        )
+        if edge:
+            selected_transitions.append(WorkflowTransition(
+                from_state=src, to_state=dst,
+                condition=edge.label,
+                label=edge.label,
+                trigger=edge.trigger,
+                optional=False,
+                priority=0,
+            ))
+        else:
+            # Shortcut edge — jumped over intermediate spine states to reach terminal
+            selected_transitions.append(WorkflowTransition(
+                from_state=src, to_state=dst,
+                condition="proceed to resolution",
+                label="proceed to resolution",
+                trigger="always",
+                optional=False,
+                priority=0,
+            ))
+
+    # Step 2: add num_branches optional edges
+    num_branches_target = rng.randint(*spec.num_branches)
+    candidate_branch_edges = [
+        e for src in included_names
+        for e in branch_edges.get(src, [])
+        if e.intent_category != "upsell_promo"
+    ]
+    rng.shuffle(candidate_branch_edges)
+    branches_added = 0
+    for e in candidate_branch_edges:
+        if branches_added >= num_branches_target:
+            break
+        if e.dst not in included_names:
+            included_names.add(e.dst)
+            selected_states.append(e.dst)
+        selected_transitions.append(WorkflowTransition(
+            from_state=e.src, to_state=e.dst,
+            condition=e.label, label=e.label,
+            trigger=e.trigger, optional=True, priority=1,
+        ))
+        branches_added += 1
+
+    # Step 3: add num_loops back-edges
+    num_loops_target = rng.randint(*spec.num_loops)
+    loops_added = 0
+    all_loop_candidates = [
+        e for src in included_names
+        for e in branch_edges.get(src, [])
+        if e.dst in included_names
+        and e.dst != src
+        and e.src in selected_states
+        and selected_states.index(e.dst) < selected_states.index(e.src)
+    ]
+    rng.shuffle(all_loop_candidates)
+    for e in all_loop_candidates:
+        if loops_added >= num_loops_target:
+            break
+        if not any(t.from_state == e.src and t.to_state == e.dst for t in selected_transitions):
+            selected_transitions.append(WorkflowTransition(
+                from_state=e.src, to_state=e.dst,
+                condition=e.label, label=e.label,
+                trigger=e.trigger, optional=True, priority=1,
+            ))
+            loops_added += 1
+
+    # Step 4: recovery arcs
+    if spec.include_recovery:
+        recovery_candidates = [
+            e for src in included_names
+            for e in branch_edges.get(src, [])
+            if e.trigger == "tool_error" and e.dst in included_names
+        ]
+        for e in recovery_candidates:
+            if not any(t.from_state == e.src and t.trigger == "tool_error" for t in selected_transitions):
+                selected_transitions.append(WorkflowTransition(
+                    from_state=e.src, to_state=e.dst,
+                    condition=e.label, label=e.label,
+                    trigger=e.trigger, optional=True, priority=1,
+                ))
+
+    # Step 5: upsell arc
+    if intent_category == "upsell_promo":
+        upsell_candidates = [
+            e for src in included_names
+            for e in branch_edges.get(src, [])
+            if e.intent_category == "upsell_promo" and e.dst in included_names
+        ]
+        for e in upsell_candidates[:1]:
+            selected_transitions.append(WorkflowTransition(
+                from_state=e.src, to_state=e.dst,
+                condition=e.label, label=e.label,
+                trigger=e.trigger, optional=True, priority=1,
+                intent_category="upsell_promo",
+            ))
+
+    # Build WorkflowState list (spine order first, then appended branch states)
+    def to_workflow_state(idx: int, name: str) -> WorkflowState:
+        node = state_map[name]
+        return WorkflowState(
+            id=f"S{idx + 1}",
+            name=name,
+            tools=list(node.tools),
+            instruction=node.instruction,
+        )
+
+    wf_states = [to_workflow_state(i, n) for i, n in enumerate(selected_states)]
+    id_map = {s.name: s.id for s in wf_states}
+
+    wf_transitions = [
+        WorkflowTransition(
+            from_state=id_map.get(t.from_state, t.from_state),
+            to_state=id_map.get(t.to_state, t.to_state),
+            condition=t.label,
+            label=t.label,
+            trigger=t.trigger,
+            optional=t.optional,
+            priority=t.priority,
+            intent_category=t.intent_category,
+        )
+        for t in selected_transitions
+        if t.from_state in id_map and t.to_state in id_map
+    ]
+
+    terminal_ids = [
+        id_map[n] for n in selected_states
+        if state_map[n].kind == "terminal"
+    ]
+
+    return WorkflowGraph(
+        states=wf_states,
+        transitions=wf_transitions,
+        initial_state=id_map[domain.initial],
+        terminal_states=terminal_ids,
+    )
 
 
 # _FORMAT_RULES is imported from data.system_prompt (single source of truth)
