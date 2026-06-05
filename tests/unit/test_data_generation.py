@@ -835,3 +835,26 @@ class TestWalkPath:
                     found_upsell = True
                     break
         assert found_upsell, "No upsell path found across 50 seeds"
+
+
+class TestWorkflowScript:
+    def test_script_renders_authored_label_not_snake_case(self):
+        from llm_workflow_agents.data._workflow_script import build_workflow_script
+        graph_dict = {
+            "state_details": [
+                {"name": "GREETING", "tools": [], "entry_actions": [], "instruction": "Greet customer."},
+                {"name": "VERIFY", "tools": ["verify_identity"], "entry_actions": [], "instruction": "Verify."},
+                {"name": "DONE", "tools": [], "entry_actions": [], "instruction": ""},
+            ],
+            "transitions": [
+                {"from": "GREETING", "to": "VERIFY", "condition": "proceed to identity check", "priority": 0},
+                {"from": "GREETING", "to": "DONE", "condition": "identity already on file", "priority": 1},
+                {"from": "VERIFY", "to": "DONE", "condition": "verification successful", "priority": 0},
+            ],
+            "initial": "GREETING",
+            "terminal": ["DONE"],
+        }
+        script = build_workflow_script(graph_dict, [], "en")
+        assert "identity already on file" in script
+        assert "branch_" not in script
+        assert "S1" not in script
