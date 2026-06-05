@@ -189,6 +189,21 @@ class TestWorkflowGeneration:
                 script = sample["workflow_script"]
                 assert "Instruction:" in script or "คำแนะนำ:" in script
 
+    def test_l5_placeholder_always_reaches_terminal(self, tmp_output_dir: Path):
+        result = generate_workflow_dataset(
+            complexity_level="L5",
+            num_samples=10,
+            domain="banking",
+            output_dir=tmp_output_dir,
+            seed=42,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        empty_terminals = [s for s in samples if not s["ground_truth"]["terminal_state"]]
+        assert not empty_terminals, f"{len(empty_terminals)} L5 samples have empty terminal_state"
+
 
 class TestToolCallDataGeneration:
     """Tests for Experiment B data generation."""

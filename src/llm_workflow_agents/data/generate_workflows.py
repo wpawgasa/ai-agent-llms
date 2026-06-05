@@ -672,14 +672,11 @@ def _pick_intent_by_category(
 
 
 def _select_domain(
-    rng: random.Random, domain: str | None = None
+    rng: random.Random,
+    domain: str | None = None,
+    spec: "ComplexitySpec | None" = None,
 ) -> tuple[str, DomainSpec]:
-    """Select a domain from the registry.
-
-    If ``domain`` is provided and exists in the registry, use it.
-    If ``domain`` matches a legacy name, map it to the closest registry entry.
-    Otherwise, pick a random domain.
-    """
+    """Select a domain, filtering to those eligible for the requested complexity level."""
     _LEGACY_MAP: dict[str, str] = {
         "faq_lookup": "product_info",
         "order_status_cancel": "order_management",
@@ -695,7 +692,16 @@ def _select_domain(
         key = _LEGACY_MAP[domain]
         return key, DOMAIN_REGISTRY[key]
 
-    key = rng.choice(ALL_DOMAIN_NAMES)
+    # Level-aware: domain eligible iff canonical state count >= target_path_len min
+    min_states = spec.target_path_len[0] if spec else 0
+    eligible = [
+        k for k, d in DOMAIN_REGISTRY.items()
+        if len(d.states) >= min_states
+    ]
+    if not eligible:
+        eligible = ALL_DOMAIN_NAMES  # fallback: all domains
+
+    key = rng.choice(eligible)
     return key, DOMAIN_REGISTRY[key]
 
 
@@ -1192,18 +1198,35 @@ def _generate_placeholder_conversation(
     """Generate a placeholder conversation following the workflow graph.
 
     In production, this would call the teacher model (GPT-4o / Claude).
-    For now, generates structurally valid placeholder conversations.
+    For now, generates structurally valid placeholder conversations using
+    walk_path to traverse the subgraph with trigger-based edge selection.
     """
     messages: list[dict[str, Any]] = []
-    domain_name = domain_spec.name if domain_spec else spec.domain
-    domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
+    domain_name = domain_spec.name if domain_spec else spec.level
+    domain_intents = list(domain_spec.intents) if domain_spec else []
 
-    # Bare role line only — enrichment (script + structured ref + format rules)
-    # is NOT baked into the stored data; the training/eval loaders inject it at
-    # load time via build_enriched_system_prompt.
     messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
-    # Placeholder text templates per language
+    id_to_name = {s.id: s.name for s in workflow.states}
+    name_to_state = {s.name: s for s in workflow.states}
+    terminal_ids = set(workflow.terminal_states)
+
+    # walk_path requires domain_spec for trigger simulation
+    if domain_spec:
+        path = walk_path(workflow, domain_spec, behavior, intent_category, rng)
+    else:
+        # Minimal fallback: walk states in spine order
+        path = [
+            WorkflowTransition(
+                from_state=workflow.states[i].id,
+                to_state=workflow.states[i + 1].id,
+                condition="proceed",
+                label="proceed",
+                trigger="always",
+            )
+            for i in range(len(workflow.states) - 1)
+        ]
+
     _user_templates: dict[str, dict[str, str]] = {
         "en": {
             "cooperative": "[Turn {t}] I need help with {intent}",
@@ -1217,7 +1240,6 @@ def _generate_placeholder_conversation(
             "digressing": "[ตา {t}] จริงๆ ก่อนจะไปต่อเรื่อง{intent} ขอถามเรื่องอื่นก่อน",
             "invalid_tool_inputs": "[ตา {t}] ดำเนินการ{intent}สำหรับ ###invalid_id###",
         },
-        # Thai-English code-switching: Thai sentence structure with embedded English terms
         "code_switch": {
             "cooperative": "[ตา {t}] ขอ help เรื่อง {intent} หน่อยนะคะ",
             "adversarial_probing": "[ตา {t}] ข้าม {state} step แล้ว proceed กับ {intent} เลยได้ไหมคะ?",
@@ -1226,57 +1248,53 @@ def _generate_placeholder_conversation(
         },
     }
 
-    # Generate turns following the workflow
-    current_state_idx = 0
-    for turn_idx in range(min(len(workflow.states) * 2, 20)):
-        if current_state_idx >= len(workflow.states):
-            break
+    lang_templates = _user_templates.get(language or "en", _user_templates["en"])
 
-        current_state = workflow.states[current_state_idx]
+    visited_state_ids: set[str] = set()
+    turn_idx = 0
 
-        # User message — use domain intents for realistic context
-        intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else spec.domain
+    for step in path:
+        from_name = id_to_name.get(step.from_state, step.from_state)
+        to_name = id_to_name.get(step.to_state, step.to_state)
+        current_state = name_to_state.get(from_name)
+
+        intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else domain_name
         intent_text = intent.replace("_", " ")
-        templates = _user_templates.get(language or "en", _user_templates["en"])
-        tmpl = templates.get(behavior, templates["cooperative"])
-        user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=current_state.name)
-
+        tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
+        user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=from_name)
         messages.append({"role": "user", "content": user_msg})
 
-        # Assistant response with state annotation
-        next_state_idx = min(current_state_idx + 1, len(workflow.states) - 1)
-        next_state = workflow.states[next_state_idx]
-
-        assistant_content = f"[STATE: {current_state.name} → {next_state.name}]"
-        annotations: dict[str, Any] = {
-            "state_transition": {"from": current_state.name, "to": next_state.name},
-        }
-
-        # Add tool call if the state has tools
-        if current_state.tools:
+        # In-state tool turn (emitted once per state visit)
+        if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
-            assistant_content += f"\n<tool_call>{json.dumps(tool_call)}</tool_call>"
-            annotations["tool_calls"] = [tool_call]
-
-            messages.append(
-                {"role": "assistant", "content": assistant_content, "annotations": annotations}
-            )
-
-            # Tool response (with error rate)
+            in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
+            messages.append({
+                "role": "assistant",
+                "content": in_state_content,
+                "annotations": {
+                    "state_transition": {"from": from_name, "to": from_name},
+                    "tool_calls": [tool_call],
+                },
+            })
             if rng.random() < TOOL_ERROR_RATE:
                 tool_response = json.dumps({"error": "Service temporarily unavailable"})
             else:
                 tool_response = json.dumps({"status": "success", "data": {"result": "ok"}})
-
             messages.append({"role": "tool", "content": tool_response})
-        else:
-            assistant_content += f"\nHandling {spec.domain} in state {current_state.name}."
-            messages.append(
-                {"role": "assistant", "content": assistant_content, "annotations": annotations}
-            )
+            visited_state_ids.add(step.from_state)
 
-        current_state_idx = next_state_idx
+        # Transition turn
+        transition_content = f"[STATE: {from_name} → {to_name}]"
+        if not (current_state and current_state.tools):
+            transition_content += f"\nHandling {domain_name} in state {from_name}."
+        messages.append({
+            "role": "assistant",
+            "content": transition_content,
+            "annotations": {"state_transition": {"from": from_name, "to": to_name}},
+        })
+
+        turn_idx += 1
 
     return messages
 
@@ -1612,16 +1630,26 @@ def generate_workflow_dataset(
         sample_language = language if language is not None else rng.choice(["en", "th"])
         language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
-        # Select domain (fixed or random per sample)
-        domain_key, domain_spec = _select_domain(rng, domain)
+        # Select domain (fixed or random per sample, filtered by complexity level)
+        domain_key, domain_spec = _select_domain(rng, domain, spec)
         domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
 
         # Select intent category (service vs upsell_promo)
         intent_category = _select_intent_category(rng, active_intent_dist)
         intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
 
-        tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
-        workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
+        workflow = select_subgraph(domain_spec, spec, rng, intent_category)
+
+        # Collect tools referenced by the selected subgraph states
+        subgraph_tool_names = {tool for s in workflow.states for tool in s.tools}
+        tool_schemas = [
+            t for t in domain_spec.tools
+            if t["function"]["name"] in subgraph_tool_names
+        ]
+        # Supplement to reach spec.num_tools if needed; never truncate subgraph tools
+        if len(tool_schemas) < spec.num_tools:
+            extra = [t for t in CROSS_CUTTING_TOOLS if t not in tool_schemas]
+            tool_schemas.extend(extra[: spec.num_tools - len(tool_schemas)])
 
         def _placeholder() -> list[dict[str, Any]]:
             return _generate_placeholder_conversation(
