@@ -1,0 +1,25 @@
+Look at teacher generated data in @data/output/benchmark/task_a/REDACTED.jsonl I think workflow script should only be embedded in system prompt through `build_enriched_system_prompt`, not directly generated. Investigate data generation pipeline
+
+---
+
+How do we construct workflow graph?
+
+---
+
+How is state transition determined, if the middle states are picked randomly?
+
+---
+
+Does this mean that some transitions may not semantically be correct?
+
+---
+
+dig further
+
+---
+
+How to make generated workflow semantically correct? Should we revise DomainSpec? And Specify eligible state transition and meaningful transition condition.
+
+---
+
+Should we expand states in some domains as well? Verify that the plan complied with @docs/data_generation_recipes.md Does the DomainSpec cover support and upsale intent?
