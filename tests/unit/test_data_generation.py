@@ -876,3 +876,119 @@ class TestRepairLoop:
         allowed = {"GREETING": set(), "VERIFY_IDENTITY": {"verify_identity"}}
         violations = find_tool_placement_violations(allowed, messages)
         assert violations == []  # tool check passes (no tools called in GREETING)
+
+
+class TestSemanticGraphProperties:
+    """Property tests per spec Section 5 — verify semantic correctness of generated data."""
+
+    _LEVELS = ["L1", "L2", "L3"]
+    _RICH_LEVELS = ["L4", "L5"]
+    _RICH_DOMAINS = ["banking", "insurance", "healthcare", "travel", "telecom"]
+
+    def _generate(self, level: str, domain: str, n: int = 5, seed: int = 42, tmp_path=None):
+        import tempfile
+        d = Path(tmp_path) if tmp_path else Path(tempfile.mkdtemp())
+        result = generate_workflow_dataset(
+            complexity_level=level, num_samples=n, domain=domain,
+            output_dir=d, seed=seed,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        return samples
+
+    def test_no_duplicate_state_names_l1_l3(self, tmp_path):
+        for level in self._LEVELS:
+            for key in list(DOMAIN_REGISTRY.keys())[:5]:
+                samples = self._generate(level, key, n=3, tmp_path=tmp_path / level / key)
+                for s in samples:
+                    names = s["workflow_graph"]["states"]
+                    assert len(names) == len(set(names)), \
+                        f"duplicate names in {level}/{key}: {names}"
+
+    def test_no_duplicate_state_names_l4(self, tmp_path):
+        for key in self._RICH_DOMAINS:
+            samples = self._generate("L4", key, n=3, tmp_path=tmp_path / "L4" / key)
+            for s in samples:
+                names = s["workflow_graph"]["states"]
+                assert len(names) == len(set(names)), \
+                    f"duplicate names in L4/{key}: {names}"
+
+    def test_no_duplicate_state_names_l5(self, tmp_path):
+        for key in self._RICH_DOMAINS:
+            samples = self._generate("L5", key, n=3, tmp_path=tmp_path / "L5" / key)
+            for s in samples:
+                names = s["workflow_graph"]["states"]
+                assert len(names) == len(set(names)), \
+                    f"duplicate names in L5/{key}: {names}"
+
+    def test_terminal_state_never_empty(self, tmp_path):
+        for level in self._LEVELS + self._RICH_LEVELS:
+            domains = self._RICH_DOMAINS if level in self._RICH_LEVELS else ["account_management"]
+            for key in domains:
+                samples = self._generate(level, key, n=5,
+                                         tmp_path=tmp_path / level / key)
+                for s in samples:
+                    assert s["ground_truth"]["terminal_state"] != "", \
+                        f"empty terminal_state in {level}/{key}"
+
+    def test_gt_transitions_are_valid_subgraph_edges(self, tmp_path):
+        for level in self._LEVELS:
+            samples = self._generate(level, "billing_payments", n=5,
+                                     tmp_path=tmp_path / level)
+            for s in samples:
+                valid_edges = {
+                    (t["from"], t["to"])
+                    for t in s["workflow_graph"]["transitions"]
+                }
+                state_names = set(s["workflow_graph"]["states"])
+                valid_edges |= {(n, n) for n in state_names}
+                for step in s["ground_truth"]["state_sequence"]:
+                    pair = (step["from"], step["to"])
+                    assert pair in valid_edges, \
+                        f"GT transition {pair} not in subgraph edges for {level}"
+
+    def test_conditions_are_not_machine_generated(self, tmp_path):
+        samples = self._generate("L2", "account_management", n=10,
+                                 tmp_path=tmp_path)
+        for s in samples:
+            for t in s["workflow_graph"]["transitions"]:
+                cond = t["condition"]
+                assert not cond.startswith("branch_S"), \
+                    f"machine-generated condition found: {cond!r}"
+                assert not cond.startswith("proceed_from_"), \
+                    f"machine-generated condition found: {cond!r}"
+
+    def test_upsell_samples_traverse_upsell_arc(self, tmp_path):
+        result = generate_workflow_dataset(
+            complexity_level="L2", num_samples=30,
+            domain="account_management", output_dir=tmp_path,
+            intent_category_preset="upsell_heavy", seed=0,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        upsell_in_messages = sum(
+            1 for s in samples
+            if any("upsell" in str(m.get("content", "")).lower()
+                   or "premium" in str(m.get("content", "")).lower()
+                   for m in s["messages"])
+        )
+        assert upsell_in_messages > 0, "No upsell content found in any upsell_heavy sample"
+
+    def test_service_samples_do_not_traverse_upsell_arc(self, tmp_path):
+        result = generate_workflow_dataset(
+            complexity_level="L2", num_samples=20,
+            domain="account_management", output_dir=tmp_path,
+            intent_category_preset="service_only", seed=1,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        for s in samples:
+            for t in s["workflow_graph"]["transitions"]:
+                assert t.get("intent_category") != "upsell_promo", \
+                    "upsell arc should not appear in service_only subgraph"
