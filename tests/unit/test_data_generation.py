@@ -148,8 +148,15 @@ class TestWorkflowGeneration:
                 schema_names = {
                     ts["function"]["name"] for ts in sample["tool_schemas"]
                 }
+                _new_schema_map = (
+                    {s.name: set(s.tools) for s in spec.states} if spec.states else {}
+                )
                 for sd in sample["workflow_graph"]["state_details"]:
-                    curated = set(spec.state_tools.get(sd["name"], ()))
+                    curated = (
+                        _new_schema_map.get(sd["name"], set())
+                        if spec.states
+                        else set(spec.state_tools.get(sd["name"], ()))
+                    )
                     for tool in sd["tools"]:
                         assert tool in curated, (
                             f"{sample['domain']}: '{tool}' placed in '{sd['name']}' "
@@ -277,16 +284,31 @@ class TestDomainRegistry:
 
     def test_all_domains_have_state_templates(self) -> None:
         for name, spec in DOMAIN_REGISTRY.items():
-            assert len(spec.state_templates) >= 7, f"{name} has fewer than 7 state templates"
-            assert spec.state_templates[-1] in ("TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW"), (
-                f"{name} last state template is {spec.state_templates[-1]}"
-            )
+            if spec.states:
+                # New-schema domain: check StateNode list
+                assert len(spec.states) >= 7, f"{name} has fewer than 7 states"
+                assert spec.terminals, f"{name} has no terminals"
+            else:
+                # Legacy-schema domain: check state_templates
+                assert len(spec.state_templates) >= 7, f"{name} has fewer than 7 state templates"
+                assert spec.state_templates[-1] in (
+                    "TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW",
+                ), f"{name} last state template is {spec.state_templates[-1]}"
 
     def test_all_domains_have_curated_state_maps(self) -> None:
         """Every state template must have a curated instruction + tools entry,
         and every referenced tool must exist in the domain's tool list."""
         for name, spec in DOMAIN_REGISTRY.items():
             tool_names = {t["function"]["name"] for t in spec.tools}
+            if spec.states:
+                # New-schema domain: validated by validate_domain at import time
+                for sn in spec.states:
+                    assert sn.instruction.strip(), f"{name}: state '{sn.name}' has no instruction"
+                    for tool in sn.tools:
+                        assert tool in tool_names, (
+                            f"{name}: state '{sn.name}' references unknown tool '{tool}'"
+                        )
+                continue
             states = set(spec.state_templates)
             for state in spec.state_templates:
                 assert state in spec.state_instructions, f"{name}: {state} has no instruction"

@@ -28,7 +28,7 @@ import structlog
 
 from llm_workflow_agents.data._teacher_client import call_teacher_model
 from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
-from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES, build_enriched_system_prompt
+from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
     TOOL_ERROR_RATE,
@@ -401,7 +401,9 @@ def _generate_tool_schemas(
     ``_generate_workflow_graph`` and end up rendered in a sensible state. If the
     domain has fewer tools than needed, supplements with cross-cutting tools.
     """
-    placed = {t for tools in domain_spec.state_tools.values() for t in tools}
+    placed = {t for tools in domain_spec.state_tools.values() for t in tools} | {
+        tool for s in domain_spec.states for tool in s.tools
+    }
     available = list(domain_spec.tools)
     rng.shuffle(available)
     # Stable sort: tools with a curated home state come first (shuffled order
@@ -785,6 +787,15 @@ def _generate_workflow_graph(
     # Use domain state templates if available, otherwise fall back to generic
     templates = list(domain_spec.state_templates) if domain_spec else []
 
+    # Compatibility bridge: synthesise old flat dicts from new semantic schema.
+    # Removed once Task 7 rewrites the generator to use the new schema directly.
+    _compat_tools: dict[str, tuple] = {}
+    _compat_instr: dict[str, str] = {}
+    if domain_spec and not templates and domain_spec.states:
+        templates = [s.name for s in domain_spec.states]
+        _compat_tools = {s.name: s.tools for s in domain_spec.states}
+        _compat_instr = {s.name: s.instruction for s in domain_spec.states}
+
     states: list[WorkflowState] = []
     for i in range(num_states):
         state_id = f"S{i + 1}"
@@ -802,9 +813,17 @@ def _generate_workflow_graph(
         # the script never lists a tool absent from ``tool_schemas``. This
         # replaces the old random ``rng.sample`` placement that put tools in
         # semantically unrelated states.
-        curated_tools = domain_spec.state_tools.get(name, ()) if domain_spec else ()
+        curated_tools = (
+            _compat_tools.get(name, ())
+            if _compat_tools
+            else (domain_spec.state_tools.get(name, ()) if domain_spec else ())
+        )
         state_tools = [t for t in curated_tools if t in tool_names]
-        instruction = domain_spec.state_instructions.get(name, "") if domain_spec else ""
+        instruction = (
+            _compat_instr.get(name, "")
+            if _compat_instr
+            else (domain_spec.state_instructions.get(name, "") if domain_spec else "")
+        )
 
         states.append(
             WorkflowState(id=state_id, name=name, tools=state_tools, instruction=instruction)
@@ -868,9 +887,9 @@ def _generate_placeholder_conversation(
     domain_name = domain_spec.name if domain_spec else spec.domain
     domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
 
-    # System message with both natural language script and structured graph
-    # Bare role line — enrichment (script + structured ref + format rules) is
-    # applied uniformly after message generation via build_enriched_system_prompt.
+    # Bare role line only — enrichment (script + structured ref + format rules)
+    # is NOT baked into the stored data; the training/eval loaders inject it at
+    # load time via build_enriched_system_prompt.
     messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
     # Placeholder text templates per language
@@ -1343,22 +1362,25 @@ def generate_workflow_dataset(
                 else:
                     messages.insert(0, {"role": "system", "content": rich_prompt})
 
-        # Enrich system prompt so training and eval see the same prompt shape.
-        # build_enriched_system_prompt is idempotent — safe for placeholder messages
-        # that are already enriched after the simplification above.
-        # Pass messages through so the workflow_script reflects the actual GT
-        # tool calls per state, not the random rng-populated state.tools.
-        _enrich_ctx = {
-            "workflow_script": _graph_to_script(workflow, tool_schemas, sample_language, messages=messages),
-            "workflow_graph": workflow.to_dict(),
-            "tool_schemas": tool_schemas,
-            "messages": messages,
-            "language": sample_language,
-        }
-        if messages and messages[0].get("role") == "system":
-            messages[0] = {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, messages[0]["content"])}
-        elif messages:
-            messages.insert(0, {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, "You are a customer service assistant.")})
+        # Keep messages[0] a BARE system message. The workflow script, tool
+        # schemas, and format rules are deliberately NOT embedded here: the
+        # training (sft.py, grpo.py) and eval (agent_benchmark.py) pipelines
+        # always inject them at load time via build_enriched_system_prompt,
+        # which derives a fresh script from workflow_graph + messages. Baking
+        # the enrichment into the stored data would only duplicate that and go
+        # stale (hence force_rebuild=True in the loaders). The authoritative
+        # rendered script is preserved separately in the top-level
+        # `workflow_script` field below. The teacher path returns no system
+        # turn, so ensure one exists for the loaders' messages[0] check.
+        if not (messages and messages[0].get("role") == "system"):
+            domain_name = domain_spec.name if domain_spec else spec.domain
+            messages.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": f"You are a customer service agent handling {domain_name} workflows.",
+                },
+            )
 
         # Count tool calls and errors
         for msg in messages:
