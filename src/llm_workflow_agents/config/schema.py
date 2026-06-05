@@ -195,15 +195,31 @@ class QuantizationMethodConfig(BaseModel):
 
 
 class ComplexitySpec(BaseModel):
-    """Workflow complexity level specification."""
+    """Workflow complexity level specification.
+
+    New semantic-graph fields drive ``select_subgraph`` (Task 5+):
+    - ``target_path_len``: number of spine states to include from the canonical domain graph.
+    - ``num_branches``: optional branch edges (off-spine arcs) to add.
+    - ``num_loops``: retry / escalation back-edges to add.
+    - ``include_recovery``: whether to include ``tool_error`` recovery arcs.
+
+    Legacy fields are kept for backward compatibility with the old random-walk
+    generator and will be removed in Task 10 once the generator is rewritten.
+    """
 
     level: ComplexityLevel
-    num_states: tuple[int, int]
-    branching_factor: tuple[int, int]
-    num_tools: int
-    chain_depth: int
-    nesting_depth: int
-    domain: str
+    # New semantic subgraph selection fields
+    target_path_len: tuple[int, int] = (0, 0)
+    num_branches: tuple[int, int] = (0, 0)
+    num_loops: tuple[int, int] = (0, 0)
+    include_recovery: bool = False
+    num_tools: int = 1
+    # Legacy fields (backward compat — superseded by the fields above)
+    num_states: tuple[int, int] = (0, 0)
+    branching_factor: tuple[int, int] = (0, 0)
+    chain_depth: int = 0
+    nesting_depth: int = 0
+    domain: str = ""
 
 
 class ServingDeploymentConfig(BaseModel):
@@ -231,45 +247,70 @@ class ExperimentConfig(BaseModel):
 COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
     ComplexityLevel.L1: ComplexitySpec(
         level=ComplexityLevel.L1,
+        target_path_len=(3, 4),
+        num_branches=(0, 0),
+        num_loops=(0, 0),
+        include_recovery=False,
+        num_tools=1,
+        # Legacy fields
         num_states=(3, 4),
         branching_factor=(1, 2),
-        num_tools=1,
         chain_depth=0,
         nesting_depth=0,
         domain="faq_lookup",
     ),
     ComplexityLevel.L2: ComplexitySpec(
         level=ComplexityLevel.L2,
-        num_states=(5, 7),
-        branching_factor=(2, 3),
+        target_path_len=(5, 7),
+        num_branches=(1, 1),
+        num_loops=(0, 0),
+        include_recovery=False,
         num_tools=2,
+        # Legacy fields
+        num_states=(5, 7),
+        branching_factor=(1, 2),
         chain_depth=1,
         nesting_depth=1,
         domain="order_status_cancel",
     ),
     ComplexityLevel.L3: ComplexitySpec(
         level=ComplexityLevel.L3,
-        num_states=(8, 12),
-        branching_factor=(3, 5),
+        target_path_len=(8, 12),
+        num_branches=(2, 3),
+        num_loops=(0, 1),
+        include_recovery=True,
         num_tools=4,
+        # Legacy fields
+        num_states=(8, 12),
+        branching_factor=(2, 4),
         chain_depth=2,
         nesting_depth=2,
         domain="booking_payment",
     ),
     ComplexityLevel.L4: ComplexitySpec(
         level=ComplexityLevel.L4,
-        num_states=(13, 20),
-        branching_factor=(5, 8),
+        target_path_len=(12, 16),
+        num_branches=(3, 5),
+        num_loops=(1, 1),
+        include_recovery=True,
         num_tools=6,
+        # Legacy fields
+        num_states=(12, 16),
+        branching_factor=(3, 5),
         chain_depth=3,
         nesting_depth=3,
         domain="it_troubleshoot_escalation",
     ),
     ComplexityLevel.L5: ComplexitySpec(
         level=ComplexityLevel.L5,
-        num_states=(21, 30),
-        branching_factor=(8, 99),
+        target_path_len=(16, 20),
+        num_branches=(5, 99),
+        num_loops=(1, 2),
+        include_recovery=True,
         num_tools=7,
+        # Legacy fields
+        num_states=(16, 20),
+        branching_factor=(5, 99),
         chain_depth=4,
         nesting_depth=4,
         domain="multi_dept_workflow",
