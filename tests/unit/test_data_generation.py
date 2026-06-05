@@ -527,3 +527,155 @@ class TestPostGenerationRepair:
         assert result.num_samples == 5
         assert result.stats["repair_retries"] == 0
         assert result.stats["repair_fallbacks"] == 0
+
+
+class TestDomainSchema:
+    """Tests for the new StateNode/Edge/DomainSpec schema and validate_domain."""
+
+    def _make_minimal_valid_domain(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge,
+        )
+        return DomainSpec(
+            name="Test",
+            category="test",
+            tools=(),
+            intents=("help",),
+            entity_slots=(),
+            states=(
+                StateNode("START", "greet", kind="initial"),
+                StateNode("WORK", "do work", tools=("some_tool",)),
+                StateNode("END", "close", kind="terminal"),
+            ),
+            edges=(
+                Edge("START", "WORK", "proceed", "always"),
+                Edge("WORK", "END", "done", "tool_success"),
+            ),
+            initial="START",
+            terminals=("END",),
+        )
+
+    def test_validate_domain_passes_minimal(self):
+        from llm_workflow_agents.data.domain_registry import validate_domain
+        d = self._make_minimal_valid_domain()
+        validate_domain(d)  # should not raise
+
+    def test_validate_domain_rejects_unknown_edge_src(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(Edge("MISSING", "B", "x", "always"),),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="unknown state"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_self_loop(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "A", "loop", "always"),
+                Edge("A", "B", "done", "always"),
+            ),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="self-loop"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_missing_spine_successor(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        # WORK has only an optional edge — no spine successor
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b"),
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "B", "go", "always"),
+                Edge("B", "C", "branch", "intent_match", optional=True, priority=1),
+            ),
+            initial="A", terminals=("C",),
+        )
+        with pytest.raises(ValueError, match="spine successor"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_tool_trigger_on_toolless_state(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b"),  # no tools
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "B", "go", "always"),
+                Edge("B", "C", "success", "tool_success"),  # tool_success but B has no tools
+            ),
+            initial="A", terminals=("C",),
+        )
+        with pytest.raises(ValueError, match="tool_success.*no tools"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_terminal_unreachable(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        # C is declared terminal but not reachable from initial
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(Edge("A", "B", "done", "always"),),
+            initial="A", terminals=("B", "C"),
+        )
+        with pytest.raises(ValueError, match="unreachable"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_invalid_trigger(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(Edge("A", "B", "x", "fire_photon_torpedoes"),),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="trigger"):
+            validate_domain(d)
+
+    def test_all_registry_domains_pass_validate(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, validate_domain
+        errors = []
+        for key, domain in DOMAIN_REGISTRY.items():
+            try:
+                validate_domain(domain)
+            except (ValueError, Exception) as e:
+                errors.append(f"{key}: {e}")
+        assert not errors, "\n".join(errors)

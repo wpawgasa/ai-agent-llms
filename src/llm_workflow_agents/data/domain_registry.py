@@ -12,31 +12,193 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# ---------------------------------------------------------------------------
+# New semantic graph schema (StateNode, Edge, updated DomainSpec)
+# ---------------------------------------------------------------------------
+
+_VALID_TRIGGERS = frozenset({
+    "always", "tool_success", "tool_error",
+    "intent_match", "slot_present", "user_declines",
+})
+
+
+@dataclass(frozen=True)
+class StateNode:
+    """A single state in the canonical domain workflow graph."""
+
+    name: str
+    instruction: str
+    tools: tuple[str, ...] = ()
+    kind: str = "working"  # "initial" | "working" | "terminal"
+
+
+@dataclass(frozen=True)
+class Edge:
+    """A directed transition in the canonical domain workflow graph."""
+
+    src: str
+    dst: str
+    label: str          # human-readable authored label
+    trigger: str        # one of _VALID_TRIGGERS
+    optional: bool = False
+    priority: int = 0
+    intent_category: str | None = None  # set to "upsell_promo" on upsell-arc edges
+
 
 @dataclass(frozen=True)
 class DomainSpec:
     """Specification for a single call center domain.
 
-    ``state_tools`` and ``state_instructions`` make tool placement and per-state
-    guidance *rational* (curated), replacing the old random tool assignment in
-    ``generate_workflows._generate_workflow_graph``. Both are keyed by the state
-    names in ``state_templates``:
-
-    * ``state_tools[name]`` — the tools that semantically belong in that state
-      (empty tuple for greeting / terminal / pure-decision states).
-    * ``state_instructions[name]`` — a one-line goal/instruction for that state.
-
-    Tool names must match the ``function.name`` of an entry in ``tools``.
+    Supports both legacy flat-dict schema (state_templates / state_tools /
+    state_instructions) and the new semantic-graph schema (states / edges).
+    During migration, legacy fields default to empty; new fields default to
+    empty tuples/strings. ``validate_domain`` only runs invariant checks on
+    domains that have ``states`` populated (i.e., migrated to the new schema).
     """
 
     name: str
     category: str
     tools: tuple[dict[str, Any], ...]
-    state_templates: tuple[str, ...]
     intents: tuple[str, ...]
     entity_slots: tuple[str, ...] = ()
+    # Legacy flat-dict fields (unmigrated domains; kept for backward compat)
+    state_templates: tuple[str, ...] = ()
     state_tools: dict[str, tuple[str, ...]] = field(default_factory=dict)
     state_instructions: dict[str, str] = field(default_factory=dict)
+    # New semantic graph fields
+    states: tuple[StateNode, ...] = ()
+    edges: tuple[Edge, ...] = ()
+    initial: str = ""
+    terminals: tuple[str, ...] = ()
+    intent_categories: dict[str, str] = field(default_factory=dict)
+
+
+def validate_domain(domain: DomainSpec) -> None:
+    """Enforce structural invariants on a new-schema domain.
+
+    Skips silently for unmigrated domains (empty ``states``).
+    Raises ValueError on any violation.
+    Called at module import for every migrated domain.
+    """
+    if not domain.states:
+        return  # unmigrated domain — skip
+
+    state_names = {s.name for s in domain.states}
+    has_tools = {s.name for s in domain.states if s.tools}
+    terminal_names = set(domain.terminals)
+
+    # Every edge references known states
+    for e in domain.edges:
+        if e.src not in state_names:
+            raise ValueError(
+                f"{domain.name}: edge src '{e.src}' references unknown state"
+            )
+        if e.dst not in state_names:
+            raise ValueError(
+                f"{domain.name}: edge dst '{e.dst}' references unknown state"
+            )
+
+    # No graph-edge self-loops
+    for e in domain.edges:
+        if e.src == e.dst:
+            raise ValueError(
+                f"{domain.name}: self-loop on state '{e.src}'"
+            )
+
+    # Valid triggers
+    for e in domain.edges:
+        if e.trigger not in _VALID_TRIGGERS:
+            raise ValueError(
+                f"{domain.name}: edge {e.src}->{e.dst} has invalid trigger '{e.trigger}'"
+            )
+
+    # tool_success / tool_error only on states with tools
+    for e in domain.edges:
+        if e.trigger in ("tool_success", "tool_error") and e.src not in has_tools:
+            raise ValueError(
+                f"{domain.name}: edge {e.src}->{e.dst} has trigger '{e.trigger}' "
+                f"but state '{e.src}' has no tools — tool_success/tool_error "
+                f"requires the source state to have at least one tool"
+            )
+
+    # initial state must have kind="initial"
+    initial_states = {s.name for s in domain.states if s.kind == "initial"}
+    if not domain.initial or domain.initial not in initial_states:
+        raise ValueError(
+            f"{domain.name}: 'initial' field '{domain.initial}' must name a state "
+            f"with kind='initial'"
+        )
+
+    # terminal states must have kind="terminal"
+    for t in domain.terminals:
+        matching = [s for s in domain.states if s.name == t]
+        if not matching or matching[0].kind != "terminal":
+            raise ValueError(
+                f"{domain.name}: terminal '{t}' must have kind='terminal'"
+            )
+
+    # Each non-terminal has >=1 outgoing edge and exactly one spine successor
+    outgoing: dict[str, list[Edge]] = {}
+    for e in domain.edges:
+        outgoing.setdefault(e.src, []).append(e)
+
+    for s in domain.states:
+        if s.kind == "terminal":
+            continue
+        edges_out = outgoing.get(s.name, [])
+        if not edges_out:
+            raise ValueError(
+                f"{domain.name}: non-terminal state '{s.name}' has no outgoing edges"
+            )
+        spine = [e for e in edges_out if not e.optional]
+        if len(spine) != 1:
+            raise ValueError(
+                f"{domain.name}: non-terminal state '{s.name}' must have exactly one "
+                f"spine successor (optional=False), found {len(spine)}"
+            )
+
+    # Reachability from initial (BFS)
+    reachable: set[str] = set()
+    queue = [domain.initial]
+    while queue:
+        node = queue.pop()
+        if node in reachable:
+            continue
+        reachable.add(node)
+        for e in outgoing.get(node, []):
+            queue.append(e.dst)
+    unreachable = state_names - reachable
+    if unreachable:
+        raise ValueError(
+            f"{domain.name}: states unreachable from initial: {unreachable}"
+        )
+
+    # Every state must be able to reach at least one terminal (reverse BFS)
+    reverse: dict[str, list[str]] = {}
+    for e in domain.edges:
+        reverse.setdefault(e.dst, []).append(e.src)
+    can_reach_terminal: set[str] = set()
+    queue = list(terminal_names)
+    while queue:
+        node = queue.pop()
+        if node in can_reach_terminal:
+            continue
+        can_reach_terminal.add(node)
+        for pred in reverse.get(node, []):
+            queue.append(pred)
+    blocked = reachable - can_reach_terminal
+    if blocked:
+        raise ValueError(
+            f"{domain.name}: states that cannot reach any terminal: {blocked}"
+        )
+
+    # Upsell-arc edges must rejoin toward a terminal
+    for e in domain.edges:
+        if e.intent_category == "upsell_promo" and e.dst not in can_reach_terminal:
+            raise ValueError(
+                f"{domain.name}: upsell-arc edge {e.src}->{e.dst} dst cannot reach "
+                f"any terminal"
+            )
 
 
 def _tool(name: str, desc: str, params: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -90,41 +252,51 @@ ACCOUNT_MANAGEMENT = DomainSpec(
             "plan_id": {"type": "string"},
         }, ["customer_id", "action"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_IDENTITY", "AUTHENTICATE", "LOOKUP_ACCOUNT",
-        "PROCESS_REQUEST", "CONFIRM_CHANGES", "UPDATE_RECORDS",
-        "NOTIFY_CUSTOMER", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "account_creation", "profile_update", "password_reset",
         "account_closure", "subscription_change", "rewards_inquiry",
         "verification_request", "premium_plan_offer",
     ),
     entity_slots=("customer_id", "email", "phone", "account_type", "field", "new_value"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_IDENTITY": ("verify_identity",),
-        "AUTHENTICATE": ("verify_identity",),
-        "LOOKUP_ACCOUNT": ("lookup_rewards",),
-        "PROCESS_REQUEST": ("create_account", "update_profile", "reset_password",
-                            "close_account", "manage_subscription"),
-        "CONFIRM_CHANGES": (),
-        "UPDATE_RECORDS": ("update_profile",),
-        "NOTIFY_CUSTOMER": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what account assistance they need.",
-        "VERIFY_IDENTITY": "Verify the customer's identity before accessing any account details.",
-        "AUTHENTICATE": "Authenticate the customer with OTP, PIN, or a security question.",
-        "LOOKUP_ACCOUNT": "Retrieve the customer's account record and confirm the details on file.",
-        "PROCESS_REQUEST": "Carry out the requested account change with the matching tool.",
-        "CONFIRM_CHANGES": "Summarise the pending change and ask the customer to confirm.",
-        "UPDATE_RECORDS": "Persist the confirmed changes to the customer's profile.",
-        "NOTIFY_CUSTOMER": "Notify the customer that the change is complete and what happens next.",
-        "RESOLVE": "Confirm the request is resolved and ask if anything else is needed.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what account assistance they need.", kind="initial"),
+        StateNode("VERIFY_IDENTITY", "Verify the customer's identity before accessing any account details.", tools=("verify_identity",)),
+        StateNode("AUTHENTICATE", "Authenticate the customer with OTP, PIN, or a security question.", tools=("verify_identity",)),
+        StateNode("LOOKUP_ACCOUNT", "Retrieve the customer's account record and confirm the details on file.", tools=("lookup_rewards",)),
+        StateNode("PROCESS_REQUEST", "Carry out the requested account change with the matching tool.", tools=("create_account", "update_profile", "reset_password", "close_account", "manage_subscription")),
+        StateNode("CONFIRM_CHANGES", "Summarise the pending change and ask the customer to confirm."),
+        StateNode("UPDATE_RECORDS", "Persist the confirmed changes to the customer's profile.", tools=("update_profile",)),
+        StateNode("NOTIFY_CUSTOMER", "Notify the customer that the change is complete and what happens next."),
+        StateNode("RESOLVE", "Confirm the request is resolved and ask if anything else is needed."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_IDENTITY", "proceed to identity verification", "always"),
+        Edge("VERIFY_IDENTITY", "AUTHENTICATE", "identity check required", "tool_success"),
+        Edge("VERIFY_IDENTITY", "LOOKUP_ACCOUNT", "identity already on file", "always", optional=True, priority=1),
+        Edge("AUTHENTICATE", "LOOKUP_ACCOUNT", "authentication successful", "tool_success"),
+        Edge("AUTHENTICATE", "VERIFY_IDENTITY", "authentication failed, retry", "tool_error", optional=True, priority=1),
+        Edge("LOOKUP_ACCOUNT", "PROCESS_REQUEST", "account located", "tool_success"),
+        Edge("PROCESS_REQUEST", "CONFIRM_CHANGES", "request processed, awaiting confirmation", "tool_success"),
+        Edge("PROCESS_REQUEST", "RESOLVE", "request completed without confirmation step", "always", optional=True, priority=1),
+        Edge("CONFIRM_CHANGES", "UPDATE_RECORDS", "customer confirmed changes", "always"),
+        Edge("CONFIRM_CHANGES", "RESOLVE", "customer declined the proposed change", "user_declines", optional=True, priority=1),
+        Edge("UPDATE_RECORDS", "NOTIFY_CUSTOMER", "records updated successfully", "tool_success"),
+        Edge("NOTIFY_CUSTOMER", "RESOLVE", "customer notified", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "premium subscription upgrade accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "account_creation": "service",
+        "profile_update": "service",
+        "password_reset": "service",
+        "account_closure": "service",
+        "subscription_change": "upsell_promo",
+        "rewards_inquiry": "upsell_promo",
+        "verification_request": "service",
+        "premium_plan_offer": "upsell_promo",
     },
 )
 
@@ -1372,3 +1544,19 @@ INTENT_CATEGORY_TAXONOMY: dict[str, str] = {
 def classify_intent(intent: str) -> str:
     """Return the intent category ('service' or 'upsell_promo') for an intent name."""
     return INTENT_CATEGORY_TAXONOMY.get(intent, "service")
+
+
+# ---------------------------------------------------------------------------
+# Import-time validation for migrated domains
+# ---------------------------------------------------------------------------
+
+def _validate_all() -> None:
+    """Run validate_domain for all migrated domains at import time."""
+    for _d in [
+        ACCOUNT_MANAGEMENT,
+        # Tasks 2-3 add remaining domains here as they are migrated
+    ]:
+        validate_domain(_d)
+
+
+_validate_all()
