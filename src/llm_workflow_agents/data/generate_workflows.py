@@ -309,6 +309,41 @@ def select_subgraph(
                 intent_category="upsell_promo",
             ))
 
+    # Step 6: close the subgraph — every non-terminal state must have an outgoing edge.
+    # Branch destination states may lack outgoing edges if they weren't on the spine.
+    changed = True
+    while changed:
+        changed = False
+        states_with_out = {t.from_state for t in selected_transitions}
+        for name in list(selected_states):
+            if name in terminal_set or name in states_with_out:
+                continue
+            s_edges = spine_edges.get(name, [])
+            if s_edges:
+                e = s_edges[0]
+                if e.dst not in included_names:
+                    included_names.add(e.dst)
+                    selected_states.append(e.dst)
+                    changed = True
+                selected_transitions.append(WorkflowTransition(
+                    from_state=name, to_state=e.dst,
+                    condition=e.label, label=e.label,
+                    trigger=e.trigger, optional=False, priority=0,
+                ))
+            else:
+                # No spine edge — add synthetic shortcut to terminal
+                terminal_name = domain.terminals[0]
+                if terminal_name not in included_names:
+                    included_names.add(terminal_name)
+                    selected_states.append(terminal_name)
+                    changed = True
+                selected_transitions.append(WorkflowTransition(
+                    from_state=name, to_state=terminal_name,
+                    condition="proceed to resolution",
+                    label="proceed to resolution",
+                    trigger="always", optional=False, priority=0,
+                ))
+
     # Build WorkflowState list (spine order first, then appended branch states)
     def to_workflow_state(idx: int, name: str) -> WorkflowState:
         node = state_map[name]
@@ -348,6 +383,81 @@ def select_subgraph(
         initial_state=id_map[domain.initial],
         terminal_states=terminal_ids,
     )
+
+
+_VALID_TRIGGERS_SET = frozenset({
+    "always", "tool_success", "tool_error",
+    "intent_match", "slot_present", "user_declines",
+})
+
+
+def walk_path(
+    subgraph: WorkflowGraph,
+    domain: "DomainSpec",
+    behavior: str,
+    intent_category: str,
+    rng: random.Random,
+) -> list[WorkflowTransition]:
+    """Traverse subgraph from initial, picking edges by simulated trigger.
+
+    Returns the sequence of WorkflowTransition objects walked.
+    Always terminates at a terminal state.
+    """
+    id_to_name = {s.id: s.name for s in subgraph.states}
+    name_to_state = {s.name: s for s in subgraph.states}
+    terminal_ids = set(subgraph.terminal_states)
+
+    # Build outgoing edge map keyed by state id
+    outgoing: dict[str, list[WorkflowTransition]] = {}
+    for t in subgraph.transitions:
+        outgoing.setdefault(t.from_state, []).append(t)
+
+    path: list[WorkflowTransition] = []
+    current_id = subgraph.initial_state
+    max_steps = len(subgraph.states) * 3 + 5  # safety cap
+
+    for _ in range(max_steps):
+        if current_id in terminal_ids:
+            break
+
+        edges = outgoing.get(current_id, [])
+        if not edges:
+            break
+
+        # Simulate trigger outcomes for this state
+        current_state = name_to_state.get(id_to_name.get(current_id, ""))
+        has_tools = bool(current_state and current_state.tools)
+
+        fired: set[str] = {"always"}
+        if has_tools:
+            if rng.random() < TOOL_ERROR_RATE:
+                fired.add("tool_error")
+            else:
+                fired.add("tool_success")
+        if intent_category == "upsell_promo" and rng.random() < 0.4:
+            fired.add("intent_match")
+        if behavior in ("adversarial_probing",) and rng.random() < 0.3:
+            fired.add("user_declines")
+        if behavior in ("cooperative",) and rng.random() < 0.5:
+            fired.add("slot_present")
+
+        # Priority: upsell arc > optional with fired trigger > spine > anything else
+        def edge_priority(e: WorkflowTransition) -> int:
+            if e.intent_category == "upsell_promo" and "intent_match" in fired:
+                return 0
+            if e.optional and e.trigger in fired:
+                return 1
+            if not e.optional:
+                return 2
+            return 3
+
+        sorted_edges = sorted(edges, key=edge_priority)
+        chosen = sorted_edges[0]
+
+        path.append(chosen)
+        current_id = chosen.to_state
+
+    return path
 
 
 # _FORMAT_RULES is imported from data.system_prompt (single source of truth)

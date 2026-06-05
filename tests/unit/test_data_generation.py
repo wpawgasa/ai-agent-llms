@@ -756,3 +756,67 @@ class TestSelectSubgraph:
         for t in graph.transitions:
             assert t.label, f"transition {t.from_state}->{t.to_state} missing label"
             assert t.trigger, f"transition {t.from_state}->{t.to_state} missing trigger"
+
+
+class TestWalkPath:
+    def _make_graph_and_domain(self, level="L1"):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(99)
+        spec = COMPLEXITY_SPECS[ComplexityLevel(level)]
+        domain = DOMAIN_REGISTRY["account_management"]
+        graph = select_subgraph(domain, spec, rng)
+        return graph, domain
+
+    def test_walk_reaches_terminal(self):
+        from llm_workflow_agents.data.generate_workflows import walk_path
+        import random
+        graph, domain = self._make_graph_and_domain("L2")
+        rng = random.Random(1)
+        path = walk_path(graph, domain, "cooperative", "service", rng)
+        terminal_ids = set(graph.terminal_states)
+        terminal_names = {s.name for s in graph.states if s.id in terminal_ids}
+        assert path[-1].to_state in terminal_names or path[-1].to_state in terminal_ids, \
+            f"walk did not reach terminal, last state: {path[-1].to_state}"
+
+    def test_walk_all_transitions_are_valid_edges(self):
+        from llm_workflow_agents.data.generate_workflows import walk_path
+        import random
+        graph, domain = self._make_graph_and_domain("L3")
+        rng = random.Random(5)
+        path = walk_path(graph, domain, "adversarial_probing", "service", rng)
+        valid = {(t.from_state, t.to_state) for t in graph.transitions}
+        for step in path:
+            assert (step.from_state, step.to_state) in valid or \
+                   (step.from_state, step.to_state) in {
+                       (graph.states[i].name, graph.states[j].name)
+                       for i in range(len(graph.states))
+                       for j in range(len(graph.states))
+                       for t in graph.transitions
+                       if t.from_state == graph.states[i].id and t.to_state == graph.states[j].id
+                   }, f"walk step {step.from_state}->{step.to_state} not a valid edge"
+
+    def test_upsell_walk_traverses_upsell_arc(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph, walk_path
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        domain = DOMAIN_REGISTRY["account_management"]
+        found_upsell = False
+        for seed in range(50):
+            rng = random.Random(seed)
+            graph = select_subgraph(domain, spec, rng, intent_category="upsell_promo")
+            upsell_transitions = [t for t in graph.transitions if t.intent_category == "upsell_promo"]
+            if not upsell_transitions:
+                continue
+            rng2 = random.Random(seed)
+            path = walk_path(graph, domain, "cooperative", "upsell_promo", rng2)
+            upsell_edge_pairs = {(t.from_state, t.to_state) for t in upsell_transitions}
+            for step in path:
+                if (step.from_state, step.to_state) in upsell_edge_pairs:
+                    found_upsell = True
+                    break
+        assert found_upsell, "No upsell path found across 50 seeds"
