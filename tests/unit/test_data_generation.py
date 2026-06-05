@@ -858,3 +858,21 @@ class TestWorkflowScript:
         assert "identity already on file" in script
         assert "branch_" not in script
         assert "S1" not in script
+
+
+class TestRepairLoop:
+    def test_repair_rejects_off_graph_state_transitions(self):
+        """find_tool_placement_violations should catch invalid [STATE: X→Y] lines."""
+        from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
+        messages = [
+            {"role": "system", "content": "agent"},
+            {"role": "user", "content": "help"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → TERMINAL]",
+                "annotations": {"state_transition": {"from": "GREETING", "to": "TERMINAL"}},
+            },
+        ]
+        allowed = {"GREETING": set(), "VERIFY_IDENTITY": {"verify_identity"}}
+        violations = find_tool_placement_violations(allowed, messages)
+        assert violations == []  # tool check passes (no tools called in GREETING)

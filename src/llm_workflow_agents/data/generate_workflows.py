@@ -47,6 +47,25 @@ from llm_workflow_agents.data.domain_registry import (
 
 logger = structlog.get_logger(__name__)
 
+
+def _find_transition_violations(
+    valid_edges: set[tuple[str, str]],
+    messages: list[dict[str, Any]],
+) -> list[str]:
+    """Return violation descriptions for [STATE: X→Y] annotations not in valid_edges."""
+    violations = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        ann = (msg.get("annotations") or {}).get("state_transition") or {}
+        src = ann.get("from")
+        dst = ann.get("to")
+        if src and dst and src != dst:  # skip in-state (X→X) annotations
+            if (src, dst) not in valid_edges:
+                violations.append(f"invalid transition [{src}→{dst}]")
+    return violations
+
+
 BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
     "default": {
         "cooperative": 0.60,
@@ -1370,14 +1389,21 @@ def _build_teacher_prompt(
         if intent_category == "upsell_promo"
         else ""
     )
+    transition_key = (
+        "Transition trigger types: "
+        "'always'=unconditional spine, 'tool_success'=after successful tool call, "
+        "'tool_error'=after failed tool call, 'intent_match'=customer intent matches, "
+        "'user_declines'=customer refuses, 'slot_present'=required slot provided.\n"
+    )
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
-        f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
+        f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
+        f"{transition_key}\n"
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
@@ -1670,8 +1696,22 @@ def generate_workflow_dataset(
             if repair_incoherent:
                 allowed = {s.name: set(s.tools) for s in workflow.states}
                 schema_names = {t["function"]["name"] for t in tool_schemas}
+                id_to_name = {s.id: s.name for s in workflow.states}
+                valid_edge_pairs = {
+                    (id_to_name.get(t.from_state, t.from_state),
+                     id_to_name.get(t.to_state, t.to_state))
+                    for t in workflow.transitions
+                } | {(id_to_name.get(sid, sid), id_to_name.get(sid, sid))
+                     for sid in {t.from_state for t in workflow.transitions}}
+
+                def _has_violations(msgs: list[dict[str, Any]]) -> bool:
+                    return bool(
+                        find_tool_placement_violations(allowed, msgs, schema_names)
+                        or _find_transition_violations(valid_edge_pairs, msgs)
+                    )
+
                 tries = 0
-                while find_tool_placement_violations(allowed, messages, schema_names):
+                while _has_violations(messages):
                     if tries >= max_repair_retries:
                         messages = _placeholder()
                         repair_fallbacks += 1
