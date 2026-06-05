@@ -1,0 +1,5 @@
+/superpowers:writing-plans from spec @docs/superpowers/specs/2026-06-05-semantic-workflow-graph-design.md
+
+---
+
+/superpowers:executing-plans

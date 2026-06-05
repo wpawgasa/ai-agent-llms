@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "8435e47fa91c",
+  "strategy": "manual-commit",
+  "branch": "feat/semantic-workflow-graph",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/llm_workflow_agents/data/generate_workflows.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/84/35e47fa91c/0/metadata.json",
+      "transcript": "/84/35e47fa91c/0/full.jsonl",
+      "content_hash": "/84/35e47fa91c/0/content_hash.txt",
+      "prompt": "/84/35e47fa91c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 103,
+    "cache_creation_tokens": 272780,
+    "cache_read_tokens": 11273679,
+    "output_tokens": 113268,
+    "api_call_count": 97
+  }
+}
