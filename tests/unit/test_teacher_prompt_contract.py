@@ -74,3 +74,10 @@ def test_rendered_prompt_contains_full_contract():
             assert f"{s.name}: {', '.join(st)}" in prompt, f"missing tools for {s.name}"
         else:
             assert f"{s.name}: (text only" in prompt, f"missing text-only line for {s.name}"
+
+
+def test_teacher_system_prompt_references_contract():
+    sp = gw._TEACHER_SYSTEM_PROMPT
+    assert "ALLOWED TRANSITIONS" in sp
+    assert "TOOL PERMISSIONS PER STATE" in sp
+    assert "never invent a transition" in sp.lower()

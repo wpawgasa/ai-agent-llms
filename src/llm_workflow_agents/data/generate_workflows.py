@@ -987,6 +987,8 @@ OUTPUT FORMAT — return a JSON object with a single key "messages" containing a
 RULES:
 - Every assistant message MUST include a [STATE: X → Y] annotation in the content.
 - When invoking a tool include <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
+- Every [STATE: X → Y] you emit with X != Y MUST appear in the WORKFLOW CONTRACT's ALLOWED TRANSITIONS list (provided in the user message). Never invent a transition; if unsure how to proceed, stay in the current state ([STATE: X → X]).
+- Only call a tool from a state that lists it under TOOL PERMISSIONS PER STATE. Never call a tool in a state marked "text only", and never call a tool absent from the tool schemas.
 - Follow the user behavior pattern exactly (cooperative / adversarial_probing / digressing / invalid_tool_inputs).
 - The conversation MUST reach one of the terminal states before ending.
 - ~20 % of tool responses should be errors: {"error": "Service temporarily unavailable"}.
