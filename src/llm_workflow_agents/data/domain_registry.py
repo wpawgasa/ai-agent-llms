@@ -46,6 +46,21 @@ class Edge:
 
 
 @dataclass(frozen=True)
+class OutboundReason:
+    """A support-side reason for initiating an outbound conversation.
+
+    ``description`` is woven into the agent's opening turn and the teacher
+    prompt (e.g. "follow up on the patient's prescription"). ``intent_category``
+    selects which subgraph arcs the conversation pulls — "upsell_promo" for
+    sales/cross-sell outreach, "service" for reminders and follow-ups.
+    """
+
+    key: str
+    description: str
+    intent_category: str = "service"  # "service" | "upsell_promo"
+
+
+@dataclass(frozen=True)
 class DomainSpec:
     """Specification for a single call center domain.
 
@@ -71,6 +86,7 @@ class DomainSpec:
     initial: str = ""
     terminals: tuple[str, ...] = ()
     intent_categories: dict[str, str] = field(default_factory=dict)
+    outbound_reasons: tuple[OutboundReason, ...] = ()
 
 
 def validate_domain(domain: DomainSpec) -> None:

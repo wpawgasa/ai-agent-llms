@@ -992,3 +992,43 @@ class TestSemanticGraphProperties:
             for t in s["workflow_graph"]["transitions"]:
                 assert t.get("intent_category") != "upsell_promo", \
                     "upsell arc should not appear in service_only subgraph"
+
+
+class TestOutboundSchema:
+    """Tests for the OutboundReason schema on DomainSpec."""
+
+    def test_outbound_reason_dataclass_defaults(self):
+        from llm_workflow_agents.data.domain_registry import OutboundReason
+        r = OutboundReason(key="promo", description="offer a promotion")
+        assert r.key == "promo"
+        assert r.description == "offer a promotion"
+        assert r.intent_category == "service"
+
+    def test_domainspec_has_outbound_reasons_default_empty(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        # A domain not in the curated subset has no outbound reasons.
+        assert DOMAIN_REGISTRY["government"].outbound_reasons == ()
+
+    def test_outbound_reason_categories_are_valid(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        for key, dom in DOMAIN_REGISTRY.items():
+            for r in dom.outbound_reasons:
+                assert r.intent_category in ("service", "upsell_promo"), \
+                    f"{key}/{r.key} has bad category {r.intent_category}"
+
+    def test_curated_domains_have_outbound_reasons(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        expected = {
+            "sales", "banking", "insurance", "healthcare",
+            "telecom", "travel", "scheduling",
+        }
+        for key in expected:
+            reasons = DOMAIN_REGISTRY[key].outbound_reasons
+            assert reasons, f"{key} should have outbound_reasons"
+            keys = {r.key for r in reasons}
+            assert len(keys) == len(reasons), f"{key} has duplicate reason keys"
+
+    def test_healthcare_has_prescription_followup(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        keys = {r.key for r in DOMAIN_REGISTRY["healthcare"].outbound_reasons}
+        assert "prescription_followup" in keys
