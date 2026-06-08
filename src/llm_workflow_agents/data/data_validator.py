@@ -70,6 +70,22 @@ def _validate_workflow_sample(sample: dict[str, Any], idx: int) -> list[str]:
     elif messages[0].get("role") != "system":
         errors.append(f"Sample {idx}: first message should be system role")
 
+    # Second-message role depends on who initiated the conversation.
+    initiator = sample.get("conversation_initiator", "user")
+    if len(messages) > 1:
+        second_role = messages[1].get("role")
+        if initiator == "agent":
+            if second_role != "assistant":
+                errors.append(
+                    f"Sample {idx}: outbound (agent-initiated) conversation must have "
+                    f"an assistant second message, got '{second_role}'"
+                )
+        elif second_role != "user":
+            errors.append(
+                f"Sample {idx}: inbound conversation must have a user second message, "
+                f"got '{second_role}'"
+            )
+
     # Validate state transitions are valid
     valid_states = set(graph.get("states", []))
     for msg in messages:

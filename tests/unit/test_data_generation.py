@@ -1209,3 +1209,33 @@ class TestGenerateOutboundDataset:
                 complexity_level="L1", num_samples=1,
                 initiation_preset="bogus", output_dir=tmp_output_dir, seed=1,
             )
+
+
+class TestValidatorOutbound:
+    def _base(self, msgs, initiator):
+        return {
+            "conversation_id": "L1_001", "complexity_level": "L1", "domain": "sales",
+            "workflow_graph": {"states": ["GREETING", "TERMINAL"],
+                               "initial": "GREETING", "terminal": ["TERMINAL"]},
+            "tool_schemas": [], "messages": msgs, "user_behavior": "cooperative",
+            "ground_truth": {}, "conversation_initiator": initiator,
+        }
+
+    def test_outbound_with_assistant_second_passes(self):
+        from llm_workflow_agents.data.data_validator import _validate_workflow_sample
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "[STATE: GREETING → GREETING]\nHi, calling about X."},
+            {"role": "user", "content": "ok"},
+        ]
+        errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
+        assert not any("second message" in e for e in errs)
+
+    def test_outbound_with_user_second_fails(self):
+        from llm_workflow_agents.data.data_validator import _validate_workflow_sample
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hello?"},
+        ]
+        errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
+        assert any("second message" in e for e in errs)
