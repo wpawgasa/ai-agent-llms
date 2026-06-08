@@ -1,0 +1,8 @@
+Currently, all generated conversations are started by user. However, they could be
+    a conversation initiated by support side. For example, sale representative call
+    customer to offer new products or services or promotions. Healthcare could
+  follow-up patient's prescription.
+
+---
+
+/superpowers:executing-plans
