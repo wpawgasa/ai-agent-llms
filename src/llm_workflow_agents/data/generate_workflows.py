@@ -99,6 +99,12 @@ INTENT_CATEGORY_PRESETS: dict[str, dict[str, float]] = {
     "upsell_heavy": {"service": 0.50, "upsell_promo": 0.50},
 }
 
+INITIATION_PRESETS: dict[str, dict[str, float]] = {
+    "default":         {"user": 1.00, "agent": 0.00},  # 100% inbound (back-compat)
+    "balanced":        {"user": 0.70, "agent": 0.30},
+    "outbound_heavy":  {"user": 0.40, "agent": 0.60},
+}
+
 
 @dataclass
 class DatasetMetadata:
@@ -674,6 +680,16 @@ def _select_intent_category(
     distribution: dict[str, float],
 ) -> str:
     """Select an intent category ('service' or 'upsell_promo') from a weighted distribution."""
+    cats = list(distribution.keys())
+    weights = list(distribution.values())
+    return rng.choices(cats, weights=weights, k=1)[0]
+
+
+def _select_initiator(
+    rng: random.Random,
+    distribution: dict[str, float],
+) -> str:
+    """Select who opens the conversation ('user' inbound | 'agent' outbound)."""
     cats = list(distribution.keys())
     weights = list(distribution.values())
     return rng.choices(cats, weights=weights, k=1)[0]

@@ -1032,3 +1032,28 @@ class TestOutboundSchema:
         from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
         keys = {r.key for r in DOMAIN_REGISTRY["healthcare"].outbound_reasons}
         assert "prescription_followup" in keys
+
+
+class TestInitiatorSelection:
+    def test_initiation_presets_shape(self):
+        from llm_workflow_agents.data.generate_workflows import INITIATION_PRESETS
+        assert INITIATION_PRESETS["default"] == {"user": 1.00, "agent": 0.00}
+        assert set(INITIATION_PRESETS["balanced"]) == {"user", "agent"}
+
+    def test_select_initiator_default_always_user(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import (
+            _select_initiator, INITIATION_PRESETS,
+        )
+        rng = random.Random(0)
+        picks = {_select_initiator(rng, INITIATION_PRESETS["default"]) for _ in range(50)}
+        assert picks == {"user"}
+
+    def test_select_initiator_outbound_heavy_yields_agents(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import (
+            _select_initiator, INITIATION_PRESETS,
+        )
+        rng = random.Random(0)
+        picks = [_select_initiator(rng, INITIATION_PRESETS["outbound_heavy"]) for _ in range(200)]
+        assert picks.count("agent") > 0
