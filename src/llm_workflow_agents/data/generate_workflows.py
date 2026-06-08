@@ -42,6 +42,7 @@ from llm_workflow_agents.data.domain_registry import (
     CROSS_CUTTING_TOOLS,
     DOMAIN_REGISTRY,
     DomainSpec,
+    OutboundReason,
     classify_intent,
 )
 
@@ -756,6 +757,8 @@ def _generate_placeholder_conversation(
     domain_spec: DomainSpec | None = None,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -772,6 +775,21 @@ def _generate_placeholder_conversation(
     id_to_name = {s.id: s.name for s in workflow.states}
     name_to_state = {s.name: s for s in workflow.states}
     terminal_ids = set(workflow.terminal_states)
+
+    # Outbound: the AGENT opens at the initial state stating the purpose,
+    # before the customer says anything. Inbound is unchanged (user-first).
+    if initiator == "agent" and outbound_reason is not None:
+        initial_name = id_to_name.get(workflow.initial_state, workflow.initial_state)
+        opener = (
+            f"[STATE: {initial_name} → {initial_name}]\n"
+            f"Hello, this is {domain_name} support reaching out. "
+            f"I'm calling to {outbound_reason.description}."
+        )
+        messages.append({
+            "role": "assistant",
+            "content": opener,
+            "annotations": {"state_transition": {"from": initial_name, "to": initial_name}},
+        })
 
     # walk_path requires domain_spec for trigger simulation
     if domain_spec:
@@ -810,6 +828,27 @@ def _generate_placeholder_conversation(
         },
     }
 
+    _outbound_user_templates: dict[str, dict[str, str]] = {
+        "en": {
+            "cooperative": "[Turn {t}] Oh, hi — yes, I have a moment. What about {intent}?",
+            "adversarial_probing": "[Turn {t}] How did you get my number? Can we skip {state} and get to the point?",
+            "digressing": "[Turn {t}] Before that — unrelated, but I had another question first.",
+            "invalid_tool_inputs": "[Turn {t}] Sure, my reference is ###invalid_id### if you need it.",
+        },
+        "th": {
+            "cooperative": "[ตา {t}] อ้อ สวัสดีค่ะ ว่างพอดี เรื่อง{intent}ใช่ไหมคะ?",
+            "adversarial_probing": "[ตา {t}] ได้เบอร์ฉันมาจากไหน? ข้าม {state} แล้วเข้าเรื่องเลยได้ไหม?",
+            "digressing": "[ตา {t}] เดี๋ยวก่อนนะคะ ขอถามเรื่องอื่นก่อนได้ไหม",
+            "invalid_tool_inputs": "[ตา {t}] ได้ค่ะ รหัสอ้างอิงของฉันคือ ###invalid_id### นะคะ",
+        },
+        "code_switch": {
+            "cooperative": "[ตา {t}] อ้อ hi ค่ะ ว่างพอดี เรื่อง {intent} ใช่ไหมคะ?",
+            "adversarial_probing": "[ตา {t}] ได้ number ฉันมาจากไหนคะ? ข้าม {state} แล้ว get to the point เลยได้ไหม?",
+            "digressing": "[ตา {t}] เดี๋ยวก่อนค่ะ ขอถาม unrelated question ก่อนนะคะ",
+            "invalid_tool_inputs": "[ตา {t}] ได้ค่ะ my reference คือ ###invalid_id### นะคะ",
+        },
+    }
+
     lang_templates = _user_templates.get(language or "en", _user_templates["en"])
 
     visited_state_ids: set[str] = set()
@@ -822,7 +861,12 @@ def _generate_placeholder_conversation(
 
         intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else domain_name
         intent_text = intent.replace("_", " ")
-        tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
+        if initiator == "agent" and turn_idx == 0:
+            # Customer's first turn reacts to the outbound outreach.
+            resp = _outbound_user_templates.get(language or "en", _outbound_user_templates["en"])
+            tmpl = resp.get(behavior, resp["cooperative"])
+        else:
+            tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
         user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=from_name)
         messages.append({"role": "user", "content": user_msg})
 

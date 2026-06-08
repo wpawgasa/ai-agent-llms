@@ -1103,3 +1103,45 @@ class TestSelectDomainOutbound:
         rng = random.Random(0)
         key, dom = _select_domain(rng, "government", spec, outbound_only=True)
         assert key == "government"  # explicit pin always honored
+
+
+class TestPlaceholderOutbound:
+    def _build(self, seed=0):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, OutboundReason
+        rng = random.Random(seed)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["healthcare"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        tools = [t for t in dom.tools]
+        reason = OutboundReason("prescription_followup", "follow up on your prescription", "service")
+        msgs = gw._generate_placeholder_conversation(
+            wf, tools, "cooperative", spec, rng, dom, "en", "service",
+            initiator="agent", outbound_reason=reason,
+        )
+        return msgs
+
+    def test_outbound_opener_is_assistant(self):
+        msgs = self._build()
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "assistant"
+
+    def test_outbound_opener_has_state_annotation_and_reason(self):
+        msgs = self._build()
+        opener = msgs[1]["content"]
+        assert "[STATE:" in opener
+        assert "prescription" in opener.lower()
+
+    def test_inbound_still_user_first(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(0)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["healthcare"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        msgs = gw._generate_placeholder_conversation(
+            wf, [t for t in dom.tools], "cooperative", spec, rng, dom, "en", "service",
+        )
+        assert msgs[1]["role"] == "user"
