@@ -1,0 +1,22 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "03e8f486036b",
+  "session_id": "dc91e762-f509-4ee3-9c95-9ed9c245867e",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-08T08:05:24.288200989Z",
+  "branch": "feat/strengthen-teacher-prompt",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "turn_id": "40769e62e8fa",
+  "token_usage": {
+    "input_tokens": 21430,
+    "cache_creation_tokens": 665495,
+    "cache_read_tokens": 63578974,
+    "output_tokens": 223426,
+    "api_call_count": 248
+  },
+  "session_metrics": {
+    "turn_count": 12
+  }
+}
