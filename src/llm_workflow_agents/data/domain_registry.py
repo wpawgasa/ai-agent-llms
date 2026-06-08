@@ -46,6 +46,21 @@ class Edge:
 
 
 @dataclass(frozen=True)
+class OutboundReason:
+    """A support-side reason for initiating an outbound conversation.
+
+    ``description`` is woven into the agent's opening turn and the teacher
+    prompt (e.g. "follow up on the patient's prescription"). ``intent_category``
+    selects which subgraph arcs the conversation pulls — "upsell_promo" for
+    sales/cross-sell outreach, "service" for reminders and follow-ups.
+    """
+
+    key: str
+    description: str
+    intent_category: str = "service"  # "service" | "upsell_promo"
+
+
+@dataclass(frozen=True)
 class DomainSpec:
     """Specification for a single call center domain.
 
@@ -71,6 +86,7 @@ class DomainSpec:
     initial: str = ""
     terminals: tuple[str, ...] = ()
     intent_categories: dict[str, str] = field(default_factory=dict)
+    outbound_reasons: tuple[OutboundReason, ...] = ()
 
 
 def validate_domain(domain: DomainSpec) -> None:
@@ -703,6 +719,11 @@ HEALTHCARE = DomainSpec(
         "prior_authorization": "service",
         "wellness_program_offer": "upsell_promo",
     },
+    outbound_reasons=(
+        OutboundReason("prescription_followup", "follow up on your current prescription and refills", "service"),
+        OutboundReason("appointment_reminder", "remind you about your upcoming appointment", "service"),
+        OutboundReason("wellness_program_offer", "invite you to enrol in our wellness programme", "upsell_promo"),
+    ),
 )
 
 BANKING = DomainSpec(
@@ -793,6 +814,11 @@ BANKING = DomainSpec(
         "rate_inquiry": "upsell_promo",
         "wire_request": "service",
     },
+    outbound_reasons=(
+        OutboundReason("loan_offer", "let you know about a pre-approved loan offer", "upsell_promo"),
+        OutboundReason("rate_review", "review a better savings rate you now qualify for", "upsell_promo"),
+        OutboundReason("card_activation_reminder", "remind you to activate the card we recently issued", "service"),
+    ),
 )
 
 TELECOM = DomainSpec(
@@ -883,6 +909,10 @@ TELECOM = DomainSpec(
         "roaming_activation": "upsell_promo",
         "sim_replacement": "service",
     },
+    outbound_reasons=(
+        OutboundReason("plan_upgrade_offer", "offer you an upgraded mobile plan at a better rate", "upsell_promo"),
+        OutboundReason("roaming_activation_reminder", "remind you to activate roaming before your trip", "service"),
+    ),
 )
 
 UTILITIES = DomainSpec(
@@ -1058,6 +1088,10 @@ TRAVEL = DomainSpec(
         "visa_inquiry": "service",
         "checkin_help": "service",
     },
+    outbound_reasons=(
+        OutboundReason("loyalty_upgrade_offer", "offer a loyalty upgrade for your upcoming trip", "upsell_promo"),
+        OutboundReason("trip_reminder", "remind you about details of your upcoming booking", "service"),
+    ),
 )
 
 ECOMMERCE = DomainSpec(
@@ -1301,6 +1335,10 @@ INSURANCE = DomainSpec(
         "policy_renewal": "upsell_promo",
         "bundle_offer": "upsell_promo",
     },
+    outbound_reasons=(
+        OutboundReason("renewal_reminder", "remind you that your policy is up for renewal soon", "service"),
+        OutboundReason("coverage_upgrade", "offer an upgrade that broadens your current coverage", "upsell_promo"),
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -1445,6 +1483,10 @@ SCHEDULING = DomainSpec(
         "reminder_request": "service",
         "premium_slot_offer": "upsell_promo",
     },
+    outbound_reasons=(
+        OutboundReason("appointment_reminder", "remind you about your scheduled appointment", "service"),
+        OutboundReason("reschedule_followup", "follow up about rescheduling your missed appointment", "service"),
+    ),
 )
 
 SALES = DomainSpec(
@@ -1519,6 +1561,10 @@ SALES = DomainSpec(
         "proposal_request": "service",
         "pricing_negotiation": "upsell_promo",
     },
+    outbound_reasons=(
+        OutboundReason("promotion_offer", "offer you a limited-time promotion on your plan", "upsell_promo"),
+        OutboundReason("cross_sell", "tell you about a product that complements your account", "upsell_promo"),
+    ),
 )
 
 SURVEYS = DomainSpec(

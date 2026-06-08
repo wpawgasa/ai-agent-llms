@@ -992,3 +992,250 @@ class TestSemanticGraphProperties:
             for t in s["workflow_graph"]["transitions"]:
                 assert t.get("intent_category") != "upsell_promo", \
                     "upsell arc should not appear in service_only subgraph"
+
+
+class TestOutboundSchema:
+    """Tests for the OutboundReason schema on DomainSpec."""
+
+    def test_outbound_reason_dataclass_defaults(self):
+        from llm_workflow_agents.data.domain_registry import OutboundReason
+        r = OutboundReason(key="promo", description="offer a promotion")
+        assert r.key == "promo"
+        assert r.description == "offer a promotion"
+        assert r.intent_category == "service"
+
+    def test_domainspec_has_outbound_reasons_default_empty(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        # A domain not in the curated subset has no outbound reasons.
+        assert DOMAIN_REGISTRY["government"].outbound_reasons == ()
+
+    def test_outbound_reason_categories_are_valid(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        for key, dom in DOMAIN_REGISTRY.items():
+            for r in dom.outbound_reasons:
+                assert r.intent_category in ("service", "upsell_promo"), \
+                    f"{key}/{r.key} has bad category {r.intent_category}"
+
+    def test_curated_domains_have_outbound_reasons(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        expected = {
+            "sales", "banking", "insurance", "healthcare",
+            "telecom", "travel", "scheduling",
+        }
+        for key in expected:
+            reasons = DOMAIN_REGISTRY[key].outbound_reasons
+            assert reasons, f"{key} should have outbound_reasons"
+            keys = {r.key for r in reasons}
+            assert len(keys) == len(reasons), f"{key} has duplicate reason keys"
+
+    def test_healthcare_has_prescription_followup(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        keys = {r.key for r in DOMAIN_REGISTRY["healthcare"].outbound_reasons}
+        assert "prescription_followup" in keys
+
+
+class TestInitiatorSelection:
+    def test_initiation_presets_shape(self):
+        from llm_workflow_agents.data.generate_workflows import INITIATION_PRESETS
+        assert INITIATION_PRESETS["default"] == {"user": 1.00, "agent": 0.00}
+        assert set(INITIATION_PRESETS["balanced"]) == {"user", "agent"}
+
+    def test_select_initiator_default_always_user(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import (
+            _select_initiator, INITIATION_PRESETS,
+        )
+        rng = random.Random(0)
+        picks = {_select_initiator(rng, INITIATION_PRESETS["default"]) for _ in range(50)}
+        assert picks == {"user"}
+
+    def test_select_initiator_outbound_heavy_yields_agents(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import (
+            _select_initiator, INITIATION_PRESETS,
+        )
+        rng = random.Random(0)
+        picks = [_select_initiator(rng, INITIATION_PRESETS["outbound_heavy"]) for _ in range(200)]
+        assert picks.count("agent") > 0
+
+
+class TestConversationSampleOutboundFields:
+    def test_to_dict_includes_initiator_fields(self):
+        from llm_workflow_agents.data.generate_workflows import ConversationSample
+        s = ConversationSample(
+            conversation_id="L1_001", complexity_level="L1", domain="sales",
+            num_states=3, num_tools=1, chain_depth=0,
+            workflow_graph={}, workflow_script="", tool_schemas=[],
+            messages=[], user_behavior="cooperative",
+            conversation_initiator="agent", outbound_reason="promotion_offer",
+        )
+        d = s.to_dict()
+        assert d["conversation_initiator"] == "agent"
+        assert d["outbound_reason"] == "promotion_offer"
+
+    def test_defaults_are_inbound(self):
+        from llm_workflow_agents.data.generate_workflows import ConversationSample
+        s = ConversationSample(
+            conversation_id="L1_001", complexity_level="L1", domain="sales",
+            num_states=3, num_tools=1, chain_depth=0,
+            workflow_graph={}, workflow_script="", tool_schemas=[],
+            messages=[], user_behavior="cooperative",
+        )
+        d = s.to_dict()
+        assert d["conversation_initiator"] == "user"
+        assert d["outbound_reason"] is None
+
+
+class TestSelectDomainOutbound:
+    def test_outbound_only_picks_outbound_capable_domain(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        for s in range(30):
+            rng = random.Random(s)
+            key, dom = _select_domain(rng, None, spec, outbound_only=True)
+            assert dom.outbound_reasons, f"{key} has no outbound_reasons"
+
+    def test_pinned_domain_ignores_outbound_filter(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        rng = random.Random(0)
+        key, dom = _select_domain(rng, "government", spec, outbound_only=True)
+        assert key == "government"  # explicit pin always honored
+
+
+class TestPlaceholderOutbound:
+    def _build(self, seed=0):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, OutboundReason
+        rng = random.Random(seed)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["healthcare"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        tools = [t for t in dom.tools]
+        reason = OutboundReason("prescription_followup", "follow up on your prescription", "service")
+        msgs = gw._generate_placeholder_conversation(
+            wf, tools, "cooperative", spec, rng, dom, "en", "service",
+            initiator="agent", outbound_reason=reason,
+        )
+        return msgs
+
+    def test_outbound_opener_is_assistant(self):
+        msgs = self._build()
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "assistant"
+
+    def test_outbound_opener_has_state_annotation_and_reason(self):
+        msgs = self._build()
+        opener = msgs[1]["content"]
+        assert "[STATE:" in opener
+        assert "prescription" in opener.lower()
+
+    def test_inbound_still_user_first(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(0)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["healthcare"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        msgs = gw._generate_placeholder_conversation(
+            wf, [t for t in dom.tools], "cooperative", spec, rng, dom, "en", "service",
+        )
+        assert msgs[1]["role"] == "user"
+
+
+class TestTeacherPromptOutbound:
+    def _prompt(self, initiator, reason=None):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, OutboundReason
+        rng = random.Random(0)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["sales"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        tools = [t for t in dom.tools]
+        r = reason or OutboundReason("promotion_offer", "offer a promotion", "upsell_promo")
+        return gw._build_teacher_prompt(
+            wf, tools, "cooperative", spec, dom, "en", "service",
+            initiator=initiator, outbound_reason=(r if initiator == "agent" else None),
+        )
+
+    def test_outbound_prompt_mentions_agent_initiation(self):
+        p = self._prompt("agent")
+        assert "OUTBOUND" in p
+        assert "offer a promotion" in p
+
+    def test_inbound_prompt_has_no_outbound_block(self):
+        p = self._prompt("user")
+        assert "OUTBOUND" not in p
+
+
+class TestGenerateOutboundDataset:
+    def test_outbound_heavy_emits_agent_samples(self, tmp_output_dir: Path) -> None:
+        meta = generate_workflow_dataset(
+            complexity_level="L2", num_samples=30,
+            initiation_preset="outbound_heavy",
+            output_dir=tmp_output_dir, seed=7,
+        )
+        agent_samples = []
+        with open(meta.output_files[0]) as f:
+            for line in f:
+                s = json.loads(line)
+                if s["conversation_initiator"] == "agent":
+                    agent_samples.append(s)
+        assert agent_samples, "expected at least one outbound sample"
+        for s in agent_samples:
+            assert s["messages"][1]["role"] == "assistant"   # opener
+            assert s["outbound_reason"]                        # reason recorded
+            assert DOMAIN_REGISTRY[s["domain"]].outbound_reasons
+
+    def test_default_preset_is_all_inbound(self, tmp_output_dir: Path) -> None:
+        meta = generate_workflow_dataset(
+            complexity_level="L1", num_samples=10,
+            output_dir=tmp_output_dir, seed=1,
+        )
+        with open(meta.output_files[0]) as f:
+            for line in f:
+                s = json.loads(line)
+                assert s["conversation_initiator"] == "user"
+                assert s["messages"][1]["role"] == "user"
+
+    def test_unknown_initiation_preset_raises(self, tmp_output_dir: Path) -> None:
+        with pytest.raises(ValueError, match="initiation_preset"):
+            generate_workflow_dataset(
+                complexity_level="L1", num_samples=1,
+                initiation_preset="bogus", output_dir=tmp_output_dir, seed=1,
+            )
+
+
+class TestValidatorOutbound:
+    def _base(self, msgs, initiator):
+        return {
+            "conversation_id": "L1_001", "complexity_level": "L1", "domain": "sales",
+            "workflow_graph": {"states": ["GREETING", "TERMINAL"],
+                               "initial": "GREETING", "terminal": ["TERMINAL"]},
+            "tool_schemas": [], "messages": msgs, "user_behavior": "cooperative",
+            "ground_truth": {}, "conversation_initiator": initiator,
+        }
+
+    def test_outbound_with_assistant_second_passes(self):
+        from llm_workflow_agents.data.data_validator import _validate_workflow_sample
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "[STATE: GREETING → GREETING]\nHi, calling about X."},
+            {"role": "user", "content": "ok"},
+        ]
+        errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
+        assert not any("second message" in e for e in errs)
+
+    def test_outbound_with_user_second_fails(self):
+        from llm_workflow_agents.data.data_validator import _validate_workflow_sample
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hello?"},
+        ]
+        errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
+        assert any("second message" in e for e in errs)

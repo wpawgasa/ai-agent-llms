@@ -16,6 +16,8 @@
 #   --language <en|th>       Conversation language for Task A (default: mixed 50/50)
 #   --intent-category <p>    Task A intent mix preset: default (70/30 service/upsell),
 #                            service_only, upsell_heavy (default: default)
+#   --initiation <p>         Task A inbound/outbound mix preset: default (100% inbound),
+#                            balanced (70/30 user/agent), outbound_heavy (40/60) (default: default)
 #   --dry-run                Print commands without executing
 #
 # Examples:
@@ -43,6 +45,7 @@ OUTPUT_DIR="$PROJECT_ROOT/data/output"
 SEED=42
 LANGUAGE=""
 INTENT_CATEGORY="default"
+INITIATION="default"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --seed)            SEED="$2";            shift 2 ;;
         --language)        LANGUAGE="$2";        shift 2 ;;
         --intent-category) INTENT_CATEGORY="$2"; shift 2 ;;
+        --initiation)      INITIATION="$2";      shift 2 ;;
         --dry-run)         DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -67,6 +71,11 @@ done
 case "$INTENT_CATEGORY" in
     default|service_only|upsell_heavy) ;;
     *) echo "Unknown --intent-category: $INTENT_CATEGORY (expected default, service_only, upsell_heavy)" >&2; exit 1 ;;
+esac
+
+case "$INITIATION" in
+    default|balanced|outbound_heavy) ;;
+    *) echo "Unknown --initiation: $INITIATION (expected default, balanced, outbound_heavy)" >&2; exit 1 ;;
 esac
 
 TEACHER_ARG=""
@@ -93,6 +102,7 @@ echo "Output dir:    $OUTPUT_DIR"
 echo "Teacher model: ${TEACHER_MODEL:-placeholder}"
 echo "Language:      ${LANGUAGE:-mixed (en/th)}"
 echo "Intent mix:    $INTENT_CATEGORY (Task A)"
+echo "Initiation:    $INITIATION (Task A)"
 echo "Seed:          $SEED"
 echo "======================="
 
@@ -114,6 +124,7 @@ meta = generate_workflow_dataset(
     seed=$SEED,
     ${LANGUAGE_ARG}
     intent_category_preset='$INTENT_CATEGORY',
+    initiation_preset='$INITIATION',
 )
 print(f'  -> {meta.output_files[0]}  ({meta.num_samples} samples)')
 "

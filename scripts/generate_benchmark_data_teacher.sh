@@ -18,6 +18,8 @@
 #   --behavior <preset>   Behavior preset: default, adversarial, balanced (default: default)
 #   --intent-category <p> Intent mix preset: default (70/30 service/upsell),
 #                         service_only, upsell_heavy (default: default)
+#   --initiation <p>      Inbound/outbound mix preset: default (100% inbound),
+#                         balanced (70/30 user/agent), outbound_heavy (40/60) (default: default)
 #   --dry-run             Print commands without executing
 #
 # Examples:
@@ -38,6 +40,7 @@ LEVELS="L1,L2,L3,L4,L5"
 LANGUAGE=""  # empty = mixed (en/th 50/50)
 BEHAVIOR="default"
 INTENT_CATEGORY="default"
+INITIATION="default"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -50,6 +53,7 @@ while [[ $# -gt 0 ]]; do
         --language)        LANGUAGE="$2";        shift 2 ;;
         --behavior)        BEHAVIOR="$2";        shift 2 ;;
         --intent-category) INTENT_CATEGORY="$2"; shift 2 ;;
+        --initiation)      INITIATION="$2";      shift 2 ;;
         --dry-run)         DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -61,6 +65,11 @@ done
 case "$INTENT_CATEGORY" in
     default|service_only|upsell_heavy) ;;
     *) echo "Unknown --intent-category: $INTENT_CATEGORY (expected default, service_only, upsell_heavy)" >&2; exit 1 ;;
+esac
+
+case "$INITIATION" in
+    default|balanced|outbound_heavy) ;;
+    *) echo "Unknown --initiation: $INITIATION (expected default, balanced, outbound_heavy)" >&2; exit 1 ;;
 esac
 
 run() {
@@ -84,6 +93,7 @@ echo "Levels:       $LEVELS ($SAMPLES samples each, $TOTAL_SAMPLES total)"
 echo "Language:     $LANG_DISPLAY"
 echo "Behavior:     $BEHAVIOR"
 echo "Intent mix:   $INTENT_CATEGORY"
+echo "Initiation:   $INITIATION"
 echo "=================================================="
 
 # Build language arg for Python (None for mixed)
@@ -111,6 +121,7 @@ meta = generate_workflow_dataset(
     language=$LANG_ARG,
     behavior_preset='$BEHAVIOR',
     intent_category_preset='$INTENT_CATEGORY',
+    initiation_preset='$INITIATION',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "

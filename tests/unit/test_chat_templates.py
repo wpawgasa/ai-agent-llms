@@ -132,3 +132,24 @@ class TestChatTemplateConverter:
         assert stats.input_samples == 2
         assert stats.skipped == 1
         assert len(stats.errors) == 1
+
+
+def test_outbound_conversation_converts_for_gemma(tmp_path: Path) -> None:
+    """An agent-initiated (assistant-first) conversation converts without reordering."""
+    src = tmp_path / "outbound.jsonl"
+    src.write_text(json.dumps({
+        "messages": [
+            {"role": "system", "content": "You are support."},
+            {"role": "assistant", "content": "[STATE: G -> G] Hi, calling about your refill."},
+            {"role": "user", "content": "Oh, hi."},
+            {"role": "assistant", "content": "[STATE: G -> V] Let me verify you."},
+        ],
+        "conversation_initiator": "agent",
+    }) + "\n")
+    out_path = tmp_path / "gemma.jsonl"
+    convert_to_model_format(src, "gemma", out_path)
+    rows = [json.loads(l) for l in out_path.read_text().splitlines() if l.strip()]
+    roles = [m["role"] for m in rows[0]["messages"]]
+    # Gemma renames assistant -> model; ordering is preserved, system stays first.
+    assert roles[0] == "system"
+    assert roles[1] == "model"

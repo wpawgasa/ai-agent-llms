@@ -42,6 +42,7 @@ from llm_workflow_agents.data.domain_registry import (
     CROSS_CUTTING_TOOLS,
     DOMAIN_REGISTRY,
     DomainSpec,
+    OutboundReason,
     classify_intent,
 )
 
@@ -97,6 +98,12 @@ INTENT_CATEGORY_PRESETS: dict[str, dict[str, float]] = {
     "default":      {"service": 0.70, "upsell_promo": 0.30},
     "service_only": {"service": 1.00, "upsell_promo": 0.00},
     "upsell_heavy": {"service": 0.50, "upsell_promo": 0.50},
+}
+
+INITIATION_PRESETS: dict[str, dict[str, float]] = {
+    "default":         {"user": 1.00, "agent": 0.00},  # 100% inbound (back-compat)
+    "balanced":        {"user": 0.70, "agent": 0.30},
+    "outbound_heavy":  {"user": 0.40, "agent": 0.60},
 }
 
 
@@ -639,6 +646,8 @@ class ConversationSample:
     user_behavior: str
     language: str = "en"
     ground_truth: dict[str, Any] = field(default_factory=dict)
+    conversation_initiator: str = "user"
+    outbound_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -655,6 +664,8 @@ class ConversationSample:
             "user_behavior": self.user_behavior,
             "language": self.language,
             "ground_truth": self.ground_truth,
+            "conversation_initiator": self.conversation_initiator,
+            "outbound_reason": self.outbound_reason,
         }
 
 
@@ -679,6 +690,16 @@ def _select_intent_category(
     return rng.choices(cats, weights=weights, k=1)[0]
 
 
+def _select_initiator(
+    rng: random.Random,
+    distribution: dict[str, float],
+) -> str:
+    """Select who opens the conversation ('user' inbound | 'agent' outbound)."""
+    cats = list(distribution.keys())
+    weights = list(distribution.values())
+    return rng.choices(cats, weights=weights, k=1)[0]
+
+
 def _pick_intent_by_category(
     rng: random.Random,
     domain_intents: tuple[str, ...] | list[str],
@@ -694,6 +715,7 @@ def _select_domain(
     rng: random.Random,
     domain: str | None = None,
     spec: "ComplexitySpec | None" = None,
+    outbound_only: bool = False,
 ) -> tuple[str, DomainSpec]:
     """Select a domain, filtering to those eligible for the requested complexity level."""
     _LEGACY_MAP: dict[str, str] = {
@@ -716,6 +738,7 @@ def _select_domain(
     eligible = [
         k for k, d in DOMAIN_REGISTRY.items()
         if len(d.states) >= min_states
+        and (not outbound_only or d.outbound_reasons)
     ]
     if not eligible:
         eligible = ALL_DOMAIN_NAMES  # fallback: all domains
@@ -734,6 +757,8 @@ def _generate_placeholder_conversation(
     domain_spec: DomainSpec | None = None,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -750,6 +775,21 @@ def _generate_placeholder_conversation(
     id_to_name = {s.id: s.name for s in workflow.states}
     name_to_state = {s.name: s for s in workflow.states}
     terminal_ids = set(workflow.terminal_states)
+
+    # Outbound: the AGENT opens at the initial state stating the purpose,
+    # before the customer says anything. Inbound is unchanged (user-first).
+    if initiator == "agent" and outbound_reason is not None:
+        initial_name = id_to_name.get(workflow.initial_state, workflow.initial_state)
+        opener = (
+            f"[STATE: {initial_name} → {initial_name}]\n"
+            f"Hello, this is {domain_name} support reaching out. "
+            f"I'm calling to {outbound_reason.description}."
+        )
+        messages.append({
+            "role": "assistant",
+            "content": opener,
+            "annotations": {"state_transition": {"from": initial_name, "to": initial_name}},
+        })
 
     # walk_path requires domain_spec for trigger simulation
     if domain_spec:
@@ -788,6 +828,27 @@ def _generate_placeholder_conversation(
         },
     }
 
+    _outbound_user_templates: dict[str, dict[str, str]] = {
+        "en": {
+            "cooperative": "[Turn {t}] Oh, hi — yes, I have a moment. What about {intent}?",
+            "adversarial_probing": "[Turn {t}] How did you get my number? Can we skip {state} and get to the point?",
+            "digressing": "[Turn {t}] Before that — unrelated, but I had another question first.",
+            "invalid_tool_inputs": "[Turn {t}] Sure, my reference is ###invalid_id### if you need it.",
+        },
+        "th": {
+            "cooperative": "[ตา {t}] อ้อ สวัสดีค่ะ ว่างพอดี เรื่อง{intent}ใช่ไหมคะ?",
+            "adversarial_probing": "[ตา {t}] ได้เบอร์ฉันมาจากไหน? ข้าม {state} แล้วเข้าเรื่องเลยได้ไหม?",
+            "digressing": "[ตา {t}] เดี๋ยวก่อนนะคะ ขอถามเรื่องอื่นก่อนได้ไหม",
+            "invalid_tool_inputs": "[ตา {t}] ได้ค่ะ รหัสอ้างอิงของฉันคือ ###invalid_id### นะคะ",
+        },
+        "code_switch": {
+            "cooperative": "[ตา {t}] อ้อ hi ค่ะ ว่างพอดี เรื่อง {intent} ใช่ไหมคะ?",
+            "adversarial_probing": "[ตา {t}] ได้ number ฉันมาจากไหนคะ? ข้าม {state} แล้ว get to the point เลยได้ไหม?",
+            "digressing": "[ตา {t}] เดี๋ยวก่อนค่ะ ขอถาม unrelated question ก่อนนะคะ",
+            "invalid_tool_inputs": "[ตา {t}] ได้ค่ะ my reference คือ ###invalid_id### นะคะ",
+        },
+    }
+
     lang_templates = _user_templates.get(language or "en", _user_templates["en"])
 
     visited_state_ids: set[str] = set()
@@ -800,7 +861,12 @@ def _generate_placeholder_conversation(
 
         intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else domain_name
         intent_text = intent.replace("_", " ")
-        tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
+        if initiator == "agent" and turn_idx == 0:
+            # Customer's first turn reacts to the outbound outreach.
+            resp = _outbound_user_templates.get(language or "en", _outbound_user_templates["en"])
+            tmpl = resp.get(behavior, resp["cooperative"])
+        else:
+            tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
         user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=from_name)
         messages.append({"role": "user", "content": user_msg})
 
@@ -898,6 +964,8 @@ def _build_teacher_prompt(
     domain_spec: DomainSpec | None,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
@@ -910,6 +978,14 @@ def _build_teacher_prompt(
         if intent_category == "upsell_promo"
         else ""
     )
+    outbound_line = ""
+    if initiator == "agent" and outbound_reason is not None:
+        outbound_line = (
+            "Conversation initiation: OUTBOUND. The support AGENT initiates this contact. "
+            "The FIRST message after the system message MUST be the assistant introducing "
+            f"themselves and stating the reason for reaching out — {outbound_reason.description}. "
+            "The customer responds only after that. The workflow must still reach a terminal state.\n"
+        )
     transition_key = (
         "Transition trigger types: "
         "'always'=unconditional spine, 'tool_success'=after successful tool call, "
@@ -921,6 +997,7 @@ def _build_teacher_prompt(
         f"Complexity level: {spec.level} "
         f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
+        f"{outbound_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
@@ -1039,13 +1116,16 @@ def _generate_teacher_conversation(
     teacher_model: str,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
     Falls back to placeholder generation if the API call fails.
     """
     user_prompt = _build_teacher_prompt(
-        workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category
+        workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
+        initiator, outbound_reason,
     )
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
@@ -1060,7 +1140,8 @@ def _generate_teacher_conversation(
             error=str(exc),
         )
         return _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec, language, intent_category
+            workflow, tool_schemas, behavior, spec, rng, domain_spec, language,
+            intent_category, initiator, outbound_reason,
         )
 
 
@@ -1075,6 +1156,7 @@ def generate_workflow_dataset(
     behavior_preset: str = "default",
     rich_prompt_rate: float = 0.30,
     intent_category_preset: str = "default",
+    initiation_preset: str = "default",
     repair_incoherent: bool = True,
     max_repair_retries: int = 2,
 ) -> DatasetMetadata:
@@ -1133,8 +1215,14 @@ def generate_workflow_dataset(
             f"Unknown intent_category_preset {intent_category_preset!r}. "
             f"Valid options: {list(INTENT_CATEGORY_PRESETS)}"
         )
+    if initiation_preset not in INITIATION_PRESETS:
+        raise ValueError(
+            f"Unknown initiation_preset {initiation_preset!r}. "
+            f"Valid options: {list(INITIATION_PRESETS)}"
+        )
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
+    active_initiation_dist = INITIATION_PRESETS[initiation_preset]
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
@@ -1163,6 +1251,9 @@ def generate_workflow_dataset(
     domain_counts: dict[str, int] = {}
     language_counts: dict[str, int] = {}
     intent_category_counts: dict[str, int] = {c: 0 for c in active_intent_dist}
+    initiator_counts: dict[str, int] = {"user": 0, "agent": 0}
+    outbound_reason_counts: dict[str, int] = {}
+    outbound_fallback_inbound = 0
     tool_error_count = 0
     total_tool_calls = 0
     rich_prompt_count = 0
@@ -1177,13 +1268,30 @@ def generate_workflow_dataset(
         sample_language = language if language is not None else rng.choice(["en", "th"])
         language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
-        # Select domain (fixed or random per sample, filtered by complexity level)
-        domain_key, domain_spec = _select_domain(rng, domain, spec)
-        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
+        # Decide who initiates this conversation (inbound user | outbound agent).
+        initiator = _select_initiator(rng, active_initiation_dist)
+        outbound_reason = None
 
-        # Select intent category (service vs upsell_promo)
-        intent_category = _select_intent_category(rng, active_intent_dist)
+        if initiator == "agent":
+            domain_key, domain_spec = _select_domain(rng, domain, spec, outbound_only=True)
+            if domain_spec.outbound_reasons:
+                outbound_reason = rng.choice(list(domain_spec.outbound_reasons))
+                intent_category = outbound_reason.intent_category
+            else:
+                # Pinned/eligible domain has no outbound reasons → fall back to inbound.
+                initiator = "user"
+                outbound_fallback_inbound += 1
+                intent_category = _select_intent_category(rng, active_intent_dist)
+        else:
+            domain_key, domain_spec = _select_domain(rng, domain, spec)
+            intent_category = _select_intent_category(rng, active_intent_dist)
+
+        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
         intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
+        initiator_counts[initiator] += 1
+        if outbound_reason is not None:
+            outbound_reason_counts[outbound_reason.key] = \
+                outbound_reason_counts.get(outbound_reason.key, 0) + 1
 
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
@@ -1201,13 +1309,13 @@ def generate_workflow_dataset(
         def _placeholder() -> list[dict[str, Any]]:
             return _generate_placeholder_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
-                intent_category,
+                intent_category, initiator, outbound_reason,
             )
 
         if teacher_model:
             messages = _generate_teacher_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
-                sample_language, intent_category,
+                sample_language, intent_category, initiator, outbound_reason,
             )
             # Post-generation repair: the teacher is only *prompted* with the
             # curated tool placement, so it may still call a tool in a state that
@@ -1242,6 +1350,7 @@ def generate_workflow_dataset(
                     messages = _generate_teacher_conversation(
                         workflow, tool_schemas, behavior, spec, rng, domain_spec,
                         teacher_model, sample_language, intent_category,
+                        initiator, outbound_reason,
                     )
         else:
             messages = _placeholder()
@@ -1307,6 +1416,8 @@ def generate_workflow_dataset(
             user_behavior=behavior,
             language=sample_language,
             ground_truth=_extract_ground_truth(messages, workflow),
+            conversation_initiator=initiator,
+            outbound_reason=(outbound_reason.key if outbound_reason else None),
         )
         samples.append(sample)
 
@@ -1320,6 +1431,9 @@ def generate_workflow_dataset(
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
         "intent_category_distribution": intent_category_counts,
+        "initiator_distribution": initiator_counts,
+        "outbound_reason_distribution": outbound_reason_counts,
+        "outbound_fallback_inbound": outbound_fallback_inbound,
         "tool_error_rate": tool_error_count / max(total_tool_calls, 1),
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),

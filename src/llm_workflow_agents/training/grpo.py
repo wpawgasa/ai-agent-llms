@@ -247,7 +247,7 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
             ]
             valid_pairs = [
                 i for i in asst_indices
-                if i > 0 and raw_msgs[i - 1].get("role") == "user"
+                if i > 0 and raw_msgs[i - 1].get("role") in ("user", "system")
             ]
             n_skipped_tool_preceded += len(asst_indices) - len(valid_pairs)
 
