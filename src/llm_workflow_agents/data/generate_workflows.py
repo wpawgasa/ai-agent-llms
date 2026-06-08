@@ -645,6 +645,8 @@ class ConversationSample:
     user_behavior: str
     language: str = "en"
     ground_truth: dict[str, Any] = field(default_factory=dict)
+    conversation_initiator: str = "user"
+    outbound_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -661,6 +663,8 @@ class ConversationSample:
             "user_behavior": self.user_behavior,
             "language": self.language,
             "ground_truth": self.ground_truth,
+            "conversation_initiator": self.conversation_initiator,
+            "outbound_reason": self.outbound_reason,
         }
 
 

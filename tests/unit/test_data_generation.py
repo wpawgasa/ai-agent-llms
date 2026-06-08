@@ -1057,3 +1057,30 @@ class TestInitiatorSelection:
         rng = random.Random(0)
         picks = [_select_initiator(rng, INITIATION_PRESETS["outbound_heavy"]) for _ in range(200)]
         assert picks.count("agent") > 0
+
+
+class TestConversationSampleOutboundFields:
+    def test_to_dict_includes_initiator_fields(self):
+        from llm_workflow_agents.data.generate_workflows import ConversationSample
+        s = ConversationSample(
+            conversation_id="L1_001", complexity_level="L1", domain="sales",
+            num_states=3, num_tools=1, chain_depth=0,
+            workflow_graph={}, workflow_script="", tool_schemas=[],
+            messages=[], user_behavior="cooperative",
+            conversation_initiator="agent", outbound_reason="promotion_offer",
+        )
+        d = s.to_dict()
+        assert d["conversation_initiator"] == "agent"
+        assert d["outbound_reason"] == "promotion_offer"
+
+    def test_defaults_are_inbound(self):
+        from llm_workflow_agents.data.generate_workflows import ConversationSample
+        s = ConversationSample(
+            conversation_id="L1_001", complexity_level="L1", domain="sales",
+            num_states=3, num_tools=1, chain_depth=0,
+            workflow_graph={}, workflow_script="", tool_schemas=[],
+            messages=[], user_behavior="cooperative",
+        )
+        d = s.to_dict()
+        assert d["conversation_initiator"] == "user"
+        assert d["outbound_reason"] is None
