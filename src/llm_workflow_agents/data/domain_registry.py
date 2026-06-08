@@ -12,31 +12,193 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# ---------------------------------------------------------------------------
+# New semantic graph schema (StateNode, Edge, updated DomainSpec)
+# ---------------------------------------------------------------------------
+
+_VALID_TRIGGERS = frozenset({
+    "always", "tool_success", "tool_error",
+    "intent_match", "slot_present", "user_declines",
+})
+
+
+@dataclass(frozen=True)
+class StateNode:
+    """A single state in the canonical domain workflow graph."""
+
+    name: str
+    instruction: str
+    tools: tuple[str, ...] = ()
+    kind: str = "working"  # "initial" | "working" | "terminal"
+
+
+@dataclass(frozen=True)
+class Edge:
+    """A directed transition in the canonical domain workflow graph."""
+
+    src: str
+    dst: str
+    label: str          # human-readable authored label
+    trigger: str        # one of _VALID_TRIGGERS
+    optional: bool = False
+    priority: int = 0
+    intent_category: str | None = None  # set to "upsell_promo" on upsell-arc edges
+
 
 @dataclass(frozen=True)
 class DomainSpec:
     """Specification for a single call center domain.
 
-    ``state_tools`` and ``state_instructions`` make tool placement and per-state
-    guidance *rational* (curated), replacing the old random tool assignment in
-    ``generate_workflows._generate_workflow_graph``. Both are keyed by the state
-    names in ``state_templates``:
-
-    * ``state_tools[name]`` — the tools that semantically belong in that state
-      (empty tuple for greeting / terminal / pure-decision states).
-    * ``state_instructions[name]`` — a one-line goal/instruction for that state.
-
-    Tool names must match the ``function.name`` of an entry in ``tools``.
+    Supports both legacy flat-dict schema (state_templates / state_tools /
+    state_instructions) and the new semantic-graph schema (states / edges).
+    During migration, legacy fields default to empty; new fields default to
+    empty tuples/strings. ``validate_domain`` only runs invariant checks on
+    domains that have ``states`` populated (i.e., migrated to the new schema).
     """
 
     name: str
     category: str
     tools: tuple[dict[str, Any], ...]
-    state_templates: tuple[str, ...]
     intents: tuple[str, ...]
     entity_slots: tuple[str, ...] = ()
+    # Legacy flat-dict fields (unmigrated domains; kept for backward compat)
+    state_templates: tuple[str, ...] = ()
     state_tools: dict[str, tuple[str, ...]] = field(default_factory=dict)
     state_instructions: dict[str, str] = field(default_factory=dict)
+    # New semantic graph fields
+    states: tuple[StateNode, ...] = ()
+    edges: tuple[Edge, ...] = ()
+    initial: str = ""
+    terminals: tuple[str, ...] = ()
+    intent_categories: dict[str, str] = field(default_factory=dict)
+
+
+def validate_domain(domain: DomainSpec) -> None:
+    """Enforce structural invariants on a new-schema domain.
+
+    Skips silently for unmigrated domains (empty ``states``).
+    Raises ValueError on any violation.
+    Called at module import for every migrated domain.
+    """
+    if not domain.states:
+        return  # unmigrated domain — skip
+
+    state_names = {s.name for s in domain.states}
+    has_tools = {s.name for s in domain.states if s.tools}
+    terminal_names = set(domain.terminals)
+
+    # Every edge references known states
+    for e in domain.edges:
+        if e.src not in state_names:
+            raise ValueError(
+                f"{domain.name}: edge src '{e.src}' references unknown state"
+            )
+        if e.dst not in state_names:
+            raise ValueError(
+                f"{domain.name}: edge dst '{e.dst}' references unknown state"
+            )
+
+    # No graph-edge self-loops
+    for e in domain.edges:
+        if e.src == e.dst:
+            raise ValueError(
+                f"{domain.name}: self-loop on state '{e.src}'"
+            )
+
+    # Valid triggers
+    for e in domain.edges:
+        if e.trigger not in _VALID_TRIGGERS:
+            raise ValueError(
+                f"{domain.name}: edge {e.src}->{e.dst} has invalid trigger '{e.trigger}'"
+            )
+
+    # tool_success / tool_error only on states with tools
+    for e in domain.edges:
+        if e.trigger in ("tool_success", "tool_error") and e.src not in has_tools:
+            raise ValueError(
+                f"{domain.name}: edge {e.src}->{e.dst} has trigger '{e.trigger}' "
+                f"but state '{e.src}' has no tools — tool_success/tool_error "
+                f"requires the source state to have at least one tool"
+            )
+
+    # initial state must have kind="initial"
+    initial_states = {s.name for s in domain.states if s.kind == "initial"}
+    if not domain.initial or domain.initial not in initial_states:
+        raise ValueError(
+            f"{domain.name}: 'initial' field '{domain.initial}' must name a state "
+            f"with kind='initial'"
+        )
+
+    # terminal states must have kind="terminal"
+    for t in domain.terminals:
+        matching = [s for s in domain.states if s.name == t]
+        if not matching or matching[0].kind != "terminal":
+            raise ValueError(
+                f"{domain.name}: terminal '{t}' must have kind='terminal'"
+            )
+
+    # Each non-terminal has >=1 outgoing edge and exactly one spine successor
+    outgoing: dict[str, list[Edge]] = {}
+    for e in domain.edges:
+        outgoing.setdefault(e.src, []).append(e)
+
+    for s in domain.states:
+        if s.kind == "terminal":
+            continue
+        edges_out = outgoing.get(s.name, [])
+        if not edges_out:
+            raise ValueError(
+                f"{domain.name}: non-terminal state '{s.name}' has no outgoing edges"
+            )
+        spine = [e for e in edges_out if not e.optional]
+        if len(spine) != 1:
+            raise ValueError(
+                f"{domain.name}: non-terminal state '{s.name}' must have exactly one "
+                f"spine successor (optional=False), found {len(spine)}"
+            )
+
+    # Reachability from initial (BFS)
+    reachable: set[str] = set()
+    queue = [domain.initial]
+    while queue:
+        node = queue.pop()
+        if node in reachable:
+            continue
+        reachable.add(node)
+        for e in outgoing.get(node, []):
+            queue.append(e.dst)
+    unreachable = state_names - reachable
+    if unreachable:
+        raise ValueError(
+            f"{domain.name}: states unreachable from initial: {unreachable}"
+        )
+
+    # Every state must be able to reach at least one terminal (reverse BFS)
+    reverse: dict[str, list[str]] = {}
+    for e in domain.edges:
+        reverse.setdefault(e.dst, []).append(e.src)
+    can_reach_terminal: set[str] = set()
+    queue = list(terminal_names)
+    while queue:
+        node = queue.pop()
+        if node in can_reach_terminal:
+            continue
+        can_reach_terminal.add(node)
+        for pred in reverse.get(node, []):
+            queue.append(pred)
+    blocked = reachable - can_reach_terminal
+    if blocked:
+        raise ValueError(
+            f"{domain.name}: states that cannot reach any terminal: {blocked}"
+        )
+
+    # Upsell-arc edges must rejoin toward a terminal
+    for e in domain.edges:
+        if e.intent_category == "upsell_promo" and e.dst not in can_reach_terminal:
+            raise ValueError(
+                f"{domain.name}: upsell-arc edge {e.src}->{e.dst} dst cannot reach "
+                f"any terminal"
+            )
 
 
 def _tool(name: str, desc: str, params: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -90,41 +252,51 @@ ACCOUNT_MANAGEMENT = DomainSpec(
             "plan_id": {"type": "string"},
         }, ["customer_id", "action"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_IDENTITY", "AUTHENTICATE", "LOOKUP_ACCOUNT",
-        "PROCESS_REQUEST", "CONFIRM_CHANGES", "UPDATE_RECORDS",
-        "NOTIFY_CUSTOMER", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "account_creation", "profile_update", "password_reset",
         "account_closure", "subscription_change", "rewards_inquiry",
         "verification_request", "premium_plan_offer",
     ),
     entity_slots=("customer_id", "email", "phone", "account_type", "field", "new_value"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_IDENTITY": ("verify_identity",),
-        "AUTHENTICATE": ("verify_identity",),
-        "LOOKUP_ACCOUNT": ("lookup_rewards",),
-        "PROCESS_REQUEST": ("create_account", "update_profile", "reset_password",
-                            "close_account", "manage_subscription"),
-        "CONFIRM_CHANGES": (),
-        "UPDATE_RECORDS": ("update_profile",),
-        "NOTIFY_CUSTOMER": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what account assistance they need.",
-        "VERIFY_IDENTITY": "Verify the customer's identity before accessing any account details.",
-        "AUTHENTICATE": "Authenticate the customer with OTP, PIN, or a security question.",
-        "LOOKUP_ACCOUNT": "Retrieve the customer's account record and confirm the details on file.",
-        "PROCESS_REQUEST": "Carry out the requested account change with the matching tool.",
-        "CONFIRM_CHANGES": "Summarise the pending change and ask the customer to confirm.",
-        "UPDATE_RECORDS": "Persist the confirmed changes to the customer's profile.",
-        "NOTIFY_CUSTOMER": "Notify the customer that the change is complete and what happens next.",
-        "RESOLVE": "Confirm the request is resolved and ask if anything else is needed.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what account assistance they need.", kind="initial"),
+        StateNode("VERIFY_IDENTITY", "Verify the customer's identity before accessing any account details.", tools=("verify_identity",)),
+        StateNode("AUTHENTICATE", "Authenticate the customer with OTP, PIN, or a security question.", tools=("verify_identity",)),
+        StateNode("LOOKUP_ACCOUNT", "Retrieve the customer's account record and confirm the details on file.", tools=("lookup_rewards",)),
+        StateNode("PROCESS_REQUEST", "Carry out the requested account change with the matching tool.", tools=("create_account", "update_profile", "reset_password", "close_account", "manage_subscription")),
+        StateNode("CONFIRM_CHANGES", "Summarise the pending change and ask the customer to confirm."),
+        StateNode("UPDATE_RECORDS", "Persist the confirmed changes to the customer's profile.", tools=("update_profile",)),
+        StateNode("NOTIFY_CUSTOMER", "Notify the customer that the change is complete and what happens next."),
+        StateNode("RESOLVE", "Confirm the request is resolved and ask if anything else is needed."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_IDENTITY", "proceed to identity verification", "always"),
+        Edge("VERIFY_IDENTITY", "AUTHENTICATE", "identity check required", "tool_success"),
+        Edge("VERIFY_IDENTITY", "LOOKUP_ACCOUNT", "identity already on file", "always", optional=True, priority=1),
+        Edge("AUTHENTICATE", "LOOKUP_ACCOUNT", "authentication successful", "tool_success"),
+        Edge("AUTHENTICATE", "VERIFY_IDENTITY", "authentication failed, retry", "tool_error", optional=True, priority=1),
+        Edge("LOOKUP_ACCOUNT", "PROCESS_REQUEST", "account located", "tool_success"),
+        Edge("PROCESS_REQUEST", "CONFIRM_CHANGES", "request processed, awaiting confirmation", "tool_success"),
+        Edge("PROCESS_REQUEST", "RESOLVE", "request completed without confirmation step", "always", optional=True, priority=1),
+        Edge("CONFIRM_CHANGES", "UPDATE_RECORDS", "customer confirmed changes", "always"),
+        Edge("CONFIRM_CHANGES", "RESOLVE", "customer declined the proposed change", "user_declines", optional=True, priority=1),
+        Edge("UPDATE_RECORDS", "NOTIFY_CUSTOMER", "records updated successfully", "tool_success"),
+        Edge("NOTIFY_CUSTOMER", "RESOLVE", "customer notified", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "premium subscription upgrade accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "account_creation": "service",
+        "profile_update": "service",
+        "password_reset": "service",
+        "account_closure": "service",
+        "subscription_change": "upsell_promo",
+        "rewards_inquiry": "upsell_promo",
+        "verification_request": "service",
+        "premium_plan_offer": "upsell_promo",
     },
 )
 
@@ -159,42 +331,53 @@ BILLING_PAYMENTS = DomainSpec(
             "dispute_reason": {"type": "string"},
         }, ["invoice_id", "disputed_amount", "dispute_reason"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_IDENTITY", "LOOKUP_BILLING", "REVIEW_CHARGES",
-        "PROCESS_PAYMENT", "APPLY_ADJUSTMENT", "CONFIRM_ACTION",
-        "GENERATE_DOCUMENT", "ESCALATE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "invoice_inquiry", "payment_processing", "refund_request",
         "dispute_charge", "payment_plan", "late_fee_waiver",
         "receipt_request", "chargeback", "payment_plan_offer",
     ),
     entity_slots=("invoice_id", "amount", "payment_method", "transaction_id", "customer_id"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_IDENTITY": (),
-        "LOOKUP_BILLING": ("lookup_invoice",),
-        "REVIEW_CHARGES": ("lookup_invoice", "dispute_charge"),
-        "PROCESS_PAYMENT": ("process_payment", "setup_payment_plan"),
-        "APPLY_ADJUSTMENT": ("issue_refund", "waive_late_fee"),
-        "CONFIRM_ACTION": (),
-        "GENERATE_DOCUMENT": ("generate_receipt",),
-        "ESCALATE": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask about their billing or payment need.",
-        "VERIFY_IDENTITY": "Confirm the customer's identity and the account in question.",
-        "LOOKUP_BILLING": "Look up the relevant invoice or billing record.",
-        "REVIEW_CHARGES": "Review the charges with the customer and note any disputes.",
-        "PROCESS_PAYMENT": "Process the payment or set up an installment plan.",
-        "APPLY_ADJUSTMENT": "Apply any approved refund or fee waiver.",
-        "CONFIRM_ACTION": "Summarise the billing action and ask the customer to confirm.",
-        "GENERATE_DOCUMENT": "Generate the requested receipt, statement, or tax document.",
-        "ESCALATE": "Escalate unresolved billing issues to a specialist.",
-        "RESOLVE": "Confirm the billing matter is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask about their billing or payment need.", kind="initial"),
+        StateNode("VERIFY_IDENTITY", "Confirm the customer's identity and the account in question."),
+        StateNode("LOOKUP_BILLING", "Look up the relevant invoice or billing record.", tools=("lookup_invoice",)),
+        StateNode("REVIEW_CHARGES", "Review the charges with the customer and note any disputes.", tools=("lookup_invoice", "dispute_charge")),
+        StateNode("PROCESS_PAYMENT", "Process the payment or set up an installment plan.", tools=("process_payment", "setup_payment_plan")),
+        StateNode("APPLY_ADJUSTMENT", "Apply any approved refund or fee waiver.", tools=("issue_refund", "waive_late_fee")),
+        StateNode("CONFIRM_ACTION", "Summarise the billing action and ask the customer to confirm."),
+        StateNode("GENERATE_DOCUMENT", "Generate the requested receipt, statement, or tax document.", tools=("generate_receipt",)),
+        StateNode("ESCALATE", "Escalate unresolved billing issues to a specialist."),
+        StateNode("RESOLVE", "Confirm the billing matter is resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_IDENTITY", "proceed to identity verification", "always"),
+        Edge("VERIFY_IDENTITY", "LOOKUP_BILLING", "identity confirmed", "always"),
+        Edge("LOOKUP_BILLING", "REVIEW_CHARGES", "invoice retrieved", "tool_success"),
+        Edge("REVIEW_CHARGES", "PROCESS_PAYMENT", "charges reviewed, proceed to payment", "tool_success"),
+        Edge("REVIEW_CHARGES", "APPLY_ADJUSTMENT", "dispute or adjustment requested", "intent_match", optional=True, priority=1),
+        Edge("APPLY_ADJUSTMENT", "CONFIRM_ACTION", "adjustment applied", "tool_success"),
+        Edge("PROCESS_PAYMENT", "CONFIRM_ACTION", "payment processed successfully", "tool_success"),
+        Edge("PROCESS_PAYMENT", "ESCALATE", "payment failed, escalating", "tool_error", optional=True, priority=1),
+        Edge("CONFIRM_ACTION", "RESOLVE", "action confirmed by customer", "always"),
+        Edge("CONFIRM_ACTION", "GENERATE_DOCUMENT", "receipt or tax document requested", "slot_present", optional=True, priority=1),
+        Edge("GENERATE_DOCUMENT", "RESOLVE", "document generated", "tool_success"),
+        Edge("ESCALATE", "RESOLVE", "issue escalated to specialist", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "payment plan offer accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "invoice_inquiry": "service",
+        "payment_processing": "service",
+        "refund_request": "service",
+        "dispute_charge": "service",
+        "payment_plan": "service",
+        "late_fee_waiver": "service",
+        "receipt_request": "service",
+        "chargeback": "service",
+        "payment_plan_offer": "upsell_promo",
     },
 )
 
@@ -229,42 +412,53 @@ ORDER_MANAGEMENT = DomainSpec(
             "time_slot": {"type": "string"},
         }, ["order_id", "new_date"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_IDENTITY", "LOOKUP_ORDER", "CHECK_STATUS",
-        "PROCESS_MODIFICATION", "INITIATE_RETURN", "ARRANGE_DELIVERY",
-        "CONFIRM_ACTION", "ESCALATE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "order_tracking", "order_cancellation", "order_modification",
         "return_request", "exchange_request", "damaged_item_report",
         "delivery_reschedule", "warranty_claim", "accessory_upsell",
     ),
     entity_slots=("order_id", "tracking_number", "item_id", "return_type"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_IDENTITY": (),
-        "LOOKUP_ORDER": ("lookup_order",),
-        "CHECK_STATUS": ("track_delivery",),
-        "PROCESS_MODIFICATION": ("modify_order", "cancel_order"),
-        "INITIATE_RETURN": ("initiate_return", "report_damaged_item"),
-        "ARRANGE_DELIVERY": ("reschedule_delivery", "track_delivery"),
-        "CONFIRM_ACTION": (),
-        "ESCALATE": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask which order they need help with.",
-        "VERIFY_IDENTITY": "Confirm the customer's identity and the order owner.",
-        "LOOKUP_ORDER": "Look up the order by its ID.",
-        "CHECK_STATUS": "Check the order's current status or delivery tracking.",
-        "PROCESS_MODIFICATION": "Modify or cancel the order as requested.",
-        "INITIATE_RETURN": "Start a return, exchange, or damaged-item report.",
-        "ARRANGE_DELIVERY": "Reschedule or re-track delivery as needed.",
-        "CONFIRM_ACTION": "Summarise the order action and ask the customer to confirm.",
-        "ESCALATE": "Escalate unresolved order issues to a specialist.",
-        "RESOLVE": "Confirm the order matter is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask which order they need help with.", kind="initial"),
+        StateNode("VERIFY_IDENTITY", "Confirm the customer's identity and the order owner."),
+        StateNode("LOOKUP_ORDER", "Look up the order by its ID.", tools=("lookup_order",)),
+        StateNode("CHECK_STATUS", "Check the order's current status or delivery tracking.", tools=("track_delivery",)),
+        StateNode("PROCESS_MODIFICATION", "Modify or cancel the order as requested.", tools=("modify_order", "cancel_order")),
+        StateNode("INITIATE_RETURN", "Start a return, exchange, or damaged-item report.", tools=("initiate_return", "report_damaged_item")),
+        StateNode("ARRANGE_DELIVERY", "Reschedule or re-track delivery as needed.", tools=("reschedule_delivery", "track_delivery")),
+        StateNode("CONFIRM_ACTION", "Summarise the order action and ask the customer to confirm."),
+        StateNode("ESCALATE", "Escalate unresolved order issues to a specialist."),
+        StateNode("RESOLVE", "Confirm the order matter is resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_IDENTITY", "proceed to identity verification", "always"),
+        Edge("VERIFY_IDENTITY", "LOOKUP_ORDER", "identity confirmed", "always"),
+        Edge("LOOKUP_ORDER", "CHECK_STATUS", "order retrieved", "tool_success"),
+        Edge("CHECK_STATUS", "PROCESS_MODIFICATION", "status checked, proceeding with modification", "tool_success"),
+        Edge("CHECK_STATUS", "INITIATE_RETURN", "return or damaged-item request", "intent_match", optional=True, priority=1),
+        Edge("CHECK_STATUS", "ARRANGE_DELIVERY", "delivery reschedule requested", "intent_match", optional=True, priority=2),
+        Edge("PROCESS_MODIFICATION", "CONFIRM_ACTION", "modification applied", "tool_success"),
+        Edge("PROCESS_MODIFICATION", "ESCALATE", "modification failed, escalating", "tool_error", optional=True, priority=1),
+        Edge("INITIATE_RETURN", "CONFIRM_ACTION", "return or exchange initiated", "tool_success"),
+        Edge("ARRANGE_DELIVERY", "CONFIRM_ACTION", "delivery rescheduled", "tool_success"),
+        Edge("CONFIRM_ACTION", "RESOLVE", "action confirmed by customer", "always"),
+        Edge("ESCALATE", "RESOLVE", "issue escalated to specialist", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "accessory upsell accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "order_tracking": "service",
+        "order_cancellation": "service",
+        "order_modification": "service",
+        "return_request": "service",
+        "exchange_request": "service",
+        "damaged_item_report": "service",
+        "delivery_reschedule": "service",
+        "warranty_claim": "service",
+        "accessory_upsell": "upsell_promo",
     },
 )
 
@@ -300,42 +494,52 @@ TECHNICAL_SUPPORT = DomainSpec(
             "notes": {"type": "string"},
         }, ["ticket_id", "priority"]),
     ),
-    state_templates=(
-        "GREETING", "IDENTIFY_ISSUE", "COLLECT_DIAGNOSTICS", "RUN_TESTS",
-        "ATTEMPT_FIX", "VERIFY_RESOLUTION", "ESCALATE_ENGINEERING",
-        "REMOTE_ASSIST", "CONFIRM_FIX", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "setup_help", "troubleshoot", "bug_report", "compatibility_check",
         "update_guidance", "remote_assistance", "escalation",
         "extended_warranty_offer",
     ),
     entity_slots=("system_name", "device_model", "fix_id", "severity", "ticket_id"),
-    state_tools={
-        "GREETING": (),
-        "IDENTIFY_ISSUE": ("check_system_status", "check_compatibility"),
-        "COLLECT_DIAGNOSTICS": ("check_system_status",),
-        "RUN_TESTS": ("run_diagnostic",),
-        "ATTEMPT_FIX": ("apply_fix", "restart_service"),
-        "VERIFY_RESOLUTION": ("check_system_status",),
-        "ESCALATE_ENGINEERING": ("escalate_to_engineer", "create_bug_report"),
-        "REMOTE_ASSIST": ("restart_service",),
-        "CONFIRM_FIX": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what technical problem they're facing.",
-        "IDENTIFY_ISSUE": "Identify the affected system and check its status or compatibility.",
-        "COLLECT_DIAGNOSTICS": "Collect diagnostic information about the issue.",
-        "RUN_TESTS": "Run the appropriate diagnostic test.",
-        "ATTEMPT_FIX": "Apply a known fix or restart the affected service.",
-        "VERIFY_RESOLUTION": "Verify the issue is resolved after the fix.",
-        "ESCALATE_ENGINEERING": "Escalate to engineering and file a bug report if unresolved.",
-        "REMOTE_ASSIST": "Guide the customer through remote assistance steps.",
-        "CONFIRM_FIX": "Confirm with the customer that the fix worked.",
-        "RESOLVE": "Confirm the technical issue is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what technical problem they're facing.", kind="initial"),
+        StateNode("IDENTIFY_ISSUE", "Identify the affected system and check its status or compatibility.", tools=("check_system_status", "check_compatibility")),
+        StateNode("COLLECT_DIAGNOSTICS", "Collect diagnostic information about the issue.", tools=("check_system_status",)),
+        StateNode("RUN_TESTS", "Run the appropriate diagnostic test.", tools=("run_diagnostic",)),
+        StateNode("ATTEMPT_FIX", "Apply a known fix or restart the affected service.", tools=("apply_fix", "restart_service")),
+        StateNode("VERIFY_RESOLUTION", "Verify the issue is resolved after the fix.", tools=("check_system_status",)),
+        StateNode("ESCALATE_ENGINEERING", "Escalate to engineering and file a bug report if unresolved.", tools=("escalate_to_engineer", "create_bug_report")),
+        StateNode("REMOTE_ASSIST", "Guide the customer through remote assistance steps.", tools=("restart_service",)),
+        StateNode("CONFIRM_FIX", "Confirm with the customer that the fix worked."),
+        StateNode("RESOLVE", "Confirm the technical issue is resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "IDENTIFY_ISSUE", "proceed to issue identification", "always"),
+        Edge("IDENTIFY_ISSUE", "COLLECT_DIAGNOSTICS", "issue identified", "tool_success"),
+        Edge("IDENTIFY_ISSUE", "REMOTE_ASSIST", "remote session requested", "intent_match", optional=True, priority=1),
+        Edge("COLLECT_DIAGNOSTICS", "RUN_TESTS", "diagnostics collected", "tool_success"),
+        Edge("RUN_TESTS", "ATTEMPT_FIX", "tests complete, applying fix", "tool_success"),
+        Edge("ATTEMPT_FIX", "VERIFY_RESOLUTION", "fix applied, verifying", "tool_success"),
+        Edge("ATTEMPT_FIX", "ESCALATE_ENGINEERING", "fix not available, escalating", "tool_error", optional=True, priority=1),
+        Edge("VERIFY_RESOLUTION", "CONFIRM_FIX", "issue resolved", "tool_success"),
+        Edge("VERIFY_RESOLUTION", "ATTEMPT_FIX", "issue persists, retrying fix", "tool_error", optional=True, priority=1),
+        Edge("ESCALATE_ENGINEERING", "RESOLVE", "case escalated to engineering", "tool_success"),
+        Edge("REMOTE_ASSIST", "ATTEMPT_FIX", "remote session complete", "tool_success"),
+        Edge("CONFIRM_FIX", "RESOLVE", "customer confirmed fix", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "extended warranty offer accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "setup_help": "service",
+        "troubleshoot": "service",
+        "bug_report": "service",
+        "compatibility_check": "service",
+        "update_guidance": "service",
+        "remote_assistance": "service",
+        "escalation": "service",
+        "extended_warranty_offer": "upsell_promo",
     },
 )
 
@@ -363,39 +567,47 @@ PRODUCT_INFO = DomainSpec(
             "current_product_id": {"type": "string"}, "usage_profile": {"type": "string"},
         }, ["current_product_id"]),
     ),
-    state_templates=(
-        "GREETING", "UNDERSTAND_NEEDS", "SEARCH_CATALOG", "PRESENT_OPTIONS",
-        "COMPARE_FEATURES", "CHECK_AVAILABILITY", "QUOTE_PRICING",
-        "RECOMMEND_UPGRADE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "product_inquiry", "pricing_inquiry", "availability_check",
         "feature_comparison", "upgrade_recommendation", "promotion_inquiry",
     ),
     entity_slots=("product_id", "category", "price_range", "customer_tier"),
-    state_tools={
-        "GREETING": (),
-        "UNDERSTAND_NEEDS": (),
-        "SEARCH_CATALOG": ("search_products",),
-        "PRESENT_OPTIONS": ("get_product_details",),
-        "COMPARE_FEATURES": ("compare_products",),
-        "CHECK_AVAILABILITY": ("check_availability",),
-        "QUOTE_PRICING": ("get_pricing",),
-        "RECOMMEND_UPGRADE": ("recommend_upgrade",),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what product information they need.",
-        "UNDERSTAND_NEEDS": "Clarify the customer's requirements and use case.",
-        "SEARCH_CATALOG": "Search the product catalog for matching items.",
-        "PRESENT_OPTIONS": "Present the matching products with their key details.",
-        "COMPARE_FEATURES": "Compare the shortlisted products' features.",
-        "CHECK_AVAILABILITY": "Check availability for the chosen product.",
-        "QUOTE_PRICING": "Provide current pricing and any promotions.",
-        "RECOMMEND_UPGRADE": "Recommend a suitable upgrade path if relevant.",
-        "RESOLVE": "Confirm the customer has the information they need.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what product information they need.", kind="initial"),
+        StateNode("UNDERSTAND_NEEDS", "Clarify the customer's requirements and use case."),
+        StateNode("SEARCH_CATALOG", "Search the product catalog for matching items.", tools=("search_products",)),
+        StateNode("PRESENT_OPTIONS", "Present the matching products with their key details.", tools=("get_product_details",)),
+        StateNode("COMPARE_FEATURES", "Compare the shortlisted products' features.", tools=("compare_products",)),
+        StateNode("CHECK_AVAILABILITY", "Check availability for the chosen product.", tools=("check_availability",)),
+        StateNode("QUOTE_PRICING", "Provide current pricing and any promotions.", tools=("get_pricing",)),
+        StateNode("RECOMMEND_UPGRADE", "Recommend a suitable upgrade path if relevant.", tools=("recommend_upgrade",)),
+        StateNode("RESOLVE", "Confirm the customer has the information they need."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "UNDERSTAND_NEEDS", "proceed to needs clarification", "always"),
+        Edge("UNDERSTAND_NEEDS", "SEARCH_CATALOG", "needs clarified, searching catalog", "always"),
+        Edge("SEARCH_CATALOG", "PRESENT_OPTIONS", "products found", "tool_success"),
+        Edge("PRESENT_OPTIONS", "CHECK_AVAILABILITY", "option selected", "tool_success"),
+        Edge("PRESENT_OPTIONS", "COMPARE_FEATURES", "multiple options to compare", "slot_present", optional=True, priority=1),
+        Edge("COMPARE_FEATURES", "CHECK_AVAILABILITY", "comparison complete", "tool_success"),
+        Edge("CHECK_AVAILABILITY", "RESOLVE", "availability confirmed", "tool_success"),
+        Edge("CHECK_AVAILABILITY", "QUOTE_PRICING", "pricing details requested", "intent_match", optional=True, priority=1),
+        Edge("CHECK_AVAILABILITY", "RECOMMEND_UPGRADE", "upgrade path requested", "intent_match", optional=True, priority=2),
+        Edge("QUOTE_PRICING", "RESOLVE", "pricing provided", "tool_success"),
+        Edge("RECOMMEND_UPGRADE", "RESOLVE", "upgrade recommended", "tool_success"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "upgrade or promotion offer accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "product_inquiry": "service",
+        "pricing_inquiry": "upsell_promo",
+        "availability_check": "service",
+        "feature_comparison": "service",
+        "upgrade_recommendation": "upsell_promo",
+        "promotion_inquiry": "upsell_promo",
     },
 )
 
@@ -432,42 +644,64 @@ HEALTHCARE = DomainSpec(
             "supporting_docs": {"type": "array", "items": {"type": "string"}},
         }, ["patient_id", "procedure_code"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_PATIENT", "CHECK_ELIGIBILITY", "REVIEW_RECORDS",
-        "SCHEDULE_SERVICE", "PROCESS_REQUEST", "SUBMIT_AUTHORIZATION",
-        "CONFIRM_DETAILS", "ESCALATE_CLINICAL", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "appointment_scheduling", "prescription_refill", "claim_status",
         "coverage_verification", "referral_request", "prior_authorization",
         "wellness_program_offer",
     ),
     entity_slots=("patient_id", "claim_id", "prescription_id", "procedure_code", "provider_id"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_PATIENT": (),
-        "CHECK_ELIGIBILITY": ("verify_coverage",),
-        "REVIEW_RECORDS": ("check_claim_status",),
-        "SCHEDULE_SERVICE": ("schedule_appointment",),
-        "PROCESS_REQUEST": ("request_prescription_refill", "request_referral"),
-        "SUBMIT_AUTHORIZATION": ("submit_prior_auth",),
-        "CONFIRM_DETAILS": (),
-        "ESCALATE_CLINICAL": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the patient and ask how you can help.",
-        "VERIFY_PATIENT": "Verify the patient's identity before accessing records.",
-        "CHECK_ELIGIBILITY": "Verify the patient's insurance coverage and benefits.",
-        "REVIEW_RECORDS": "Review the patient's records or claim status.",
-        "SCHEDULE_SERVICE": "Schedule the requested appointment.",
-        "PROCESS_REQUEST": "Process the prescription refill or specialist referral.",
-        "SUBMIT_AUTHORIZATION": "Submit the prior-authorization request.",
-        "CONFIRM_DETAILS": "Confirm the appointment or request details with the patient.",
-        "ESCALATE_CLINICAL": "Escalate clinical questions to a qualified provider.",
-        "RESOLVE": "Confirm the patient's request is resolved.",
-        "TERMINAL": "Thank the patient and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the patient and ask how you can help with their healthcare needs.", kind="initial"),
+        StateNode("VERIFY_PATIENT", "Verify the patient's identity and confirm their account before accessing records."),
+        StateNode("CHECK_ELIGIBILITY", "Verify the patient's insurance coverage and benefits for the requested service.", tools=("verify_coverage",)),
+        StateNode("REVIEW_RECORDS", "Review the patient's medical records or current claim status.", tools=("check_claim_status",)),
+        StateNode("SCHEDULE_SERVICE", "Schedule the requested medical appointment.", tools=("schedule_appointment",)),
+        StateNode("PROCESS_REQUEST", "Process the prescription refill or specialist referral request.", tools=("request_prescription_refill", "request_referral")),
+        StateNode("REFERRAL_PROCESS", "Coordinate the specialist referral, confirming provider availability and next steps.", tools=("request_referral",)),
+        StateNode("SUBMIT_AUTHORIZATION", "Submit the prior-authorization request for the procedure or service.", tools=("submit_prior_auth",)),
+        StateNode("REVIEW_AUTHORIZATION", "Review the outcome of a submitted prior-authorization request.", tools=("check_claim_status",)),
+        StateNode("APPEAL_DENIAL", "Handle a formal appeal when a prior-authorization or claim is denied."),
+        StateNode("WELLNESS_ENROLL", "Enroll the patient in a wellness or preventive care program."),
+        StateNode("CONFIRM_DETAILS", "Confirm the appointment, referral, or authorization details with the patient."),
+        StateNode("NOTIFY_PATIENT", "Notify the patient of outcomes, next steps, or appointment confirmations."),
+        StateNode("ESCALATE_CLINICAL", "Escalate clinical questions or urgent cases to a qualified healthcare provider."),
+        StateNode("RESOLVE", "Confirm the patient's request is fully resolved."),
+        StateNode("TERMINAL", "Thank the patient and close the healthcare conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_PATIENT", "proceed to patient verification", "always"),
+        Edge("VERIFY_PATIENT", "CHECK_ELIGIBILITY", "patient verified", "always"),
+        Edge("CHECK_ELIGIBILITY", "REVIEW_RECORDS", "eligibility confirmed", "tool_success"),
+        Edge("CHECK_ELIGIBILITY", "ESCALATE_CLINICAL", "complex coverage issue requiring clinical review", "tool_error", optional=True, priority=1),
+        Edge("REVIEW_RECORDS", "SCHEDULE_SERVICE", "records reviewed, scheduling service", "tool_success"),
+        Edge("REVIEW_RECORDS", "PROCESS_REQUEST", "prescription or referral request", "intent_match", optional=True, priority=1),
+        Edge("REVIEW_RECORDS", "SUBMIT_AUTHORIZATION", "prior authorization required", "intent_match", optional=True, priority=2),
+        Edge("SCHEDULE_SERVICE", "CONFIRM_DETAILS", "appointment scheduled", "tool_success"),
+        Edge("PROCESS_REQUEST", "REFERRAL_PROCESS", "referral pathway initiated", "tool_success"),
+        Edge("PROCESS_REQUEST", "CONFIRM_DETAILS", "prescription refill processed", "always", optional=True, priority=1),
+        Edge("REFERRAL_PROCESS", "CONFIRM_DETAILS", "referral coordinated", "tool_success"),
+        Edge("SUBMIT_AUTHORIZATION", "REVIEW_AUTHORIZATION", "authorization submitted", "tool_success"),
+        Edge("REVIEW_AUTHORIZATION", "CONFIRM_DETAILS", "authorization approved", "tool_success"),
+        Edge("REVIEW_AUTHORIZATION", "APPEAL_DENIAL", "authorization denied, initiating appeal", "tool_error", optional=True, priority=1),
+        Edge("APPEAL_DENIAL", "ESCALATE_CLINICAL", "appeal requires clinical escalation", "always"),
+        Edge("CONFIRM_DETAILS", "WELLNESS_ENROLL", "wellness program offered", "intent_match", optional=True, priority=1),
+        Edge("CONFIRM_DETAILS", "NOTIFY_PATIENT", "details confirmed", "always"),
+        Edge("WELLNESS_ENROLL", "NOTIFY_PATIENT", "wellness enrollment processed", "always"),
+        Edge("ESCALATE_CLINICAL", "NOTIFY_PATIENT", "clinical escalation complete", "always"),
+        Edge("NOTIFY_PATIENT", "RESOLVE", "patient notified", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "wellness program enrollment accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "appointment_scheduling": "service",
+        "prescription_refill": "service",
+        "claim_status": "service",
+        "coverage_verification": "service",
+        "referral_request": "service",
+        "prior_authorization": "service",
+        "wellness_program_offer": "upsell_promo",
     },
 )
 
@@ -500,45 +734,64 @@ BANKING = DomainSpec(
             "product_type": {"type": "string", "enum": ["savings", "cd", "mortgage", "personal_loan"]},
         }, ["product_type"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_IDENTITY", "AUTHENTICATE_2FA", "LOOKUP_ACCOUNT",
-        "REVIEW_TRANSACTIONS", "PROCESS_REQUEST", "FRAUD_INVESTIGATION",
-        "APPROVAL_CHECK", "CONFIRM_ACTION", "ESCALATE_COMPLIANCE",
-        "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "balance_inquiry", "fund_transfer", "card_block", "fraud_report",
         "loan_inquiry", "card_activation", "rate_inquiry", "wire_request",
     ),
     entity_slots=("account_id", "card_id", "transaction_id", "amount", "loan_type"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_IDENTITY": (),
-        "AUTHENTICATE_2FA": (),
-        "LOOKUP_ACCOUNT": ("check_balance",),
-        "REVIEW_TRANSACTIONS": ("check_balance",),
-        "PROCESS_REQUEST": ("transfer_funds", "apply_for_loan", "activate_card",
-                            "inquiry_interest_rate", "block_card"),
-        "FRAUD_INVESTIGATION": ("report_fraud", "block_card"),
-        "APPROVAL_CHECK": (),
-        "CONFIRM_ACTION": (),
-        "ESCALATE_COMPLIANCE": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask how you can help with their banking.",
-        "VERIFY_IDENTITY": "Verify the customer's identity before discussing the account.",
-        "AUTHENTICATE_2FA": "Complete two-factor authentication for sensitive actions.",
-        "LOOKUP_ACCOUNT": "Look up the account balance and details.",
-        "REVIEW_TRANSACTIONS": "Review recent transactions with the customer.",
-        "PROCESS_REQUEST": "Carry out the requested banking transaction.",
-        "FRAUD_INVESTIGATION": "Investigate suspected fraud and secure the card if needed.",
-        "APPROVAL_CHECK": "Check whether the request requires additional approval.",
-        "CONFIRM_ACTION": "Summarise the transaction and ask the customer to confirm.",
-        "ESCALATE_COMPLIANCE": "Escalate to compliance for flagged cases.",
-        "RESOLVE": "Confirm the banking request is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask how you can help with their banking needs.", kind="initial"),
+        StateNode("VERIFY_IDENTITY", "Verify the customer's identity before accessing any account information."),
+        StateNode("AUTHENTICATE_2FA", "Complete two-factor authentication for sensitive banking actions."),
+        StateNode("LOOKUP_ACCOUNT", "Look up the account balance and recent transaction history.", tools=("check_balance",)),
+        StateNode("REVIEW_TRANSACTIONS", "Review recent transactions with the customer and note any concerns.", tools=("check_balance",)),
+        StateNode("PROCESS_REQUEST", "Carry out the requested banking transaction using the appropriate tool.", tools=("transfer_funds", "apply_for_loan", "activate_card", "inquiry_interest_rate", "block_card")),
+        StateNode("FRAUD_INVESTIGATION", "Investigate suspected fraud, block the card if necessary, and file a report.", tools=("report_fraud", "block_card")),
+        StateNode("FRAUD_APPEAL", "Review a previously filed fraud decision and escalate if the customer disputes the outcome."),
+        StateNode("APPROVAL_CHECK", "Check whether the transaction or loan request requires additional approval."),
+        StateNode("COLLECT_DOCUMENTS", "Guide the customer through submitting the documents required for a loan application."),
+        StateNode("SUBMIT_LOAN_APPLICATION", "Submit the completed loan application with all collected documents.", tools=("apply_for_loan",)),
+        StateNode("RATE_COMPARISON", "Retrieve and compare current interest rates across savings, CD, and loan products.", tools=("inquiry_interest_rate",)),
+        StateNode("CONFIRM_ACTION", "Summarise the transaction or request and ask the customer to confirm."),
+        StateNode("ESCALATE_COMPLIANCE", "Escalate flagged transactions or policy-sensitive cases to the compliance team."),
+        StateNode("NOTIFY_CUSTOMER", "Notify the customer of the outcome and any next steps."),
+        StateNode("RESOLVE", "Confirm the banking request is fully resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the banking conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_IDENTITY", "proceed to identity verification", "always"),
+        Edge("VERIFY_IDENTITY", "AUTHENTICATE_2FA", "identity check requires 2FA", "always"),
+        Edge("AUTHENTICATE_2FA", "LOOKUP_ACCOUNT", "authentication successful", "always"),
+        Edge("LOOKUP_ACCOUNT", "REVIEW_TRANSACTIONS", "account retrieved", "tool_success"),
+        Edge("REVIEW_TRANSACTIONS", "PROCESS_REQUEST", "transactions reviewed, proceeding with request", "tool_success"),
+        Edge("REVIEW_TRANSACTIONS", "FRAUD_INVESTIGATION", "suspicious activity detected", "intent_match", optional=True, priority=1),
+        Edge("REVIEW_TRANSACTIONS", "RATE_COMPARISON", "interest rate comparison requested", "intent_match", optional=True, priority=2),
+        Edge("PROCESS_REQUEST", "APPROVAL_CHECK", "request requires approval gate", "tool_success"),
+        Edge("PROCESS_REQUEST", "COLLECT_DOCUMENTS", "loan application requires document collection", "intent_match", optional=True, priority=1),
+        Edge("COLLECT_DOCUMENTS", "SUBMIT_LOAN_APPLICATION", "all documents collected", "always"),
+        Edge("SUBMIT_LOAN_APPLICATION", "APPROVAL_CHECK", "loan application submitted", "tool_success"),
+        Edge("FRAUD_INVESTIGATION", "FRAUD_APPEAL", "customer disputes fraud decision", "tool_success", optional=True, priority=1),
+        Edge("FRAUD_INVESTIGATION", "ESCALATE_COMPLIANCE", "fraud confirmed, escalating", "tool_success"),
+        Edge("FRAUD_APPEAL", "ESCALATE_COMPLIANCE", "appeal requires compliance review", "always"),
+        Edge("RATE_COMPARISON", "CONFIRM_ACTION", "rate comparison complete", "tool_success"),
+        Edge("APPROVAL_CHECK", "CONFIRM_ACTION", "approval check complete", "always"),
+        Edge("ESCALATE_COMPLIANCE", "NOTIFY_CUSTOMER", "compliance case escalated", "always"),
+        Edge("CONFIRM_ACTION", "NOTIFY_CUSTOMER", "action confirmed by customer", "always"),
+        Edge("NOTIFY_CUSTOMER", "RESOLVE", "customer notified of outcome", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "loan or rate product offer accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "balance_inquiry": "service",
+        "fund_transfer": "service",
+        "card_block": "service",
+        "fraud_report": "service",
+        "loan_inquiry": "upsell_promo",
+        "card_activation": "service",
+        "rate_inquiry": "upsell_promo",
+        "wire_request": "service",
     },
 )
 
@@ -569,41 +822,66 @@ TELECOM = DomainSpec(
             "roaming_plan": {"type": "string", "enum": ["basic", "premium", "unlimited"]},
         }, ["account_id", "destination_country"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_ACCOUNT", "CHECK_ELIGIBILITY", "REVIEW_PLAN",
-        "PROCESS_CHANGE", "TECHNICAL_CHECK", "ACTIVATE_SERVICE",
-        "CONFIRM_CHANGES", "ESCALATE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "plan_change", "number_porting", "outage_report", "data_usage",
         "device_unlock", "roaming_activation", "sim_replacement",
     ),
     entity_slots=("account_id", "phone_number", "device_imei", "plan_id"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_ACCOUNT": (),
-        "CHECK_ELIGIBILITY": (),
-        "REVIEW_PLAN": ("check_data_usage",),
-        "PROCESS_CHANGE": ("change_plan", "port_number"),
-        "TECHNICAL_CHECK": ("report_outage",),
-        "ACTIVATE_SERVICE": ("activate_roaming", "unlock_device"),
-        "CONFIRM_CHANGES": (),
-        "ESCALATE": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what telecom service they need.",
-        "VERIFY_ACCOUNT": "Verify the customer's account before making changes.",
-        "CHECK_ELIGIBILITY": "Check whether the customer is eligible for the requested change.",
-        "REVIEW_PLAN": "Review the current plan and data usage with the customer.",
-        "PROCESS_CHANGE": "Apply the plan change or number port as requested.",
-        "TECHNICAL_CHECK": "Check for network outages or technical issues.",
-        "ACTIVATE_SERVICE": "Activate roaming or unlock the device as requested.",
-        "CONFIRM_CHANGES": "Summarise the changes and ask the customer to confirm.",
-        "ESCALATE": "Escalate unresolved telecom issues to a specialist.",
-        "RESOLVE": "Confirm the telecom request is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what telecom service they need help with.", kind="initial"),
+        StateNode("VERIFY_ACCOUNT", "Verify the customer's account and identity before making any changes."),
+        StateNode("CHECK_ELIGIBILITY", "Check whether the customer is eligible for the requested change or service."),
+        StateNode("REVIEW_PLAN", "Review the current plan and data usage with the customer.", tools=("check_data_usage",)),
+        StateNode("USAGE_ANALYSIS", "Analyse the customer's data usage patterns and recommend a suitable plan.", tools=("check_data_usage",)),
+        StateNode("UPGRADE_OFFER", "Present a plan upgrade recommendation based on usage analysis.", tools=("change_plan",)),
+        StateNode("PROCESS_CHANGE", "Apply the plan change as requested by the customer.", tools=("change_plan",)),
+        StateNode("PORT_NUMBER_PROCESS", "Carry out the number porting procedure from the previous carrier.", tools=("port_number",)),
+        StateNode("SIM_REPLACEMENT", "Process a SIM card replacement for the customer.", tools=("unlock_device",)),
+        StateNode("TECHNICAL_CHECK", "Check for network outages or technical issues affecting the service.", tools=("report_outage",)),
+        StateNode("ACTIVATE_SERVICE", "Activate roaming or unlock the device as requested.", tools=("activate_roaming", "unlock_device")),
+        StateNode("CONFIRM_CHANGES", "Summarise all pending changes and ask the customer to confirm."),
+        StateNode("NOTIFY_CUSTOMER", "Notify the customer of the completed changes and any important details."),
+        StateNode("ESCALATE", "Escalate unresolved telecom issues to a specialist."),
+        StateNode("RESOLVE", "Confirm the telecom request is fully resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the telecom conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_ACCOUNT", "proceed to account verification", "always"),
+        Edge("VERIFY_ACCOUNT", "CHECK_ELIGIBILITY", "account verified", "always"),
+        Edge("CHECK_ELIGIBILITY", "REVIEW_PLAN", "eligibility confirmed, reviewing plan", "always"),
+        Edge("REVIEW_PLAN", "USAGE_ANALYSIS", "detailed usage analysis needed", "tool_success"),
+        Edge("REVIEW_PLAN", "PROCESS_CHANGE", "plan change directly requested", "intent_match", optional=True, priority=1),
+        Edge("REVIEW_PLAN", "PORT_NUMBER_PROCESS", "number porting requested", "intent_match", optional=True, priority=2),
+        Edge("REVIEW_PLAN", "SIM_REPLACEMENT", "SIM replacement requested", "intent_match", optional=True, priority=3),
+        Edge("REVIEW_PLAN", "TECHNICAL_CHECK", "outage or technical issue reported", "intent_match", optional=True, priority=4),
+        Edge("USAGE_ANALYSIS", "UPGRADE_OFFER", "upgrade recommended based on usage", "tool_success"),
+        Edge("USAGE_ANALYSIS", "PROCESS_CHANGE", "plan change confirmed without upsell", "always", optional=True, priority=1),
+        Edge("UPGRADE_OFFER", "PROCESS_CHANGE", "upgrade accepted", "tool_success"),
+        Edge("UPGRADE_OFFER", "CONFIRM_CHANGES", "upgrade declined, confirming original request", "always", optional=True, priority=1),
+        Edge("PROCESS_CHANGE", "ACTIVATE_SERVICE", "plan changed, activating roaming or device", "tool_success", optional=True, priority=1),
+        Edge("PROCESS_CHANGE", "CONFIRM_CHANGES", "plan change complete", "tool_success"),
+        Edge("PORT_NUMBER_PROCESS", "CONFIRM_CHANGES", "number porting initiated", "tool_success"),
+        Edge("PORT_NUMBER_PROCESS", "ESCALATE", "porting failed, escalating", "tool_error", optional=True, priority=1),
+        Edge("SIM_REPLACEMENT", "CONFIRM_CHANGES", "SIM replacement processed", "tool_success"),
+        Edge("TECHNICAL_CHECK", "CONFIRM_CHANGES", "technical issue reported", "tool_success"),
+        Edge("TECHNICAL_CHECK", "ESCALATE", "outage confirmed, escalating", "tool_error", optional=True, priority=1),
+        Edge("ACTIVATE_SERVICE", "CONFIRM_CHANGES", "service activated", "tool_success"),
+        Edge("CONFIRM_CHANGES", "NOTIFY_CUSTOMER", "customer confirmed changes", "always"),
+        Edge("ESCALATE", "NOTIFY_CUSTOMER", "issue escalated to specialist", "always"),
+        Edge("NOTIFY_CUSTOMER", "RESOLVE", "customer notified", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "plan upgrade or roaming package accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "plan_change": "upsell_promo",
+        "number_porting": "service",
+        "outage_report": "service",
+        "data_usage": "service",
+        "device_unlock": "service",
+        "roaming_activation": "upsell_promo",
+        "sim_replacement": "service",
     },
 )
 
@@ -634,42 +912,54 @@ UTILITIES = DomainSpec(
             "account_id": {"type": "string"}, "program": {"type": "string", "enum": ["solar", "wind", "carbon_offset"]},
         }, ["account_id", "program"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_ACCOUNT", "REVIEW_BILLING", "CHECK_METER",
-        "PROCESS_REQUEST", "DISPATCH_TECHNICIAN", "CONFIRM_ACTION",
-        "SCHEDULE_SERVICE", "ESCALATE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "meter_reading", "billing_dispute", "new_connection", "disconnection",
         "outage_report", "usage_analysis", "green_program_enrollment",
         "green_energy_upgrade",
     ),
     entity_slots=("account_id", "address", "meter_type", "reading_value"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_ACCOUNT": (),
-        "REVIEW_BILLING": ("dispute_bill", "analyze_usage"),
-        "CHECK_METER": ("submit_meter_reading",),
-        "PROCESS_REQUEST": ("request_connection", "enroll_green_energy"),
-        "DISPATCH_TECHNICIAN": ("report_outage",),
-        "CONFIRM_ACTION": (),
-        "SCHEDULE_SERVICE": ("request_connection",),
-        "ESCALATE": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask about their utility service.",
-        "VERIFY_ACCOUNT": "Verify the customer's utility account.",
-        "REVIEW_BILLING": "Review the bill and usage, noting any disputes.",
-        "CHECK_METER": "Record or check the customer's meter reading.",
-        "PROCESS_REQUEST": "Process the connection or program-enrollment request.",
-        "DISPATCH_TECHNICIAN": "Report the outage and dispatch a technician if needed.",
-        "CONFIRM_ACTION": "Summarise the action and ask the customer to confirm.",
-        "SCHEDULE_SERVICE": "Schedule the service connection or visit.",
-        "ESCALATE": "Escalate unresolved utility issues to a specialist.",
-        "RESOLVE": "Confirm the utility request is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask about their utility service.", kind="initial"),
+        StateNode("VERIFY_ACCOUNT", "Verify the customer's utility account."),
+        StateNode("REVIEW_BILLING", "Review the bill and usage, noting any disputes.", tools=("dispute_bill", "analyze_usage")),
+        StateNode("CHECK_METER", "Record or check the customer's meter reading.", tools=("submit_meter_reading",)),
+        StateNode("PROCESS_REQUEST", "Process the connection or program-enrollment request.", tools=("request_connection", "enroll_green_energy")),
+        StateNode("DISPATCH_TECHNICIAN", "Report the outage and dispatch a technician if needed.", tools=("report_outage",)),
+        StateNode("CONFIRM_ACTION", "Summarise the action and ask the customer to confirm."),
+        StateNode("SCHEDULE_SERVICE", "Schedule the service connection or visit.", tools=("request_connection",)),
+        StateNode("ESCALATE", "Escalate unresolved utility issues to a specialist."),
+        StateNode("RESOLVE", "Confirm the utility request is resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_ACCOUNT", "proceed to account verification", "always"),
+        Edge("VERIFY_ACCOUNT", "REVIEW_BILLING", "account verified, reviewing billing", "always"),
+        Edge("VERIFY_ACCOUNT", "CHECK_METER", "meter reading submission", "intent_match", optional=True, priority=1),
+        Edge("REVIEW_BILLING", "PROCESS_REQUEST", "billing reviewed, processing request", "tool_success"),
+        Edge("REVIEW_BILLING", "CHECK_METER", "meter discrepancy, checking reading", "intent_match", optional=True, priority=1),
+        Edge("CHECK_METER", "CONFIRM_ACTION", "meter reading submitted", "tool_success"),
+        Edge("PROCESS_REQUEST", "CONFIRM_ACTION", "request processed", "tool_success"),
+        Edge("PROCESS_REQUEST", "SCHEDULE_SERVICE", "site visit needed", "intent_match", optional=True, priority=1),
+        Edge("PROCESS_REQUEST", "DISPATCH_TECHNICIAN", "outage reported", "intent_match", optional=True, priority=2),
+        Edge("SCHEDULE_SERVICE", "CONFIRM_ACTION", "service scheduled", "tool_success"),
+        Edge("DISPATCH_TECHNICIAN", "CONFIRM_ACTION", "technician dispatched", "tool_success"),
+        Edge("CONFIRM_ACTION", "RESOLVE", "customer confirmed", "always"),
+        Edge("CONFIRM_ACTION", "ESCALATE", "issue unresolved, escalating", "user_declines", optional=True, priority=1),
+        Edge("ESCALATE", "RESOLVE", "escalated to specialist", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "green energy upgrade accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "meter_reading": "service",
+        "billing_dispute": "service",
+        "new_connection": "service",
+        "disconnection": "service",
+        "outage_report": "service",
+        "usage_analysis": "service",
+        "green_program_enrollment": "upsell_promo",
+        "green_energy_upgrade": "upsell_promo",
     },
 )
 
@@ -705,44 +995,68 @@ TRAVEL = DomainSpec(
             "trip_purpose": {"type": "string", "enum": ["tourism", "business", "transit"]},
         }, ["nationality", "destination"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_TRAVELER", "SEARCH_OPTIONS", "PRESENT_ITINERARY",
-        "PROCESS_BOOKING", "PAYMENT_PROCESSING", "ISSUE_DOCUMENTS",
-        "HANDLE_CHANGES", "FILE_CLAIM", "CONFIRM_DETAILS", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "flight_search", "hotel_booking", "car_rental", "reservation_change",
         "cancellation", "loyalty_redemption", "insurance_claim",
         "visa_inquiry", "checkin_help",
     ),
     entity_slots=("reservation_id", "origin", "destination", "departure_date", "loyalty_id"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_TRAVELER": (),
-        "SEARCH_OPTIONS": ("search_flights", "check_visa_requirements"),
-        "PRESENT_ITINERARY": (),
-        "PROCESS_BOOKING": ("book_reservation",),
-        "PAYMENT_PROCESSING": ("redeem_points",),
-        "ISSUE_DOCUMENTS": ("check_visa_requirements",),
-        "HANDLE_CHANGES": ("modify_reservation", "cancel_reservation"),
-        "FILE_CLAIM": ("file_travel_claim",),
-        "CONFIRM_DETAILS": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the traveler and ask about their trip needs.",
-        "VERIFY_TRAVELER": "Verify the traveler's identity and booking.",
-        "SEARCH_OPTIONS": "Search flights and check any visa requirements.",
-        "PRESENT_ITINERARY": "Present the proposed itinerary to the traveler.",
-        "PROCESS_BOOKING": "Book the selected reservation.",
-        "PAYMENT_PROCESSING": "Process payment, applying loyalty points if requested.",
-        "ISSUE_DOCUMENTS": "Issue travel documents and confirm requirements.",
-        "HANDLE_CHANGES": "Modify or cancel the reservation as requested.",
-        "FILE_CLAIM": "File the travel insurance claim.",
-        "CONFIRM_DETAILS": "Confirm the booking details with the traveler.",
-        "RESOLVE": "Confirm the travel request is resolved.",
-        "TERMINAL": "Thank the traveler and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the traveler and ask about their trip planning or booking needs.", kind="initial"),
+        StateNode("VERIFY_TRAVELER", "Verify the traveler's identity and confirm any existing reservations."),
+        StateNode("SEARCH_OPTIONS", "Search available flights, hotels, or car rentals.", tools=("search_flights",)),
+        StateNode("CHECK_VISA_REQUIREMENTS", "Check visa and travel documentation requirements for the destination.", tools=("check_visa_requirements",)),
+        StateNode("COLLECT_VISA_DOCS", "Guide the traveler through collecting and submitting visa documentation.", tools=("check_visa_requirements",)),
+        StateNode("PRESENT_ITINERARY", "Present the proposed itinerary options to the traveler."),
+        StateNode("PROCESS_BOOKING", "Book the selected flight, hotel, or car reservation.", tools=("book_reservation",)),
+        StateNode("PAYMENT_PROCESSING", "Process payment for the booking, applying loyalty points if requested.", tools=("redeem_points",)),
+        StateNode("LOYALTY_UPGRADE", "Present a loyalty tier upgrade offer or apply a points redemption.", tools=("redeem_points",)),
+        StateNode("ISSUE_DOCUMENTS", "Issue travel documents and confirm all requirements are met.", tools=("check_visa_requirements",)),
+        StateNode("HANDLE_CHANGES", "Modify or cancel an existing reservation as requested.", tools=("modify_reservation", "cancel_reservation")),
+        StateNode("DISRUPTION_HANDLING", "Handle travel disruption such as delays, cancellations, or missed connections.", tools=("modify_reservation", "cancel_reservation")),
+        StateNode("REBOOK_FLIGHTS", "Rebook affected flights due to disruption or schedule change.", tools=("book_reservation",)),
+        StateNode("FILE_CLAIM", "File the travel insurance claim for the incident.", tools=("file_travel_claim",)),
+        StateNode("CONFIRM_DETAILS", "Confirm the booking or change details with the traveler."),
+        StateNode("RESOLVE", "Confirm the travel request is fully resolved."),
+        StateNode("TERMINAL", "Thank the traveler and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_TRAVELER", "proceed to traveler verification", "always"),
+        Edge("VERIFY_TRAVELER", "SEARCH_OPTIONS", "traveler verified, searching options", "always"),
+        Edge("SEARCH_OPTIONS", "CHECK_VISA_REQUIREMENTS", "visa check needed for destination", "tool_success"),
+        Edge("SEARCH_OPTIONS", "HANDLE_CHANGES", "change or cancellation requested", "intent_match", optional=True, priority=1),
+        Edge("SEARCH_OPTIONS", "DISRUPTION_HANDLING", "travel disruption reported", "intent_match", optional=True, priority=2),
+        Edge("CHECK_VISA_REQUIREMENTS", "COLLECT_VISA_DOCS", "visa documents required", "tool_success"),
+        Edge("CHECK_VISA_REQUIREMENTS", "PRESENT_ITINERARY", "no additional visa docs needed", "always", optional=True, priority=1),
+        Edge("COLLECT_VISA_DOCS", "PRESENT_ITINERARY", "visa documents collected", "tool_success"),
+        Edge("PRESENT_ITINERARY", "PROCESS_BOOKING", "itinerary selected", "always"),
+        Edge("PROCESS_BOOKING", "PAYMENT_PROCESSING", "booking confirmed", "tool_success"),
+        Edge("PAYMENT_PROCESSING", "LOYALTY_UPGRADE", "loyalty tier upgrade offered", "tool_success", optional=True, priority=1),
+        Edge("PAYMENT_PROCESSING", "ISSUE_DOCUMENTS", "payment complete", "always"),
+        Edge("LOYALTY_UPGRADE", "ISSUE_DOCUMENTS", "loyalty upgrade processed", "tool_success"),
+        Edge("ISSUE_DOCUMENTS", "CONFIRM_DETAILS", "documents issued", "tool_success"),
+        Edge("HANDLE_CHANGES", "CONFIRM_DETAILS", "reservation change applied", "tool_success"),
+        Edge("HANDLE_CHANGES", "FILE_CLAIM", "cancellation insurance claim required", "intent_match", optional=True, priority=1),
+        Edge("DISRUPTION_HANDLING", "REBOOK_FLIGHTS", "rebooking required", "tool_success"),
+        Edge("DISRUPTION_HANDLING", "FILE_CLAIM", "disruption insurance claim required", "intent_match", optional=True, priority=1),
+        Edge("REBOOK_FLIGHTS", "CONFIRM_DETAILS", "rebooking complete", "tool_success"),
+        Edge("FILE_CLAIM", "CONFIRM_DETAILS", "insurance claim filed", "tool_success"),
+        Edge("CONFIRM_DETAILS", "RESOLVE", "details confirmed by traveler", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "loyalty upgrade or points redemption accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "flight_search": "service",
+        "hotel_booking": "service",
+        "car_rental": "service",
+        "reservation_change": "service",
+        "cancellation": "service",
+        "loyalty_redemption": "upsell_promo",
+        "insurance_claim": "service",
+        "visa_inquiry": "service",
+        "checkin_help": "service",
     },
 )
 
@@ -771,40 +1085,48 @@ ECOMMERCE = DomainSpec(
             "product_id": {"type": "string"},
         }, ["product_id"]),
     ),
-    state_templates=(
-        "GREETING", "UNDERSTAND_NEEDS", "SEARCH_CATALOG", "CHECK_AVAILABILITY",
-        "APPLY_PROMOTIONS", "PROCESS_ORDER", "CONFIRM_PURCHASE",
-        "ARRANGE_DELIVERY", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "product_search", "stock_check", "coupon_application",
         "price_match_request", "recommendation", "backorder_inquiry",
         "bundle_promotion",
     ),
     entity_slots=("product_id", "coupon_code", "store_id", "order_id"),
-    state_tools={
-        "GREETING": (),
-        "UNDERSTAND_NEEDS": ("recommend_products",),
-        "SEARCH_CATALOG": ("search_products",),
-        "CHECK_AVAILABILITY": ("check_stock", "check_backorder"),
-        "APPLY_PROMOTIONS": ("apply_coupon", "price_match"),
-        "PROCESS_ORDER": (),
-        "CONFIRM_PURCHASE": (),
-        "ARRANGE_DELIVERY": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the shopper and ask what they're looking for.",
-        "UNDERSTAND_NEEDS": "Clarify the shopper's needs and suggest relevant products.",
-        "SEARCH_CATALOG": "Search the catalog for matching products.",
-        "CHECK_AVAILABILITY": "Check stock or back-order status for the chosen item.",
-        "APPLY_PROMOTIONS": "Apply coupons or a price match if eligible.",
-        "PROCESS_ORDER": "Place the order for the shopper.",
-        "CONFIRM_PURCHASE": "Summarise the purchase and ask the shopper to confirm.",
-        "ARRANGE_DELIVERY": "Arrange delivery details for the order.",
-        "RESOLVE": "Confirm the shopping request is resolved.",
-        "TERMINAL": "Thank the shopper and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the shopper and ask what they're looking for.", kind="initial"),
+        StateNode("UNDERSTAND_NEEDS", "Clarify the shopper's needs and suggest relevant products.", tools=("recommend_products",)),
+        StateNode("SEARCH_CATALOG", "Search the catalog for matching products.", tools=("search_products",)),
+        StateNode("CHECK_AVAILABILITY", "Check stock or back-order status for the chosen item.", tools=("check_stock", "check_backorder")),
+        StateNode("APPLY_PROMOTIONS", "Apply coupons or a price match if eligible.", tools=("apply_coupon", "price_match")),
+        StateNode("PROCESS_ORDER", "Place the order for the shopper."),
+        StateNode("CONFIRM_PURCHASE", "Summarise the purchase and ask the shopper to confirm."),
+        StateNode("ARRANGE_DELIVERY", "Arrange delivery details for the order."),
+        StateNode("RESOLVE", "Confirm the shopping request is resolved."),
+        StateNode("TERMINAL", "Thank the shopper and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "UNDERSTAND_NEEDS", "proceed to needs clarification", "always"),
+        Edge("UNDERSTAND_NEEDS", "SEARCH_CATALOG", "needs clarified, searching", "tool_success"),
+        Edge("SEARCH_CATALOG", "CHECK_AVAILABILITY", "products found", "tool_success"),
+        Edge("CHECK_AVAILABILITY", "PROCESS_ORDER", "item available, placing order", "tool_success"),
+        Edge("CHECK_AVAILABILITY", "APPLY_PROMOTIONS", "promotion code available", "slot_present", optional=True, priority=1),
+        Edge("APPLY_PROMOTIONS", "PROCESS_ORDER", "promotion applied", "tool_success"),
+        Edge("PROCESS_ORDER", "CONFIRM_PURCHASE", "order placed", "always"),
+        Edge("PROCESS_ORDER", "ARRANGE_DELIVERY", "custom delivery required", "intent_match", optional=True, priority=1),
+        Edge("ARRANGE_DELIVERY", "CONFIRM_PURCHASE", "delivery arranged", "always"),
+        Edge("CONFIRM_PURCHASE", "RESOLVE", "purchase confirmed", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "bundle promotion accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "product_search": "service",
+        "stock_check": "service",
+        "coupon_application": "service",
+        "price_match_request": "service",
+        "recommendation": "upsell_promo",
+        "backorder_inquiry": "service",
+        "bundle_promotion": "upsell_promo",
     },
 )
 
@@ -835,41 +1157,48 @@ GOVERNMENT = DomainSpec(
             "inquiry_type": {"type": "string", "enum": ["filing_status", "refund_status", "payment", "amendment"]},
         }, ["taxpayer_id", "tax_year", "inquiry_type"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_CITIZEN", "CHECK_ELIGIBILITY", "REVIEW_APPLICATION",
-        "PROCESS_REQUEST", "VERIFY_DOCUMENTS", "SUBMIT_FORM",
-        "SCHEDULE_VISIT", "ESCALATE_SUPERVISOR", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "benefit_inquiry", "application_status", "complaint_filing",
         "document_verification", "appointment_scheduling", "tax_inquiry",
     ),
     entity_slots=("citizen_id", "application_id", "document_number", "taxpayer_id"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_CITIZEN": (),
-        "CHECK_ELIGIBILITY": ("check_benefit_eligibility",),
-        "REVIEW_APPLICATION": ("check_application_status",),
-        "PROCESS_REQUEST": ("file_complaint", "submit_tax_inquiry"),
-        "VERIFY_DOCUMENTS": ("verify_document",),
-        "SUBMIT_FORM": ("submit_tax_inquiry",),
-        "SCHEDULE_VISIT": ("schedule_appointment",),
-        "ESCALATE_SUPERVISOR": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the citizen and ask which public service they need.",
-        "VERIFY_CITIZEN": "Verify the citizen's identity.",
-        "CHECK_ELIGIBILITY": "Check eligibility for the requested benefit.",
-        "REVIEW_APPLICATION": "Review the status of the citizen's application.",
-        "PROCESS_REQUEST": "Process the complaint or tax inquiry.",
-        "VERIFY_DOCUMENTS": "Verify the authenticity of submitted documents.",
-        "SUBMIT_FORM": "Submit the required form on the citizen's behalf.",
-        "SCHEDULE_VISIT": "Schedule an in-person office appointment.",
-        "ESCALATE_SUPERVISOR": "Escalate complex cases to a supervisor.",
-        "RESOLVE": "Confirm the citizen's request is resolved.",
-        "TERMINAL": "Thank the citizen and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the citizen and ask which public service they need.", kind="initial"),
+        StateNode("VERIFY_CITIZEN", "Verify the citizen's identity."),
+        StateNode("CHECK_ELIGIBILITY", "Check eligibility for the requested benefit.", tools=("check_benefit_eligibility",)),
+        StateNode("REVIEW_APPLICATION", "Review the status of the citizen's application.", tools=("check_application_status",)),
+        StateNode("PROCESS_REQUEST", "Process the complaint or tax inquiry.", tools=("file_complaint", "submit_tax_inquiry")),
+        StateNode("VERIFY_DOCUMENTS", "Verify the authenticity of submitted documents.", tools=("verify_document",)),
+        StateNode("SUBMIT_FORM", "Submit the required form on the citizen's behalf.", tools=("submit_tax_inquiry",)),
+        StateNode("SCHEDULE_VISIT", "Schedule an in-person office appointment.", tools=("schedule_appointment",)),
+        StateNode("ESCALATE_SUPERVISOR", "Escalate complex cases to a supervisor."),
+        StateNode("RESOLVE", "Confirm the citizen's request is resolved."),
+        StateNode("TERMINAL", "Thank the citizen and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_CITIZEN", "proceed to citizen verification", "always"),
+        Edge("VERIFY_CITIZEN", "CHECK_ELIGIBILITY", "identity verified", "always"),
+        Edge("CHECK_ELIGIBILITY", "REVIEW_APPLICATION", "eligibility checked", "tool_success"),
+        Edge("CHECK_ELIGIBILITY", "VERIFY_DOCUMENTS", "documents required", "slot_present", optional=True, priority=1),
+        Edge("VERIFY_DOCUMENTS", "SUBMIT_FORM", "documents verified", "tool_success"),
+        Edge("SUBMIT_FORM", "RESOLVE", "form submitted", "tool_success"),
+        Edge("REVIEW_APPLICATION", "PROCESS_REQUEST", "application reviewed, processing request", "tool_success"),
+        Edge("REVIEW_APPLICATION", "SCHEDULE_VISIT", "in-person visit required", "intent_match", optional=True, priority=1),
+        Edge("PROCESS_REQUEST", "RESOLVE", "request processed", "tool_success"),
+        Edge("PROCESS_REQUEST", "ESCALATE_SUPERVISOR", "complex case, escalating", "tool_error", optional=True, priority=1),
+        Edge("SCHEDULE_VISIT", "RESOLVE", "visit scheduled", "tool_success"),
+        Edge("ESCALATE_SUPERVISOR", "RESOLVE", "escalated to supervisor", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "benefit_inquiry": "service",
+        "application_status": "service",
+        "complaint_filing": "service",
+        "document_verification": "service",
+        "appointment_scheduling": "service",
+        "tax_inquiry": "service",
     },
 )
 
@@ -912,11 +1241,6 @@ INSURANCE = DomainSpec(
             "doc_type": {"type": "string", "enum": ["police_report", "medical_record", "repair_estimate", "photo"]},
         }, ["claim_id", "doc_type"]),
     ),
-    state_templates=(
-        "GREETING", "VERIFY_POLICYHOLDER", "REVIEW_POLICY", "CLAIM_INTAKE",
-        "ASSESS_COVERAGE", "REQUEST_DOCUMENTATION", "EVALUATE_CLAIM",
-        "APPROVE_OR_DENY", "PROCESS_PAYOUT", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "file_claim", "check_claim_status", "update_beneficiary",
         "policy_verification", "cancel_policy",
@@ -924,31 +1248,58 @@ INSURANCE = DomainSpec(
     ),
     entity_slots=("policy_id", "claim_id", "policyholder_id", "coverage_type",
                   "incident_date", "vin", "beneficiary"),
-    state_tools={
-        "GREETING": (),
-        "VERIFY_POLICYHOLDER": ("verify_policy",),
-        "REVIEW_POLICY": ("update_policy", "renew_policy", "cancel_policy", "quote_premium"),
-        "CLAIM_INTAKE": ("file_claim",),
-        "ASSESS_COVERAGE": ("check_claim_status",),
-        "REQUEST_DOCUMENTATION": ("request_claim_documents",),
-        "EVALUATE_CLAIM": ("check_claim_status",),
-        "APPROVE_OR_DENY": (),
-        "PROCESS_PAYOUT": (),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the policyholder and ask how you can help.",
-        "VERIFY_POLICYHOLDER": "Verify the policyholder and active coverage.",
-        "REVIEW_POLICY": "Review the policy, including any updates, renewals, or quotes.",
-        "CLAIM_INTAKE": "Take down the details of the new claim.",
-        "ASSESS_COVERAGE": "Assess coverage and current claim status.",
-        "REQUEST_DOCUMENTATION": "Request supporting documents for the claim.",
-        "EVALUATE_CLAIM": "Evaluate the claim against the policy terms.",
-        "APPROVE_OR_DENY": "Decide whether to approve or deny the claim.",
-        "PROCESS_PAYOUT": "Process the approved claim payout.",
-        "RESOLVE": "Confirm the insurance request is resolved.",
-        "TERMINAL": "Thank the policyholder and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the policyholder and ask how you can help with their insurance needs.", kind="initial"),
+        StateNode("VERIFY_POLICYHOLDER", "Verify the policyholder's identity and confirm active coverage.", tools=("verify_policy",)),
+        StateNode("REVIEW_POLICY", "Review the policy details, including coverage levels and any pending renewals.", tools=("update_policy", "renew_policy", "cancel_policy", "quote_premium")),
+        StateNode("AMEND_POLICY", "Apply a policy amendment such as beneficiary update or coverage level change.", tools=("update_policy",)),
+        StateNode("CLAIM_INTAKE", "Take down the details of the new claim and file it.", tools=("file_claim",)),
+        StateNode("ASSESS_COVERAGE", "Assess whether the incident is covered and check the current claim status.", tools=("check_claim_status",)),
+        StateNode("REQUEST_DOCUMENTATION", "Request supporting documents required for the claim evaluation.", tools=("request_claim_documents",)),
+        StateNode("EVALUATE_CLAIM", "Evaluate the submitted claim against the policy terms and documentation.", tools=("check_claim_status",)),
+        StateNode("APPROVE_OR_DENY", "Determine whether to approve or deny the claim and record the decision."),
+        StateNode("APPEAL_CLAIM", "Handle a formal appeal from the policyholder against a denied claim."),
+        StateNode("NOTIFY_OUTCOME", "Notify the policyholder of the claim decision and any next steps."),
+        StateNode("PROCESS_PAYOUT", "Process the approved claim payout to the policyholder."),
+        StateNode("BUNDLE_OFFER", "Present a bundle coverage offer to the policyholder.", tools=("quote_premium",)),
+        StateNode("CONFIRM_SETTLEMENT", "Confirm the settlement amount and payment method with the policyholder."),
+        StateNode("RESOLVE", "Confirm the insurance request is fully resolved."),
+        StateNode("TERMINAL", "Thank the policyholder and close the insurance conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "VERIFY_POLICYHOLDER", "proceed to policyholder verification", "always"),
+        Edge("VERIFY_POLICYHOLDER", "REVIEW_POLICY", "policyholder verified", "tool_success"),
+        Edge("REVIEW_POLICY", "CLAIM_INTAKE", "new claim to file", "tool_success"),
+        Edge("REVIEW_POLICY", "AMEND_POLICY", "policy amendment requested", "intent_match", optional=True, priority=1),
+        Edge("REVIEW_POLICY", "BUNDLE_OFFER", "bundle coverage offer presented", "intent_match", optional=True, priority=2),
+        Edge("AMEND_POLICY", "NOTIFY_OUTCOME", "policy amendment applied", "tool_success"),
+        Edge("CLAIM_INTAKE", "ASSESS_COVERAGE", "claim filed, assessing coverage", "tool_success"),
+        Edge("ASSESS_COVERAGE", "REQUEST_DOCUMENTATION", "documents required for evaluation", "tool_success"),
+        Edge("ASSESS_COVERAGE", "APPROVE_OR_DENY", "coverage assessed, no additional docs needed", "always", optional=True, priority=1),
+        Edge("REQUEST_DOCUMENTATION", "EVALUATE_CLAIM", "documents received", "tool_success"),
+        Edge("EVALUATE_CLAIM", "APPROVE_OR_DENY", "evaluation complete", "tool_success"),
+        Edge("APPROVE_OR_DENY", "PROCESS_PAYOUT", "claim approved", "always"),
+        Edge("APPROVE_OR_DENY", "APPEAL_CLAIM", "claim denied, appeal filed", "intent_match", optional=True, priority=1),
+        Edge("APPEAL_CLAIM", "NOTIFY_OUTCOME", "appeal decision reached", "always"),
+        Edge("PROCESS_PAYOUT", "CONFIRM_SETTLEMENT", "payout ready, confirming settlement", "always"),
+        Edge("CONFIRM_SETTLEMENT", "NOTIFY_OUTCOME", "settlement confirmed by policyholder", "always"),
+        Edge("BUNDLE_OFFER", "NOTIFY_OUTCOME", "bundle offer presented", "tool_success"),
+        Edge("NOTIFY_OUTCOME", "RESOLVE", "policyholder notified", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "coverage upgrade or renewal accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "file_claim": "service",
+        "check_claim_status": "service",
+        "update_beneficiary": "service",
+        "policy_verification": "service",
+        "cancel_policy": "service",
+        "quote_request": "service",
+        "coverage_upgrade": "upsell_promo",
+        "policy_renewal": "upsell_promo",
+        "bundle_offer": "upsell_promo",
     },
 )
 
@@ -980,39 +1331,47 @@ COMPLAINTS = DomainSpec(
             "customer_satisfied": {"type": "boolean"},
         }, ["case_id", "resolution_summary"]),
     ),
-    state_templates=(
-        "GREETING", "LISTEN_COMPLAINT", "ACKNOWLEDGE_ISSUE", "INVESTIGATE",
-        "OFFER_RESOLUTION", "ESCALATE_SUPERVISOR", "APPLY_COMPENSATION",
-        "VERIFY_SATISFACTION", "CLOSE_CASE", "TERMINAL",
-    ),
     intents=(
         "complaint_registration", "escalation_request", "service_recovery",
         "sla_inquiry", "case_followup", "case_closure", "goodwill_upgrade_offer",
     ),
     entity_slots=("case_id", "customer_id", "severity", "gesture_type"),
-    state_tools={
-        "GREETING": (),
-        "LISTEN_COMPLAINT": ("register_complaint",),
-        "ACKNOWLEDGE_ISSUE": (),
-        "INVESTIGATE": ("check_sla_status",),
-        "OFFER_RESOLUTION": ("offer_goodwill",),
-        "ESCALATE_SUPERVISOR": ("escalate_to_supervisor",),
-        "APPLY_COMPENSATION": ("offer_goodwill",),
-        "VERIFY_SATISFACTION": (),
-        "CLOSE_CASE": ("close_case",),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and invite them to share their concern.",
-        "LISTEN_COMPLAINT": "Listen to the complaint and register it formally.",
-        "ACKNOWLEDGE_ISSUE": "Acknowledge the issue and empathise with the customer.",
-        "INVESTIGATE": "Investigate the case and check SLA status.",
-        "OFFER_RESOLUTION": "Offer a resolution or goodwill gesture.",
-        "ESCALATE_SUPERVISOR": "Escalate the case to a supervisor when needed.",
-        "APPLY_COMPENSATION": "Apply the agreed compensation.",
-        "VERIFY_SATISFACTION": "Confirm the customer is satisfied with the resolution.",
-        "CLOSE_CASE": "Close the complaint case with a resolution summary.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and invite them to share their concern.", kind="initial"),
+        StateNode("LISTEN_COMPLAINT", "Listen to the complaint and register it formally.", tools=("register_complaint",)),
+        StateNode("ACKNOWLEDGE_ISSUE", "Acknowledge the issue and empathise with the customer."),
+        StateNode("INVESTIGATE", "Investigate the case and check SLA status.", tools=("check_sla_status",)),
+        StateNode("OFFER_RESOLUTION", "Offer a resolution or goodwill gesture.", tools=("offer_goodwill",)),
+        StateNode("ESCALATE_SUPERVISOR", "Escalate the case to a supervisor when needed.", tools=("escalate_to_supervisor",)),
+        StateNode("APPLY_COMPENSATION", "Apply the agreed compensation.", tools=("offer_goodwill",)),
+        StateNode("VERIFY_SATISFACTION", "Confirm the customer is satisfied with the resolution."),
+        StateNode("CLOSE_CASE", "Close the complaint case with a resolution summary.", tools=("close_case",)),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "LISTEN_COMPLAINT", "proceed to complaint registration", "always"),
+        Edge("LISTEN_COMPLAINT", "ACKNOWLEDGE_ISSUE", "complaint registered", "tool_success"),
+        Edge("ACKNOWLEDGE_ISSUE", "INVESTIGATE", "issue acknowledged, investigating", "always"),
+        Edge("INVESTIGATE", "OFFER_RESOLUTION", "investigation complete", "tool_success"),
+        Edge("INVESTIGATE", "ESCALATE_SUPERVISOR", "SLA breach or high severity", "tool_success", optional=True, priority=1),
+        Edge("OFFER_RESOLUTION", "VERIFY_SATISFACTION", "resolution offered", "tool_success"),
+        Edge("OFFER_RESOLUTION", "APPLY_COMPENSATION", "compensation agreed", "intent_match", optional=True, priority=1),
+        Edge("ESCALATE_SUPERVISOR", "OFFER_RESOLUTION", "supervisor decision reached", "tool_success"),
+        Edge("APPLY_COMPENSATION", "VERIFY_SATISFACTION", "compensation applied", "tool_success"),
+        Edge("VERIFY_SATISFACTION", "CLOSE_CASE", "customer satisfied", "always"),
+        Edge("CLOSE_CASE", "TERMINAL", "case closed", "tool_success"),
+        Edge("CLOSE_CASE", "TERMINAL", "goodwill upgrade accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "complaint_registration": "service",
+        "escalation_request": "service",
+        "service_recovery": "service",
+        "sla_inquiry": "service",
+        "case_followup": "service",
+        "case_closure": "service",
+        "goodwill_upgrade_offer": "upsell_promo",
     },
 )
 
@@ -1043,40 +1402,48 @@ SCHEDULING = DomainSpec(
             "appointment_id": {"type": "string"}, "channel": {"type": "string", "enum": ["sms", "email", "push"]},
         }, ["appointment_id"]),
     ),
-    state_templates=(
-        "GREETING", "IDENTIFY_SERVICE", "CHECK_AVAILABILITY", "SELECT_SLOT",
-        "CONFIRM_BOOKING", "SEND_CONFIRMATION", "HANDLE_RESCHEDULE",
-        "MANAGE_WAITLIST", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "book_appointment", "reschedule", "cancel_appointment",
         "check_availability", "waitlist_request", "reminder_request",
         "premium_slot_offer",
     ),
     entity_slots=("appointment_id", "service_type", "date", "time", "location"),
-    state_tools={
-        "GREETING": (),
-        "IDENTIFY_SERVICE": (),
-        "CHECK_AVAILABILITY": ("check_availability",),
-        "SELECT_SLOT": ("book_appointment",),
-        "CONFIRM_BOOKING": ("book_appointment",),
-        "SEND_CONFIRMATION": ("send_reminder",),
-        "HANDLE_RESCHEDULE": ("reschedule_appointment", "cancel_appointment"),
-        "MANAGE_WAITLIST": ("join_waitlist",),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and ask what they'd like to schedule.",
-        "IDENTIFY_SERVICE": "Identify the service the customer wants to book.",
-        "CHECK_AVAILABILITY": "Check available time slots for the service.",
-        "SELECT_SLOT": "Help the customer select a slot and book it.",
-        "CONFIRM_BOOKING": "Confirm the booking details with the customer.",
-        "SEND_CONFIRMATION": "Send a confirmation or reminder.",
-        "HANDLE_RESCHEDULE": "Reschedule or cancel the appointment as requested.",
-        "MANAGE_WAITLIST": "Add the customer to the waitlist if no slot is open.",
-        "RESOLVE": "Confirm the scheduling request is resolved.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and ask what they'd like to schedule.", kind="initial"),
+        StateNode("IDENTIFY_SERVICE", "Identify the service the customer wants to book."),
+        StateNode("CHECK_AVAILABILITY", "Check available time slots for the service.", tools=("check_availability",)),
+        StateNode("SELECT_SLOT", "Help the customer select a slot and book it.", tools=("book_appointment",)),
+        StateNode("CONFIRM_BOOKING", "Confirm the booking details with the customer.", tools=("book_appointment",)),
+        StateNode("SEND_CONFIRMATION", "Send a confirmation or reminder.", tools=("send_reminder",)),
+        StateNode("HANDLE_RESCHEDULE", "Reschedule or cancel the appointment as requested.", tools=("reschedule_appointment", "cancel_appointment")),
+        StateNode("MANAGE_WAITLIST", "Add the customer to the waitlist if no slot is open.", tools=("join_waitlist",)),
+        StateNode("RESOLVE", "Confirm the scheduling request is resolved."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "IDENTIFY_SERVICE", "proceed to service identification", "always"),
+        Edge("IDENTIFY_SERVICE", "CHECK_AVAILABILITY", "service identified", "always"),
+        Edge("CHECK_AVAILABILITY", "SELECT_SLOT", "slots available, selecting", "tool_success"),
+        Edge("CHECK_AVAILABILITY", "MANAGE_WAITLIST", "no slots available, joining waitlist", "tool_error", optional=True, priority=1),
+        Edge("SELECT_SLOT", "CONFIRM_BOOKING", "slot booked", "tool_success"),
+        Edge("CONFIRM_BOOKING", "SEND_CONFIRMATION", "booking confirmed", "tool_success"),
+        Edge("CONFIRM_BOOKING", "HANDLE_RESCHEDULE", "reschedule or cancellation requested", "intent_match", optional=True, priority=1),
+        Edge("SEND_CONFIRMATION", "RESOLVE", "confirmation sent", "tool_success"),
+        Edge("HANDLE_RESCHEDULE", "SEND_CONFIRMATION", "reschedule applied", "tool_success"),
+        Edge("MANAGE_WAITLIST", "RESOLVE", "added to waitlist", "tool_success"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "premium slot upgrade accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "book_appointment": "service",
+        "reschedule": "service",
+        "cancel_appointment": "service",
+        "check_availability": "service",
+        "waitlist_request": "service",
+        "reminder_request": "service",
+        "premium_slot_offer": "upsell_promo",
     },
 )
 
@@ -1107,41 +1474,50 @@ SALES = DomainSpec(
             "quote_id": {"type": "string"}, "recipient_email": {"type": "string"},
         }, ["quote_id", "recipient_email"]),
     ),
-    state_templates=(
-        "GREETING", "QUALIFY_PROSPECT", "IDENTIFY_NEEDS", "PRESENT_SOLUTION",
-        "HANDLE_OBJECTIONS", "CREATE_PROPOSAL", "NEGOTIATE_TERMS",
-        "CLOSE_DEAL", "FOLLOW_UP", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "sales_inquiry", "demo_request", "quote_request", "contract_renewal",
         "upsell_offer", "proposal_request", "pricing_negotiation",
     ),
     entity_slots=("contact_name", "company", "contract_id", "quote_id", "product"),
-    state_tools={
-        "GREETING": (),
-        "QUALIFY_PROSPECT": ("qualify_lead",),
-        "IDENTIFY_NEEDS": (),
-        "PRESENT_SOLUTION": ("schedule_demo",),
-        "HANDLE_OBJECTIONS": (),
-        "CREATE_PROPOSAL": ("create_quote", "send_proposal"),
-        "NEGOTIATE_TERMS": ("process_upsell",),
-        "CLOSE_DEAL": ("check_contract_renewal",),
-        "FOLLOW_UP": ("send_proposal",),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the prospect and open the conversation.",
-        "QUALIFY_PROSPECT": "Qualify the lead's budget, timeline, and fit.",
-        "IDENTIFY_NEEDS": "Identify the prospect's needs and pain points.",
-        "PRESENT_SOLUTION": "Present the solution, offering a demo if useful.",
-        "HANDLE_OBJECTIONS": "Address the prospect's objections.",
-        "CREATE_PROPOSAL": "Create a quote and send a proposal.",
-        "NEGOTIATE_TERMS": "Negotiate terms, including any upsell.",
-        "CLOSE_DEAL": "Close the deal and check renewal terms.",
-        "FOLLOW_UP": "Follow up with the prospect after the meeting.",
-        "RESOLVE": "Confirm next steps are agreed.",
-        "TERMINAL": "Thank the prospect and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the prospect and open the conversation.", kind="initial"),
+        StateNode("QUALIFY_PROSPECT", "Qualify the lead's budget, timeline, and fit.", tools=("qualify_lead",)),
+        StateNode("IDENTIFY_NEEDS", "Identify the prospect's needs and pain points."),
+        StateNode("PRESENT_SOLUTION", "Present the solution, offering a demo if useful.", tools=("schedule_demo",)),
+        StateNode("HANDLE_OBJECTIONS", "Address the prospect's objections."),
+        StateNode("CREATE_PROPOSAL", "Create a quote and send a proposal.", tools=("create_quote", "send_proposal")),
+        StateNode("NEGOTIATE_TERMS", "Negotiate terms, including any upsell.", tools=("process_upsell",)),
+        StateNode("CLOSE_DEAL", "Close the deal and check renewal terms.", tools=("check_contract_renewal",)),
+        StateNode("FOLLOW_UP", "Follow up with the prospect after the meeting.", tools=("send_proposal",)),
+        StateNode("RESOLVE", "Confirm next steps are agreed."),
+        StateNode("TERMINAL", "Thank the prospect and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "QUALIFY_PROSPECT", "proceed to lead qualification", "always"),
+        Edge("QUALIFY_PROSPECT", "IDENTIFY_NEEDS", "lead qualified", "tool_success"),
+        Edge("IDENTIFY_NEEDS", "PRESENT_SOLUTION", "needs identified", "always"),
+        Edge("PRESENT_SOLUTION", "HANDLE_OBJECTIONS", "solution presented", "tool_success"),
+        Edge("PRESENT_SOLUTION", "NEGOTIATE_TERMS", "price negotiation needed", "intent_match", optional=True, priority=1),
+        Edge("HANDLE_OBJECTIONS", "CREATE_PROPOSAL", "objections addressed", "always"),
+        Edge("NEGOTIATE_TERMS", "CREATE_PROPOSAL", "terms negotiated", "tool_success"),
+        Edge("CREATE_PROPOSAL", "CLOSE_DEAL", "proposal sent", "tool_success"),
+        Edge("CREATE_PROPOSAL", "FOLLOW_UP", "follow-up scheduled", "intent_match", optional=True, priority=1),
+        Edge("CLOSE_DEAL", "RESOLVE", "deal closed", "tool_success"),
+        Edge("CLOSE_DEAL", "FOLLOW_UP", "deal needs follow-up", "intent_match", optional=True, priority=1),
+        Edge("FOLLOW_UP", "RESOLVE", "follow-up complete", "tool_success"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+        Edge("RESOLVE", "TERMINAL", "upsell or contract renewal accepted", "intent_match", optional=True, priority=1, intent_category="upsell_promo"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "sales_inquiry": "service",
+        "demo_request": "service",
+        "quote_request": "upsell_promo",
+        "contract_renewal": "upsell_promo",
+        "upsell_offer": "upsell_promo",
+        "proposal_request": "service",
+        "pricing_negotiation": "upsell_promo",
     },
 )
 
@@ -1166,34 +1542,39 @@ SURVEYS = DomainSpec(
             "region": {"type": "string"},
         }, ["category", "description"]),
     ),
-    state_templates=(
-        "GREETING", "EXPLAIN_SURVEY", "COLLECT_RATING", "COLLECT_COMMENTS",
-        "THANK_CUSTOMER", "ESCALATE_LOW_SCORE", "RESOLVE", "TERMINAL",
-    ),
     intents=(
         "csat_survey", "nps_survey", "product_feedback",
         "service_feedback", "complaint_trend_report",
     ),
     entity_slots=("interaction_id", "score", "feedback_type", "sentiment"),
-    state_tools={
-        "GREETING": (),
-        "EXPLAIN_SURVEY": (),
-        "COLLECT_RATING": ("collect_csat", "collect_nps"),
-        "COLLECT_COMMENTS": ("submit_feedback",),
-        "THANK_CUSTOMER": (),
-        "ESCALATE_LOW_SCORE": ("log_complaint_trend",),
-        "RESOLVE": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "GREETING": "Greet the customer and introduce the survey.",
-        "EXPLAIN_SURVEY": "Explain the survey's purpose and length.",
-        "COLLECT_RATING": "Collect the customer's satisfaction or NPS rating.",
-        "COLLECT_COMMENTS": "Collect any additional comments or feedback.",
-        "THANK_CUSTOMER": "Thank the customer for their feedback.",
-        "ESCALATE_LOW_SCORE": "Log low scores for trend analysis and follow-up.",
-        "RESOLVE": "Confirm the survey is complete.",
-        "TERMINAL": "Thank the customer and close the conversation.",
+    states=(
+        StateNode("GREETING", "Greet the customer and introduce the survey.", kind="initial"),
+        StateNode("EXPLAIN_SURVEY", "Explain the survey's purpose and length."),
+        StateNode("COLLECT_RATING", "Collect the customer's satisfaction or NPS rating.", tools=("collect_csat", "collect_nps")),
+        StateNode("COLLECT_COMMENTS", "Collect any additional comments or feedback.", tools=("submit_feedback",)),
+        StateNode("THANK_CUSTOMER", "Thank the customer for their feedback."),
+        StateNode("ESCALATE_LOW_SCORE", "Log low scores for trend analysis and follow-up.", tools=("log_complaint_trend",)),
+        StateNode("RESOLVE", "Confirm the survey is complete."),
+        StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
+    ),
+    edges=(
+        Edge("GREETING", "EXPLAIN_SURVEY", "proceed to survey explanation", "always"),
+        Edge("EXPLAIN_SURVEY", "COLLECT_RATING", "survey explained", "always"),
+        Edge("COLLECT_RATING", "COLLECT_COMMENTS", "rating collected", "tool_success"),
+        Edge("COLLECT_RATING", "ESCALATE_LOW_SCORE", "critical low score detected", "intent_match", optional=True, priority=1),
+        Edge("COLLECT_COMMENTS", "THANK_CUSTOMER", "comments collected", "tool_success"),
+        Edge("ESCALATE_LOW_SCORE", "RESOLVE", "low score logged", "tool_success"),
+        Edge("THANK_CUSTOMER", "RESOLVE", "customer thanked", "always"),
+        Edge("RESOLVE", "TERMINAL", "conversation complete", "always"),
+    ),
+    initial="GREETING",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "csat_survey": "service",
+        "nps_survey": "service",
+        "product_feedback": "service",
+        "service_feedback": "service",
+        "complaint_trend_report": "service",
     },
 )
 
@@ -1222,40 +1603,45 @@ EMERGENCY = DomainSpec(
             "system_name": {"type": "string"}, "failover_type": {"type": "string", "enum": ["hot", "warm", "cold"]},
         }, ["system_name"]),
     ),
-    state_templates=(
-        "ALERT_RECEIVED", "ASSESS_SEVERITY", "DISPATCH_RESPONSE",
-        "COORDINATE_TEAMS", "NOTIFY_STAKEHOLDERS", "MONITOR_STATUS",
-        "ACTIVATE_BACKUP", "CONFIRM_RESOLUTION", "POST_INCIDENT_REVIEW",
-        "TERMINAL",
-    ),
     intents=(
         "emergency_dispatch", "incident_report", "safety_check",
         "mass_notification", "backup_activation", "status_update",
     ),
     entity_slots=("location", "emergency_type", "severity", "incident_type"),
-    state_tools={
-        "ALERT_RECEIVED": ("report_incident",),
-        "ASSESS_SEVERITY": ("check_safety_status",),
-        "DISPATCH_RESPONSE": ("dispatch_emergency",),
-        "COORDINATE_TEAMS": (),
-        "NOTIFY_STAKEHOLDERS": ("send_mass_notification",),
-        "MONITOR_STATUS": ("check_safety_status",),
-        "ACTIVATE_BACKUP": ("activate_backup_systems",),
-        "CONFIRM_RESOLUTION": (),
-        "POST_INCIDENT_REVIEW": (),
-        "TERMINAL": (),
-    },
-    state_instructions={
-        "ALERT_RECEIVED": "Receive the alert and record the incident details.",
-        "ASSESS_SEVERITY": "Assess the severity and safety status.",
-        "DISPATCH_RESPONSE": "Dispatch the appropriate emergency response team.",
-        "COORDINATE_TEAMS": "Coordinate the responding teams.",
-        "NOTIFY_STAKEHOLDERS": "Send notifications to affected stakeholders.",
-        "MONITOR_STATUS": "Monitor the ongoing status of the incident.",
-        "ACTIVATE_BACKUP": "Activate backup or failover systems if required.",
-        "CONFIRM_RESOLUTION": "Confirm the incident is resolved.",
-        "POST_INCIDENT_REVIEW": "Conduct a post-incident review.",
-        "TERMINAL": "Close out the incident record.",
+    states=(
+        StateNode("ALERT_RECEIVED", "Receive the alert and record the incident details.", kind="initial", tools=("report_incident",)),
+        StateNode("ASSESS_SEVERITY", "Assess the severity and safety status.", tools=("check_safety_status",)),
+        StateNode("DISPATCH_RESPONSE", "Dispatch the appropriate emergency response team.", tools=("dispatch_emergency",)),
+        StateNode("COORDINATE_TEAMS", "Coordinate the responding teams."),
+        StateNode("NOTIFY_STAKEHOLDERS", "Send notifications to affected stakeholders.", tools=("send_mass_notification",)),
+        StateNode("MONITOR_STATUS", "Monitor the ongoing status of the incident.", tools=("check_safety_status",)),
+        StateNode("ACTIVATE_BACKUP", "Activate backup or failover systems if required.", tools=("activate_backup_systems",)),
+        StateNode("CONFIRM_RESOLUTION", "Confirm the incident is resolved."),
+        StateNode("POST_INCIDENT_REVIEW", "Conduct a post-incident review."),
+        StateNode("TERMINAL", "Close out the incident record.", kind="terminal"),
+    ),
+    edges=(
+        Edge("ALERT_RECEIVED", "ASSESS_SEVERITY", "incident recorded", "tool_success"),
+        Edge("ASSESS_SEVERITY", "DISPATCH_RESPONSE", "severity assessed, dispatching", "tool_success"),
+        Edge("DISPATCH_RESPONSE", "COORDINATE_TEAMS", "response dispatched", "tool_success"),
+        Edge("DISPATCH_RESPONSE", "ACTIVATE_BACKUP", "backup systems required", "intent_match", optional=True, priority=1),
+        Edge("ACTIVATE_BACKUP", "COORDINATE_TEAMS", "backup activated", "tool_success"),
+        Edge("COORDINATE_TEAMS", "NOTIFY_STAKEHOLDERS", "teams coordinated", "always"),
+        Edge("COORDINATE_TEAMS", "MONITOR_STATUS", "ongoing monitoring needed", "intent_match", optional=True, priority=1),
+        Edge("NOTIFY_STAKEHOLDERS", "CONFIRM_RESOLUTION", "stakeholders notified", "tool_success"),
+        Edge("MONITOR_STATUS", "CONFIRM_RESOLUTION", "situation stable", "tool_success"),
+        Edge("CONFIRM_RESOLUTION", "POST_INCIDENT_REVIEW", "incident confirmed resolved", "always"),
+        Edge("POST_INCIDENT_REVIEW", "TERMINAL", "review complete", "always"),
+    ),
+    initial="ALERT_RECEIVED",
+    terminals=("TERMINAL",),
+    intent_categories={
+        "emergency_dispatch": "service",
+        "incident_report": "service",
+        "safety_check": "service",
+        "mass_notification": "service",
+        "backup_activation": "service",
+        "status_update": "service",
     },
 )
 
@@ -1372,3 +1758,36 @@ INTENT_CATEGORY_TAXONOMY: dict[str, str] = {
 def classify_intent(intent: str) -> str:
     """Return the intent category ('service' or 'upsell_promo') for an intent name."""
     return INTENT_CATEGORY_TAXONOMY.get(intent, "service")
+
+
+# ---------------------------------------------------------------------------
+# Import-time validation for migrated domains
+# ---------------------------------------------------------------------------
+
+def _validate_all() -> None:
+    """Run validate_domain for all migrated domains at import time."""
+    for _d in [
+        ACCOUNT_MANAGEMENT,
+        BILLING_PAYMENTS,
+        ORDER_MANAGEMENT,
+        TECHNICAL_SUPPORT,
+        PRODUCT_INFO,
+        UTILITIES,
+        ECOMMERCE,
+        GOVERNMENT,
+        COMPLAINTS,
+        SCHEDULING,
+        SALES,
+        SURVEYS,
+        EMERGENCY,
+        # Newly migrated rich domains
+        BANKING,
+        INSURANCE,
+        HEALTHCARE,
+        TRAVEL,
+        TELECOM,
+    ]:
+        validate_domain(_d)
+
+
+_validate_all()

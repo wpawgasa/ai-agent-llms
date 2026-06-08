@@ -13,15 +13,17 @@ There is **no separate GRPO dataset** and **no separately generated held-out eva
 
 ### Complexity Levels
 
-Complexity controls structure only — domains are assigned separately (see [Domains](#domains)).
+| Level | States (subgraph) | Branches | Loops | Recovery | Eligible domains |
+|-------|-------------------|----------|-------|----------|------------------|
+| L1    | 3–4               | 0        | 0     | no       | all 18           |
+| L2    | 5–7               | 1        | 0     | no       | all 18           |
+| L3    | 8–12              | 2–3      | 0–1   | optional | all 18           |
+| L4    | 12–16             | 3–5      | 1     | yes      | ≥12-state domains|
+| L5    | 16–20             | all      | 1–2   | yes      | 5 expanded domains|
 
-| Level | States | Branching | Tools | Chain depth |
-|-------|--------|-----------|-------|-------------|
-| L1 | 3–4 | 1–2 | 1 | 0 |
-| L2 | 5–7 | 2–3 | 2 | 1 |
-| L3 | 8–12 | 3–5 | 4 | 2 |
-| L4 | 13–20 | 5–8 | 6 | 3 |
-| L5 | 21–30 | 8+ | 7 | 4 |
+> **Domain-level coupling:** `_select_domain` filters domains by canonical state count ≥ `target_path_len` minimum at runtime. L4 = domains with ≥12 canonical states (banking, insurance, healthcare, travel, telecom + any others expanded); L5 = the 5 expanded rich domains (≥16 states). This is a deliberate deviation from the original "domains fully decoupled from complexity" goal: strict decoupling requires cycling state names, which was the root cause of the duplicate-name defect.
+
+> **Self-loops in conversations:** graph-*edge* self-loops (src == dst) are forbidden in `DomainSpec` and enforced by `validate_domain`. However, the conversation walker emits turn-level `[STATE: X → X]` annotations when a state invokes a tool or handles a follow-up without transitioning. These message-level self-loops are legitimate and appear in GT.
 
 ### Domains
 
@@ -195,8 +197,8 @@ Every recipe writes JSONL where each line is one conversation sample. The schema
     ...
   ],
   "transitions": [
-    {"from": "GREETING",         "to": "VERIFY_PATIENT",     "condition": "proceed_from_greeting",       "priority": 0},
-    {"from": "CHECK_ELIGIBILITY","to": "SCHEDULE_SERVICE",    "condition": "branch_S3_to_S5",             "priority": 1},
+    {"from": "GREETING",         "to": "VERIFY_PATIENT",     "condition": "patient identifies self",      "priority": 0},
+    {"from": "CHECK_ELIGIBILITY","to": "SCHEDULE_SERVICE",    "condition": "eligibility confirmed",        "priority": 1},
     ...
   ],
   "initial":  "GREETING",

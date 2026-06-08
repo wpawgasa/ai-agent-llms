@@ -28,7 +28,7 @@ import structlog
 
 from llm_workflow_agents.data._teacher_client import call_teacher_model
 from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
-from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES, build_enriched_system_prompt
+from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
     TOOL_ERROR_RATE,
@@ -46,6 +46,25 @@ from llm_workflow_agents.data.domain_registry import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+def _find_transition_violations(
+    valid_edges: set[tuple[str, str]],
+    messages: list[dict[str, Any]],
+) -> list[str]:
+    """Return violation descriptions for [STATE: X→Y] annotations not in valid_edges."""
+    violations = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        ann = (msg.get("annotations") or {}).get("state_transition") or {}
+        src = ann.get("from")
+        dst = ann.get("to")
+        if src and dst and src != dst:  # skip in-state (X→X) annotations
+            if (src, dst) not in valid_edges:
+                violations.append(f"invalid transition [{src}→{dst}]")
+    return violations
+
 
 BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
     "default": {
@@ -109,8 +128,12 @@ class WorkflowTransition:
 
     from_state: str
     to_state: str
-    condition: str
+    condition: str          # legacy field; rendered from label at to_dict()
     priority: int = 0
+    label: str = ""         # authored human-readable label
+    trigger: str = "always" # one of _VALID_TRIGGERS
+    optional: bool = False
+    intent_category: str | None = None
 
 
 @dataclass
@@ -139,7 +162,7 @@ class WorkflowGraph:
                 {
                     "from": name_of.get(t.from_state, t.from_state),
                     "to": name_of.get(t.to_state, t.to_state),
-                    "condition": t.condition,
+                    "condition": t.label if t.label else t.condition,
                     "priority": t.priority,
                 }
                 for t in self.transitions
@@ -147,6 +170,313 @@ class WorkflowGraph:
             "initial": name_of.get(self.initial_state, self.initial_state),
             "terminal": [name_of.get(t, t) for t in self.terminal_states],
         }
+
+
+def select_subgraph(
+    domain: "DomainSpec",
+    spec: "ComplexitySpec",
+    rng: random.Random,
+    intent_category: str = "service",
+) -> WorkflowGraph:
+    """Build a semantically-valid subgraph of domain's canonical edge graph.
+
+    Algorithm:
+    1. Walk the spine (optional=False edges) from initial, reserving one slot for the
+       terminal so the total state count stays within target_path_len.
+    2. Add num_branches optional edges (+ their dst states if not yet included).
+    3. Add num_loops back-edges to earlier distinct states.
+    4. Add tool_error recovery arcs if include_recovery.
+    5. Add upsell arc when intent_category == 'upsell_promo' and domain has one.
+    """
+    # Build lookup structures
+    state_map = {s.name: s for s in domain.states}
+    spine_edges: dict[str, list] = {}
+    branch_edges: dict[str, list] = {}
+    for e in domain.edges:
+        if not e.optional:
+            spine_edges.setdefault(e.src, []).append(e)
+        else:
+            branch_edges.setdefault(e.src, []).append(e)
+
+    terminal_set = set(domain.terminals)
+
+    # Step 1: walk spine for target_len - 1 non-terminal states, then add terminal.
+    # The last slot is reserved for the terminal so total count == target_len.
+    target_len = rng.randint(*spec.target_path_len)
+    spine_states: list[str] = [domain.initial]
+    current = domain.initial
+
+    while len(spine_states) < target_len - 1 and current not in terminal_set:
+        candidates = spine_edges.get(current, [])
+        if not candidates:
+            break
+        nxt = candidates[0].dst
+        if nxt in set(spine_states):
+            break
+        spine_states.append(nxt)
+        current = nxt
+        if current in terminal_set:
+            break
+
+    # Ensure the last state is a terminal (may be a shortcut over intermediate states)
+    if spine_states[-1] not in terminal_set:
+        spine_states.append(domain.terminals[0])
+
+    included_names: set[str] = set(spine_states)
+    selected_states: list[str] = list(spine_states)
+
+    # Collect spine transitions; use a synthetic edge where we jumped over spine states
+    selected_transitions: list[WorkflowTransition] = []
+    for i in range(len(spine_states) - 1):
+        src, dst = spine_states[i], spine_states[i + 1]
+        edge = next(
+            (e for e in spine_edges.get(src, []) if e.dst == dst),
+            None,
+        )
+        if edge:
+            selected_transitions.append(WorkflowTransition(
+                from_state=src, to_state=dst,
+                condition=edge.label,
+                label=edge.label,
+                trigger=edge.trigger,
+                optional=False,
+                priority=0,
+            ))
+        else:
+            # Shortcut edge — jumped over intermediate spine states to reach terminal
+            selected_transitions.append(WorkflowTransition(
+                from_state=src, to_state=dst,
+                condition="proceed to resolution",
+                label="proceed to resolution",
+                trigger="always",
+                optional=False,
+                priority=0,
+            ))
+
+    # Step 2: add num_branches optional edges
+    num_branches_target = rng.randint(*spec.num_branches)
+    candidate_branch_edges = [
+        e for src in included_names
+        for e in branch_edges.get(src, [])
+        if e.intent_category != "upsell_promo"
+    ]
+    rng.shuffle(candidate_branch_edges)
+    branches_added = 0
+    for e in candidate_branch_edges:
+        if branches_added >= num_branches_target:
+            break
+        if e.dst not in included_names:
+            included_names.add(e.dst)
+            selected_states.append(e.dst)
+        selected_transitions.append(WorkflowTransition(
+            from_state=e.src, to_state=e.dst,
+            condition=e.label, label=e.label,
+            trigger=e.trigger, optional=True, priority=1,
+        ))
+        branches_added += 1
+
+    # Step 3: add num_loops back-edges
+    num_loops_target = rng.randint(*spec.num_loops)
+    loops_added = 0
+    all_loop_candidates = [
+        e for src in included_names
+        for e in branch_edges.get(src, [])
+        if e.dst in included_names
+        and e.dst != src
+        and e.src in selected_states
+        and selected_states.index(e.dst) < selected_states.index(e.src)
+    ]
+    rng.shuffle(all_loop_candidates)
+    for e in all_loop_candidates:
+        if loops_added >= num_loops_target:
+            break
+        if not any(t.from_state == e.src and t.to_state == e.dst for t in selected_transitions):
+            selected_transitions.append(WorkflowTransition(
+                from_state=e.src, to_state=e.dst,
+                condition=e.label, label=e.label,
+                trigger=e.trigger, optional=True, priority=1,
+            ))
+            loops_added += 1
+
+    # Step 4: recovery arcs
+    if spec.include_recovery:
+        recovery_candidates = [
+            e for src in included_names
+            for e in branch_edges.get(src, [])
+            if e.trigger == "tool_error" and e.dst in included_names
+        ]
+        for e in recovery_candidates:
+            if not any(t.from_state == e.src and t.trigger == "tool_error" for t in selected_transitions):
+                selected_transitions.append(WorkflowTransition(
+                    from_state=e.src, to_state=e.dst,
+                    condition=e.label, label=e.label,
+                    trigger=e.trigger, optional=True, priority=1,
+                ))
+
+    # Step 5: upsell arc
+    if intent_category == "upsell_promo":
+        upsell_candidates = [
+            e for src in included_names
+            for e in branch_edges.get(src, [])
+            if e.intent_category == "upsell_promo" and e.dst in included_names
+        ]
+        for e in upsell_candidates[:1]:
+            selected_transitions.append(WorkflowTransition(
+                from_state=e.src, to_state=e.dst,
+                condition=e.label, label=e.label,
+                trigger=e.trigger, optional=True, priority=1,
+                intent_category="upsell_promo",
+            ))
+
+    # Step 6: close the subgraph — every non-terminal state must have an outgoing edge.
+    # Branch destination states may lack outgoing edges if they weren't on the spine.
+    changed = True
+    while changed:
+        changed = False
+        states_with_out = {t.from_state for t in selected_transitions}
+        for name in list(selected_states):
+            if name in terminal_set or name in states_with_out:
+                continue
+            s_edges = spine_edges.get(name, [])
+            if s_edges:
+                e = s_edges[0]
+                if e.dst not in included_names:
+                    included_names.add(e.dst)
+                    selected_states.append(e.dst)
+                    changed = True
+                selected_transitions.append(WorkflowTransition(
+                    from_state=name, to_state=e.dst,
+                    condition=e.label, label=e.label,
+                    trigger=e.trigger, optional=False, priority=0,
+                ))
+            else:
+                # No spine edge — add synthetic shortcut to terminal
+                terminal_name = domain.terminals[0]
+                if terminal_name not in included_names:
+                    included_names.add(terminal_name)
+                    selected_states.append(terminal_name)
+                    changed = True
+                selected_transitions.append(WorkflowTransition(
+                    from_state=name, to_state=terminal_name,
+                    condition="proceed to resolution",
+                    label="proceed to resolution",
+                    trigger="always", optional=False, priority=0,
+                ))
+
+    # Build WorkflowState list (spine order first, then appended branch states)
+    def to_workflow_state(idx: int, name: str) -> WorkflowState:
+        node = state_map[name]
+        return WorkflowState(
+            id=f"S{idx + 1}",
+            name=name,
+            tools=list(node.tools),
+            instruction=node.instruction,
+        )
+
+    wf_states = [to_workflow_state(i, n) for i, n in enumerate(selected_states)]
+    id_map = {s.name: s.id for s in wf_states}
+
+    wf_transitions = [
+        WorkflowTransition(
+            from_state=id_map.get(t.from_state, t.from_state),
+            to_state=id_map.get(t.to_state, t.to_state),
+            condition=t.label,
+            label=t.label,
+            trigger=t.trigger,
+            optional=t.optional,
+            priority=t.priority,
+            intent_category=t.intent_category,
+        )
+        for t in selected_transitions
+        if t.from_state in id_map and t.to_state in id_map
+    ]
+
+    terminal_ids = [
+        id_map[n] for n in selected_states
+        if state_map[n].kind == "terminal"
+    ]
+
+    return WorkflowGraph(
+        states=wf_states,
+        transitions=wf_transitions,
+        initial_state=id_map[domain.initial],
+        terminal_states=terminal_ids,
+    )
+
+
+_VALID_TRIGGERS_SET = frozenset({
+    "always", "tool_success", "tool_error",
+    "intent_match", "slot_present", "user_declines",
+})
+
+
+def walk_path(
+    subgraph: WorkflowGraph,
+    domain: "DomainSpec",
+    behavior: str,
+    intent_category: str,
+    rng: random.Random,
+) -> list[WorkflowTransition]:
+    """Traverse subgraph from initial, picking edges by simulated trigger.
+
+    Returns the sequence of WorkflowTransition objects walked.
+    Always terminates at a terminal state.
+    """
+    id_to_name = {s.id: s.name for s in subgraph.states}
+    name_to_state = {s.name: s for s in subgraph.states}
+    terminal_ids = set(subgraph.terminal_states)
+
+    # Build outgoing edge map keyed by state id
+    outgoing: dict[str, list[WorkflowTransition]] = {}
+    for t in subgraph.transitions:
+        outgoing.setdefault(t.from_state, []).append(t)
+
+    path: list[WorkflowTransition] = []
+    current_id = subgraph.initial_state
+    max_steps = len(subgraph.states) * 3 + 5  # safety cap
+
+    for _ in range(max_steps):
+        if current_id in terminal_ids:
+            break
+
+        edges = outgoing.get(current_id, [])
+        if not edges:
+            break
+
+        # Simulate trigger outcomes for this state
+        current_state = name_to_state.get(id_to_name.get(current_id, ""))
+        has_tools = bool(current_state and current_state.tools)
+
+        fired: set[str] = {"always"}
+        if has_tools:
+            if rng.random() < TOOL_ERROR_RATE:
+                fired.add("tool_error")
+            else:
+                fired.add("tool_success")
+        if intent_category == "upsell_promo" and rng.random() < 0.4:
+            fired.add("intent_match")
+        if behavior in ("adversarial_probing",) and rng.random() < 0.3:
+            fired.add("user_declines")
+        if behavior in ("cooperative",) and rng.random() < 0.5:
+            fired.add("slot_present")
+
+        # Priority: upsell arc > optional with fired trigger > spine > anything else
+        def edge_priority(e: WorkflowTransition) -> int:
+            if e.intent_category == "upsell_promo" and "intent_match" in fired:
+                return 0
+            if e.optional and e.trigger in fired:
+                return 1
+            if not e.optional:
+                return 2
+            return 3
+
+        sorted_edges = sorted(edges, key=edge_priority)
+        chosen = sorted_edges[0]
+
+        path.append(chosen)
+        current_id = chosen.to_state
+
+    return path
 
 
 # _FORMAT_RULES is imported from data.system_prompt (single source of truth)
@@ -361,14 +691,11 @@ def _pick_intent_by_category(
 
 
 def _select_domain(
-    rng: random.Random, domain: str | None = None
+    rng: random.Random,
+    domain: str | None = None,
+    spec: "ComplexitySpec | None" = None,
 ) -> tuple[str, DomainSpec]:
-    """Select a domain from the registry.
-
-    If ``domain`` is provided and exists in the registry, use it.
-    If ``domain`` matches a legacy name, map it to the closest registry entry.
-    Otherwise, pick a random domain.
-    """
+    """Select a domain, filtering to those eligible for the requested complexity level."""
     _LEGACY_MAP: dict[str, str] = {
         "faq_lookup": "product_info",
         "order_status_cancel": "order_management",
@@ -384,469 +711,18 @@ def _select_domain(
         key = _LEGACY_MAP[domain]
         return key, DOMAIN_REGISTRY[key]
 
-    key = rng.choice(ALL_DOMAIN_NAMES)
+    # Level-aware: domain eligible iff canonical state count >= target_path_len min
+    min_states = spec.target_path_len[0] if spec else 0
+    eligible = [
+        k for k, d in DOMAIN_REGISTRY.items()
+        if len(d.states) >= min_states
+    ]
+    if not eligible:
+        eligible = ALL_DOMAIN_NAMES  # fallback: all domains
+
+    key = rng.choice(eligible)
     return key, DOMAIN_REGISTRY[key]
 
-
-def _generate_tool_schemas(
-    spec: ComplexitySpec,
-    domain_spec: DomainSpec,
-    rng: random.Random,
-) -> list[dict[str, Any]]:
-    """Select tool schemas from the domain registry for the given complexity.
-
-    Picks ``spec.num_tools`` tools from the domain's tool list, biased toward
-    tools that have a curated home state in ``domain_spec.state_tools`` so the
-    selected tools survive the per-state ``t in tool_names`` filter in
-    ``_generate_workflow_graph`` and end up rendered in a sensible state. If the
-    domain has fewer tools than needed, supplements with cross-cutting tools.
-    """
-    placed = {t for tools in domain_spec.state_tools.values() for t in tools}
-    available = list(domain_spec.tools)
-    rng.shuffle(available)
-    # Stable sort: tools with a curated home state come first (shuffled order
-    # preserved within each group), so the random budget prefers placeable tools.
-    available.sort(key=lambda t: 0 if t["function"]["name"] in placed else 1)
-    if len(available) < spec.num_tools:
-        available.extend(CROSS_CUTTING_TOOLS)
-    return available[: spec.num_tools]
-
-
-def _get_tool_templates_for_domain(domain: str) -> list[dict[str, Any]]:
-    """Return tool schema templates for a given domain."""
-    domain_tools: dict[str, list[dict[str, Any]]] = {
-        "faq_lookup": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_faq",
-                    "description": "Search the FAQ database for answers",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string", "description": "Search query"},
-                            "category": {
-                                "type": "string",
-                                "enum": ["billing", "technical", "general"],
-                            },
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-        ],
-        "order_status_cancel": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "lookup_order",
-                    "description": "Look up order details by order ID",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "order_id": {"type": "string", "description": "The order ID"},
-                        },
-                        "required": ["order_id"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "cancel_order",
-                    "description": "Cancel an active order",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "order_id": {"type": "string"},
-                            "reason": {"type": "string"},
-                        },
-                        "required": ["order_id", "reason"],
-                    },
-                },
-            },
-        ],
-        "booking_payment": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "search_availability",
-                    "description": "Search for available booking slots",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "date": {"type": "string", "format": "date"},
-                            "service_type": {"type": "string"},
-                            "location": {"type": "string"},
-                        },
-                        "required": ["date", "service_type"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_booking",
-                    "description": "Create a new booking",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "slot_id": {"type": "string"},
-                            "customer_name": {"type": "string"},
-                            "customer_email": {"type": "string", "format": "email"},
-                        },
-                        "required": ["slot_id", "customer_name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "process_payment",
-                    "description": "Process payment for a booking",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "booking_id": {"type": "string"},
-                            "amount": {"type": "number"},
-                            "payment_method": {
-                                "type": "string",
-                                "enum": ["credit_card", "debit_card", "bank_transfer"],
-                            },
-                        },
-                        "required": ["booking_id", "amount", "payment_method"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "send_confirmation",
-                    "description": "Send booking confirmation to customer",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "booking_id": {"type": "string"},
-                            "channel": {
-                                "type": "string",
-                                "enum": ["email", "sms", "both"],
-                            },
-                        },
-                        "required": ["booking_id"],
-                    },
-                },
-            },
-        ],
-        "it_troubleshoot_escalation": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_system_status",
-                    "description": "Check status of an IT system or service",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "system_name": {"type": "string"},
-                            "check_type": {
-                                "type": "string",
-                                "enum": ["health", "connectivity", "performance"],
-                            },
-                        },
-                        "required": ["system_name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "run_diagnostic",
-                    "description": "Run a diagnostic test on a system",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "system_name": {"type": "string"},
-                            "diagnostic_type": {"type": "string"},
-                            "verbose": {"type": "boolean", "default": False},
-                        },
-                        "required": ["system_name", "diagnostic_type"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "apply_fix",
-                    "description": "Apply a known fix to a system issue",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "system_name": {"type": "string"},
-                            "fix_id": {"type": "string"},
-                            "force": {"type": "boolean", "default": False},
-                        },
-                        "required": ["system_name", "fix_id"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_ticket",
-                    "description": "Create an escalation ticket",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "description": {"type": "string"},
-                            "priority": {
-                                "type": "string",
-                                "enum": ["low", "medium", "high", "critical"],
-                            },
-                            "assignee_group": {"type": "string"},
-                        },
-                        "required": ["title", "priority"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "restart_service",
-                    "description": "Restart a system service",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "service_name": {"type": "string"},
-                            "graceful": {"type": "boolean", "default": True},
-                        },
-                        "required": ["service_name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "notify_team",
-                    "description": "Send notification to an operations team",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "team": {"type": "string"},
-                            "message": {"type": "string"},
-                            "urgency": {
-                                "type": "string",
-                                "enum": ["info", "warning", "critical"],
-                            },
-                        },
-                        "required": ["team", "message"],
-                    },
-                },
-            },
-        ],
-        "multi_dept_workflow": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "route_to_department",
-                    "description": "Route request to appropriate department",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "department": {"type": "string"},
-                            "request_summary": {"type": "string"},
-                            "priority": {"type": "string", "enum": ["low", "medium", "high"]},
-                        },
-                        "required": ["department", "request_summary"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "lookup_customer",
-                    "description": "Look up customer information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "customer_id": {"type": "string"},
-                            "lookup_type": {
-                                "type": "string",
-                                "enum": ["full", "summary", "contact"],
-                            },
-                        },
-                        "required": ["customer_id"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "check_policy",
-                    "description": "Check applicable policies for a request",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "policy_area": {"type": "string"},
-                            "customer_tier": {"type": "string"},
-                            "request_type": {"type": "string"},
-                        },
-                        "required": ["policy_area"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "process_refund",
-                    "description": "Process a customer refund",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "order_id": {"type": "string"},
-                            "amount": {"type": "number"},
-                            "reason": {"type": "string"},
-                            "refund_method": {"type": "string"},
-                        },
-                        "required": ["order_id", "amount", "reason"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "schedule_callback",
-                    "description": "Schedule a callback from a specialist",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "customer_id": {"type": "string"},
-                            "department": {"type": "string"},
-                            "preferred_time": {"type": "string"},
-                            "notes": {"type": "string"},
-                        },
-                        "required": ["customer_id", "department"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "update_account",
-                    "description": "Update customer account information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "customer_id": {"type": "string"},
-                            "field": {"type": "string"},
-                            "new_value": {"type": "string"},
-                            "verification_code": {"type": "string"},
-                        },
-                        "required": ["customer_id", "field", "new_value"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "generate_report",
-                    "description": "Generate a summary report of customer interactions",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "customer_id": {"type": "string"},
-                            "report_type": {
-                                "type": "string",
-                                "enum": ["interaction", "billing", "service"],
-                            },
-                            "date_range_days": {"type": "integer", "default": 30},
-                        },
-                        "required": ["customer_id", "report_type"],
-                    },
-                },
-            },
-        ],
-    }
-    return domain_tools.get(domain, [])
-
-
-def _generate_workflow_graph(
-    spec: ComplexitySpec,
-    rng: random.Random,
-    domain_spec: DomainSpec | None = None,
-    tool_schemas: list[dict[str, Any]] | None = None,
-) -> WorkflowGraph:
-    """Generate a random workflow graph conforming to the complexity spec."""
-    num_states = rng.randint(*spec.num_states)
-
-    if tool_schemas is None:
-        tool_schemas = _get_tool_templates_for_domain(spec.domain)
-    tool_names = [t["function"]["name"] for t in tool_schemas][: spec.num_tools]
-
-    # Use domain state templates if available, otherwise fall back to generic
-    templates = list(domain_spec.state_templates) if domain_spec else []
-
-    states: list[WorkflowState] = []
-    for i in range(num_states):
-        state_id = f"S{i + 1}"
-        if i == 0:
-            name = templates[0] if templates else "GREETING"
-        elif i == num_states - 1:
-            name = templates[-1] if templates else "TERMINAL"
-        else:
-            # Pick from middle templates, cycling if needed
-            middle_templates = templates[1:-1] if len(templates) > 2 else [f"STATE_{i + 1}"]
-            name = middle_templates[(i - 1) % len(middle_templates)] if middle_templates else f"STATE_{i + 1}"
-
-        # Assign tools to states from the domain's curated state→tools map,
-        # filtered to the tools actually selected into this sample's schemas so
-        # the script never lists a tool absent from ``tool_schemas``. This
-        # replaces the old random ``rng.sample`` placement that put tools in
-        # semantically unrelated states.
-        curated_tools = domain_spec.state_tools.get(name, ()) if domain_spec else ()
-        state_tools = [t for t in curated_tools if t in tool_names]
-        instruction = domain_spec.state_instructions.get(name, "") if domain_spec else ""
-
-        states.append(
-            WorkflowState(id=state_id, name=name, tools=state_tools, instruction=instruction)
-        )
-
-    # Generate transitions ensuring connectivity
-    transitions: list[WorkflowTransition] = []
-    for i in range(num_states - 1):
-        transitions.append(
-            WorkflowTransition(
-                from_state=states[i].id,
-                to_state=states[i + 1].id,
-                condition=f"proceed_from_{states[i].name.lower()}",
-            )
-        )
-
-    # Add branching transitions
-    max_branching = rng.randint(*spec.branching_factor)
-    for _ in range(min(max_branching, num_states - 2)):
-        src = rng.randint(0, num_states - 3)
-        dst = rng.randint(src + 2, num_states - 1)
-        transitions.append(
-            WorkflowTransition(
-                from_state=states[src].id,
-                to_state=states[dst].id,
-                condition=f"branch_{states[src].id}_to_{states[dst].id}",
-                priority=1,
-            )
-        )
-
-    terminal_states = [states[-1].id]
-    # Possibly add an alternative terminal
-    if num_states > 4 and rng.random() < 0.3:
-        alt_terminal = states[-2].id
-        terminal_states.append(alt_terminal)
-
-    return WorkflowGraph(
-        states=states,
-        transitions=transitions,
-        initial_state=states[0].id,
-        terminal_states=terminal_states,
-    )
 
 
 def _generate_placeholder_conversation(
@@ -862,18 +738,35 @@ def _generate_placeholder_conversation(
     """Generate a placeholder conversation following the workflow graph.
 
     In production, this would call the teacher model (GPT-4o / Claude).
-    For now, generates structurally valid placeholder conversations.
+    For now, generates structurally valid placeholder conversations using
+    walk_path to traverse the subgraph with trigger-based edge selection.
     """
     messages: list[dict[str, Any]] = []
-    domain_name = domain_spec.name if domain_spec else spec.domain
-    domain_intents = list(domain_spec.intents) if domain_spec else [spec.domain]
+    domain_name = domain_spec.name if domain_spec else spec.level
+    domain_intents = list(domain_spec.intents) if domain_spec else []
 
-    # System message with both natural language script and structured graph
-    # Bare role line — enrichment (script + structured ref + format rules) is
-    # applied uniformly after message generation via build_enriched_system_prompt.
     messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
-    # Placeholder text templates per language
+    id_to_name = {s.id: s.name for s in workflow.states}
+    name_to_state = {s.name: s for s in workflow.states}
+    terminal_ids = set(workflow.terminal_states)
+
+    # walk_path requires domain_spec for trigger simulation
+    if domain_spec:
+        path = walk_path(workflow, domain_spec, behavior, intent_category, rng)
+    else:
+        # Minimal fallback: walk states in spine order
+        path = [
+            WorkflowTransition(
+                from_state=workflow.states[i].id,
+                to_state=workflow.states[i + 1].id,
+                condition="proceed",
+                label="proceed",
+                trigger="always",
+            )
+            for i in range(len(workflow.states) - 1)
+        ]
+
     _user_templates: dict[str, dict[str, str]] = {
         "en": {
             "cooperative": "[Turn {t}] I need help with {intent}",
@@ -887,7 +780,6 @@ def _generate_placeholder_conversation(
             "digressing": "[ตา {t}] จริงๆ ก่อนจะไปต่อเรื่อง{intent} ขอถามเรื่องอื่นก่อน",
             "invalid_tool_inputs": "[ตา {t}] ดำเนินการ{intent}สำหรับ ###invalid_id###",
         },
-        # Thai-English code-switching: Thai sentence structure with embedded English terms
         "code_switch": {
             "cooperative": "[ตา {t}] ขอ help เรื่อง {intent} หน่อยนะคะ",
             "adversarial_probing": "[ตา {t}] ข้าม {state} step แล้ว proceed กับ {intent} เลยได้ไหมคะ?",
@@ -896,57 +788,53 @@ def _generate_placeholder_conversation(
         },
     }
 
-    # Generate turns following the workflow
-    current_state_idx = 0
-    for turn_idx in range(min(len(workflow.states) * 2, 20)):
-        if current_state_idx >= len(workflow.states):
-            break
+    lang_templates = _user_templates.get(language or "en", _user_templates["en"])
 
-        current_state = workflow.states[current_state_idx]
+    visited_state_ids: set[str] = set()
+    turn_idx = 0
 
-        # User message — use domain intents for realistic context
-        intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else spec.domain
+    for step in path:
+        from_name = id_to_name.get(step.from_state, step.from_state)
+        to_name = id_to_name.get(step.to_state, step.to_state)
+        current_state = name_to_state.get(from_name)
+
+        intent = _pick_intent_by_category(rng, domain_intents, intent_category) if domain_intents else domain_name
         intent_text = intent.replace("_", " ")
-        templates = _user_templates.get(language or "en", _user_templates["en"])
-        tmpl = templates.get(behavior, templates["cooperative"])
-        user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=current_state.name)
-
+        tmpl = lang_templates.get(behavior, lang_templates["cooperative"])
+        user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=from_name)
         messages.append({"role": "user", "content": user_msg})
 
-        # Assistant response with state annotation
-        next_state_idx = min(current_state_idx + 1, len(workflow.states) - 1)
-        next_state = workflow.states[next_state_idx]
-
-        assistant_content = f"[STATE: {current_state.name} → {next_state.name}]"
-        annotations: dict[str, Any] = {
-            "state_transition": {"from": current_state.name, "to": next_state.name},
-        }
-
-        # Add tool call if the state has tools
-        if current_state.tools:
+        # In-state tool turn (emitted once per state visit)
+        if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
-            assistant_content += f"\n<tool_call>{json.dumps(tool_call)}</tool_call>"
-            annotations["tool_calls"] = [tool_call]
-
-            messages.append(
-                {"role": "assistant", "content": assistant_content, "annotations": annotations}
-            )
-
-            # Tool response (with error rate)
+            in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
+            messages.append({
+                "role": "assistant",
+                "content": in_state_content,
+                "annotations": {
+                    "state_transition": {"from": from_name, "to": from_name},
+                    "tool_calls": [tool_call],
+                },
+            })
             if rng.random() < TOOL_ERROR_RATE:
                 tool_response = json.dumps({"error": "Service temporarily unavailable"})
             else:
                 tool_response = json.dumps({"status": "success", "data": {"result": "ok"}})
-
             messages.append({"role": "tool", "content": tool_response})
-        else:
-            assistant_content += f"\nHandling {spec.domain} in state {current_state.name}."
-            messages.append(
-                {"role": "assistant", "content": assistant_content, "annotations": annotations}
-            )
+            visited_state_ids.add(step.from_state)
 
-        current_state_idx = next_state_idx
+        # Transition turn
+        transition_content = f"[STATE: {from_name} → {to_name}]"
+        if not (current_state and current_state.tools):
+            transition_content += f"\nHandling {domain_name} in state {from_name}."
+        messages.append({
+            "role": "assistant",
+            "content": transition_content,
+            "annotations": {"state_transition": {"from": from_name, "to": to_name}},
+        })
+
+        turn_idx += 1
 
     return messages
 
@@ -1022,14 +910,21 @@ def _build_teacher_prompt(
         if intent_category == "upsell_promo"
         else ""
     )
+    transition_key = (
+        "Transition trigger types: "
+        "'always'=unconditional spine, 'tool_success'=after successful tool call, "
+        "'tool_error'=after failed tool call, 'intent_match'=customer intent matches, "
+        "'user_declines'=customer refuses, 'slot_present'=required slot provided.\n"
+    )
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
-        f"({spec.num_states[0]}–{spec.num_states[1]} states, chain_depth={spec.chain_depth})\n"
+        f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
+        f"{transition_key}\n"
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
@@ -1282,16 +1177,26 @@ def generate_workflow_dataset(
         sample_language = language if language is not None else rng.choice(["en", "th"])
         language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
-        # Select domain (fixed or random per sample)
-        domain_key, domain_spec = _select_domain(rng, domain)
+        # Select domain (fixed or random per sample, filtered by complexity level)
+        domain_key, domain_spec = _select_domain(rng, domain, spec)
         domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
 
         # Select intent category (service vs upsell_promo)
         intent_category = _select_intent_category(rng, active_intent_dist)
         intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
 
-        tool_schemas = _generate_tool_schemas(spec, domain_spec, rng)
-        workflow = _generate_workflow_graph(spec, rng, domain_spec, tool_schemas)
+        workflow = select_subgraph(domain_spec, spec, rng, intent_category)
+
+        # Collect tools referenced by the selected subgraph states
+        subgraph_tool_names = {tool for s in workflow.states for tool in s.tools}
+        tool_schemas = [
+            t for t in domain_spec.tools
+            if t["function"]["name"] in subgraph_tool_names
+        ]
+        # Supplement to reach spec.num_tools if needed; never truncate subgraph tools
+        if len(tool_schemas) < spec.num_tools:
+            extra = [t for t in CROSS_CUTTING_TOOLS if t not in tool_schemas]
+            tool_schemas.extend(extra[: spec.num_tools - len(tool_schemas)])
 
         def _placeholder() -> list[dict[str, Any]]:
             return _generate_placeholder_conversation(
@@ -1312,8 +1217,22 @@ def generate_workflow_dataset(
             if repair_incoherent:
                 allowed = {s.name: set(s.tools) for s in workflow.states}
                 schema_names = {t["function"]["name"] for t in tool_schemas}
+                id_to_name = {s.id: s.name for s in workflow.states}
+                valid_edge_pairs = {
+                    (id_to_name.get(t.from_state, t.from_state),
+                     id_to_name.get(t.to_state, t.to_state))
+                    for t in workflow.transitions
+                } | {(id_to_name.get(sid, sid), id_to_name.get(sid, sid))
+                     for sid in {t.from_state for t in workflow.transitions}}
+
+                def _has_violations(msgs: list[dict[str, Any]]) -> bool:
+                    return bool(
+                        find_tool_placement_violations(allowed, msgs, schema_names)
+                        or _find_transition_violations(valid_edge_pairs, msgs)
+                    )
+
                 tries = 0
-                while find_tool_placement_violations(allowed, messages, schema_names):
+                while _has_violations(messages):
                     if tries >= max_repair_retries:
                         messages = _placeholder()
                         repair_fallbacks += 1
@@ -1343,22 +1262,25 @@ def generate_workflow_dataset(
                 else:
                     messages.insert(0, {"role": "system", "content": rich_prompt})
 
-        # Enrich system prompt so training and eval see the same prompt shape.
-        # build_enriched_system_prompt is idempotent — safe for placeholder messages
-        # that are already enriched after the simplification above.
-        # Pass messages through so the workflow_script reflects the actual GT
-        # tool calls per state, not the random rng-populated state.tools.
-        _enrich_ctx = {
-            "workflow_script": _graph_to_script(workflow, tool_schemas, sample_language, messages=messages),
-            "workflow_graph": workflow.to_dict(),
-            "tool_schemas": tool_schemas,
-            "messages": messages,
-            "language": sample_language,
-        }
-        if messages and messages[0].get("role") == "system":
-            messages[0] = {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, messages[0]["content"])}
-        elif messages:
-            messages.insert(0, {"role": "system", "content": build_enriched_system_prompt(_enrich_ctx, "You are a customer service assistant.")})
+        # Keep messages[0] a BARE system message. The workflow script, tool
+        # schemas, and format rules are deliberately NOT embedded here: the
+        # training (sft.py, grpo.py) and eval (agent_benchmark.py) pipelines
+        # always inject them at load time via build_enriched_system_prompt,
+        # which derives a fresh script from workflow_graph + messages. Baking
+        # the enrichment into the stored data would only duplicate that and go
+        # stale (hence force_rebuild=True in the loaders). The authoritative
+        # rendered script is preserved separately in the top-level
+        # `workflow_script` field below. The teacher path returns no system
+        # turn, so ensure one exists for the loaders' messages[0] check.
+        if not (messages and messages[0].get("role") == "system"):
+            domain_name = domain_spec.name if domain_spec else spec.domain
+            messages.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": f"You are a customer service agent handling {domain_name} workflows.",
+                },
+            )
 
         # Count tool calls and errors
         for msg in messages:

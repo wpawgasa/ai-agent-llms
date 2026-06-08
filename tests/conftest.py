@@ -77,9 +77,13 @@ def sample_model_config() -> ModelConfig:
 def l1_complexity_spec() -> ComplexitySpec:
     return ComplexitySpec(
         level=ComplexityLevel.L1,
+        target_path_len=(3, 4),
+        num_branches=(0, 0),
+        num_loops=(0, 0),
+        include_recovery=False,
+        num_tools=1,
         num_states=(3, 4),
         branching_factor=(1, 2),
-        num_tools=1,
         chain_depth=0,
         nesting_depth=0,
         domain="faq_lookup",
@@ -90,9 +94,13 @@ def l1_complexity_spec() -> ComplexitySpec:
 def l3_complexity_spec() -> ComplexitySpec:
     return ComplexitySpec(
         level=ComplexityLevel.L3,
-        num_states=(8, 12),
-        branching_factor=(3, 5),
+        target_path_len=(8, 12),
+        num_branches=(2, 3),
+        num_loops=(0, 1),
+        include_recovery=True,
         num_tools=4,
+        num_states=(8, 12),
+        branching_factor=(2, 4),
         chain_depth=2,
         nesting_depth=2,
         domain="booking_payment",

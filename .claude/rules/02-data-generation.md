@@ -18,29 +18,33 @@
 @dataclass
 class ComplexitySpec:
     level: str
-    num_states: tuple[int, int]
-    branching_factor: tuple[int, int]
-    num_tools: int
+    target_path_len: tuple[int, int]   # spine states to include (terminal counts)
+    num_branches: tuple[int, int]      # optional off-spine branch edges
+    num_loops: tuple[int, int]         # retry / escalation back-edges
+    include_recovery: bool             # add tool_error recovery arcs
+    num_tools: int                     # minimum tool count (never truncated above)
     chain_depth: int
-    nesting_depth: int
-    num_samples: int
-    domain: str
 
 COMPLEXITY_SPECS = {
-    "L1": ComplexitySpec("L1", (3,4),   (1,2), 1, 0, 0, 200, "faq_lookup"),
-    "L2": ComplexitySpec("L2", (5,7),   (2,3), 2, 1, 1, 200, "order_status_cancel"),
-    "L3": ComplexitySpec("L3", (8,12),  (3,5), 4, 2, 2, 200, "booking_payment"),
-    "L4": ComplexitySpec("L4", (13,20), (5,8), 6, 3, 3, 200, "it_troubleshoot"),
-    "L5": ComplexitySpec("L5", (21,30), (8,99),7, 4, 4, 200, "multi_dept_workflow"),
+    "L1": ComplexitySpec("L1", (3,4),   (0,0), (0,0), False, 1, 0),
+    "L2": ComplexitySpec("L2", (5,7),   (1,1), (0,0), False, 2, 1),
+    "L3": ComplexitySpec("L3", (8,12),  (2,3), (0,1), False, 4, 2),
+    "L4": ComplexitySpec("L4", (12,16), (3,5), (1,1), True,  6, 3),
+    "L5": ComplexitySpec("L5", (16,20), (0,99),(1,2), True,  7, 4),
 }
 
 def generate_workflow_dataset(
     complexity_level: Literal["L1","L2","L3","L4","L5"],
+    num_samples: int = 200,
+    domain: str | None = None,          # None → random; pin with e.g. "banking"
+    intent_category_preset: str = "default",  # "default"|"service_only"|"upsell_heavy"
     teacher_model: str = "gpt-4o",
     output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
 ) -> DatasetMetadata
 ```
+
+**Domain eligibility by level:** `_select_domain` filters domains by canonical state count ≥ `target_path_len` minimum. L1–L3 draw from all 18 domains; L4 requires ≥12-state domains; L5 requires the 5 expanded rich domains (banking, insurance, healthcare, travel, telecom).
 
 ### User Behavior Distribution
 - cooperative: 60%, adversarial_probing: 15%, digressing: 10%, invalid_tool_inputs: 15%

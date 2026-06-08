@@ -148,8 +148,15 @@ class TestWorkflowGeneration:
                 schema_names = {
                     ts["function"]["name"] for ts in sample["tool_schemas"]
                 }
+                _new_schema_map = (
+                    {s.name: set(s.tools) for s in spec.states} if spec.states else {}
+                )
                 for sd in sample["workflow_graph"]["state_details"]:
-                    curated = set(spec.state_tools.get(sd["name"], ()))
+                    curated = (
+                        _new_schema_map.get(sd["name"], set())
+                        if spec.states
+                        else set(spec.state_tools.get(sd["name"], ()))
+                    )
                     for tool in sd["tools"]:
                         assert tool in curated, (
                             f"{sample['domain']}: '{tool}' placed in '{sd['name']}' "
@@ -181,6 +188,21 @@ class TestWorkflowGeneration:
                 # Instruction line is rendered with a language-specific marker.
                 script = sample["workflow_script"]
                 assert "Instruction:" in script or "คำแนะนำ:" in script
+
+    def test_l5_placeholder_always_reaches_terminal(self, tmp_output_dir: Path):
+        result = generate_workflow_dataset(
+            complexity_level="L5",
+            num_samples=10,
+            domain="banking",
+            output_dir=tmp_output_dir,
+            seed=42,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        empty_terminals = [s for s in samples if not s["ground_truth"]["terminal_state"]]
+        assert not empty_terminals, f"{len(empty_terminals)} L5 samples have empty terminal_state"
 
 
 class TestToolCallDataGeneration:
@@ -277,16 +299,31 @@ class TestDomainRegistry:
 
     def test_all_domains_have_state_templates(self) -> None:
         for name, spec in DOMAIN_REGISTRY.items():
-            assert len(spec.state_templates) >= 7, f"{name} has fewer than 7 state templates"
-            assert spec.state_templates[-1] in ("TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW"), (
-                f"{name} last state template is {spec.state_templates[-1]}"
-            )
+            if spec.states:
+                # New-schema domain: check StateNode list
+                assert len(spec.states) >= 7, f"{name} has fewer than 7 states"
+                assert spec.terminals, f"{name} has no terminals"
+            else:
+                # Legacy-schema domain: check state_templates
+                assert len(spec.state_templates) >= 7, f"{name} has fewer than 7 state templates"
+                assert spec.state_templates[-1] in (
+                    "TERMINAL", "RESOLVE", "POST_INCIDENT_REVIEW",
+                ), f"{name} last state template is {spec.state_templates[-1]}"
 
     def test_all_domains_have_curated_state_maps(self) -> None:
         """Every state template must have a curated instruction + tools entry,
         and every referenced tool must exist in the domain's tool list."""
         for name, spec in DOMAIN_REGISTRY.items():
             tool_names = {t["function"]["name"] for t in spec.tools}
+            if spec.states:
+                # New-schema domain: validated by validate_domain at import time
+                for sn in spec.states:
+                    assert sn.instruction.strip(), f"{name}: state '{sn.name}' has no instruction"
+                    for tool in sn.tools:
+                        assert tool in tool_names, (
+                            f"{name}: state '{sn.name}' references unknown tool '{tool}'"
+                        )
+                continue
             states = set(spec.state_templates)
             for state in spec.state_templates:
                 assert state in spec.state_instructions, f"{name}: {state} has no instruction"
@@ -527,3 +564,431 @@ class TestPostGenerationRepair:
         assert result.num_samples == 5
         assert result.stats["repair_retries"] == 0
         assert result.stats["repair_fallbacks"] == 0
+
+
+class TestDomainSchema:
+    """Tests for the new StateNode/Edge/DomainSpec schema and validate_domain."""
+
+    def _make_minimal_valid_domain(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge,
+        )
+        return DomainSpec(
+            name="Test",
+            category="test",
+            tools=(),
+            intents=("help",),
+            entity_slots=(),
+            states=(
+                StateNode("START", "greet", kind="initial"),
+                StateNode("WORK", "do work", tools=("some_tool",)),
+                StateNode("END", "close", kind="terminal"),
+            ),
+            edges=(
+                Edge("START", "WORK", "proceed", "always"),
+                Edge("WORK", "END", "done", "tool_success"),
+            ),
+            initial="START",
+            terminals=("END",),
+        )
+
+    def test_validate_domain_passes_minimal(self):
+        from llm_workflow_agents.data.domain_registry import validate_domain
+        d = self._make_minimal_valid_domain()
+        validate_domain(d)  # should not raise
+
+    def test_validate_domain_rejects_unknown_edge_src(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(Edge("MISSING", "B", "x", "always"),),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="unknown state"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_self_loop(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "A", "loop", "always"),
+                Edge("A", "B", "done", "always"),
+            ),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="self-loop"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_missing_spine_successor(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        # WORK has only an optional edge — no spine successor
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b"),
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "B", "go", "always"),
+                Edge("B", "C", "branch", "intent_match", optional=True, priority=1),
+            ),
+            initial="A", terminals=("C",),
+        )
+        with pytest.raises(ValueError, match="spine successor"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_tool_trigger_on_toolless_state(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b"),  # no tools
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(
+                Edge("A", "B", "go", "always"),
+                Edge("B", "C", "success", "tool_success"),  # tool_success but B has no tools
+            ),
+            initial="A", terminals=("C",),
+        )
+        with pytest.raises(ValueError, match="tool_success.*no tools"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_terminal_unreachable(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        # C is declared terminal but not reachable from initial
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+                StateNode("C", "c", kind="terminal"),
+            ),
+            edges=(Edge("A", "B", "done", "always"),),
+            initial="A", terminals=("B", "C"),
+        )
+        with pytest.raises(ValueError, match="unreachable"):
+            validate_domain(d)
+
+    def test_validate_domain_rejects_invalid_trigger(self):
+        from llm_workflow_agents.data.domain_registry import (
+            DomainSpec, StateNode, Edge, validate_domain,
+        )
+        d = DomainSpec(
+            name="T", category="t", tools=(), intents=(), entity_slots=(),
+            states=(
+                StateNode("A", "a", kind="initial"),
+                StateNode("B", "b", kind="terminal"),
+            ),
+            edges=(Edge("A", "B", "x", "fire_photon_torpedoes"),),
+            initial="A", terminals=("B",),
+        )
+        with pytest.raises(ValueError, match="trigger"):
+            validate_domain(d)
+
+    def test_all_registry_domains_pass_validate(self):
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, validate_domain
+        errors = []
+        for key, domain in DOMAIN_REGISTRY.items():
+            try:
+                validate_domain(domain)
+            except (ValueError, Exception) as e:
+                errors.append(f"{key}: {e}")
+        assert not errors, "\n".join(errors)
+
+
+class TestSelectSubgraph:
+    def test_l1_subgraph_has_3_to_4_states(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(42)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        domain = DOMAIN_REGISTRY["account_management"]
+        graph = select_subgraph(domain, spec, rng)
+        assert 3 <= len(graph.states) <= 4
+
+    def test_subgraph_no_duplicate_state_names(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        for level in [ComplexityLevel.L1, ComplexityLevel.L2, ComplexityLevel.L3]:
+            spec = COMPLEXITY_SPECS[level]
+            for key, domain in DOMAIN_REGISTRY.items():
+                rng = random.Random(0)
+                graph = select_subgraph(domain, spec, rng)
+                names = [s.name for s in graph.states]
+                assert len(names) == len(set(names)), f"duplicate names in {key} {level}: {names}"
+
+    def test_subgraph_terminal_always_reachable(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L3]
+        for key, domain in DOMAIN_REGISTRY.items():
+            rng = random.Random(7)
+            graph = select_subgraph(domain, spec, rng)
+            terminal_names = set(graph.terminal_states)
+            terminal_state_names = {
+                s.name for s in graph.states
+                if s.id in terminal_names or s.name in terminal_names
+            }
+            assert terminal_state_names, f"no terminal in subgraph for {key}"
+
+    def test_subgraph_transitions_carry_label_and_trigger(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        domain = DOMAIN_REGISTRY["billing_payments"]
+        rng = random.Random(1)
+        graph = select_subgraph(domain, spec, rng)
+        for t in graph.transitions:
+            assert t.label, f"transition {t.from_state}->{t.to_state} missing label"
+            assert t.trigger, f"transition {t.from_state}->{t.to_state} missing trigger"
+
+
+class TestWalkPath:
+    def _make_graph_and_domain(self, level="L1"):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        rng = random.Random(99)
+        spec = COMPLEXITY_SPECS[ComplexityLevel(level)]
+        domain = DOMAIN_REGISTRY["account_management"]
+        graph = select_subgraph(domain, spec, rng)
+        return graph, domain
+
+    def test_walk_reaches_terminal(self):
+        from llm_workflow_agents.data.generate_workflows import walk_path
+        import random
+        graph, domain = self._make_graph_and_domain("L2")
+        rng = random.Random(1)
+        path = walk_path(graph, domain, "cooperative", "service", rng)
+        terminal_ids = set(graph.terminal_states)
+        terminal_names = {s.name for s in graph.states if s.id in terminal_ids}
+        assert path[-1].to_state in terminal_names or path[-1].to_state in terminal_ids, \
+            f"walk did not reach terminal, last state: {path[-1].to_state}"
+
+    def test_walk_all_transitions_are_valid_edges(self):
+        from llm_workflow_agents.data.generate_workflows import walk_path
+        import random
+        graph, domain = self._make_graph_and_domain("L3")
+        rng = random.Random(5)
+        path = walk_path(graph, domain, "adversarial_probing", "service", rng)
+        valid = {(t.from_state, t.to_state) for t in graph.transitions}
+        for step in path:
+            assert (step.from_state, step.to_state) in valid or \
+                   (step.from_state, step.to_state) in {
+                       (graph.states[i].name, graph.states[j].name)
+                       for i in range(len(graph.states))
+                       for j in range(len(graph.states))
+                       for t in graph.transitions
+                       if t.from_state == graph.states[i].id and t.to_state == graph.states[j].id
+                   }, f"walk step {step.from_state}->{step.to_state} not a valid edge"
+
+    def test_upsell_walk_traverses_upsell_arc(self):
+        import random
+        from llm_workflow_agents.data.generate_workflows import select_subgraph, walk_path
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        domain = DOMAIN_REGISTRY["account_management"]
+        found_upsell = False
+        for seed in range(50):
+            rng = random.Random(seed)
+            graph = select_subgraph(domain, spec, rng, intent_category="upsell_promo")
+            upsell_transitions = [t for t in graph.transitions if t.intent_category == "upsell_promo"]
+            if not upsell_transitions:
+                continue
+            rng2 = random.Random(seed)
+            path = walk_path(graph, domain, "cooperative", "upsell_promo", rng2)
+            upsell_edge_pairs = {(t.from_state, t.to_state) for t in upsell_transitions}
+            for step in path:
+                if (step.from_state, step.to_state) in upsell_edge_pairs:
+                    found_upsell = True
+                    break
+        assert found_upsell, "No upsell path found across 50 seeds"
+
+
+class TestWorkflowScript:
+    def test_script_renders_authored_label_not_snake_case(self):
+        from llm_workflow_agents.data._workflow_script import build_workflow_script
+        graph_dict = {
+            "state_details": [
+                {"name": "GREETING", "tools": [], "entry_actions": [], "instruction": "Greet customer."},
+                {"name": "VERIFY", "tools": ["verify_identity"], "entry_actions": [], "instruction": "Verify."},
+                {"name": "DONE", "tools": [], "entry_actions": [], "instruction": ""},
+            ],
+            "transitions": [
+                {"from": "GREETING", "to": "VERIFY", "condition": "proceed to identity check", "priority": 0},
+                {"from": "GREETING", "to": "DONE", "condition": "identity already on file", "priority": 1},
+                {"from": "VERIFY", "to": "DONE", "condition": "verification successful", "priority": 0},
+            ],
+            "initial": "GREETING",
+            "terminal": ["DONE"],
+        }
+        script = build_workflow_script(graph_dict, [], "en")
+        assert "identity already on file" in script
+        assert "branch_" not in script
+        assert "S1" not in script
+
+
+class TestRepairLoop:
+    def test_repair_rejects_off_graph_state_transitions(self):
+        """find_tool_placement_violations should catch invalid [STATE: X→Y] lines."""
+        from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
+        messages = [
+            {"role": "system", "content": "agent"},
+            {"role": "user", "content": "help"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → TERMINAL]",
+                "annotations": {"state_transition": {"from": "GREETING", "to": "TERMINAL"}},
+            },
+        ]
+        allowed = {"GREETING": set(), "VERIFY_IDENTITY": {"verify_identity"}}
+        violations = find_tool_placement_violations(allowed, messages)
+        assert violations == []  # tool check passes (no tools called in GREETING)
+
+
+class TestSemanticGraphProperties:
+    """Property tests per spec Section 5 — verify semantic correctness of generated data."""
+
+    _LEVELS = ["L1", "L2", "L3"]
+    _RICH_LEVELS = ["L4", "L5"]
+    _RICH_DOMAINS = ["banking", "insurance", "healthcare", "travel", "telecom"]
+
+    def _generate(self, level: str, domain: str, n: int = 5, seed: int = 42, tmp_path=None):
+        import tempfile
+        d = Path(tmp_path) if tmp_path else Path(tempfile.mkdtemp())
+        result = generate_workflow_dataset(
+            complexity_level=level, num_samples=n, domain=domain,
+            output_dir=d, seed=seed,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        return samples
+
+    def test_no_duplicate_state_names_l1_l3(self, tmp_path):
+        for level in self._LEVELS:
+            for key in list(DOMAIN_REGISTRY.keys())[:5]:
+                samples = self._generate(level, key, n=3, tmp_path=tmp_path / level / key)
+                for s in samples:
+                    names = s["workflow_graph"]["states"]
+                    assert len(names) == len(set(names)), \
+                        f"duplicate names in {level}/{key}: {names}"
+
+    def test_no_duplicate_state_names_l4(self, tmp_path):
+        for key in self._RICH_DOMAINS:
+            samples = self._generate("L4", key, n=3, tmp_path=tmp_path / "L4" / key)
+            for s in samples:
+                names = s["workflow_graph"]["states"]
+                assert len(names) == len(set(names)), \
+                    f"duplicate names in L4/{key}: {names}"
+
+    def test_no_duplicate_state_names_l5(self, tmp_path):
+        for key in self._RICH_DOMAINS:
+            samples = self._generate("L5", key, n=3, tmp_path=tmp_path / "L5" / key)
+            for s in samples:
+                names = s["workflow_graph"]["states"]
+                assert len(names) == len(set(names)), \
+                    f"duplicate names in L5/{key}: {names}"
+
+    def test_terminal_state_never_empty(self, tmp_path):
+        for level in self._LEVELS + self._RICH_LEVELS:
+            domains = self._RICH_DOMAINS if level in self._RICH_LEVELS else ["account_management"]
+            for key in domains:
+                samples = self._generate(level, key, n=5,
+                                         tmp_path=tmp_path / level / key)
+                for s in samples:
+                    assert s["ground_truth"]["terminal_state"] != "", \
+                        f"empty terminal_state in {level}/{key}"
+
+    def test_gt_transitions_are_valid_subgraph_edges(self, tmp_path):
+        for level in self._LEVELS:
+            samples = self._generate(level, "billing_payments", n=5,
+                                     tmp_path=tmp_path / level)
+            for s in samples:
+                valid_edges = {
+                    (t["from"], t["to"])
+                    for t in s["workflow_graph"]["transitions"]
+                }
+                state_names = set(s["workflow_graph"]["states"])
+                valid_edges |= {(n, n) for n in state_names}
+                for step in s["ground_truth"]["state_sequence"]:
+                    pair = (step["from"], step["to"])
+                    assert pair in valid_edges, \
+                        f"GT transition {pair} not in subgraph edges for {level}"
+
+    def test_conditions_are_not_machine_generated(self, tmp_path):
+        samples = self._generate("L2", "account_management", n=10,
+                                 tmp_path=tmp_path)
+        for s in samples:
+            for t in s["workflow_graph"]["transitions"]:
+                cond = t["condition"]
+                assert not cond.startswith("branch_S"), \
+                    f"machine-generated condition found: {cond!r}"
+                assert not cond.startswith("proceed_from_"), \
+                    f"machine-generated condition found: {cond!r}"
+
+    def test_upsell_samples_traverse_upsell_arc(self, tmp_path):
+        result = generate_workflow_dataset(
+            complexity_level="L2", num_samples=30,
+            domain="account_management", output_dir=tmp_path,
+            intent_category_preset="upsell_heavy", seed=0,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        upsell_in_messages = sum(
+            1 for s in samples
+            if any("upsell" in str(m.get("content", "")).lower()
+                   or "premium" in str(m.get("content", "")).lower()
+                   for m in s["messages"])
+        )
+        assert upsell_in_messages > 0, "No upsell content found in any upsell_heavy sample"
+
+    def test_service_samples_do_not_traverse_upsell_arc(self, tmp_path):
+        result = generate_workflow_dataset(
+            complexity_level="L2", num_samples=20,
+            domain="account_management", output_dir=tmp_path,
+            intent_category_preset="service_only", seed=1,
+        )
+        samples = []
+        with open(result.output_files[0]) as f:
+            for line in f:
+                samples.append(json.loads(line))
+        for s in samples:
+            for t in s["workflow_graph"]["transitions"]:
+                assert t.get("intent_category") != "upsell_promo", \
+                    "upsell arc should not appear in service_only subgraph"
