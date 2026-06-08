@@ -3,6 +3,11 @@
 ## Overview
 `training/` implements Phase 2: two-stage fine-tuning (SFT then GRPO RL) for the 3 category winners selected in Phase 1. Uses Unsloth for 2× speed and 70% less VRAM.
 
+### Outbound (support-initiated) conversations
+Task A data may include outbound conversations (`conversation_initiator == "agent"`; see `02-data-generation.md`) whose first message after `system` is an **assistant** opener. Two training-path notes:
+- **GRPO** (`grpo.py::_load_grpo_jsonl`): the assistant-turn filter accepts an opener preceded by `system` (not only `user`), so the outbound opening turn becomes a training row (prompt = `[system]`).
+- **SFT** (`render_response_only_sample`): masking is role-agnostic and keeps the opener unmasked. Rendering depends on the tokenizer's chat template. **Verified:** ChatML-family (Qwen2.5/Qwen3.5) renders `[system, assistant, user, …]` correctly. **Gemma** templates reject `system` entirely (`TemplateError: System role not supported`) — a pre-existing constraint affecting inbound too, not specific to outbound; resolve at the data layer (strip/fold `system`) before fine-tuning a Gemma winner on system-bearing Task A data. Mistral (strict user-first alternation) should be re-checked before training a Mistral winner on outbound data.
+
 ## Files
 - `sft.py` — Unsloth SFT entry point
 - `grpo.py` — Unsloth GRPO RL entry point
