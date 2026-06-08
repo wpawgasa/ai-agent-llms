@@ -67,6 +67,30 @@ def _find_transition_violations(
     return violations
 
 
+def _workflow_contract(
+    workflow: "WorkflowGraph",
+) -> tuple[set[tuple[str, str]], dict[str, list[str]]]:
+    """Return (legal_directed_edges, tools_by_state) keyed by state NAME.
+
+    Mirrors exactly what the generator's repair loop enforces:
+    - legal_directed_edges: the X!=Y subset of valid_edge_pairs, i.e. every
+      (from_name, to_name) transition where the two states differ. Staying in a
+      state (X->X) is always allowed and is intentionally not listed.
+    - tools_by_state: {state name: sorted tool names} == the ``allowed`` map used
+      by find_tool_placement_violations. Tools are returned as a sorted list (not
+      a set) for deterministic prompt rendering by ``_render_workflow_contract``.
+    """
+    id_to_name = {s.id: s.name for s in workflow.states}
+    edges: set[tuple[str, str]] = set()
+    for t in workflow.transitions:
+        src = id_to_name.get(t.from_state, t.from_state)
+        dst = id_to_name.get(t.to_state, t.to_state)
+        if src != dst:
+            edges.add((src, dst))
+    tools_by_state = {s.name: sorted(s.tools) for s in workflow.states}
+    return edges, tools_by_state
+
+
 BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
     "default": {
         "cooperative": 0.60,
