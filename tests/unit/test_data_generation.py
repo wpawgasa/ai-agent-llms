@@ -1145,3 +1145,29 @@ class TestPlaceholderOutbound:
             wf, [t for t in dom.tools], "cooperative", spec, rng, dom, "en", "service",
         )
         assert msgs[1]["role"] == "user"
+
+
+class TestTeacherPromptOutbound:
+    def _prompt(self, initiator, reason=None):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY, OutboundReason
+        rng = random.Random(0)
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        dom = DOMAIN_REGISTRY["sales"]
+        wf = gw.select_subgraph(dom, spec, rng, "service")
+        tools = [t for t in dom.tools]
+        r = reason or OutboundReason("promotion_offer", "offer a promotion", "upsell_promo")
+        return gw._build_teacher_prompt(
+            wf, tools, "cooperative", spec, dom, "en", "service",
+            initiator=initiator, outbound_reason=(r if initiator == "agent" else None),
+        )
+
+    def test_outbound_prompt_mentions_agent_initiation(self):
+        p = self._prompt("agent")
+        assert "OUTBOUND" in p
+        assert "offer a promotion" in p
+
+    def test_inbound_prompt_has_no_outbound_block(self):
+        p = self._prompt("user")
+        assert "OUTBOUND" not in p

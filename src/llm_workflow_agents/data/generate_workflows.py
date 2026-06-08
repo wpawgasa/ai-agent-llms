@@ -964,6 +964,8 @@ def _build_teacher_prompt(
     domain_spec: DomainSpec | None,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
@@ -976,6 +978,14 @@ def _build_teacher_prompt(
         if intent_category == "upsell_promo"
         else ""
     )
+    outbound_line = ""
+    if initiator == "agent" and outbound_reason is not None:
+        outbound_line = (
+            "Conversation initiation: OUTBOUND. The support AGENT initiates this contact. "
+            "The FIRST message after the system message MUST be the assistant introducing "
+            f"themselves and stating the reason for reaching out — {outbound_reason.description}. "
+            "The customer responds only after that. The workflow must still reach a terminal state.\n"
+        )
     transition_key = (
         "Transition trigger types: "
         "'always'=unconditional spine, 'tool_success'=after successful tool call, "
@@ -987,6 +997,7 @@ def _build_teacher_prompt(
         f"Complexity level: {spec.level} "
         f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
+        f"{outbound_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
@@ -1105,13 +1116,16 @@ def _generate_teacher_conversation(
     teacher_model: str,
     language: str = "en",
     intent_category: str = "service",
+    initiator: str = "user",
+    outbound_reason: "OutboundReason | None" = None,
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
     Falls back to placeholder generation if the API call fails.
     """
     user_prompt = _build_teacher_prompt(
-        workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category
+        workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
+        initiator, outbound_reason,
     )
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
@@ -1126,7 +1140,8 @@ def _generate_teacher_conversation(
             error=str(exc),
         )
         return _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec, language, intent_category
+            workflow, tool_schemas, behavior, spec, rng, domain_spec, language,
+            intent_category, initiator, outbound_reason,
         )
 
 
