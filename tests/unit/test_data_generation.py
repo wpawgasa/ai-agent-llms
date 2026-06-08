@@ -1239,3 +1239,16 @@ class TestValidatorOutbound:
         ]
         errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
         assert any("second message" in e for e in errs)
+
+    def test_inbound_with_assistant_greeting_passes(self):
+        # A natural inbound conversation may open with an agent greeting
+        # ("Hi, how can I help?") before the customer states intent. This must
+        # NOT be flagged — only the outbound direction is constrained.
+        from llm_workflow_agents.data.data_validator import _validate_workflow_sample
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "[STATE: GREETING → GREETING]\nHi, how can I help you today?"},
+            {"role": "user", "content": "I need to check my balance."},
+        ]
+        errs = _validate_workflow_sample(self._base(msgs, "user"), 0)
+        assert not any("second message" in e for e in errs)

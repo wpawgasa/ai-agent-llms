@@ -70,20 +70,18 @@ def _validate_workflow_sample(sample: dict[str, Any], idx: int) -> list[str]:
     elif messages[0].get("role") != "system":
         errors.append(f"Sample {idx}: first message should be system role")
 
-    # Second-message role depends on who initiated the conversation.
+    # Outbound (agent-initiated) conversations must open with an assistant turn
+    # stating the purpose. Inbound conversations are NOT constrained here: a
+    # natural inbound dialogue may legitimately open with either the customer's
+    # request or an agent greeting ("Hi, how can I help?"), so we only enforce
+    # the outbound direction.
     initiator = sample.get("conversation_initiator", "user")
-    if len(messages) > 1:
+    if initiator == "agent" and len(messages) > 1:
         second_role = messages[1].get("role")
-        if initiator == "agent":
-            if second_role != "assistant":
-                errors.append(
-                    f"Sample {idx}: outbound (agent-initiated) conversation must have "
-                    f"an assistant second message, got '{second_role}'"
-                )
-        elif second_role != "user":
+        if second_role != "assistant":
             errors.append(
-                f"Sample {idx}: inbound conversation must have a user second message, "
-                f"got '{second_role}'"
+                f"Sample {idx}: outbound (agent-initiated) conversation must have "
+                f"an assistant second message, got '{second_role}'"
             )
 
     # Validate state transitions are valid
