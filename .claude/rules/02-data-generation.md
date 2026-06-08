@@ -38,6 +38,7 @@ def generate_workflow_dataset(
     num_samples: int = 200,
     domain: str | None = None,          # None → random; pin with e.g. "banking"
     intent_category_preset: str = "default",  # "default"|"service_only"|"upsell_heavy"
+    initiation_preset: str = "default",  # "default"|"balanced"|"outbound_heavy"
     teacher_model: str = "gpt-4o",
     output_dir: Path = Path("data/output/task_a"),
     seed: int = 42,
@@ -46,12 +47,23 @@ def generate_workflow_dataset(
 
 **Domain eligibility by level:** `_select_domain` filters domains by canonical state count ≥ `target_path_len` minimum. L1–L3 draw from all 18 domains; L4 requires ≥12-state domains; L5 requires the 5 expanded rich domains (banking, insurance, healthcare, travel, telecom).
 
+### Conversation Initiation (inbound vs outbound)
+By default every conversation is **inbound** (user-initiated): after the `system` message the customer speaks first. `initiation_preset` mixes in **outbound** (support-initiated) conversations where the agent opens the call with a purpose.
+
+| Preset | user (inbound) | agent (outbound) |
+|--------|---------------|------------------|
+| `default` | 100% | 0% |
+| `balanced` | 70% | 30% |
+| `outbound_heavy` | 40% | 60% |
+
+Outbound samples reuse each domain's canonical graph: the agent opens at the existing initial state stating the reason (`messages[1].role == "assistant"`); `state_sequence` still starts at the initial state. Outbound is only chosen for domains carrying an `outbound_reasons` tuple — a curated subset: **sales, banking, insurance, healthcare, telecom, travel, scheduling**. Each reason is an `OutboundReason(key, description, intent_category)` (e.g. healthcare `prescription_followup`, insurance `renewal_reminder`, sales `promotion_offer`); its `intent_category` ("service" | "upsell_promo") drives subgraph arc selection. If an outbound sample lands on a domain without reasons it falls back to inbound (counted in stats `outbound_fallback_inbound`).
+
 ### User Behavior Distribution
 - cooperative: 60%, adversarial_probing: 15%, digressing: 10%, invalid_tool_inputs: 15%
 - Tool error rate: 20% of tool calls return error payloads
 
 ### Output Format (per sample)
-Each sample includes: conversation_id, complexity_level, domain, workflow_graph, tool_schemas, messages (with `[STATE: X → Y]` and `<tool_call>` annotations), user_behavior, ground_truth (state_sequence, tool_chain_dependencies, terminal_state).
+Each sample includes: conversation_id, complexity_level, domain, workflow_graph, tool_schemas, messages (with `[STATE: X → Y]` and `<tool_call>` annotations), user_behavior, ground_truth (state_sequence, tool_chain_dependencies, terminal_state), `conversation_initiator` ("user" | "agent"), and `outbound_reason` (reason key | null). Outbound message shape: `[system, assistant(opener), user, assistant, …]`.
 
 ## Task B: generate_tool_call_data.py
 
