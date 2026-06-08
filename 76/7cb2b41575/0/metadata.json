@@ -1,0 +1,22 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "767cb2b41575",
+  "session_id": "dc91e762-f509-4ee3-9c95-9ed9c245867e",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-08T04:20:35.527213628Z",
+  "branch": "feat/outbound-support-initiated-conversations",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "turn_id": "b630b7db4b63",
+  "token_usage": {
+    "input_tokens": 11604,
+    "cache_creation_tokens": 447843,
+    "cache_read_tokens": 9491644,
+    "output_tokens": 76306,
+    "api_call_count": 59
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}
