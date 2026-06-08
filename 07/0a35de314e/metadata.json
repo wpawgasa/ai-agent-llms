@@ -4,7 +4,10 @@
   "strategy": "manual-commit",
   "branch": "feat/strengthen-teacher-prompt",
   "checkpoints_count": 1,
-  "files_touched": null,
+  "files_touched": [
+    "src/llm_workflow_agents/data/generate_workflows.py",
+    "tests/unit/test_teacher_prompt_contract.py"
+  ],
   "sessions": [
     {
       "metadata": "/07/0a35de314e/0/metadata.json",
@@ -14,10 +17,10 @@
     }
   ],
   "token_usage": {
-    "input_tokens": 16961,
-    "cache_creation_tokens": 648792,
-    "cache_read_tokens": 61046293,
-    "output_tokens": 215670,
-    "api_call_count": 242
+    "input_tokens": 21428,
+    "cache_creation_tokens": 665269,
+    "cache_read_tokens": 63150560,
+    "output_tokens": 220643,
+    "api_call_count": 247
   }
 }
