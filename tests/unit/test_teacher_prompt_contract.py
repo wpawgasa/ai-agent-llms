@@ -51,3 +51,26 @@ def test_contract_tools_match_repair_loop():
             _legal, allowed = _repair_loop_sets(wf)
             as_sets = {k: set(v) for k, v in c_tools.items()}
             assert as_sets == allowed, f"{key}/{level}: tool map mismatch"
+
+
+def test_rendered_prompt_contains_full_contract():
+    spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+    dom = DOMAIN_REGISTRY["account_management"]
+    rng = random.Random(0)
+    wf = gw.select_subgraph(dom, spec, rng, "service")
+    tools = [t for t in dom.tools]
+    prompt = gw._build_teacher_prompt(
+        wf, tools, "cooperative", spec, dom, "en", "service",
+    )
+    assert "WORKFLOW CONTRACT" in prompt
+    edges, tools_by_state = gw._workflow_contract(wf)
+    # Every legal edge appears as an "X → Y" line.
+    for src, dst in edges:
+        assert f"{src} → {dst}" in prompt, f"missing edge line {src} → {dst}"
+    # Every state's tool permission appears verbatim.
+    for s in wf.states:
+        st = tools_by_state[s.name]
+        if st:
+            assert f"{s.name}: {', '.join(st)}" in prompt, f"missing tools for {s.name}"
+        else:
+            assert f"{s.name}: (text only" in prompt, f"missing text-only line for {s.name}"

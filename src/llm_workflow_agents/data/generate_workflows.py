@@ -91,6 +91,38 @@ def _workflow_contract(
     return edges, tools_by_state
 
 
+def _render_workflow_contract(workflow: "WorkflowGraph") -> str:
+    """Render the legality/placement contract block for the teacher prompt."""
+    edges, tools_by_state = _workflow_contract(workflow)
+    if edges:
+        edge_lines = "\n".join(f"  {src} → {dst}" for src, dst in sorted(edges))
+    else:
+        edge_lines = "  (none — single-state workflow; stay in the initial state)"
+    tool_lines = []
+    for s in workflow.states:  # preserve graph order for readability
+        tools = tools_by_state.get(s.name, [])
+        if tools:
+            tool_lines.append(f"  {s.name}: {', '.join(tools)}")
+        else:
+            tool_lines.append(f"  {s.name}: (text only — no tools)")
+    tools_block = "\n".join(tool_lines)
+    return (
+        "WORKFLOW CONTRACT — these are hard constraints. Output that violates them "
+        "is rejected and regenerated.\n\n"
+        "ALLOWED TRANSITIONS (only these state changes are legal; staying in the "
+        "same state is always allowed):\n"
+        f"{edge_lines}\n\n"
+        "TOOL PERMISSIONS PER STATE (a tool may ONLY be called from a state that "
+        "lists it):\n"
+        f"{tools_block}\n\n"
+        "Authority: the tool SCHEMAS define which tools exist and what arguments "
+        "they take; this CONTRACT defines where each tool may be called and which "
+        "transitions are legal; the workflow script is only a flow hint. When they "
+        "disagree, the schema wins for arguments and the CONTRACT wins for "
+        "placement and transitions."
+    )
+
+
 BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
     "default": {
         "cooperative": 0.60,
@@ -1016,6 +1048,7 @@ def _build_teacher_prompt(
         "'tool_error'=after failed tool call, 'intent_match'=customer intent matches, "
         "'user_declines'=customer refuses, 'slot_present'=required slot provided.\n"
     )
+    contract_block = _render_workflow_contract(workflow)
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
@@ -1024,6 +1057,7 @@ def _build_teacher_prompt(
         f"{outbound_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
+        f"{contract_block}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
         f"{transition_key}\n"
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
