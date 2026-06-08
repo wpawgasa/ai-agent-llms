@@ -20,6 +20,8 @@
 #   --output-dir <path>       Base output directory (default: data/output)
 #   --intent-category <p>     Intent mix preset: default (70/30 service/upsell),
 #                             service_only, upsell_heavy (default: default)
+#   --initiation <p>          Inbound/outbound mix preset: default (100% inbound),
+#                             balanced (70/30 user/agent), outbound_heavy (40/60) (default: default)
 #   --dry-run                 Print commands without executing
 #
 # Examples:
@@ -34,6 +36,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_DIR="$PROJECT_ROOT/data/output"
 SPLIT="both"
 INTENT_CATEGORY="default"
+INITIATION="default"
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --output-dir)      OUTPUT_DIR="$2";      shift 2 ;;
         --split)           SPLIT="$2";           shift 2 ;;
         --intent-category) INTENT_CATEGORY="$2"; shift 2 ;;
+        --initiation)      INITIATION="$2";      shift 2 ;;
         --dry-run)         DRY_RUN=true;         shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -52,6 +56,11 @@ done
 case "$INTENT_CATEGORY" in
     default|service_only|upsell_heavy) ;;
     *) echo "Unknown --intent-category: $INTENT_CATEGORY (expected default, service_only, upsell_heavy)" >&2; exit 1 ;;
+esac
+
+case "$INITIATION" in
+    default|balanced|outbound_heavy) ;;
+    *) echo "Unknown --initiation: $INITIATION (expected default, balanced, outbound_heavy)" >&2; exit 1 ;;
 esac
 
 if [[ "$DRY_RUN" = false ]]; then
@@ -87,6 +96,7 @@ meta = generate_workflow_dataset(
     output_dir=Path('$DEST'),
     seed=$SEED,
     intent_category_preset='$INTENT_CATEGORY',
+    initiation_preset='$INITIATION',
 )
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
@@ -101,6 +111,7 @@ echo "Language:     mixed (en/th)"
 echo "Model:        gpt-5.4-nano-2026-03-17"
 echo "Distribution: default"
 echo "Intent mix:   $INTENT_CATEGORY"
+echo "Initiation:   $INITIATION"
 echo "Seeds:        val=300, test=400 (no overlap with sft=42, benchmark=100, grpo=200)"
 echo "============================"
 
