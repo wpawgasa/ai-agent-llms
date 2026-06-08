@@ -1084,3 +1084,22 @@ class TestConversationSampleOutboundFields:
         d = s.to_dict()
         assert d["conversation_initiator"] == "user"
         assert d["outbound_reason"] is None
+
+
+class TestSelectDomainOutbound:
+    def test_outbound_only_picks_outbound_capable_domain(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        for s in range(30):
+            rng = random.Random(s)
+            key, dom = _select_domain(rng, None, spec, outbound_only=True)
+            assert dom.outbound_reasons, f"{key} has no outbound_reasons"
+
+    def test_pinned_domain_ignores_outbound_filter(self):
+        import random
+        from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L1]
+        rng = random.Random(0)
+        key, dom = _select_domain(rng, "government", spec, outbound_only=True)
+        assert key == "government"  # explicit pin always honored

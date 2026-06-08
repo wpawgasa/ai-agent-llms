@@ -714,6 +714,7 @@ def _select_domain(
     rng: random.Random,
     domain: str | None = None,
     spec: "ComplexitySpec | None" = None,
+    outbound_only: bool = False,
 ) -> tuple[str, DomainSpec]:
     """Select a domain, filtering to those eligible for the requested complexity level."""
     _LEGACY_MAP: dict[str, str] = {
@@ -736,6 +737,7 @@ def _select_domain(
     eligible = [
         k for k, d in DOMAIN_REGISTRY.items()
         if len(d.states) >= min_states
+        and (not outbound_only or d.outbound_reasons)
     ]
     if not eligible:
         eligible = ALL_DOMAIN_NAMES  # fallback: all domains
