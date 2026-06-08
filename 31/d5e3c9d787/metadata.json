@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "31d5e3c9d787",
+  "strategy": "manual-commit",
+  "branch": "feat/outbound-support-initiated-conversations",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/31/d5e3c9d787/0/metadata.json",
+      "transcript": "/31/d5e3c9d787/0/full.jsonl",
+      "content_hash": "/31/d5e3c9d787/0/content_hash.txt",
+      "prompt": "/31/d5e3c9d787/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 14685,
+    "cache_creation_tokens": 505652,
+    "cache_read_tokens": 26497257,
+    "output_tokens": 113086,
+    "api_call_count": 134
+  }
+}
