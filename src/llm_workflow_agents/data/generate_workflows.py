@@ -1156,6 +1156,7 @@ def generate_workflow_dataset(
     behavior_preset: str = "default",
     rich_prompt_rate: float = 0.30,
     intent_category_preset: str = "default",
+    initiation_preset: str = "default",
     repair_incoherent: bool = True,
     max_repair_retries: int = 2,
 ) -> DatasetMetadata:
@@ -1214,8 +1215,14 @@ def generate_workflow_dataset(
             f"Unknown intent_category_preset {intent_category_preset!r}. "
             f"Valid options: {list(INTENT_CATEGORY_PRESETS)}"
         )
+    if initiation_preset not in INITIATION_PRESETS:
+        raise ValueError(
+            f"Unknown initiation_preset {initiation_preset!r}. "
+            f"Valid options: {list(INITIATION_PRESETS)}"
+        )
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
+    active_initiation_dist = INITIATION_PRESETS[initiation_preset]
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
@@ -1244,6 +1251,9 @@ def generate_workflow_dataset(
     domain_counts: dict[str, int] = {}
     language_counts: dict[str, int] = {}
     intent_category_counts: dict[str, int] = {c: 0 for c in active_intent_dist}
+    initiator_counts: dict[str, int] = {"user": 0, "agent": 0}
+    outbound_reason_counts: dict[str, int] = {}
+    outbound_fallback_inbound = 0
     tool_error_count = 0
     total_tool_calls = 0
     rich_prompt_count = 0
@@ -1258,13 +1268,30 @@ def generate_workflow_dataset(
         sample_language = language if language is not None else rng.choice(["en", "th"])
         language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
-        # Select domain (fixed or random per sample, filtered by complexity level)
-        domain_key, domain_spec = _select_domain(rng, domain, spec)
-        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
+        # Decide who initiates this conversation (inbound user | outbound agent).
+        initiator = _select_initiator(rng, active_initiation_dist)
+        outbound_reason = None
 
-        # Select intent category (service vs upsell_promo)
-        intent_category = _select_intent_category(rng, active_intent_dist)
+        if initiator == "agent":
+            domain_key, domain_spec = _select_domain(rng, domain, spec, outbound_only=True)
+            if domain_spec.outbound_reasons:
+                outbound_reason = rng.choice(list(domain_spec.outbound_reasons))
+                intent_category = outbound_reason.intent_category
+            else:
+                # Pinned/eligible domain has no outbound reasons → fall back to inbound.
+                initiator = "user"
+                outbound_fallback_inbound += 1
+                intent_category = _select_intent_category(rng, active_intent_dist)
+        else:
+            domain_key, domain_spec = _select_domain(rng, domain, spec)
+            intent_category = _select_intent_category(rng, active_intent_dist)
+
+        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
         intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
+        initiator_counts[initiator] += 1
+        if outbound_reason is not None:
+            outbound_reason_counts[outbound_reason.key] = \
+                outbound_reason_counts.get(outbound_reason.key, 0) + 1
 
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
@@ -1282,13 +1309,13 @@ def generate_workflow_dataset(
         def _placeholder() -> list[dict[str, Any]]:
             return _generate_placeholder_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
-                intent_category,
+                intent_category, initiator, outbound_reason,
             )
 
         if teacher_model:
             messages = _generate_teacher_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
-                sample_language, intent_category,
+                sample_language, intent_category, initiator, outbound_reason,
             )
             # Post-generation repair: the teacher is only *prompted* with the
             # curated tool placement, so it may still call a tool in a state that
@@ -1323,6 +1350,7 @@ def generate_workflow_dataset(
                     messages = _generate_teacher_conversation(
                         workflow, tool_schemas, behavior, spec, rng, domain_spec,
                         teacher_model, sample_language, intent_category,
+                        initiator, outbound_reason,
                     )
         else:
             messages = _placeholder()
@@ -1388,6 +1416,8 @@ def generate_workflow_dataset(
             user_behavior=behavior,
             language=sample_language,
             ground_truth=_extract_ground_truth(messages, workflow),
+            conversation_initiator=initiator,
+            outbound_reason=(outbound_reason.key if outbound_reason else None),
         )
         samples.append(sample)
 
@@ -1401,6 +1431,9 @@ def generate_workflow_dataset(
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
         "intent_category_distribution": intent_category_counts,
+        "initiator_distribution": initiator_counts,
+        "outbound_reason_distribution": outbound_reason_counts,
+        "outbound_fallback_inbound": outbound_fallback_inbound,
         "tool_error_rate": tool_error_count / max(total_tool_calls, 1),
         "total_tool_calls": total_tool_calls,
         "avg_states": sum(s.num_states for s in samples) / len(samples),

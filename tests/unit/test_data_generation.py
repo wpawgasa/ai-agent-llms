@@ -1171,3 +1171,41 @@ class TestTeacherPromptOutbound:
     def test_inbound_prompt_has_no_outbound_block(self):
         p = self._prompt("user")
         assert "OUTBOUND" not in p
+
+
+class TestGenerateOutboundDataset:
+    def test_outbound_heavy_emits_agent_samples(self, tmp_output_dir: Path) -> None:
+        meta = generate_workflow_dataset(
+            complexity_level="L2", num_samples=30,
+            initiation_preset="outbound_heavy",
+            output_dir=tmp_output_dir, seed=7,
+        )
+        agent_samples = []
+        with open(meta.output_files[0]) as f:
+            for line in f:
+                s = json.loads(line)
+                if s["conversation_initiator"] == "agent":
+                    agent_samples.append(s)
+        assert agent_samples, "expected at least one outbound sample"
+        for s in agent_samples:
+            assert s["messages"][1]["role"] == "assistant"   # opener
+            assert s["outbound_reason"]                        # reason recorded
+            assert DOMAIN_REGISTRY[s["domain"]].outbound_reasons
+
+    def test_default_preset_is_all_inbound(self, tmp_output_dir: Path) -> None:
+        meta = generate_workflow_dataset(
+            complexity_level="L1", num_samples=10,
+            output_dir=tmp_output_dir, seed=1,
+        )
+        with open(meta.output_files[0]) as f:
+            for line in f:
+                s = json.loads(line)
+                assert s["conversation_initiator"] == "user"
+                assert s["messages"][1]["role"] == "user"
+
+    def test_unknown_initiation_preset_raises(self, tmp_output_dir: Path) -> None:
+        with pytest.raises(ValueError, match="initiation_preset"):
+            generate_workflow_dataset(
+                complexity_level="L1", num_samples=1,
+                initiation_preset="bogus", output_dir=tmp_output_dir, seed=1,
+            )
