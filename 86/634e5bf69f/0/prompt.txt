@@ -46,3 +46,7 @@ yes, write a spec
 ---
 
 /superpowers:writing-plans
+
+---
+
+Subagent-driven
