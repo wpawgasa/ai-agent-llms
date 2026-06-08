@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "86634e5bf69f",
+  "strategy": "manual-commit",
+  "branch": "feat/strengthen-teacher-prompt",
+  "checkpoints_count": 2,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/86/634e5bf69f/0/metadata.json",
+      "transcript": "/86/634e5bf69f/0/full.jsonl",
+      "content_hash": "/86/634e5bf69f/0/content_hash.txt",
+      "prompt": "/86/634e5bf69f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 16611,
+    "cache_creation_tokens": 632919,
+    "cache_read_tokens": 57397258,
+    "output_tokens": 203375,
+    "api_call_count": 233
+  }
+}
