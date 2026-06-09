@@ -67,6 +67,62 @@ def _find_transition_violations(
     return violations
 
 
+def _workflow_contract(
+    workflow: "WorkflowGraph",
+) -> tuple[set[tuple[str, str]], dict[str, list[str]]]:
+    """Return (legal_directed_edges, tools_by_state) keyed by state NAME.
+
+    Mirrors exactly what the generator's repair loop enforces:
+    - legal_directed_edges: the X!=Y subset of valid_edge_pairs, i.e. every
+      (from_name, to_name) transition where the two states differ. Staying in a
+      state (X->X) is always allowed and is intentionally not listed.
+    - tools_by_state: {state name: sorted tool names} == the ``allowed`` map used
+      by find_tool_placement_violations. Tools are returned as a sorted list (not
+      a set) for deterministic prompt rendering by ``_render_workflow_contract``.
+    """
+    id_to_name = {s.id: s.name for s in workflow.states}
+    edges: set[tuple[str, str]] = set()
+    for t in workflow.transitions:
+        src = id_to_name.get(t.from_state, t.from_state)
+        dst = id_to_name.get(t.to_state, t.to_state)
+        if src != dst:
+            edges.add((src, dst))
+    tools_by_state = {s.name: sorted(s.tools) for s in workflow.states}
+    return edges, tools_by_state
+
+
+def _render_workflow_contract(workflow: "WorkflowGraph") -> str:
+    """Render the legality/placement contract block for the teacher prompt."""
+    edges, tools_by_state = _workflow_contract(workflow)
+    if edges:
+        edge_lines = "\n".join(f"  {src} → {dst}" for src, dst in sorted(edges))
+    else:
+        edge_lines = "  (none — single-state workflow; stay in the initial state)"
+    tool_lines = []
+    for s in workflow.states:  # preserve graph order for readability
+        tools = tools_by_state.get(s.name, [])
+        if tools:
+            tool_lines.append(f"  {s.name}: {', '.join(tools)}")
+        else:
+            tool_lines.append(f"  {s.name}: (text only — no tools)")
+    tools_block = "\n".join(tool_lines)
+    return (
+        "WORKFLOW CONTRACT — these are hard constraints. Output that violates them "
+        "is rejected and regenerated.\n\n"
+        "ALLOWED TRANSITIONS (only these state changes are legal; staying in the "
+        "same state is always allowed):\n"
+        f"{edge_lines}\n\n"
+        "TOOL PERMISSIONS PER STATE (a tool may ONLY be called from a state that "
+        "lists it):\n"
+        f"{tools_block}\n\n"
+        "Authority: the tool SCHEMAS define which tools exist and what arguments "
+        "they take; this CONTRACT defines where each tool may be called and which "
+        "transitions are legal; the workflow script is only a flow hint. When they "
+        "disagree, the schema wins for arguments and the CONTRACT wins for "
+        "placement and transitions."
+    )
+
+
 BEHAVIOR_PRESETS: dict[str, dict[str, float]] = {
     "default": {
         "cooperative": 0.60,
@@ -931,6 +987,8 @@ OUTPUT FORMAT — return a JSON object with a single key "messages" containing a
 RULES:
 - Every assistant message MUST include a [STATE: X → Y] annotation in the content.
 - When invoking a tool include <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
+- Every [STATE: X → Y] you emit with X != Y MUST appear in the WORKFLOW CONTRACT's ALLOWED TRANSITIONS list (provided in the user message). Never invent a transition; if unsure how to proceed, stay in the current state ([STATE: X → X]).
+- Only call a tool from a state that lists it under TOOL PERMISSIONS PER STATE. Never call a tool in a state marked "text only", and never call a tool absent from the tool schemas.
 - Follow the user behavior pattern exactly (cooperative / adversarial_probing / digressing / invalid_tool_inputs).
 - The conversation MUST reach one of the terminal states before ending.
 - ~20 % of tool responses should be errors: {"error": "Service temporarily unavailable"}.
@@ -992,6 +1050,7 @@ def _build_teacher_prompt(
         "'tool_error'=after failed tool call, 'intent_match'=customer intent matches, "
         "'user_declines'=customer refuses, 'slot_present'=required slot provided.\n"
     )
+    contract_block = _render_workflow_contract(workflow)
     return (
         f"Domain: {domain_name}\n"
         f"Complexity level: {spec.level} "
@@ -1000,6 +1059,7 @@ def _build_teacher_prompt(
         f"{outbound_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
+        f"{contract_block}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
         f"{transition_key}\n"
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
