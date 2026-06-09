@@ -1010,10 +1010,12 @@ You are a dataset generation expert creating training data for LLM workflow agen
 Generate a realistic multi-turn customer service conversation that strictly follows
 the provided workflow graph, tool schemas, and user behavior pattern.
 
-OUTPUT FORMAT — return a JSON object with a single key "messages" containing an array:
+OUTPUT FORMAT — return a JSON object with a single key "messages" containing an array.
+Do NOT include a system message — start with the first user turn (or, for an
+outbound conversation, the assistant's opening turn); the agent's system prompt
+is supplied separately:
 {
   "messages": [
-    {"role": "system", "content": "..."},
     {"role": "user", "content": "..."},
     {
       "role": "assistant",
@@ -1029,6 +1031,9 @@ OUTPUT FORMAT — return a JSON object with a single key "messages" containing a
 }
 
 RULES:
+- Do NOT emit a system message; the first message is the user turn (or the
+  assistant opener for an outbound conversation). Never restate these
+  generation instructions inside the conversation.
 - Every assistant message MUST include a [STATE: X → Y] annotation in the content.
 - When invoking a tool include <tool_call>{"name": "...", "arguments": {...}}</tool_call>.
 - Every [STATE: X → Y] you emit with X != Y MUST appear in the WORKFLOW CONTRACT's ALLOWED TRANSITIONS list (provided in the user message). Never invent a transition; if unsure how to proceed, stay in the current state ([STATE: X → X]).
@@ -1241,6 +1246,11 @@ def _generate_teacher_conversation(
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
         messages = _parse_messages_response(raw)
+        # The generator owns messages[0]: the caller applies a rich or bare
+        # system prompt. Drop any system turn the teacher emitted so its own
+        # task framing (e.g. the "dataset generation expert" instructions) can
+        # never leak into the sample's system message.
+        messages = [m for m in messages if m.get("role") != "system"]
         if not messages:
             raise ValueError("Teacher model returned empty messages")
         return messages

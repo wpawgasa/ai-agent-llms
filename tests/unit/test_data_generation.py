@@ -749,6 +749,51 @@ class TestPostGenerationRepair:
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
 
+    def test_teacher_system_message_is_stripped(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """A teacher that emits its own (meta) system message must not have it
+        leak into the sample — the generator owns messages[0] (rich or bare)."""
+        meta = (
+            "You are a dataset generation expert creating training data for "
+            "LLM workflow agents. Generate a realistic conversation."
+        )
+
+        def fake_call(model, system_prompt, user_prompt):
+            return json.dumps(
+                {
+                    "messages": [
+                        {"role": "system", "content": meta},
+                        {"role": "user", "content": "Hello"},
+                        {
+                            "role": "assistant",
+                            "content": "[STATE: GREETING → GREETING]\n"
+                            "Hello! How can I help with your banking today?",
+                        },
+                    ]
+                }
+            )
+
+        monkeypatch.setattr(gw, "call_teacher_model", fake_call)
+        result = generate_workflow_dataset(
+            complexity_level="L1",
+            domain="banking",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            rich_prompt_rate=0.0,  # force the bare fallback for a deterministic assertion
+        )
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        sys_msgs = [m for m in sample["messages"] if m["role"] == "system"]
+        assert len(sys_msgs) == 1
+        assert sample["messages"][0]["role"] == "system"
+        assert "dataset generation expert" not in sample["messages"][0]["content"]
+        assert sample["messages"][0]["content"].startswith(
+            "You are a customer service agent handling"
+        )
+
 
 class TestDomainSchema:
     """Tests for the new StateNode/Edge/DomainSpec schema and validate_domain."""
