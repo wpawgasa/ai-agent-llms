@@ -69,14 +69,27 @@ def build_sample_prompt(sample: dict[str, Any]) -> dict[str, Any]:
     )
     original = system_msg.get("content", "") if system_msg else ""
     enriched = build_enriched_system_prompt(sample, original)
+    messages = sample.get("messages", [])
     seed_user = next(
-        (m.get("content", "") for m in sample.get("messages", []) if m.get("role") == "user"),
+        (m.get("content", "") for m in messages if m.get("role") == "user"),
         "",
+    )
+    # Outbound (support-initiated) conversations open with an assistant turn
+    # right after `system` (conversation_initiator == "agent"). Surface that
+    # opener so the UI can render it as the first bubble instead of waiting on
+    # the user. Inbound conversations leave this empty.
+    first_non_system = next((m for m in messages if m.get("role") != "system"), None)
+    seed_assistant = (
+        first_non_system.get("content", "")
+        if first_non_system and first_non_system.get("role") == "assistant"
+        else ""
     )
     return {
         "system_prompt": enriched,
         "tools": sample.get("tool_schemas", []),
         "seed_user": seed_user,
+        "seed_assistant": seed_assistant,
+        "conversation_initiator": sample.get("conversation_initiator", "user"),
         "mermaid": build_workflow_mermaid(sample),
     }
 

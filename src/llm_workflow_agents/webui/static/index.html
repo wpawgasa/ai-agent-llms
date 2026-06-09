@@ -808,6 +808,13 @@ async function loadSample() {
   if (data.seed_user) $('input').value = data.seed_user;
   resetChat(false);
   renderDiagram(data.mermaid || '');
+  // Outbound (support-initiated) samples open with an assistant turn. Render it
+  // as the first bubble and seed it into history so the agent's opener is sent
+  // as context when the user replies. resetChat() ran first, so history is clean.
+  if (data.seed_assistant) {
+    addMsg('assistant', data.seed_assistant);
+    history.push({ role: 'assistant', content: data.seed_assistant });
+  }
 }
 
 function resetChat(clearSystem) {
