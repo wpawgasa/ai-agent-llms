@@ -13,13 +13,13 @@ stages:
       size: 757
     - path: scripts/generate_benchmark_data.sh
       hash: md5
-      md5: 152977d9d3df3c2fa1389115f8cb3d3e
-      size: 2066
+      md5: 8833dacf43f2c3766aeff390f08f7419
+      size: 3214
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: 04514ca973b47a22a433414ba11bdb3d
-      size: 48510
+      md5: 713a717053359b741d215d3280989e49
+      size: 71345
     params:
       configs/benchmark/phase1_matrix.yaml:
         task_a:
@@ -31,7 +31,13 @@ stages:
           - configs/models/cat_a/nemotron_30b.yaml
           - configs/models/cat_a/glm47_flash.yaml
           - configs/models/cat_a/gemma4_26b_a4b.yaml
+          - configs/models/cat_a/gemma4_26b_a4b_fp8.yaml
           - configs/models/cat_a/gemma4_31b.yaml
+          - configs/models/cat_a/gemma4_31b_fp8.yaml
+          - configs/models/cat_a/qwen36_35b_a3b.yaml
+          - configs/models/cat_a/qwen36_35b_a3b_fp8.yaml
+          - configs/models/cat_a/qwen36_27b.yaml
+          - configs/models/cat_a/qwen36_27b_fp8.yaml
           complexity_levels:
           - L1
           - L2
@@ -39,13 +45,13 @@ stages:
           - L4
           - L5
           samples_per_level: 200
-          total_evaluations: 8000
+          total_evaluations: 14000
     outs:
     - path: data/output/benchmark/task_a
       hash: md5
-      md5: 7784f7e1ed6415f3d2a85f70485d3527.dir
-      size: 2734500
-      nfiles: 5
+      md5: 94b15ffab08c8681c796414b627906b9.dir
+      size: 496825
+      nfiles: 4
   task_a_sft:
     cmd: "./scripts/generate_sft_data.sh && python scripts/clean_task_a_sft.py\n \
       \ --input-dir data/output/sft/task_a\n  --output-dir data/output/sft/task_a_cleaned\n\
