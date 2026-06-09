@@ -342,7 +342,11 @@ def graph_to_mermaid(graph: WorkflowGraph) -> str:
         dst = edge.get("to_state", "")
         condition = edge.get("condition", "")
         if condition:
-            escaped_condition = condition.replace("|", "&#124;")
+            escaped_condition = (
+                condition.replace("|", "&#124;")
+                .replace("[", "&#91;")
+                .replace("]", "&#93;")
+            )
             lines.append(f"    {src} -->|{escaped_condition}| {dst}")
         else:
             lines.append(f"    {src} --> {dst}")
