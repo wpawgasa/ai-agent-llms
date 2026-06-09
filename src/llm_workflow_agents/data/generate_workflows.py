@@ -39,7 +39,6 @@ from llm_workflow_agents.config.schema import (
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     CROSS_CUTTING_INTENTS,
-    CROSS_CUTTING_TOOLS,
     DOMAIN_REGISTRY,
     DomainSpec,
     OutboundReason,
@@ -1379,16 +1378,17 @@ def generate_workflow_dataset(
 
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
-        # Collect tools referenced by the selected subgraph states
+        # tool_schemas = exactly the tools the selected subgraph's states use, no
+        # padding. A purely conversational subgraph yields an empty list; the
+        # sample's num_tools reflects this actual count (not spec.num_tools, which
+        # is only a subgraph-selection target). Padding with cross-cutting decoys
+        # was dropped: it injected an unused verify_identity that mis-baited tool
+        # calls in deliberately tool-less states.
         subgraph_tool_names = {tool for s in workflow.states for tool in s.tools}
         tool_schemas = [
             t for t in domain_spec.tools
             if t["function"]["name"] in subgraph_tool_names
         ]
-        # Supplement to reach spec.num_tools if needed; never truncate subgraph tools
-        if len(tool_schemas) < spec.num_tools:
-            extra = [t for t in CROSS_CUTTING_TOOLS if t not in tool_schemas]
-            tool_schemas.extend(extra[: spec.num_tools - len(tool_schemas)])
 
         def _placeholder() -> list[dict[str, Any]]:
             return _generate_placeholder_conversation(
@@ -1551,7 +1551,7 @@ def generate_workflow_dataset(
             complexity_level=complexity_level,
             domain=domain_key,
             num_states=len(workflow.states),
-            num_tools=spec.num_tools,
+            num_tools=len(tool_schemas),
             chain_depth=spec.chain_depth,
             workflow_graph=workflow.to_dict(),
             workflow_script=_graph_to_script(workflow, tool_schemas, sample_language, messages=messages),

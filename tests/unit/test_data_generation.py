@@ -166,6 +166,67 @@ class TestWorkflowGeneration:
                             f"{sample['domain']}: '{tool}' not in tool_schemas"
                         )
 
+    def test_tool_schemas_match_used_tools_no_distractors(
+        self, tmp_output_dir: Path
+    ) -> None:
+        """C-full invariant: tool_schemas contains exactly the tools the
+        workflow's states use (no cross-cutting decoy padding), and num_tools
+        reports that actual count."""
+        for level in ("L1", "L2"):
+            result = generate_workflow_dataset(
+                complexity_level=level,
+                num_samples=12,
+                output_dir=tmp_output_dir,
+                seed=11,
+            )
+            with open(result.output_files[0]) as f:
+                for line in f:
+                    sample = json.loads(line)
+                    schema_names = {
+                        ts["function"]["name"] for ts in sample["tool_schemas"]
+                    }
+                    used = {
+                        tool
+                        for sd in sample["workflow_graph"]["state_details"]
+                        for tool in sd["tools"]
+                    }
+                    assert schema_names == used, (
+                        f"{sample['conversation_id']}: tool_schemas {schema_names} "
+                        f"!= tools used by states {used}"
+                    )
+                    assert sample["num_tools"] == len(sample["tool_schemas"])
+
+    def test_tool_less_banking_l1_has_no_decoy(self, tmp_output_dir: Path) -> None:
+        """A purely conversational banking L1 flow ships zero tools. Banking has
+        no verify_identity tool of its own, so its appearance would mean the old
+        cross-cutting padding came back."""
+        result = generate_workflow_dataset(
+            complexity_level="L1",
+            domain="banking",
+            num_samples=8,
+            output_dir=tmp_output_dir,
+            seed=11,
+        )
+        saw_tool_less = False
+        with open(result.output_files[0]) as f:
+            for line in f:
+                sample = json.loads(line)
+                schema_names = {
+                    ts["function"]["name"] for ts in sample["tool_schemas"]
+                }
+                assert "verify_identity" not in schema_names
+                used = {
+                    tool
+                    for sd in sample["workflow_graph"]["state_details"]
+                    for tool in sd["tools"]
+                }
+                assert schema_names == used
+                if not used:
+                    saw_tool_less = True
+                    assert sample["tool_schemas"] == []
+                    assert sample["num_tools"] == 0
+        assert saw_tool_less, "expected at least one tool-less banking L1 subgraph"
+
     def test_every_working_state_has_instruction(self, tmp_output_dir: Path) -> None:
         """Every non-terminal state carries an instruction in both the graph
         and the rendered workflow_script."""
