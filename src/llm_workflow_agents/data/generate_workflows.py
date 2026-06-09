@@ -611,6 +611,51 @@ _TOOL_CALL_RE = re.compile(
 )
 
 
+def _backfill_annotations(messages: list[dict[str, Any]]) -> None:
+    """Normalise each assistant turn to carry a structured ``annotations`` dict
+    derived from its inline ``[STATE: X → Y]`` / ``<tool_call>`` markers.
+
+    Some teacher models emit the inline markers in ``content`` but omit the
+    parallel ``annotations`` object that downstream consumers key off — the
+    data validator, the repair loop's transition-legality check
+    (``_find_transition_violations``, which has no content fallback), the
+    chat-template converter, and GRPO loss masking. This fills in only the
+    *missing* fields from content, preserving any annotation the teacher already
+    supplied, so every consumer sees a consistent shape regardless of teacher
+    formatting. Mutates ``messages`` in place.
+    """
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content") or ""
+        ann = msg.get("annotations")
+        if not isinstance(ann, dict):
+            ann = {}
+
+        if not (ann.get("state_transition") or {}).get("from"):
+            m = _STATE_ANNOTATION_RE.search(content)
+            if m:
+                ann["state_transition"] = {"from": m.group(1), "to": m.group(2)}
+
+        if not ann.get("tool_calls"):
+            inline: list[dict[str, Any]] = []
+            for tc_match in _TOOL_CALL_RE.finditer(content):
+                try:
+                    parsed = json.loads(tc_match.group(1))
+                except json.JSONDecodeError:
+                    continue
+                name = parsed.get("name", "")
+                if name:
+                    inline.append(
+                        {"name": name, "arguments": parsed.get("arguments", {})}
+                    )
+            if inline:
+                ann["tool_calls"] = inline
+
+        if ann:
+            msg["annotations"] = ann
+
+
 def _extract_ground_truth(
     messages: list[dict[str, Any]],
     workflow: "WorkflowGraph",
@@ -1402,6 +1447,11 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
                 sample_language, intent_category, initiator, outbound_reason,
             )
+            # Normalise annotations from the inline markers before the repair
+            # loop, so its transition-legality check (which reads annotations,
+            # not content) sees this teacher's transitions regardless of whether
+            # it emitted the structured annotations object.
+            _backfill_annotations(messages)
             # Post-generation repair: the teacher is only *prompted* with the
             # curated tool placement, so it may still call a tool in a state that
             # does not allow it. Retry within this attempt; if still incoherent,
@@ -1438,6 +1488,7 @@ def generate_workflow_dataset(
                         teacher_model, sample_language, intent_category,
                         initiator, outbound_reason,
                     )
+                    _backfill_annotations(messages)
         else:
             messages = _placeholder()
 
@@ -1476,6 +1527,11 @@ def generate_workflow_dataset(
             )
 
         messages = result["messages"]
+        # Idempotent guarantee that the emitted sample carries normalised
+        # annotations on every assistant turn (the teacher path already
+        # backfilled before its repair loop; this covers the placeholder path
+        # and any future path).
+        _backfill_annotations(messages)
         workflow = result["workflow"]
         tool_schemas = result["tool_schemas"]
         domain_key = result["domain_key"]

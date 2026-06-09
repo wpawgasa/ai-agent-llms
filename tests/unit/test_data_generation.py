@@ -597,12 +597,13 @@ class TestPostGenerationRepair:
             calls["n"] += 1
             if calls["n"] == 1:
                 return TestPostGenerationRepair._incoherent_conversation(workflow)
-            # Coherent: an assistant turn with no tool calls has zero violations.
+            # Coherent: a self-loop (always a legal transition) with no tool
+            # calls has zero violations under both the tool-placement and the
+            # transition-legality checks.
             s0 = workflow.states[0].name
-            s1 = workflow.states[1].name if len(workflow.states) > 1 else s0
             return [
                 {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": f"[STATE: {s0} → {s1}]\nLet me help."},
+                {"role": "assistant", "content": f"[STATE: {s0} → {s0}]\nLet me help."},
             ]
 
         monkeypatch.setattr(gw, "_generate_teacher_conversation", flaky)
@@ -670,6 +671,83 @@ class TestPostGenerationRepair:
         assert result.stats["repair_fallbacks"] == 0
         assert result.stats["sample_retries"] == 0
         assert result.stats["sample_fallbacks"] == 0
+
+    def test_annotations_backfilled_from_inline_markers(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """A teacher that emits inline [STATE:]/<tool_call> markers but omits
+        the structured annotations object still yields samples whose every
+        assistant turn carries a backfilled annotations.state_transition (and
+        tool_calls where inline calls exist)."""
+
+        def annotationless(workflow, *args, **kwargs):
+            s0 = workflow.states[0].name
+            return [
+                {"role": "user", "content": "hi"},
+                # self-loop (always legal) + an inline tool call, no annotations
+                {
+                    "role": "assistant",
+                    "content": f"[STATE: {s0} → {s0}]\n"
+                    "<tool_call>{\"name\": \"ghost\", \"arguments\": {\"x\": 1}}</tool_call>",
+                },
+            ]
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", annotationless)
+        # Disable repair so the (tool-violating) teacher turn is emitted as-is
+        # and we can inspect the backfilled annotations directly.
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            repair_incoherent=False,
+        )
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        asst = [
+            m
+            for m in sample["messages"]
+            if m["role"] == "assistant" and "[STATE:" in m["content"]
+        ]
+        assert asst, "expected at least one annotated assistant turn"
+        for m in asst:
+            st = (m.get("annotations") or {}).get("state_transition") or {}
+            assert st.get("from") and st.get("to"), m
+            tcs = (m.get("annotations") or {}).get("tool_calls") or []
+            assert any(tc.get("name") == "ghost" for tc in tcs), m
+
+    def test_annotationless_teacher_transition_violation_is_caught(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """An illegal transition emitted only as an inline [STATE:] marker (no
+        annotations object) is still detected by the repair loop, because the
+        annotations are backfilled before the transition-legality check runs.
+        Pre-backfill this slipped through unrepaired."""
+
+        def illegal_transition(workflow, *args, **kwargs):
+            # GREETING -> NOWHERE is not a legal edge in any workflow graph.
+            return [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": "[STATE: GREETING → NOWHERE]\nskipping the workflow.",
+                },
+            ]
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", illegal_transition)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=2,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        # Every attempt is incoherent, so all samples fall back to the placeholder.
+        assert result.stats["sample_fallbacks"] == 2
+        # And the emitted output is fully coherent under the validator.
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
 
 
 class TestDomainSchema:
