@@ -515,11 +515,14 @@ class TestPostGenerationRepair:
             output_dir=tmp_output_dir,
             seed=5,
         )
-        # Every requested sample is still emitted...
+        # Every requested sample is still emitted, exhausting every fresh attempt.
         assert result.num_samples == 4
-        # ...all fell back to the placeholder generator...
-        assert result.stats["repair_fallbacks"] == 4
-        assert result.stats["repair_retries"] == 4 * 2  # max_repair_retries default
+        # Each sample makes max_sample_attempts (default 3) attempts; every attempt
+        # exhausts max_repair_retries (default 2) and falls back to the placeholder.
+        assert result.stats["sample_fallbacks"] == 4
+        assert result.stats["sample_retries"] == 4 * (3 - 1)  # max_sample_attempts default
+        assert result.stats["repair_fallbacks"] == 4 * 3  # attempts incl. discarded
+        assert result.stats["repair_retries"] == 4 * 3 * 2  # attempts × max_repair_retries
         # ...and the output is fully coherent under the validator.
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
@@ -551,6 +554,46 @@ class TestPostGenerationRepair:
         )
         assert result.stats["repair_retries"] >= 1
         assert result.stats["repair_fallbacks"] == 0
+        # In-attempt repair succeeded, so no fresh-sample retry was needed.
+        assert result.stats["sample_retries"] == 0
+        assert result.stats["sample_fallbacks"] == 0
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
+
+    def test_fresh_retry_recovers_without_placeholder(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        # Incoherent for the whole first attempt (1 initial + max_repair_retries=2
+        # regenerations = 3 calls), then coherent → a fresh sample attempt recovers
+        # without emitting a placeholder.
+        calls = {"n": 0}
+
+        def incoherent_then_coherent(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 3:
+                return TestPostGenerationRepair._incoherent_conversation(workflow)
+            s0 = workflow.states[0].name
+            s1 = workflow.states[1].name if len(workflow.states) > 1 else s0
+            return [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": f"[STATE: {s0} → {s1}]\nLet me help."},
+            ]
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", incoherent_then_coherent)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.num_samples == 1
+        assert result.stats["sample_retries"] >= 1
+        assert result.stats["sample_fallbacks"] == 0
+        # The emitted sample is the coherent teacher turn, not the placeholder stub.
+        content = result.output_files[0].read_text()
+        assert "Let me help." in content
+        assert "ghost_tool" not in content
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
 
@@ -564,6 +607,8 @@ class TestPostGenerationRepair:
         assert result.num_samples == 5
         assert result.stats["repair_retries"] == 0
         assert result.stats["repair_fallbacks"] == 0
+        assert result.stats["sample_retries"] == 0
+        assert result.stats["sample_fallbacks"] == 0
 
 
 class TestDomainSchema:

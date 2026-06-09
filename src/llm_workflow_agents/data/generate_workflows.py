@@ -1089,8 +1089,10 @@ The authored prompt MUST contain:
    - Intent-based branching as bullets — "If the customer confirms, say '...'
      -> follow the [next_section] path"; "If the customer asks to be called
      back, proceed to [call_later] section"; etc.
-   - Tool-call instructions when a state has tools: "Call <tool>(args) to
-     <purpose>. Then confirm: '...'".
+   - Tool-call instructions ONLY for a state the WORKFLOW CONTRACT grants tools:
+     "Call <tool>(args) to <purpose>. Then confirm: '...'". For a state the
+     CONTRACT marks "(text only — no tools)", the section MUST be purely
+     conversational — do NOT instruct the agent to call any tool there.
 5. Cross-references between sections using [state_name] that match the
    transitions in the workflow graph.
 
@@ -1100,6 +1102,9 @@ RULES:
   or [TRANSFER] — those are deployment concerns, not training signal.
 - Use customer-intent language for branches, not schematic state-machine phrasing.
 - Keep tool names and state names verbatim from the inputs.
+- A tool may only be referenced as callable in a state the WORKFLOW CONTRACT
+  grants it. Tools present in the schema list but assigned to no state by the
+  CONTRACT are decoys — never instruct the agent to call them.
 - Output ONLY the JSON object — no markdown fences, no extra keys.
 """
 
@@ -1112,11 +1117,13 @@ def _build_rich_prompt_request(
 ) -> str:
     domain_name = domain_spec.name if domain_spec else "customer service"
     lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
+    contract_block = _render_workflow_contract(workflow)
     return (
         f"Domain: {domain_name}\n"
         f"{lang_instruction}\n\n"
         f"Workflow graph (authoritative — authored sections must match the state names):\n"
         f"{json.dumps(workflow.to_dict(), indent=2)}\n\n"
+        f"{contract_block}\n\n"
         f"Available tools:\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Author the rich system prompt now."
     )
@@ -1219,6 +1226,7 @@ def generate_workflow_dataset(
     initiation_preset: str = "default",
     repair_incoherent: bool = True,
     max_repair_retries: int = 2,
+    max_sample_attempts: int = 3,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1258,9 +1266,16 @@ def generate_workflow_dataset(
             if still incoherent, replaced by the deterministic placeholder
             conversation so every emitted sample respects the curated tool
             placement. No-op for placeholder generation (already coherent).
-        max_repair_retries: Maximum teacher regenerations per sample before the
-            placeholder fallback is used. Reported via the ``repair_retries`` and
-            ``repair_fallbacks`` stats.
+        max_repair_retries: Maximum teacher regenerations within a single sample
+            attempt before that attempt is marked as fallen-back. Reported via the
+            ``repair_retries`` and ``repair_fallbacks`` stats.
+        max_sample_attempts: Maximum number of fresh full-sample attempts (each
+            redrawing domain/workflow/behavior/language/initiator and re-running the
+            teacher) before a last-resort placeholder conversation is emitted. The
+            first generation counts as attempt 1, so the default of 3 allows 2 fresh
+            redraws. Only the teacher path can fall back; the placeholder generator
+            path (``teacher_model is None``) never retries. Reported via the
+            ``sample_retries`` and ``sample_fallbacks`` stats.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1279,6 +1294,10 @@ def generate_workflow_dataset(
         raise ValueError(
             f"Unknown initiation_preset {initiation_preset!r}. "
             f"Valid options: {list(INITIATION_PRESETS)}"
+        )
+    if max_sample_attempts < 1:
+        raise ValueError(
+            f"max_sample_attempts must be >= 1, got {max_sample_attempts}"
         )
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
@@ -1319,18 +1338,30 @@ def generate_workflow_dataset(
     rich_prompt_count = 0
     repair_retries = 0
     repair_fallbacks = 0
+    sample_retries = 0
+    sample_fallbacks = 0
 
-    for i in range(num_samples):
+    def _attempt_sample() -> dict[str, Any]:
+        """Draw a fresh sample and run the teacher + repair loop once.
+
+        Returns a bundle with the conversation and all of its context. The
+        ``fell_back`` flag is True when the teacher path exhausted
+        ``max_repair_retries`` and the placeholder was substituted; the caller
+        decides whether to retry a fresh draw or accept the placeholder as a
+        last resort. The placeholder-generator path (no ``teacher_model``)
+        never falls back, since the placeholder is its intended output.
+        """
+        nonlocal repair_retries, repair_fallbacks
+
         behavior = _select_user_behavior(rng, active_distribution)
-        behavior_counts[behavior] += 1
 
         # Select language (fixed or 50/50 mix per sample)
         sample_language = language if language is not None else rng.choice(["en", "th"])
-        language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
 
         # Decide who initiates this conversation (inbound user | outbound agent).
         initiator = _select_initiator(rng, active_initiation_dist)
         outbound_reason = None
+        fell_back_inbound = False
 
         if initiator == "agent":
             domain_key, domain_spec = _select_domain(rng, domain, spec, outbound_only=True)
@@ -1340,18 +1371,11 @@ def generate_workflow_dataset(
             else:
                 # Pinned/eligible domain has no outbound reasons → fall back to inbound.
                 initiator = "user"
-                outbound_fallback_inbound += 1
+                fell_back_inbound = True
                 intent_category = _select_intent_category(rng, active_intent_dist)
         else:
             domain_key, domain_spec = _select_domain(rng, domain, spec)
             intent_category = _select_intent_category(rng, active_intent_dist)
-
-        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
-        intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
-        initiator_counts[initiator] += 1
-        if outbound_reason is not None:
-            outbound_reason_counts[outbound_reason.key] = \
-                outbound_reason_counts.get(outbound_reason.key, 0) + 1
 
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
@@ -1372,6 +1396,7 @@ def generate_workflow_dataset(
                 intent_category, initiator, outbound_reason,
             )
 
+        fell_back = False
         if teacher_model:
             messages = _generate_teacher_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
@@ -1379,9 +1404,9 @@ def generate_workflow_dataset(
             )
             # Post-generation repair: the teacher is only *prompted* with the
             # curated tool placement, so it may still call a tool in a state that
-            # does not allow it. Retry, then fall back to the deterministic
-            # placeholder conversation (always coherent) so every emitted sample
-            # respects the curated map without shrinking the dataset.
+            # does not allow it. Retry within this attempt; if still incoherent,
+            # mark the attempt fallen-back so the caller can retry a fresh sample
+            # (the placeholder is only emitted if every attempt fails).
             if repair_incoherent:
                 allowed = {s.name: set(s.tools) for s in workflow.states}
                 schema_names = {t["function"]["name"] for t in tool_schemas}
@@ -1404,6 +1429,7 @@ def generate_workflow_dataset(
                     if tries >= max_repair_retries:
                         messages = _placeholder()
                         repair_fallbacks += 1
+                        fell_back = True
                         break
                     tries += 1
                     repair_retries += 1
@@ -1414,6 +1440,64 @@ def generate_workflow_dataset(
                     )
         else:
             messages = _placeholder()
+
+        return {
+            "messages": messages,
+            "fell_back": fell_back,
+            "workflow": workflow,
+            "tool_schemas": tool_schemas,
+            "domain_key": domain_key,
+            "domain_spec": domain_spec,
+            "behavior": behavior,
+            "sample_language": sample_language,
+            "initiator": initiator,
+            "outbound_reason": outbound_reason,
+            "intent_category": intent_category,
+            "fell_back_inbound": fell_back_inbound,
+        }
+
+    for i in range(num_samples):
+        # Generate one sample, retrying a fresh draw if the teacher path falls
+        # back to the placeholder, so the dataset keeps `num_samples` real
+        # conversations. A placeholder is emitted only as a last resort when
+        # every attempt exhausts repairs.
+        result = _attempt_sample()
+        attempts = 1
+        while result["fell_back"] and attempts < max_sample_attempts:
+            sample_retries += 1
+            result = _attempt_sample()
+            attempts += 1
+        if result["fell_back"]:
+            sample_fallbacks += 1
+            logger.warning(
+                "sample_fallback_placeholder_emitted",
+                conversation_index=i,
+                attempts=attempts,
+            )
+
+        messages = result["messages"]
+        workflow = result["workflow"]
+        tool_schemas = result["tool_schemas"]
+        domain_key = result["domain_key"]
+        domain_spec = result["domain_spec"]
+        behavior = result["behavior"]
+        sample_language = result["sample_language"]
+        initiator = result["initiator"]
+        outbound_reason = result["outbound_reason"]
+        intent_category = result["intent_category"]
+
+        # Record distribution counters for the accepted attempt only, so that
+        # discarded fallen-back attempts do not pollute the reported totals.
+        behavior_counts[behavior] += 1
+        language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
+        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
+        intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
+        initiator_counts[initiator] += 1
+        if outbound_reason is not None:
+            outbound_reason_counts[outbound_reason.key] = \
+                outbound_reason_counts.get(outbound_reason.key, 0) + 1
+        if result["fell_back_inbound"]:
+            outbound_fallback_inbound += 1
 
         # Optionally replace the bare role line with a teacher-authored rich
         # natural-language system prompt (persona + named sections + dialogue
@@ -1502,6 +1586,8 @@ def generate_workflow_dataset(
         "rich_prompt_rate_effective": rich_prompt_count / max(len(samples), 1),
         "repair_retries": repair_retries,
         "repair_fallbacks": repair_fallbacks,
+        "sample_retries": sample_retries,
+        "sample_fallbacks": sample_fallbacks,
     }
 
     logger.info("dataset_generated", output_file=str(output_file), **stats)
