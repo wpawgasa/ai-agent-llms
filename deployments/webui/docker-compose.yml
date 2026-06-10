@@ -1,0 +1,65 @@
+# Workflow Debugging Interface — FastAPI UI for inspecting LLM workflow-agent
+# runs against the BiFrost gateway.
+#
+# Prereqs:
+#   - The BiFrost gateway is up (deployments/local/docker-compose.yml). It
+#     creates the external `llm-benchmark-network` and the
+#     `llm-benchmark-gateway` container this UI talks to.
+#   - Benchmark data has been generated under data/output/benchmark/task_a
+#     (scripts/generate_benchmark_data.sh).
+#
+# Usage (run from this directory, deployments/webui/):
+#   docker compose up --build
+# Then open http://127.0.0.1:8100
+
+services:
+
+  workflow-debug-ui:
+    build:
+      # Build context is the repo root so the image can copy pyproject + src/.
+      context: ../..
+      dockerfile: deployments/webui/Dockerfile
+    container_name: workflow-debug-ui
+    ports:
+    - 8100:8100
+    environment:
+      # Reach the gateway over the shared docker network (container port 8080,
+      # not the host-published 23040). Override for a host/remote gateway.
+      BIFROST_ENDPOINT: ${BIFROST_ENDPOINT:-http://llm-benchmark-gateway:8080}
+      # Paths inside the container (see volume mounts below).
+      BIFROST_CONFIG: /app/config/bifrost-config.json
+      BENCHMARK_DATA_DIR: /app/data/benchmark/task_a
+      # Expands the BiFrost "*" wildcard to the real served model id. Leave empty
+      # to resolve it from VLLM_ENV_FILE below (mirrors scripts/run_chat_ui.sh);
+      # set a value here only to force a specific id.
+      VLLM_MODEL: ${VLLM_MODEL:-}
+      # Source for the served model when VLLM_MODEL is empty — the mounted
+      # deployments/models/.env. webui.config.served_vllm_model() reads the
+      # VLLM_MODEL= line from it so the dropdown shows the real served model
+      # instead of dropping the "vllm-local/*" wildcard.
+      VLLM_ENV_FILE: /app/config/models.env
+    volumes:
+    # Live-mount data + config (read-only) so they aren't baked into the image.
+    - ../../data/output/benchmark:/app/data/benchmark:ro
+    - ../local/data/bifrost/config.json:/app/config/bifrost-config.json:ro
+    - ../models/.env:/app/config/models.env:ro
+    networks:
+    - llm-benchmark-network
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/models')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+# Join the gateway's network, created by deployments/local/docker-compose.yml.
+networks:
+  llm-benchmark-network:
+    name: llm-benchmark-network
+    external: true

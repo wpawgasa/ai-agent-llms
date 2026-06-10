@@ -1,4 +1,4 @@
-"""FastAPI app for the BiFrost chatbot test UI."""
+"""FastAPI app for the Workflow Debugging Interface."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from llm_workflow_agents.webui import config, gateway, samples
 
-app = FastAPI(title="BiFrost Chatbot Test UI")
+app = FastAPI(title="Workflow Debugging Interface")
 
 _STATIC = Path(__file__).resolve().parent / "static"
 

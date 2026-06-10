@@ -77,9 +77,33 @@ def test_list_models_substitutes_wildcard_with_served_model(tmp_path):
 
 def test_served_vllm_model_reads_env(monkeypatch):
     monkeypatch.delenv("VLLM_MODEL", raising=False)
+    monkeypatch.delenv("VLLM_ENV_FILE", raising=False)
     assert config.served_vllm_model() is None
     monkeypatch.setenv("VLLM_MODEL", "Qwen/Qwen3.6-27B")
     assert config.served_vllm_model() == "Qwen/Qwen3.6-27B"
+
+
+def test_served_vllm_model_falls_back_to_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("VLLM_MODEL", raising=False)
+    env_file = tmp_path / "models.env"
+    env_file.write_text(
+        "# example\n"
+        "#   VLLM_MODEL=google/gemma-4-31B-it\n"
+        "VLLM_MODEL=google/gemma-4-E4B-it   # served model\n"
+        "VLLM_TOOL_CALL_PARSER=gemma4\n"
+    )
+    monkeypatch.setenv("VLLM_ENV_FILE", str(env_file))
+    # Commented example lines are ignored; inline comment + whitespace stripped.
+    assert config.served_vllm_model() == "google/gemma-4-E4B-it"
+    # An explicit VLLM_MODEL still wins over the file.
+    monkeypatch.setenv("VLLM_MODEL", "Qwen/Qwen3.6-27B")
+    assert config.served_vllm_model() == "Qwen/Qwen3.6-27B"
+
+
+def test_served_vllm_model_env_file_missing_returns_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("VLLM_MODEL", raising=False)
+    monkeypatch.setenv("VLLM_ENV_FILE", str(tmp_path / "absent.env"))
+    assert config.served_vllm_model() is None
 
 
 def test_build_chat_request_downgrades_tool_turns_and_sets_stream():
