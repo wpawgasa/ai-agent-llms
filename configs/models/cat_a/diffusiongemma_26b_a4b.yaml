@@ -15,8 +15,12 @@ serving:
   chat_template: "gemma"
   gpu_memory_utilization: 0.90
   max_model_len: 8192
+  # Per the DiffusionGemma model card: canvas decode is memory-heavy.
+  max_num_seqs: 4
   hf_overrides:
     rope_scaling: null
+    diffusion_sampler: "entropy_bound"
+    diffusion_entropy_bound: 0.1
 
 category: "A"
 
@@ -29,3 +33,10 @@ benchmark_tasks:
 # denoising (~15-20 tok/forward pass). Diffusion sampling means KV-cache
 # quantization (Phase 3) and Unsloth/GRPO rollout paths need separate validation
 # before use; only Task A pretrained benchmarking is wired here.
+#
+# SERVING (verified 2026-06-11): no tagged vLLM release supports diffusion_gemma
+# (latest 0.22.1 has no model entry; transformers added the defs in 5.11.0).
+# Support is on vLLM's `dgemma` branch (PR #45163, open) — serve via
+# deployments/models/ with VLLM_IMAGE=vllm/vllm-openai:gemma-cu129,
+# VLLM_USE_V2_MODEL_RUNNER=1 and VLLM_TRUST_REMOTE_CODE=1 (see .env.example
+# preset). serving/launch_vllm.sh's .venv-infer (vLLM 0.20.0) CANNOT serve this.

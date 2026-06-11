@@ -29,7 +29,10 @@ x-healthcheck-defaults: &healthcheck-defaults
 services:
 
   vllm:
-    image: vllm/vllm-openai:v0.20.0
+    # Override VLLM_IMAGE in .env for models needing a newer/branch build —
+    # e.g. DiffusionGemma needs vllm/vllm-openai:gemma-cu129 (dgemma branch,
+    # PR #45163; not in any tagged release as of 2026-06-11).
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.20.0}
     container_name: vllm-model
     ipc: host                   # vLLM needs host shared memory
     restart: unless-stopped
@@ -47,7 +50,12 @@ services:
       VLLM_HF_OVERRIDES: ${VLLM_HF_OVERRIDES:-}
       VLLM_KV_CACHE_DTYPE: ${VLLM_KV_CACHE_DTYPE:-}
       VLLM_ENFORCE_EAGER: ${VLLM_ENFORCE_EAGER:-}
+      VLLM_TRUST_REMOTE_CODE: ${VLLM_TRUST_REMOTE_CODE:-}
       VLLM_EXTRA_ARGS: ${VLLM_EXTRA_ARGS:-}
+      # Real vLLM env var (not a launcher flag) — needed by DiffusionGemma.
+      # Must be unset (not empty) when unused: vLLM parses it with int(), and
+      # int("") crashes at import. The entrypoint unsets it if blank.
+      VLLM_USE_V2_MODEL_RUNNER: ${VLLM_USE_V2_MODEL_RUNNER:-}
     volumes:
       - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
     networks:
@@ -74,6 +82,9 @@ services:
       - -c
       - |
         set -eu
+        # vLLM reads VLLM_USE_V2_MODEL_RUNNER itself via int() — empty string
+        # raises ValueError at import, so drop it entirely when blank.
+        if [ -z "$${VLLM_USE_V2_MODEL_RUNNER:-}" ]; then unset VLLM_USE_V2_MODEL_RUNNER; fi
         args=(
           --model "$${VLLM_MODEL}"
           --dtype "$${VLLM_DTYPE}"
@@ -86,6 +97,7 @@ services:
         if [ -n "$${VLLM_HF_OVERRIDES}" ];  then args+=(--hf-overrides "$${VLLM_HF_OVERRIDES}"); fi
         if [ -n "$${VLLM_KV_CACHE_DTYPE}" ]; then args+=(--kv-cache-dtype "$${VLLM_KV_CACHE_DTYPE}"); fi
         if [ -n "$${VLLM_ENFORCE_EAGER}" ];  then args+=(--enforce-eager); fi
+        if [ -n "$${VLLM_TRUST_REMOTE_CODE}" ]; then args+=(--trust-remote-code); fi
         if [ -n "$${VLLM_EXTRA_ARGS}" ];     then args+=($${VLLM_EXTRA_ARGS}); fi
         echo "Launching: python3 -m vllm.entrypoints.openai.api_server $${args[*]}"
         exec python3 -m vllm.entrypoints.openai.api_server "$${args[@]}"

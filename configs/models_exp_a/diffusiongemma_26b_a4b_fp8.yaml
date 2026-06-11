@@ -14,11 +14,19 @@ serving:
   chat_template: "gemma"
   gpu_memory_utilization: 0.90
   max_model_len: 8192
-  # CAUTION: diffusiongemma uses discrete-diffusion (multi-canvas) sampling, NOT
-  # standard autoregressive decode. vLLM serving of the diffusion path is
-  # unverified here — validate generation before trusting benchmark numbers.
+  # Per the RedHatAI model card: canvas decode is memory-heavy.
+  max_num_seqs: 4
+  # diffusiongemma uses discrete-diffusion (multi-canvas) sampling, NOT standard
+  # autoregressive decode. Verified 2026-06-11: no tagged vLLM release supports
+  # it (latest 0.22.1; transformers added the defs in 5.11.0). Support is on
+  # vLLM's `dgemma` branch (PR #45163, open) — serve via deployments/models/
+  # with VLLM_IMAGE=vllm/vllm-openai:gemma-cu129, VLLM_USE_V2_MODEL_RUNNER=1 and
+  # VLLM_TRUST_REMOTE_CODE=1 (see .env.example preset). launch_vllm.sh's
+  # .venv-infer (vLLM 0.20.0) CANNOT serve this.
   hf_overrides:
     rope_scaling: null
+    diffusion_sampler: "entropy_bound"
+    diffusion_entropy_bound: 0.1
 
 inference:
   temperature_deterministic: 0.0
