@@ -1,0 +1,21 @@
+Add configs for
+https://huggingface.co/google/diffusiongemma-26B-A4B-it
+https://huggingface.co/google/gemma-4-12B-it
+
+---
+
+Add configs for
+https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-unquantized
+https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized
+https://huggingface.co/google/gemma-4-E4B-it
+https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-unquantized-assistant
+https://huggingface.co/RedHatAI/gemma-4-12B-it-FP8-Dynamic
+https://huggingface.co/RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic
+
+---
+
+Also add experiment configs in @configs/models_exp_a/ and @configs/models_exp_bc/
+
+---
+
+commit and push the newly added configs

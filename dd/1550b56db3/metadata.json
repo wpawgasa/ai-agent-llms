@@ -1,0 +1,58 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "dd1550b56db3",
+  "strategy": "manual-commit",
+  "branch": "chore/add-gemma4-diffusiongemma-configs",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "configs/models/cat_a/diffusiongemma_26b_a4b.yaml",
+    "configs/models/cat_a/diffusiongemma_26b_a4b_fp8.yaml",
+    "configs/models/cat_a/gemma4_12b.yaml",
+    "configs/models/cat_a/gemma4_12b_fp8.yaml",
+    "configs/models/cat_a/gemma4_12b_qat.yaml",
+    "configs/models/cat_a/gemma4_26b_a4b_qat.yaml",
+    "configs/models/cat_bc/gemma4_e4b_qat.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b_fp8.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b_fp8_sglang.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b_fp8_trtllm.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b_sglang.yaml",
+    "configs/models_exp_a/diffusiongemma_26b_a4b_trtllm.yaml",
+    "configs/models_exp_a/gemma4_12b.yaml",
+    "configs/models_exp_a/gemma4_12b_dflash.yaml",
+    "configs/models_exp_a/gemma4_12b_dflash_sglang.yaml",
+    "configs/models_exp_a/gemma4_12b_dflash_trtllm.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8_dflash.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8_dflash_sglang.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8_dflash_trtllm.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8_sglang.yaml",
+    "configs/models_exp_a/gemma4_12b_fp8_trtllm.yaml",
+    "configs/models_exp_a/gemma4_12b_qat.yaml",
+    "configs/models_exp_a/gemma4_12b_qat_sglang.yaml",
+    "configs/models_exp_a/gemma4_12b_qat_trtllm.yaml",
+    "configs/models_exp_a/gemma4_12b_sglang.yaml",
+    "configs/models_exp_a/gemma4_12b_trtllm.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b_qat.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b_qat_sglang.yaml",
+    "configs/models_exp_a/gemma4_26b_a4b_qat_trtllm.yaml",
+    "configs/models_exp_bc/gemma4_e4b_qat.yaml",
+    "configs/models_exp_bc/gemma4_e4b_qat_sglang.yaml",
+    "configs/models_exp_bc/gemma4_e4b_qat_trtllm.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/dd/1550b56db3/0/metadata.json",
+      "transcript": "/dd/1550b56db3/0/full.jsonl",
+      "content_hash": "/dd/1550b56db3/0/content_hash.txt",
+      "prompt": "/dd/1550b56db3/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12803,
+    "cache_creation_tokens": 305329,
+    "cache_read_tokens": 2507375,
+    "output_tokens": 46693,
+    "api_call_count": 33
+  }
+}
