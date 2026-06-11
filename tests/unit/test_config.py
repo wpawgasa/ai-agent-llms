@@ -124,11 +124,11 @@ class TestConfigLoader:
         model_dir = configs_dir / "models" / "cat_a"
         assert model_dir.exists(), f"Expected model dir at {model_dir}"
         configs = load_all_model_configs(model_dir)
-        assert len(configs) == 14
+        assert len(configs) == 20
         assert "gemma3_27b" in configs
 
     def test_load_cat_bc_configs(self, configs_dir: Path) -> None:
         model_dir = configs_dir / "models" / "cat_bc"
         assert model_dir.exists(), f"Expected model dir at {model_dir}"
         configs = load_all_model_configs(model_dir)
-        assert len(configs) == 9
+        assert len(configs) == 10
