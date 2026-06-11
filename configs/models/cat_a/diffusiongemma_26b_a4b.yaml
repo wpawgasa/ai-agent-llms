@@ -1,0 +1,31 @@
+model:
+  name: "google/diffusiongemma-26B-A4B-it"
+  revision: "0f28bc42f588fbd8f71e08102b1c3960298a1358"
+  family: "gemma"
+  architecture: "diffusion_moe_transformer"
+  params_total: 25_200_000_000
+  params_active: 3_800_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 50
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# Discrete-diffusion language model (block-autoregressive multi-canvas sampling),
+# NOT standard autoregressive. Sparse MoE decoder: 26B total / ~3.8B active
+# (8 of 128 experts) — freeze mlp.gate during LoRA. Canvas length 256, parallel
+# denoising (~15-20 tok/forward pass). Diffusion sampling means KV-cache
+# quantization (Phase 3) and Unsloth/GRPO rollout paths need separate validation
+# before use; only Task A pretrained benchmarking is wired here.

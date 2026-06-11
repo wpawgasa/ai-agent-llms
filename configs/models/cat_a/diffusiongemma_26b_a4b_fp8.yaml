@@ -1,0 +1,29 @@
+model:
+  name: "RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic"
+  family: "gemma"
+  architecture: "diffusion_moe_transformer"
+  params_total: 25_200_000_000
+  params_active: 3_800_000_000
+  context_length: 262144
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 26
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# FP8 dynamic-quantized diffusion MoE (RedHat). FP8 variant of
+# diffusiongemma_26b_a4b — discrete-diffusion LM, NOT autoregressive; 26B total /
+# ~3.8B active (8 of 128 experts), freeze mlp.gate during LoRA. Requires vLLM with
+# MoE 2D-quantized-weight support (cf. gemma4_26b_a4b_fp8 PR #39045 note). Phase 3
+# KV-cache quant and Unsloth/GRPO rollouts need separate validation for diffusion.
