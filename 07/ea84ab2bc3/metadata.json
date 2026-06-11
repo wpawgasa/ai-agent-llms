@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "07ea84ab2bc3",
+  "strategy": "manual-commit",
+  "branch": "chore/add-gemma4-diffusiongemma-configs",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_config.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/07/ea84ab2bc3/0/metadata.json",
+      "transcript": "/07/ea84ab2bc3/0/full.jsonl",
+      "content_hash": "/07/ea84ab2bc3/0/content_hash.txt",
+      "prompt": "/07/ea84ab2bc3/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 278,
+    "cache_creation_tokens": 11233,
+    "cache_read_tokens": 1355425,
+    "output_tokens": 4022,
+    "api_call_count": 10
+  }
+}

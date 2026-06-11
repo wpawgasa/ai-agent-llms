@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "07ea84ab2bc3",
+  "session_id": "9c5f8b0f-ce7a-4cbf-a5f1-94b3acec34f8",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T08:31:54.438237905Z",
+  "branch": "chore/add-gemma4-diffusiongemma-configs",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_config.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "f0d1274b82aa",
+  "checkpoint_transcript_start": 241,
+  "transcript_lines_at_start": 241,
+  "token_usage": {
+    "input_tokens": 278,
+    "cache_creation_tokens": 11233,
+    "cache_read_tokens": 1355425,
+    "output_tokens": 4022,
+    "api_call_count": 10
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-11T08:31:53.985616325Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 2,
+    "human_removed": 0,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}
