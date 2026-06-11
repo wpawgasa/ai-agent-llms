@@ -565,6 +565,54 @@ class TestPostGenerationRepair:
             {"role": "tool", "content": "{\"status\": \"ok\"}"},
         ]
 
+    @staticmethod
+    def _coherent_conversation(workflow, *args, **kwargs):
+        """A fully coherent teacher conversation for the given workflow.
+
+        Walks the BFS-shortest legal path from the initial state to a
+        terminal, user-first, one leading [STATE:] marker per assistant turn,
+        no tool calls — passes every repair-loop check (tool placement, edge
+        legality, continuity, shape). The final assistant turn carries
+        "Let me help." for content assertions.
+        """
+        from collections import deque
+
+        id_to_name = {s.id: s.name for s in workflow.states}
+        edges: dict[str, list[str]] = {}
+        for t in workflow.transitions:
+            edges.setdefault(
+                id_to_name.get(t.from_state, t.from_state), []
+            ).append(id_to_name.get(t.to_state, t.to_state))
+        terminals = {id_to_name.get(t, t) for t in workflow.terminal_states}
+        start = id_to_name.get(workflow.initial_state, workflow.initial_state)
+
+        prev: dict[str, str | None] = {start: None}
+        queue = deque([start])
+        goal = None
+        while queue:
+            cur = queue.popleft()
+            if cur in terminals:
+                goal = cur
+                break
+            for nxt in edges.get(cur, []):
+                if nxt not in prev:
+                    prev[nxt] = cur
+                    queue.append(nxt)
+        assert goal is not None, "workflow has no reachable terminal"
+        chain = [goal]
+        while prev[chain[0]] is not None:
+            chain.insert(0, prev[chain[0]])
+
+        messages = []
+        hops = list(zip(chain, chain[1:]))
+        for idx, (a, b) in enumerate(hops):
+            tail = "Let me help." if idx == len(hops) - 1 else "Proceeding."
+            messages.append({"role": "user", "content": f"step {idx}"})
+            messages.append(
+                {"role": "assistant", "content": f"[STATE: {a} → {b}]\n{tail}"}
+            )
+        return messages
+
     def test_irreparable_teacher_falls_back_to_placeholder(
         self, tmp_output_dir: Path, monkeypatch
     ) -> None:
@@ -576,14 +624,22 @@ class TestPostGenerationRepair:
             output_dir=tmp_output_dir,
             seed=5,
         )
-        # Every requested sample is still emitted, exhausting every fresh attempt.
+        # Every requested sample is still emitted, exhausting the global redraw
+        # budget of (max_sample_attempts - 1) * num_samples = 8 fresh redraws.
         assert result.num_samples == 4
-        # Each sample makes max_sample_attempts (default 3) attempts; every attempt
-        # exhausts max_repair_retries (default 2) and falls back to the placeholder.
+        # The first sample drains the whole budget (1 + 8 attempts); the rest
+        # fall back after their single attempt. Totals match the old per-sample
+        # cap: 12 attempts, each exhausting max_repair_retries (default 2).
         assert result.stats["sample_fallbacks"] == 4
-        assert result.stats["sample_retries"] == 4 * (3 - 1)  # max_sample_attempts default
+        assert result.stats["sample_retries"] == 4 * (3 - 1)  # global redraw budget
         assert result.stats["repair_fallbacks"] == 4 * 3  # attempts incl. discarded
         assert result.stats["repair_retries"] == 4 * 3 * 2  # attempts × max_repair_retries
+        # Every emitted sample is tagged as a placeholder fallback, in both the
+        # JSONL and the persisted stats.
+        with open(result.output_files[0]) as f:
+            sources = [json.loads(line)["generation_source"] for line in f]
+        assert sources == ["placeholder_fallback"] * 4
+        assert result.stats["generation_source_counts"] == {"placeholder_fallback": 4}
         # ...and the output is fully coherent under the validator.
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
@@ -597,14 +653,7 @@ class TestPostGenerationRepair:
             calls["n"] += 1
             if calls["n"] == 1:
                 return TestPostGenerationRepair._incoherent_conversation(workflow)
-            # Coherent: a self-loop (always a legal transition) with no tool
-            # calls has zero violations under both the tool-placement and the
-            # transition-legality checks.
-            s0 = workflow.states[0].name
-            return [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": f"[STATE: {s0} → {s0}]\nLet me help."},
-            ]
+            return TestPostGenerationRepair._coherent_conversation(workflow)
 
         monkeypatch.setattr(gw, "_generate_teacher_conversation", flaky)
         result = generate_workflow_dataset(
@@ -619,6 +668,9 @@ class TestPostGenerationRepair:
         # In-attempt repair succeeded, so no fresh-sample retry was needed.
         assert result.stats["sample_retries"] == 0
         assert result.stats["sample_fallbacks"] == 0
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        assert sample["generation_source"] == "teacher"
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
 
@@ -634,12 +686,7 @@ class TestPostGenerationRepair:
             calls["n"] += 1
             if calls["n"] <= 3:
                 return TestPostGenerationRepair._incoherent_conversation(workflow)
-            s0 = workflow.states[0].name
-            s1 = workflow.states[1].name if len(workflow.states) > 1 else s0
-            return [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": f"[STATE: {s0} → {s1}]\nLet me help."},
-            ]
+            return TestPostGenerationRepair._coherent_conversation(workflow)
 
         monkeypatch.setattr(gw, "_generate_teacher_conversation", incoherent_then_coherent)
         result = generate_workflow_dataset(
@@ -671,6 +718,11 @@ class TestPostGenerationRepair:
         assert result.stats["repair_fallbacks"] == 0
         assert result.stats["sample_retries"] == 0
         assert result.stats["sample_fallbacks"] == 0
+        # No teacher configured → every sample is an intended placeholder.
+        with open(result.output_files[0]) as f:
+            sources = [json.loads(line)["generation_source"] for line in f]
+        assert sources == ["placeholder"] * 5
+        assert result.stats["generation_source_counts"] == {"placeholder": 5}
 
     def test_annotations_backfilled_from_inline_markers(
         self, tmp_output_dir: Path, monkeypatch
@@ -783,6 +835,10 @@ class TestPostGenerationRepair:
             output_dir=tmp_output_dir,
             seed=5,
             rich_prompt_rate=0.0,  # force the bare fallback for a deterministic assertion
+            # The fake conversation ends at non-terminal GREETING; disable the
+            # coherence repair so the teacher turn is emitted as-is — this test
+            # is about system-message stripping, not coherence.
+            repair_incoherent=False,
         )
         with open(result.output_files[0]) as f:
             sample = json.loads(f.readline())
@@ -793,6 +849,374 @@ class TestPostGenerationRepair:
         assert sample["messages"][0]["content"].startswith(
             "You are a customer service agent handling"
         )
+
+
+class TestBackfillOverwrite:
+    """Inline content markers are authoritative over teacher-supplied
+    annotations (the L3_043 ground-truth-corruption class)."""
+
+    def test_backfill_overwrites_contradicting_state_annotation(self) -> None:
+        msg = {
+            "role": "assistant",
+            "content": "[STATE: PROCESS_BOOKING → PAYMENT]\nBooked.",
+            "annotations": {
+                "state_transition": {"from": "PRESENT_ITINERARY", "to": "PROCESS_BOOKING"}
+            },
+        }
+        gw._backfill_annotations([msg])
+        assert msg["annotations"]["state_transition"] == {
+            "from": "PROCESS_BOOKING",
+            "to": "PAYMENT",
+        }
+
+    def test_backfill_overwrites_contradicting_tool_calls(self) -> None:
+        msg = {
+            "role": "assistant",
+            "content": "[STATE: A → A]\n"
+            '<tool_call>{"name": "real_tool", "arguments": {"x": 1}}</tool_call>',
+            "annotations": {
+                "state_transition": {"from": "A", "to": "A"},
+                "tool_calls": [{"name": "phantom_tool", "arguments": {}}],
+            },
+        }
+        gw._backfill_annotations([msg])
+        assert msg["annotations"]["tool_calls"] == [
+            {"name": "real_tool", "arguments": {"x": 1}}
+        ]
+
+    def test_backfill_keeps_annotation_when_content_has_no_marker(self) -> None:
+        # No inline markers at all → the teacher annotation is the only signal
+        # and must survive. Unparseable inline tool JSON must not wipe it either.
+        msg = {
+            "role": "assistant",
+            "content": "Plain prose.\n<tool_call>{not json}</tool_call>",
+            "annotations": {
+                "state_transition": {"from": "A", "to": "B"},
+                "tool_calls": [{"name": "kept_tool", "arguments": {}}],
+            },
+        }
+        gw._backfill_annotations([msg])
+        assert msg["annotations"]["state_transition"] == {"from": "A", "to": "B"}
+        assert msg["annotations"]["tool_calls"] == [
+            {"name": "kept_tool", "arguments": {}}
+        ]
+
+    def test_ground_truth_follows_inline_markers_on_disagreement(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """End to end: a teacher whose annotations contradict its inline
+        markers yields ground truth built from the markers."""
+
+        def contradicting(workflow, *args, **kwargs):
+            msgs = TestPostGenerationRepair._coherent_conversation(workflow)
+            for m in msgs:
+                if m["role"] == "assistant":
+                    m["annotations"] = {
+                        "state_transition": {"from": "WRONG_A", "to": "WRONG_B"}
+                    }
+            return msgs
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", contradicting)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            repair_incoherent=False,
+        )
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        seq = sample["ground_truth"]["state_sequence"]
+        assert seq, "expected a non-empty state sequence"
+        assert all(
+            t["from"] != "WRONG_A" and t["to"] != "WRONG_B" for t in seq
+        ), seq
+        # The sequence chains and matches the graph's initial state.
+        assert seq[0]["from"] == sample["workflow_graph"]["initial"]
+        for prev, cur in zip(seq, seq[1:]):
+            assert cur["from"] == prev["to"], seq
+
+
+class TestContinuityViolations:
+    """Unit tests for the shared sequence-level coherence checker."""
+
+    @staticmethod
+    def _check(messages, initial="START", terminals=("END",)):
+        from llm_workflow_agents.data._workflow_script import (
+            find_continuity_violations,
+        )
+
+        return find_continuity_violations(messages, initial, set(terminals))
+
+    @staticmethod
+    def _asst(content):
+        return {"role": "assistant", "content": content}
+
+    def test_clean_walk_has_no_violations(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            self._asst("[STATE: START → START]\nGreeting."),
+            {"role": "user", "content": "go"},
+            self._asst("\n[STATE: START → MID]\nProceeding."),  # leading newline OK
+            {"role": "user", "content": "ok"},
+            self._asst("[STATE: MID → END]\nDone."),
+        ]
+        assert self._check(msgs) == []
+
+    def test_mid_message_marker_is_flagged(self) -> None:
+        # The L3_026 shape: a second [STATE:] marker buried mid-content.
+        msgs = [
+            self._asst(
+                "[STATE: START → MID]\nMoving on. [STATE: MID → END]\nActually…"
+            ),
+        ]
+        assert any("mid-content" in v for v in self._check(msgs))
+
+    def test_marker_not_at_start_is_flagged(self) -> None:
+        msgs = [self._asst("Let me check. [STATE: START → END]")]
+        assert any("not at the start" in v for v in self._check(msgs))
+
+    def test_discontinuity_is_flagged(self) -> None:
+        msgs = [
+            self._asst("[STATE: START → MID]\nOK."),
+            {"role": "user", "content": "go"},
+            self._asst("[STATE: OTHER → END]\nDone."),
+        ]
+        assert any("previous turn ended at" in v for v in self._check(msgs))
+
+    def test_wrong_initial_state_is_flagged(self) -> None:
+        msgs = [self._asst("[STATE: MID → END]\nDone.")]
+        assert any("initial state" in v for v in self._check(msgs))
+
+    def test_nonterminal_ending_is_flagged(self) -> None:
+        # The L2_029 shape: the conversation stops short of a terminal.
+        msgs = [self._asst("[STATE: START → MID]\nOK.")]
+        assert any("not a terminal state" in v for v in self._check(msgs))
+
+    def test_missing_annotation_is_flagged(self) -> None:
+        msgs = [
+            self._asst("[STATE: START → END]\nDone."),
+            {"role": "user", "content": "thanks"},
+            self._asst("You're welcome!"),
+        ]
+        assert any("missing state annotation" in v for v in self._check(msgs))
+
+
+class TestShapeViolations:
+    """Unit tests for the shared conversation-shape checker."""
+
+    @staticmethod
+    def _check(messages, initiator="user"):
+        from llm_workflow_agents.data._workflow_script import find_shape_violations
+
+        return find_shape_violations(messages, initiator)
+
+    def test_inbound_assistant_first_is_flagged(self) -> None:
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "[STATE: A → A]\nHow can I help?"},
+            {"role": "user", "content": "hi"},
+        ]
+        assert any("first message role" in v for v in self._check(msgs, "user"))
+
+    def test_outbound_assistant_first_is_valid(self) -> None:
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "assistant", "content": "[STATE: A → A]\nCalling about X."},
+            {"role": "user", "content": "ok"},
+        ]
+        assert self._check(msgs, "agent") == []
+
+    def test_consecutive_prose_assistant_turns_are_flagged(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "[STATE: A → B]\nEscalating."},
+            {"role": "assistant", "content": "[STATE: B → C]\nYou will hear back."},
+        ]
+        assert any("consecutive assistant" in v for v in self._check(msgs))
+
+    def test_speak_then_tool_call_split_is_allowed(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "[STATE: A → B]\nLet me block that card."},
+            {
+                "role": "assistant",
+                "content": "[STATE: B → B]\n"
+                '<tool_call>{"name": "block_card", "arguments": {}}</tool_call>',
+            },
+            {"role": "tool", "content": '{"status": "ok"}'},
+        ]
+        assert self._check(msgs) == []
+
+
+class TestRedrawBudgetAndProvenance:
+    """The global redraw budget replaces the per-sample attempt cap, and every
+    emitted sample carries its generation_source."""
+
+    def test_continuity_violation_triggers_repair_loop(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """A discontinuous-but-edge-legal conversation (every edge valid, the
+        sequence skips a hop) is exactly what the per-edge legality check
+        misses; the continuity check must send it through repair."""
+        calls = {"n": 0}
+
+        def discontinuous_then_coherent(workflow, *args, **kwargs):
+            calls["n"] += 1
+            msgs = TestPostGenerationRepair._coherent_conversation(workflow)
+            if calls["n"] == 1 and len(msgs) >= 6:
+                # Drop the second (user, assistant) hop → discontinuity.
+                del msgs[2:4]
+            return msgs
+
+        monkeypatch.setattr(
+            gw, "_generate_teacher_conversation", discontinuous_then_coherent
+        )
+        result = generate_workflow_dataset(
+            complexity_level="L3",  # long spine → ≥3 hops, so the cut bites
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.stats["repair_retries"] >= 1
+        assert result.stats["sample_fallbacks"] == 0
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        assert sample["generation_source"] == "teacher"
+
+    def test_redraw_budget_allows_recovery_beyond_old_attempt_cap(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        calls = {"n": 0}
+
+        def bad_five_times(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= 5:
+                return TestPostGenerationRepair._incoherent_conversation(workflow)
+            return TestPostGenerationRepair._coherent_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", bad_five_times)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            max_repair_retries=0,  # 1 teacher call per attempt
+            max_total_redraws=10,
+        )
+        # Under the old per-sample cap (3 attempts) this sample would have been
+        # emitted as a placeholder; the global budget lets it recover.
+        assert result.stats["sample_retries"] == 5
+        assert result.stats["sample_fallbacks"] == 0
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        assert sample["generation_source"] == "teacher"
+
+    def test_redraw_budget_exhaustion_emits_tagged_fallback(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            gw,
+            "_generate_teacher_conversation",
+            TestPostGenerationRepair._incoherent_conversation,
+        )
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            max_repair_retries=0,
+            max_total_redraws=2,
+        )
+        assert result.stats["sample_retries"] == 2
+        assert result.stats["sample_fallbacks"] == 1
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        assert sample["generation_source"] == "placeholder_fallback"
+
+    def test_teacher_api_failure_falls_back_and_is_counted(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """An API/parse failure must not masquerade as teacher output: the
+        attempt is marked fallen-back, redrawn, and counted."""
+        calls = {"n": 0}
+
+        def raise_then_recover(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("simulated API failure")
+            return TestPostGenerationRepair._coherent_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", raise_then_recover)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.stats["teacher_call_failures"] == 1
+        assert result.stats["sample_retries"] == 1
+        assert result.stats["sample_fallbacks"] == 0
+        with open(result.output_files[0]) as f:
+            sample = json.loads(f.readline())
+        assert sample["generation_source"] == "teacher"
+
+    def test_stats_sidecar_written(self, tmp_output_dir: Path) -> None:
+        result = generate_workflow_dataset(
+            complexity_level="L1",
+            num_samples=3,
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert result.stats_file is not None
+        assert result.stats_file == result.output_files[0].with_suffix(".stats.json")
+        with open(result.stats_file) as f:
+            envelope = json.load(f)
+        assert envelope["complexity_level"] == "L1"
+        assert envelope["num_samples"] == 3
+        assert envelope["output_file"] == result.output_files[0].name
+        counts = envelope["stats"]["generation_source_counts"]
+        with open(result.output_files[0]) as f:
+            sources = [json.loads(line)["generation_source"] for line in f]
+        assert sum(counts.values()) == 3
+        assert counts == {s: sources.count(s) for s in set(sources)}
+
+    def test_to_dict_includes_generation_source(self) -> None:
+        sample = ConversationSample(
+            conversation_id="L1_001",
+            complexity_level="L1",
+            domain="banking",
+            num_states=2,
+            num_tools=0,
+            chain_depth=0,
+            workflow_graph={},
+            workflow_script="",
+            tool_schemas=[],
+            messages=[],
+            user_behavior="cooperative",
+        )
+        assert sample.generation_source == "placeholder"
+        assert sample.to_dict()["generation_source"] == "placeholder"
+
+    def test_outbound_placeholder_dataset_passes_strict_validation(
+        self, tmp_output_dir: Path
+    ) -> None:
+        """Regression guard: the stricter validator (continuity + shape) must
+        not flag the placeholder generator's output, inbound or outbound."""
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=10,
+            output_dir=tmp_output_dir,
+            seed=11,
+            initiation_preset="outbound_heavy",
+        )
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
 
 
 class TestDomainSchema:
@@ -1458,7 +1882,7 @@ class TestValidatorOutbound:
             {"role": "user", "content": "ok"},
         ]
         errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
-        assert not any("second message" in e for e in errs)
+        assert not any("first message role" in e for e in errs)
 
     def test_outbound_with_user_second_fails(self):
         from llm_workflow_agents.data.data_validator import _validate_workflow_sample
@@ -1467,12 +1891,12 @@ class TestValidatorOutbound:
             {"role": "user", "content": "hello?"},
         ]
         errs = _validate_workflow_sample(self._base(msgs, "agent"), 0)
-        assert any("second message" in e for e in errs)
+        assert any("first message role" in e for e in errs)
 
-    def test_inbound_with_assistant_greeting_passes(self):
-        # A natural inbound conversation may open with an agent greeting
-        # ("Hi, how can I help?") before the customer states intent. This must
-        # NOT be flagged — only the outbound direction is constrained.
+    def test_inbound_with_assistant_first_fails(self):
+        # Inbound (user-initiated) conversations must open with the customer's
+        # message — an agent greeting first contradicts conversation_initiator
+        # and breaks the documented inbound shape [system, user, ...].
         from llm_workflow_agents.data.data_validator import _validate_workflow_sample
         msgs = [
             {"role": "system", "content": "s"},
@@ -1480,4 +1904,4 @@ class TestValidatorOutbound:
             {"role": "user", "content": "I need to check my balance."},
         ]
         errs = _validate_workflow_sample(self._base(msgs, "user"), 0)
-        assert not any("second message" in e for e in errs)
+        assert any("first message role" in e for e in errs)

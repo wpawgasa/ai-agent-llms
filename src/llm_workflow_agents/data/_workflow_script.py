@@ -149,6 +149,128 @@ def find_tool_placement_violations(
     return violations
 
 
+def find_continuity_violations(
+    messages: list[dict[str, Any]],
+    initial_state: str,
+    terminal_states: set[str],
+) -> list[str]:
+    """Find state-annotation continuity violations in a conversation.
+
+    The per-edge legality check cannot see *sequence*-level incoherence: a
+    conversation whose every edge is individually legal can still skip states,
+    start mid-graph, or stop short of a terminal. This walks the assistant
+    turns in order and returns one human-readable description per violation:
+
+    * an assistant turn with extra ``[STATE: X → Y]`` markers mid-content, or
+      whose first marker is not at the start of the content,
+    * an assistant turn with no state annotation at all (neither a structured
+      ``annotations.state_transition`` nor an inline marker),
+    * consecutive annotations that do not chain (turn N's ``to`` differs from
+      turn N+1's ``from``),
+    * a first annotation that does not start at ``initial_state``,
+    * a last annotation that does not end in ``terminal_states``.
+
+    ``initial_state`` and ``terminal_states`` are state *names* (callers map
+    IDs to names). An empty list means coherent.
+
+    Single source of truth shared by the data validator and the generator's
+    inline repair loop.
+    """
+    violations: list[str] = []
+    sequence: list[tuple[int, str, str]] = []  # (turn index, from, to)
+    turn = 0
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        turn += 1
+        content = msg.get("content") or ""
+        markers = list(_STATE_RE.finditer(content))
+        if markers:
+            if len(markers) > 1:
+                violations.append(
+                    f"assistant turn {turn} has {len(markers) - 1} extra "
+                    f"[STATE:] marker(s) mid-content"
+                )
+            lead = len(content) - len(content.lstrip())
+            if markers[0].start() != lead:
+                violations.append(
+                    f"assistant turn {turn} [STATE:] marker is not at the "
+                    f"start of the message"
+                )
+        transition = (msg.get("annotations") or {}).get("state_transition") or {}
+        src, dst = transition.get("from"), transition.get("to")
+        if not (src and dst) and markers:
+            src, dst = markers[0].group(1), markers[0].group(2)
+        if src and dst:
+            sequence.append((turn, src, dst))
+        else:
+            violations.append(f"assistant turn {turn} missing state annotation")
+
+    if not sequence:
+        return violations
+
+    first_turn, first_src, _ = sequence[0]
+    if initial_state and first_src != initial_state:
+        violations.append(
+            f"assistant turn {first_turn} starts at '{first_src}', "
+            f"not the initial state '{initial_state}'"
+        )
+    for (_, _, prev_dst), (cur_turn, cur_src, _) in zip(sequence, sequence[1:]):
+        if cur_src != prev_dst:
+            violations.append(
+                f"assistant turn {cur_turn} transitions from '{cur_src}' but "
+                f"the previous turn ended at '{prev_dst}'"
+            )
+    last_turn, _, last_dst = sequence[-1]
+    if terminal_states and last_dst not in terminal_states:
+        violations.append(
+            f"assistant turn {last_turn} ends at '{last_dst}', "
+            f"which is not a terminal state"
+        )
+    return violations
+
+
+def find_shape_violations(
+    messages: list[dict[str, Any]],
+    initiator: str = "user",
+) -> list[str]:
+    """Find conversation-shape violations.
+
+    * The opening turn must match ``initiator``: inbound (``"user"``)
+      conversations open with a user message, outbound (``"agent"``) with the
+      assistant's opener. A leading ``system`` message is skipped.
+    * Consecutive assistant messages are allowed only when the later one is a
+      pure tool-call turn (its content, after the leading ``[STATE:]`` marker,
+      starts with ``<tool_call>``) — two prose turns in a row break
+      strict-alternation chat templates (e.g. Mistral).
+
+    An empty list means the shape is valid.
+
+    Single source of truth shared by the data validator and the generator's
+    inline repair loop.
+    """
+    violations: list[str] = []
+    body = [m for m in messages if m.get("role") != "system"]
+    if body:
+        expected = "assistant" if initiator == "agent" else "user"
+        first_role = body[0].get("role")
+        if first_role != expected:
+            violations.append(
+                f"conversation initiator is '{initiator}' but the first "
+                f"message role is '{first_role}' (expected '{expected}')"
+            )
+    for prev, cur in zip(body, body[1:]):
+        if prev.get("role") == "assistant" and cur.get("role") == "assistant":
+            content = (cur.get("content") or "").lstrip()
+            stripped = _STATE_RE.sub("", content, count=1).lstrip()
+            if not stripped.startswith("<tool_call>"):
+                violations.append(
+                    "consecutive assistant prose turns (no user or tool "
+                    "message in between)"
+                )
+    return violations
+
+
 def build_workflow_script(
     workflow_graph: dict[str, Any],
     tool_schemas: list[dict[str, Any]] | None = None,

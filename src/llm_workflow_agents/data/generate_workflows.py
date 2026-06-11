@@ -27,7 +27,11 @@ from typing import Any, Literal
 import structlog
 
 from llm_workflow_agents.data._teacher_client import call_teacher_model
-from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
+from llm_workflow_agents.data._workflow_script import (
+    find_continuity_violations,
+    find_shape_violations,
+    find_tool_placement_violations,
+)
 from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
@@ -171,6 +175,7 @@ class DatasetMetadata:
     num_samples: int
     output_files: list[Path] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
+    stats_file: Path | None = None
 
 
 @dataclass
@@ -615,14 +620,17 @@ def _backfill_annotations(messages: list[dict[str, Any]]) -> None:
     """Normalise each assistant turn to carry a structured ``annotations`` dict
     derived from its inline ``[STATE: X → Y]`` / ``<tool_call>`` markers.
 
-    Some teacher models emit the inline markers in ``content`` but omit the
-    parallel ``annotations`` object that downstream consumers key off — the
-    data validator, the repair loop's transition-legality check
-    (``_find_transition_violations``, which has no content fallback), the
-    chat-template converter, and GRPO loss masking. This fills in only the
-    *missing* fields from content, preserving any annotation the teacher already
-    supplied, so every consumer sees a consistent shape regardless of teacher
-    formatting. Mutates ``messages`` in place.
+    The inline content markers are authoritative: a teacher model may emit a
+    structured ``annotations`` object that *contradicts* its own inline
+    markers, and downstream consumers that key off annotations — the data
+    validator, the repair loop's transition-legality check
+    (``_find_transition_violations``, which has no content fallback),
+    ``_extract_ground_truth``, the chat-template converter, and GRPO loss
+    masking — would silently inherit the wrong labels. So whenever content
+    carries a marker, the annotation is overwritten from it; a teacher-supplied
+    annotation survives only on turns whose content has no marker (per field:
+    state and tool_calls are resolved independently). Mutates ``messages``
+    in place.
     """
     for msg in messages:
         if msg.get("role") != "assistant":
@@ -632,25 +640,23 @@ def _backfill_annotations(messages: list[dict[str, Any]]) -> None:
         if not isinstance(ann, dict):
             ann = {}
 
-        if not (ann.get("state_transition") or {}).get("from"):
-            m = _STATE_ANNOTATION_RE.search(content)
-            if m:
-                ann["state_transition"] = {"from": m.group(1), "to": m.group(2)}
+        m = _STATE_ANNOTATION_RE.search(content)
+        if m:
+            ann["state_transition"] = {"from": m.group(1), "to": m.group(2)}
 
-        if not ann.get("tool_calls"):
-            inline: list[dict[str, Any]] = []
-            for tc_match in _TOOL_CALL_RE.finditer(content):
-                try:
-                    parsed = json.loads(tc_match.group(1))
-                except json.JSONDecodeError:
-                    continue
-                name = parsed.get("name", "")
-                if name:
-                    inline.append(
-                        {"name": name, "arguments": parsed.get("arguments", {})}
-                    )
-            if inline:
-                ann["tool_calls"] = inline
+        inline: list[dict[str, Any]] = []
+        for tc_match in _TOOL_CALL_RE.finditer(content):
+            try:
+                parsed = json.loads(tc_match.group(1))
+            except json.JSONDecodeError:
+                continue
+            name = parsed.get("name", "")
+            if name:
+                inline.append(
+                    {"name": name, "arguments": parsed.get("arguments", {})}
+                )
+        if inline:
+            ann["tool_calls"] = inline
 
         if ann:
             msg["annotations"] = ann
@@ -665,6 +671,10 @@ def _extract_ground_truth(
     Reads from the ``annotations`` metadata dict if present (placeholder
     generator). Falls back to parsing ``[STATE: X → Y]`` and
     ``<tool_call>`` from message content (teacher-model generator).
+
+    Assumes ``_backfill_annotations`` has already normalised annotations from
+    the inline content markers — calling this on raw teacher output whose
+    annotations contradict its content would yield corrupted labels.
 
     Returns a dict with:
     - ``state_sequence``: list of {from, to} transition dicts in order
@@ -748,6 +758,10 @@ class ConversationSample:
     ground_truth: dict[str, Any] = field(default_factory=dict)
     conversation_initiator: str = "user"
     outbound_reason: str | None = None
+    # Provenance: "teacher" (live teacher output), "placeholder" (no teacher
+    # configured), or "placeholder_fallback" (teacher path that exhausted the
+    # redraw budget — exclude from quality metrics).
+    generation_source: str = "placeholder"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -766,6 +780,7 @@ class ConversationSample:
             "ground_truth": self.ground_truth,
             "conversation_initiator": self.conversation_initiator,
             "outbound_reason": self.outbound_reason,
+            "generation_source": self.generation_source,
         }
 
 
@@ -1237,7 +1252,11 @@ def _generate_teacher_conversation(
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
-    Falls back to placeholder generation if the API call fails.
+    Raises on API/parse failure (logged as ``teacher_model_fallback``); the
+    caller substitutes the placeholder, marks the attempt fallen-back, and
+    redraws. Returning the placeholder from here instead would make the
+    failure indistinguishable from genuine teacher output, mis-tagging the
+    sample's ``generation_source``.
     """
     user_prompt = _build_teacher_prompt(
         workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
@@ -1260,10 +1279,7 @@ def _generate_teacher_conversation(
             teacher_model=teacher_model,
             error=str(exc),
         )
-        return _generate_placeholder_conversation(
-            workflow, tool_schemas, behavior, spec, rng, domain_spec, language,
-            intent_category, initiator, outbound_reason,
-        )
+        raise
 
 
 def generate_workflow_dataset(
@@ -1281,6 +1297,7 @@ def generate_workflow_dataset(
     repair_incoherent: bool = True,
     max_repair_retries: int = 2,
     max_sample_attempts: int = 3,
+    max_total_redraws: int | None = None,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1316,23 +1333,38 @@ def generate_workflow_dataset(
             ``"service_only"`` disables upsell biasing entirely.
             ``"upsell_heavy"`` uses a 50/50 split.
         repair_incoherent: When True (default), teacher-generated conversations
-            that call a tool in a state the curated map disallows are retried and,
-            if still incoherent, replaced by the deterministic placeholder
-            conversation so every emitted sample respects the curated tool
-            placement. No-op for placeholder generation (already coherent).
+            that violate any coherence check — tool placement, transition
+            legality, state-sequence continuity (mid-message markers,
+            discontinuity, wrong initial, non-terminal ending, missing
+            annotations), or conversation shape (initiator mismatch,
+            consecutive assistant prose turns) — are retried and, if still
+            incoherent, replaced by the deterministic placeholder conversation.
+            No-op for placeholder generation (already coherent).
         max_repair_retries: Maximum teacher regenerations within a single sample
             attempt before that attempt is marked as fallen-back. Reported via the
             ``repair_retries`` and ``repair_fallbacks`` stats.
-        max_sample_attempts: Maximum number of fresh full-sample attempts (each
-            redrawing domain/workflow/behavior/language/initiator and re-running the
-            teacher) before a last-resort placeholder conversation is emitted. The
-            first generation counts as attempt 1, so the default of 3 allows 2 fresh
-            redraws. Only the teacher path can fall back; the placeholder generator
-            path (``teacher_model is None``) never retries. Reported via the
+        max_sample_attempts: Per-sample average allowance of fresh full-sample
+            redraws (each redrawing domain/workflow/behavior/language/initiator
+            and re-running the teacher) used to derive the default redraw
+            budget: ``(max_sample_attempts - 1) * num_samples``. ``1`` means
+            "never redraw". Ignored when ``max_total_redraws`` is given. Only
+            the teacher path can fall back; the placeholder generator path
+            (``teacher_model is None``) never retries. Reported via the
             ``sample_retries`` and ``sample_fallbacks`` stats.
+        max_total_redraws: Global budget of fresh full-sample redraws shared by
+            the whole run (None → derived from ``max_sample_attempts``). The
+            budget is shared, not per-sample, so a hard sample may consume many
+            redraws as long as the rest of the run stays cheap; once exhausted,
+            remaining fallen-back samples emit the placeholder (tagged
+            ``generation_source="placeholder_fallback"``) after a single
+            attempt. Total teacher attempts are bounded by
+            ``num_samples + budget`` even when the teacher never produces a
+            coherent conversation.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
+        The full stats dict is also written to a ``.stats.json`` sidecar next
+        to the output JSONL (path in ``DatasetMetadata.stats_file``).
     """
     if behavior_preset not in BEHAVIOR_PRESETS:
         raise ValueError(
@@ -1353,6 +1385,15 @@ def generate_workflow_dataset(
         raise ValueError(
             f"max_sample_attempts must be >= 1, got {max_sample_attempts}"
         )
+    if max_total_redraws is not None and max_total_redraws < 0:
+        raise ValueError(
+            f"max_total_redraws must be >= 0, got {max_total_redraws}"
+        )
+    redraw_budget = (
+        max_total_redraws
+        if max_total_redraws is not None
+        else (max_sample_attempts - 1) * num_samples
+    )
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
     active_initiation_dist = INITIATION_PRESETS[initiation_preset]
@@ -1394,6 +1435,8 @@ def generate_workflow_dataset(
     repair_fallbacks = 0
     sample_retries = 0
     sample_fallbacks = 0
+    teacher_call_failures = 0
+    source_counts: dict[str, int] = {}
 
     def _attempt_sample() -> dict[str, Any]:
         """Draw a fresh sample and run the teacher + repair loop once.
@@ -1405,7 +1448,7 @@ def generate_workflow_dataset(
         last resort. The placeholder-generator path (no ``teacher_model``)
         never falls back, since the placeholder is its intended output.
         """
-        nonlocal repair_retries, repair_fallbacks
+        nonlocal repair_retries, repair_fallbacks, teacher_call_failures
 
         behavior = _select_user_behavior(rng, active_distribution)
 
@@ -1453,10 +1496,18 @@ def generate_workflow_dataset(
 
         fell_back = False
         if teacher_model:
-            messages = _generate_teacher_conversation(
-                workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
-                sample_language, intent_category, initiator, outbound_reason,
-            )
+            try:
+                messages = _generate_teacher_conversation(
+                    workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
+                    sample_language, intent_category, initiator, outbound_reason,
+                )
+            except Exception:
+                # API/parse failure (already logged as teacher_model_fallback).
+                # Substitute the placeholder and mark the attempt fallen-back so
+                # the caller redraws under the budget instead of accepting it.
+                teacher_call_failures += 1
+                messages = _placeholder()
+                fell_back = True
             # Normalise annotations from the inline markers before the repair
             # loop, so its transition-legality check (which reads annotations,
             # not content) sees this teacher's transitions regardless of whether
@@ -1467,7 +1518,7 @@ def generate_workflow_dataset(
             # does not allow it. Retry within this attempt; if still incoherent,
             # mark the attempt fallen-back so the caller can retry a fresh sample
             # (the placeholder is only emitted if every attempt fails).
-            if repair_incoherent:
+            if not fell_back and repair_incoherent:
                 allowed = {s.name: set(s.tools) for s in workflow.states}
                 schema_names = {t["function"]["name"] for t in tool_schemas}
                 id_to_name = {s.id: s.name for s in workflow.states}
@@ -1477,12 +1528,27 @@ def generate_workflow_dataset(
                     for t in workflow.transitions
                 } | {(id_to_name.get(sid, sid), id_to_name.get(sid, sid))
                      for sid in {t.from_state for t in workflow.transitions}}
+                initial_name = id_to_name.get(
+                    workflow.initial_state, workflow.initial_state
+                )
+                terminal_names = {
+                    id_to_name.get(t, t) for t in workflow.terminal_states
+                }
 
                 def _has_violations(msgs: list[dict[str, Any]]) -> bool:
-                    return bool(
+                    violations = (
                         find_tool_placement_violations(allowed, msgs, schema_names)
                         or _find_transition_violations(valid_edge_pairs, msgs)
+                        or find_continuity_violations(
+                            msgs, initial_name, terminal_names
+                        )
+                        or find_shape_violations(msgs, initiator)
                     )
+                    if violations:
+                        logger.debug(
+                            "teacher_coherence_violations", violations=violations
+                        )
+                    return bool(violations)
 
                 tries = 0
                 while _has_violations(messages):
@@ -1493,11 +1559,17 @@ def generate_workflow_dataset(
                         break
                     tries += 1
                     repair_retries += 1
-                    messages = _generate_teacher_conversation(
-                        workflow, tool_schemas, behavior, spec, rng, domain_spec,
-                        teacher_model, sample_language, intent_category,
-                        initiator, outbound_reason,
-                    )
+                    try:
+                        messages = _generate_teacher_conversation(
+                            workflow, tool_schemas, behavior, spec, rng, domain_spec,
+                            teacher_model, sample_language, intent_category,
+                            initiator, outbound_reason,
+                        )
+                    except Exception:
+                        teacher_call_failures += 1
+                        messages = _placeholder()
+                        fell_back = True
+                        break
                     _backfill_annotations(messages)
         else:
             messages = _placeholder()
@@ -1517,14 +1589,17 @@ def generate_workflow_dataset(
             "fell_back_inbound": fell_back_inbound,
         }
 
+    redraws_used = 0
     for i in range(num_samples):
         # Generate one sample, retrying a fresh draw if the teacher path falls
         # back to the placeholder, so the dataset keeps `num_samples` real
-        # conversations. A placeholder is emitted only as a last resort when
-        # every attempt exhausts repairs.
+        # conversations. Redraws are budgeted globally across the run (not
+        # capped per sample), so a hard sample may redraw many times; the
+        # placeholder is emitted only once the shared budget is exhausted.
         result = _attempt_sample()
         attempts = 1
-        while result["fell_back"] and attempts < max_sample_attempts:
+        while result["fell_back"] and redraws_used < redraw_budget:
+            redraws_used += 1
             sample_retries += 1
             result = _attempt_sample()
             attempts += 1
@@ -1534,7 +1609,18 @@ def generate_workflow_dataset(
                 "sample_fallback_placeholder_emitted",
                 conversation_index=i,
                 attempts=attempts,
+                redraw_budget_exhausted=True,
             )
+
+        if teacher_model is None:
+            generation_source = "placeholder"
+        elif result["fell_back"]:
+            generation_source = "placeholder_fallback"
+        else:
+            generation_source = "teacher"
+        source_counts[generation_source] = (
+            source_counts.get(generation_source, 0) + 1
+        )
 
         messages = result["messages"]
         # Idempotent guarantee that the emitted sample carries normalised
@@ -1628,6 +1714,7 @@ def generate_workflow_dataset(
             ground_truth=_extract_ground_truth(messages, workflow),
             conversation_initiator=initiator,
             outbound_reason=(outbound_reason.key if outbound_reason else None),
+            generation_source=generation_source,
         )
         samples.append(sample)
 
@@ -1654,9 +1741,37 @@ def generate_workflow_dataset(
         "repair_fallbacks": repair_fallbacks,
         "sample_retries": sample_retries,
         "sample_fallbacks": sample_fallbacks,
+        "teacher_call_failures": teacher_call_failures,
+        "generation_source_counts": source_counts,
+        "redraw_budget": redraw_budget,
+        "redraws_used": redraws_used,
     }
 
-    logger.info("dataset_generated", output_file=str(output_file), **stats)
+    # Persist the run stats next to the JSONL so fallback rates are auditable
+    # from the artifact itself (the returned DatasetMetadata is ephemeral).
+    stats_file = output_file.with_suffix(".stats.json")
+    with open(stats_file, "w") as f:
+        json.dump(
+            {
+                "complexity_level": complexity_level,
+                "num_samples": num_samples,
+                "teacher_model": teacher_model,
+                "seed": seed,
+                "output_file": output_file.name,
+                "generated_at": timestamp,
+                "stats": stats,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    logger.info(
+        "dataset_generated",
+        output_file=str(output_file),
+        stats_file=str(stats_file),
+        **stats,
+    )
 
     return DatasetMetadata(
         output_dir=output_dir,
@@ -1664,4 +1779,5 @@ def generate_workflow_dataset(
         num_samples=num_samples,
         output_files=[output_file],
         stats=stats,
+        stats_file=stats_file,
     )

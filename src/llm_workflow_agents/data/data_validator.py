@@ -70,19 +70,16 @@ def _validate_workflow_sample(sample: dict[str, Any], idx: int) -> list[str]:
     elif messages[0].get("role") != "system":
         errors.append(f"Sample {idx}: first message should be system role")
 
-    # Outbound (agent-initiated) conversations must open with an assistant turn
-    # stating the purpose. Inbound conversations are NOT constrained here: a
-    # natural inbound dialogue may legitimately open with either the customer's
-    # request or an agent greeting ("Hi, how can I help?"), so we only enforce
-    # the outbound direction.
-    initiator = sample.get("conversation_initiator", "user")
-    if initiator == "agent" and len(messages) > 1:
-        second_role = messages[1].get("role")
-        if second_role != "assistant":
-            errors.append(
-                f"Sample {idx}: outbound (agent-initiated) conversation must have "
-                f"an assistant second message, got '{second_role}'"
-            )
+    # Conversation shape: the opening turn must match conversation_initiator
+    # in BOTH directions (inbound opens with the user, outbound with the
+    # assistant's purpose-stating opener), and consecutive assistant prose
+    # turns are rejected (they break strict-alternation chat templates).
+    if messages:
+        from llm_workflow_agents.data._workflow_script import find_shape_violations
+
+        initiator = sample.get("conversation_initiator", "user")
+        for violation in find_shape_violations(messages, initiator):
+            errors.append(f"Sample {idx}: {violation}")
 
     # Validate state transitions are valid
     valid_states = set(graph.get("states", []))
@@ -116,7 +113,7 @@ def _check_workflow_rationality(
 ) -> list[str]:
     """Enforce that workflow data is semantically coherent.
 
-    Three checks (see ``.claude/rules/02-data-generation.md``):
+    Four checks (see ``.claude/rules/02-data-generation.md``):
 
     1. Tool-state coherence — every tool listed in a state exists in the
        sample's ``tool_schemas``, and every tool *called* in the ground-truth
@@ -124,6 +121,9 @@ def _check_workflow_rationality(
     2. Instruction completeness — every non-terminal state has an instruction.
     3. Terminal reachability — at least one terminal is reachable from the
        initial state by following the transitions.
+    4. State-sequence continuity — annotations chain turn-to-turn, start at
+       the initial state, end at a terminal, and every assistant turn carries
+       exactly one leading ``[STATE:]`` marker.
     """
     errors: list[str] = []
 
@@ -167,6 +167,15 @@ def _check_workflow_rationality(
             continue
         if not (sd.get("instruction") or "").strip():
             errors.append(f"Sample {idx}: state '{sname}' has no instruction")
+
+    # 4. State-sequence continuity over the conversation's annotations.
+    if messages and initial and terminals:
+        from llm_workflow_agents.data._workflow_script import (
+            find_continuity_violations,
+        )
+
+        for violation in find_continuity_violations(messages, initial, terminals):
+            errors.append(f"Sample {idx}: {violation}")
 
     # 3. Terminal reachability via BFS over transitions (state names).
     transitions = graph.get("transitions") or []
