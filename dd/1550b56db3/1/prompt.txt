@@ -15,3 +15,19 @@ Should we fix data generation with teacher model pipeline to skip fell back samp
 ---
 
 /superpowers:using-superpowers implement these fixes
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational.
+
+---
+
+How does the data generation handle a sample when a sample lands in violation?
+
+---
+
+In stage 1 repair loop, do we notify teacher model about the violations?
+
+---
+
+commit change then implement
