@@ -1,0 +1,26 @@
+model:
+  name: "RedHatAI/gemma-4-12B-it-FP8-Dynamic"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 11_950_000_000
+  params_active: 11_950_000_000
+  context_length: 262144
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 12
+
+serving:
+  engine: "tensorrt_llm"
+  source: "hf"
+  # engine_dir: "checkpoints/trt-engines/gemma4_12b_fp8"
+  tool_call_parser: null
+  port: 8000
+  max_batch_size: 768
+  max_num_tokens: 8192
+  tp_size: 1
+  kv_cache_dtype: "auto"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
