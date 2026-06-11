@@ -1,0 +1,9 @@
+Verify that samples in @data/output/benchmark/task_a/REDACTED.jsonl are rational
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational. Look for samples that fell into `teacher_model_fallback` or `sample_fallback_placeholder_emitted`. Are these samples still consistent?
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational. Look for samples that fell into `teacher_model_fallback` or `sample_fallback_placeholder_emitted`. Are these samples still consistent?

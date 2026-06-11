@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f3b9efbabb2a",
+  "strategy": "manual-commit",
+  "branch": "fix/teacher-pipeline-fallback-fixes",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/f3/b9efbabb2a/0/metadata.json",
+      "transcript": "/f3/b9efbabb2a/0/full.jsonl",
+      "content_hash": "/f3/b9efbabb2a/0/content_hash.txt",
+      "prompt": "/f3/b9efbabb2a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12860,
+    "cache_creation_tokens": 466914,
+    "cache_read_tokens": 14535824,
+    "output_tokens": 94096,
+    "api_call_count": 92
+  }
+}
