@@ -1,0 +1,25 @@
+model:
+  name: "RedHatAI/gemma-4-12B-it-FP8-Dynamic"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 11_950_000_000
+  params_active: 11_950_000_000
+  context_length: 262144
+  precision: "fp8_e4m3"
+  vram_estimate_gb: 12
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# FP8 dynamic-quantized dense 12B (RedHat). FP8 variant of gemma4_12b.

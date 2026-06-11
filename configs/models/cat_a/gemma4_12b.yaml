@@ -1,0 +1,29 @@
+model:
+  name: "google/gemma-4-12B-it"
+  revision: "5926caa4ec0cac5cbfadaf4077420520de1d5205"
+  family: "gemma"
+  architecture: "dense_gqa_transformer"
+  params_total: 11_950_000_000
+  params_active: 11_950_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 24
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# Gemma 4 12B unified multimodal dense model. At 12B it sits below the nominal
+# Cat A 15-35B band but well above the Cat B-C 2-5B band; placed in Cat A as the
+# smallest orchestrator-class candidate. Hybrid local (1024-tok sliding window) +
+# global attention. Text-only path used for Task A benchmarking.

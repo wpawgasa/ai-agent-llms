@@ -136,8 +136,18 @@ def _rational_workflow_sample() -> dict:
             {"role": "user", "content": "Change my plan"},
             {
                 "role": "assistant",
-                "content": "[STATE: PROCESS_CHANGE → TERMINAL]\n"
+                "content": "[STATE: GREETING → PROCESS_CHANGE]\nHappy to help with that.",
+            },
+            {"role": "user", "content": "Great, go ahead."},
+            {
+                "role": "assistant",
+                "content": "[STATE: PROCESS_CHANGE → PROCESS_CHANGE]\n"
                            "<tool_call>{\"name\": \"change_plan\", \"arguments\": {}}</tool_call>",
+            },
+            {"role": "tool", "content": "{\"status\": \"success\"}"},
+            {
+                "role": "assistant",
+                "content": "[STATE: PROCESS_CHANGE → TERMINAL]\nAll done!",
             },
         ],
     }
@@ -185,6 +195,53 @@ class TestWorkflowRationality:
         result = validate_dataset(self._write(tmp_path, sample), "workflow")
         assert not result.valid
         assert any("reachable" in e for e in result.errors)
+
+
+class TestValidatorContinuityAndShape:
+    """The validator enforces sequence continuity and conversation shape via
+    the shared checkers (same source of truth as the generator repair loop)."""
+
+    def _write(self, tmp_path: Path, sample: dict) -> Path:
+        path = tmp_path / "continuity.jsonl"
+        path.write_text(json.dumps(sample) + "\n")
+        return path
+
+    def test_discontinuous_annotations_are_invalid(self, tmp_path: Path) -> None:
+        sample = _rational_workflow_sample()
+        # Skip the GREETING → PROCESS_CHANGE hop: every remaining edge is
+        # legal, but the sequence no longer chains from the initial state.
+        del sample["messages"][1:3]
+        result = validate_dataset(self._write(tmp_path, sample), "workflow")
+        assert not result.valid
+        assert any("initial state" in e for e in result.errors)
+
+    def test_nonterminal_ending_is_invalid(self, tmp_path: Path) -> None:
+        sample = _rational_workflow_sample()
+        # Drop the closing turn → the conversation ends at PROCESS_CHANGE.
+        sample["messages"] = sample["messages"][:-2]
+        result = validate_dataset(self._write(tmp_path, sample), "workflow")
+        assert not result.valid
+        assert any("not a terminal state" in e for e in result.errors)
+
+    def test_mid_message_marker_is_invalid(self, tmp_path: Path) -> None:
+        sample = _rational_workflow_sample()
+        sample["messages"][-1]["content"] += " [STATE: TERMINAL → TERMINAL] bye"
+        result = validate_dataset(self._write(tmp_path, sample), "workflow")
+        assert not result.valid
+        assert any("mid-content" in e for e in result.errors)
+
+    def test_inbound_assistant_first_is_invalid(self, tmp_path: Path) -> None:
+        sample = _rational_workflow_sample()
+        sample["messages"].insert(
+            1,
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\nHow can I help?",
+            },
+        )
+        result = validate_dataset(self._write(tmp_path, sample), "workflow")
+        assert not result.valid
+        assert any("first message role" in e for e in result.errors)
 
 
 class TestFindToolPlacementViolations:

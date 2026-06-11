@@ -1,0 +1,28 @@
+model:
+  name: "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized"
+  revision: "641f184470aa8554ae7957599a624badc2bf4e57"
+  family: "gemma"
+  architecture: "moe_gqa_transformer"
+  params_total: 26_000_000_000
+  params_active: 4_000_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 52
+
+serving:
+  engine: "vllm"
+  tool_call_parser: "gemma4"
+  chat_template: "gemma"
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  hf_overrides:
+    rope_scaling: null
+
+category: "A"
+
+benchmark_tasks:
+  - "task_a"
+
+# QAT (quantization-aware-trained) MoE, weights stored UNQUANTIZED (BF16) so they
+# load like the base model; QAT tuning makes downstream q4_0 near-lossless. Same
+# 26B total / ~4B active footprint as gemma4_26b_a4b — freeze mlp.gate during LoRA.

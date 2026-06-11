@@ -1,0 +1,31 @@
+model:
+  name: "google/diffusiongemma-26B-A4B-it"
+  family: "gemma"
+  architecture: "diffusion_moe_transformer"
+  params_total: 25_200_000_000
+  params_active: 3_800_000_000
+  context_length: 262144
+  precision: "bfloat16"
+  vram_estimate_gb: 50
+
+serving:
+  engine: "sglang"
+  tool_call_parser: "gemma4"
+  reasoning_parser: "gemma4"
+  # chat_template intentionally omitted: SGLang falls back to the HF tokenizer's
+  # built-in chat_template (canonical for Gemma 4 instruct models).
+  # CAUTION: discrete-diffusion (multi-canvas) sampling is not a standard AR decode
+  # path; SGLang/TensorRT-LLM support for diffusiongemma is unverified — validate
+  # before benchmarking.
+  mem_fraction_static: 0.85
+  context_length: 8192
+  max_running_requests: 256
+  attention_backend: "triton"
+  port: 8000
+  kv_cache_dtype: "auto"
+
+inference:
+  temperature_deterministic: 0.0
+  temperature_stochastic: 0.7
+  stochastic_trials: 5
+  max_tokens: 2048
