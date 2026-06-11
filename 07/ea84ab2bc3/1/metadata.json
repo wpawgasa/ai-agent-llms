@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "07ea84ab2bc3",
+  "session_id": "af3ca601-9f7f-4b01-82f8-3343a0811e57",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T08:31:55.767767069Z",
+  "branch": "chore/add-gemma4-diffusiongemma-configs",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-fable-5",
+  "turn_id": "4ae431aeadb0",
+  "token_usage": {
+    "input_tokens": 13100,
+    "cache_creation_tokens": 479965,
+    "cache_read_tokens": 17883283,
+    "output_tokens": 106145,
+    "api_call_count": 105
+  },
+  "session_metrics": {
+    "turn_count": 8
+  }
+}

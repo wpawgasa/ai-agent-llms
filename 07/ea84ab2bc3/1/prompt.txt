@@ -1,0 +1,33 @@
+Verify that samples in @data/output/benchmark/task_a/REDACTED.jsonl are rational
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational. Look for samples that fell into `teacher_model_fallback` or `sample_fallback_placeholder_emitted`. Are these samples still consistent?
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational. Look for samples that fell into `teacher_model_fallback` or `sample_fallback_placeholder_emitted`. Are these samples still consistent?
+
+---
+
+Should we fix data generation with teacher model pipeline to skip fell back samples and prevent broken and inconsistent samples mentioned above?
+
+---
+
+/superpowers:using-superpowers implement these fixes
+
+---
+
+Verify that samples in @REDACTED.jsonl are rational.
+
+---
+
+How does the data generation handle a sample when a sample lands in violation?
+
+---
+
+In stage 1 repair loop, do we notify teacher model about the violations?
+
+---
+
+commit change then implement
