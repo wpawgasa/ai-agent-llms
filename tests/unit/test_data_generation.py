@@ -851,6 +851,79 @@ class TestPostGenerationRepair:
         )
 
 
+class TestRepairFeedback:
+    """Repair-loop retries tell the teacher WHY the previous attempt was
+    rejected, so it can correct the mistakes instead of re-rolling blind."""
+
+    @staticmethod
+    def _incoherent_response() -> str:
+        return json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": "[STATE: GREETING → GREETING]\n"
+                        '<tool_call>{"name": "ghost_tool", "arguments": {}}</tool_call>',
+                    },
+                ]
+            }
+        )
+
+    def test_retry_prompt_carries_violations(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        prompts: list[str] = []
+
+        def fake_call(model, system_prompt, user_prompt):
+            prompts.append(user_prompt)
+            return self._incoherent_response()
+
+        monkeypatch.setattr(gw, "call_teacher_model", fake_call)
+        generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            max_repair_retries=1,
+            max_total_redraws=0,
+            rich_prompt_rate=0.0,  # keep call_teacher_model calls to the conversation path
+        )
+        # One initial call + one repair retry.
+        assert len(prompts) == 2
+        assert "CORRECTIONS REQUIRED" not in prompts[0]
+        assert "CORRECTIONS REQUIRED" in prompts[1]
+        # The retry names the concrete violation from the previous attempt.
+        assert "ghost_tool" in prompts[1]
+
+    def test_fresh_redraws_do_not_carry_feedback(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """Feedback is scoped to in-attempt repair: a fresh redraw is a new
+        workflow, so stale violations must not leak into its prompt."""
+        prompts: list[str] = []
+
+        def fake_call(model, system_prompt, user_prompt):
+            prompts.append(user_prompt)
+            return self._incoherent_response()
+
+        monkeypatch.setattr(gw, "call_teacher_model", fake_call)
+        generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            max_repair_retries=0,  # no in-attempt retries → no feedback calls
+            max_total_redraws=1,
+            rich_prompt_rate=0.0,  # keep call_teacher_model calls to the conversation path
+        )
+        # Initial attempt + one fresh redraw, both first calls of an attempt.
+        assert len(prompts) == 2
+        assert all("CORRECTIONS REQUIRED" not in p for p in prompts)
+
+
 class TestBackfillOverwrite:
     """Inline content markers are authoritative over teacher-supplied
     annotations (the L3_043 ground-truth-corruption class)."""
