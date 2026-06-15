@@ -259,6 +259,21 @@ class TestTransitionLegality:
     def test_empty_valid_transitions_scores_zero(self) -> None:
         assert transition_legality_score([("A", "B")], []) == 0.0
 
+    def test_self_loop_is_legal_when_undeclared(self) -> None:
+        # Self-loops denote staying in a state across turns; always legal even
+        # though graphs never declare an explicit (X, X) edge.
+        assert transition_legality_score([("A", "A")], [["A", "B"]]) == 1.0
+
+    def test_self_loop_mixed_with_legal_edge(self) -> None:
+        assert (
+            transition_legality_score([("A", "A"), ("A", "B")], [["A", "B"]]) == 1.0
+        )
+
+    def test_self_loop_does_not_rescue_real_hallucination(self) -> None:
+        # Self-loop legal, but X→Y is still an illegal hallucinated transition.
+        score = transition_legality_score([("A", "A"), ("X", "Y")], [["A", "B"]])
+        assert score == pytest.approx(0.5)
+
 
 # --- Within-Group Variance Tests (regression gate for the dead-reward bug) ---
 
