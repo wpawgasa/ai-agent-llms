@@ -1,0 +1,21 @@
+Verify that samples in
+  @data/output/benchmark/task_a/REDACTED.jsonl are rational.
+
+---
+
+Verify that samples in
+  @data/output/benchmark/task_a/REDACTED.jsonl are rational.
+
+---
+
+Verify that samples in
+  @data/output/benchmark/task_a/REDACTED.jsonl are rational.
+
+---
+
+Verify that samples in
+  @data/output/benchmark/task_a/REDACTED.jsonl are rational.
+
+---
+
+Implement (b) a self-loop reward exemption fix
