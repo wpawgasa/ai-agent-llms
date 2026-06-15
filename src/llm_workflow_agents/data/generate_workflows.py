@@ -1249,6 +1249,7 @@ def _generate_teacher_conversation(
     intent_category: str = "service",
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
+    repair_feedback: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
@@ -1257,11 +1258,26 @@ def _generate_teacher_conversation(
     redraws. Returning the placeholder from here instead would make the
     failure indistinguishable from genuine teacher output, mis-tagging the
     sample's ``generation_source``.
+
+    ``repair_feedback`` carries the coherence violations found in the previous
+    attempt (repair-loop retries only). They are appended to the prompt so the
+    teacher can correct the specific mistakes instead of re-rolling blind —
+    without this, systematic mistakes fail every retry identically.
     """
     user_prompt = _build_teacher_prompt(
         workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
         initiator, outbound_reason,
     )
+    if repair_feedback:
+        feedback_lines = "\n".join(f"- {v}" for v in repair_feedback)
+        user_prompt += (
+            "\n\n## CORRECTIONS REQUIRED\n"
+            "Your previous attempt was rejected by an automated coherence "
+            "check for the issues listed below. Regenerate the ENTIRE "
+            "conversation from scratch, following all of the instructions "
+            "above while fixing every one of these issues:\n"
+            f"{feedback_lines}"
+        )
     try:
         raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
         messages = _parse_messages_response(raw)
@@ -1535,7 +1551,7 @@ def generate_workflow_dataset(
                     id_to_name.get(t, t) for t in workflow.terminal_states
                 }
 
-                def _has_violations(msgs: list[dict[str, Any]]) -> bool:
+                def _find_violations(msgs: list[dict[str, Any]]) -> list[str]:
                     violations = (
                         find_tool_placement_violations(allowed, msgs, schema_names)
                         or _find_transition_violations(valid_edge_pairs, msgs)
@@ -1548,10 +1564,13 @@ def generate_workflow_dataset(
                         logger.debug(
                             "teacher_coherence_violations", violations=violations
                         )
-                    return bool(violations)
+                    return violations
 
                 tries = 0
-                while _has_violations(messages):
+                while True:
+                    violations = _find_violations(messages)
+                    if not violations:
+                        break
                     if tries >= max_repair_retries:
                         messages = _placeholder()
                         repair_fallbacks += 1
@@ -1564,6 +1583,7 @@ def generate_workflow_dataset(
                             workflow, tool_schemas, behavior, spec, rng, domain_spec,
                             teacher_model, sample_language, intent_category,
                             initiator, outbound_reason,
+                            repair_feedback=violations,
                         )
                     except Exception:
                         teacher_call_failures += 1
