@@ -119,7 +119,9 @@ def transition_legality_score(
     edge list. Unlike state-correctness scoring, this is independent of which
     transition is *expected* for the turn — it only asks whether the emitted
     transition exists in the graph at all, directly penalizing hallucinated
-    states. Empty prediction → 0.0 (the model must emit a transition).
+    states. A self-loop ``(X, X)`` is always legal — it denotes remaining in the
+    current state across turns — even when the graph does not declare an explicit
+    self-edge. Empty prediction → 0.0 (the model must emit a transition).
     """
     if not predicted:
         return 0.0
@@ -128,7 +130,9 @@ def transition_legality_score(
         for t in valid_transitions
         if isinstance(t, (list, tuple)) and len(t) == 2
     }
-    return sum(1 for tr in predicted if tuple(tr) in valid) / len(predicted)
+    return sum(
+        1 for tr in predicted if tr[0] == tr[1] or tuple(tr) in valid
+    ) / len(predicted)
 
 
 def node_f1(predicted_nodes: list[dict], gold_nodes: list[dict]) -> float:
