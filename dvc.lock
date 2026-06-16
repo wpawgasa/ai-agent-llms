@@ -18,8 +18,8 @@ stages:
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: 713a717053359b741d215d3280989e49
-      size: 71345
+      md5: bd954fa91cf9b2f05a3dbdab4a6893df
+      size: 77496
     params:
       configs/benchmark/phase1_matrix.yaml:
         task_a:
@@ -49,9 +49,9 @@ stages:
     outs:
     - path: data/output/benchmark/task_a
       hash: md5
-      md5: 94b15ffab08c8681c796414b627906b9.dir
-      size: 496825
-      nfiles: 4
+      md5: bca6a9943285f0ac7f026b558fe0badc.dir
+      size: 8410342
+      nfiles: 21
   task_a_sft:
     cmd: "./scripts/generate_sft_data.sh && python scripts/clean_task_a_sft.py\n \
       \ --input-dir data/output/sft/task_a\n  --output-dir data/output/sft/task_a_cleaned\n\
