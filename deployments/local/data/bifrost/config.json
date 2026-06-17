@@ -62,7 +62,7 @@
             "keys": [
                 {
                     "name": "vllm-key",
-                    "value": "dummy",
+                    "value": "env.VLLM_API_KEY",
                     "models": [
                         "*"
                     ],

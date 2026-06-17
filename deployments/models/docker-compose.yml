@@ -52,6 +52,8 @@ services:
       VLLM_ENFORCE_EAGER: ${VLLM_ENFORCE_EAGER:-}
       VLLM_TRUST_REMOTE_CODE: ${VLLM_TRUST_REMOTE_CODE:-}
       VLLM_EXTRA_ARGS: ${VLLM_EXTRA_ARGS:-}
+      # Bearer token required on /v1/* when non-empty (vLLM reads VLLM_API_KEY natively).
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
       # Real vLLM env var (not a launcher flag) — needed by DiffusionGemma.
       # Must be unset (not empty) when unused: vLLM parses it with int(), and
       # int("") crashes at import. The entrypoint unsets it if blank.

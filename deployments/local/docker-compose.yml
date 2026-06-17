@@ -43,6 +43,8 @@ services:
       COHERE_API_KEY: ${COHERE_API_KEY:-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Local vLLM (DiffusionGemma) bearer token — referenced as env.VLLM_API_KEY in config.json
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
       # BiFrost Configuration
       APP_PORT: '8080'
       APP_HOST: 0.0.0.0
