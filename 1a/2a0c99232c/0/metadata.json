@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1a2a0c99232c",
+  "session_id": "83fb698f-8bb6-4652-ac60-9cab340b7e84",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-18T08:38:24.299331013Z",
+  "branch": "feat/lmcache-cpu-offload",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "0917dfeec4d6",
+  "token_usage": {
+    "input_tokens": 4203,
+    "cache_creation_tokens": 97469,
+    "cache_read_tokens": 913915,
+    "output_tokens": 19757,
+    "api_call_count": 15
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}
