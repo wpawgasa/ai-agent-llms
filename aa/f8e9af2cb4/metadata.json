@@ -4,13 +4,22 @@
   "strategy": "manual-commit",
   "branch": "feat/lmcache-cpu-offload",
   "checkpoints_count": 2,
-  "files_touched": null,
+  "files_touched": [
+    "deployments/models/docker-compose.yml",
+    "tests/test_lmcache_entrypoint.py"
+  ],
   "sessions": [
     {
       "metadata": "/aa/f8e9af2cb4/0/metadata.json",
       "transcript": "/aa/f8e9af2cb4/0/full.jsonl",
       "content_hash": "/aa/f8e9af2cb4/0/content_hash.txt",
       "prompt": "/aa/f8e9af2cb4/0/prompt.txt"
+    },
+    {
+      "metadata": "/aa/f8e9af2cb4/1/metadata.json",
+      "transcript": "/aa/f8e9af2cb4/1/full.jsonl",
+      "content_hash": "/aa/f8e9af2cb4/1/content_hash.txt",
+      "prompt": ""
     }
   ],
   "token_usage": {
