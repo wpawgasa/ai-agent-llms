@@ -3,7 +3,7 @@
   "checkpoint_id": "005604bd4ede",
   "strategy": "manual-commit",
   "branch": "feat/lmcache-cpu-offload",
-  "checkpoints_count": 1,
+  "checkpoints_count": 2,
   "files_touched": [
     "deployments/models/docker-compose.l4.yml"
   ],
@@ -19,13 +19,19 @@
       "transcript": "/00/5604bd4ede/1/full.jsonl",
       "content_hash": "/00/5604bd4ede/1/content_hash.txt",
       "prompt": ""
+    },
+    {
+      "metadata": "/00/5604bd4ede/2/metadata.json",
+      "transcript": "/00/5604bd4ede/2/full.jsonl",
+      "content_hash": "/00/5604bd4ede/2/content_hash.txt",
+      "prompt": "/00/5604bd4ede/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 4622,
-    "cache_creation_tokens": 151323,
-    "cache_read_tokens": 2813670,
-    "output_tokens": 52878,
-    "api_call_count": 31
+    "input_tokens": 4624,
+    "cache_creation_tokens": 157591,
+    "cache_read_tokens": 2994982,
+    "output_tokens": 54437,
+    "api_call_count": 32
   }
 }
