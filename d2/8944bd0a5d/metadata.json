@@ -1,0 +1,27 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "d28944bd0a5d",
+  "strategy": "manual-commit",
+  "branch": "feat/sft-target-data-loop",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/generate_sft_data.sh",
+    "scripts/generate_sft_until_target.py",
+    "src/llm_workflow_agents/data/quality_profiler.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d2/8944bd0a5d/0/metadata.json",
+      "transcript": "/d2/8944bd0a5d/0/full.jsonl",
+      "content_hash": "/d2/8944bd0a5d/0/content_hash.txt",
+      "prompt": "/d2/8944bd0a5d/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 51,
+    "cache_creation_tokens": 49225,
+    "cache_read_tokens": 1568909,
+    "output_tokens": 9565,
+    "api_call_count": 49
+  }
+}
