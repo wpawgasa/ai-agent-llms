@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "d28944bd0a5d",
+  "session_id": "ca72b430-92c5-481b-8ba7-061c1910b3b5",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-18T08:19:27.805048188Z",
+  "branch": "feat/sft-target-data-loop",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "scripts/generate_sft_data.sh",
+    "scripts/generate_sft_until_target.py",
+    "src/llm_workflow_agents/data/quality_profiler.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "13859c067eb0",
+  "token_usage": {
+    "input_tokens": 18294,
+    "cache_creation_tokens": 283472,
+    "cache_read_tokens": 9805409,
+    "output_tokens": 65964,
+    "api_call_count": 81
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-18T08:19:27.130367914Z",
+    "agent_lines": 492,
+    "human_added": 9,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 501,
+    "agent_percentage": 98.20359281437125
+  }
+}

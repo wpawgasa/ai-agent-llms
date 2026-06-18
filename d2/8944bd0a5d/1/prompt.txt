@@ -1,0 +1,21 @@
+Explore @scripts/generate_sft_data.sh what are available behavior presets?
+
+---
+
+How to select teacher models
+
+---
+
+Let's use gemini-3.5-flash for all langauges
+
+---
+
+create a SFT data generation loop that runs until the total number of samples reach specific target. Use data verififier agent to verify generated data. Remove unqualified data. Loop until reaching target number of samples.
+
+---
+
+how can i invoke data-verifier agent during the loop just created
+
+---
+
+B
