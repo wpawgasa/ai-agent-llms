@@ -1,0 +1,32 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "005604bd4ede",
+  "session_id": "c432811d-4890-4681-b37b-90e3f7c52324",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-18T08:54:34.507486635Z",
+  "branch": "feat/lmcache-cpu-offload",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "deployments/models/docker-compose.l4.yml"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "adc350476fc4",
+  "checkpoint_transcript_start": 145,
+  "transcript_lines_at_start": 145,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-18T08:54:34.350846497Z",
+    "agent_lines": 38,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 38,
+    "agent_percentage": 100
+  }
+}
