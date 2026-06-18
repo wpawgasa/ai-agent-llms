@@ -5,3 +5,7 @@
 /superpowers:brainstorming read LMCache doc
   https://docs.lmcache.ai/getting_started/quickstart.html to offload KV cache in vLLM from GPU
   memory to CPU memory
+
+---
+
+/superpowers:using-superpowers implement (b) and (c)
