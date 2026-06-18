@@ -115,3 +115,18 @@ def test_quant_conflict_hard_fails(compose, dtype):
     r = _run(compose, {"VLLM_LMCACHE_ENABLED": "1", "VLLM_KV_CACHE_DTYPE": dtype})
     assert r.returncode != 0
     assert "unsupported" in r.stderr.lower()
+
+
+LMCACHE_VARS = [
+    "VLLM_LMCACHE_ENABLED",
+    "VLLM_LMCACHE_CPU_SIZE",
+    "VLLM_LMCACHE_CHUNK_SIZE",
+    "VLLM_LMCACHE_VERSION",
+    "VLLM_LMCACHE_KV_TRANSFER_CONFIG",
+]
+
+
+@pytest.mark.parametrize("var", LMCACHE_VARS)
+def test_env_example_documents_lmcache_var(var):
+    text = (MODELS_DIR / ".env.example").read_text()
+    assert var in text, f"{var} not documented in .env.example"

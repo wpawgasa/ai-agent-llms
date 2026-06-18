@@ -146,6 +146,10 @@ To make the custom implementations actually compress KV cache at inference time,
 
 Phase 3 benchmark matrix: upstream `turboquant_*` variants + FP8 + KIVI + KVQuant + AWQ-INT4+FP8 KV. RotorQuant column is **provisionally deferred** pending the microbenchmark result.
 
+### KV Cache CPU Offload (LMCache) — serving knob, not a benchmark target
+
+The docker serving stack (`deployments/models/docker-compose.yml` + `.l4.yml`) exposes an opt-in LMCache CPU KV-cache offload knob via `VLLM_LMCACHE_ENABLED` (+ `VLLM_LMCACHE_CPU_SIZE`/`_CHUNK_SIZE`/`_VERSION`/`_KV_TRANSFER_CONFIG`; see `.env.example`). When enabled, the entrypoint pip-installs `lmcache` at container start and passes `--kv-transfer-config` to vLLM, offloading **full-precision** KV to CPU RAM and re-fetching on prefix reuse. This is **orthogonal to and not stackable with** the on-GPU KV-quant backends: combining `VLLM_LMCACHE_ENABLED` with `VLLM_KV_CACHE_DTYPE=turboquant*`/`rotorquant*` hard-fails in the entrypoint (both hook KV cache I/O). It is a serving/deployment knob only — not a Phase 3 quantization benchmark column. Entrypoint logic is unit-tested via `tests/test_lmcache_entrypoint.py` using the `VLLM_ENTRYPOINT_DRY_RUN` affordance (no GPU/docker required).
+
 ### Known Model × TurboQuant Incompatibilities
 
 | Model | Reason | Workaround |
