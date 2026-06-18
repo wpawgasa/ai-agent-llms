@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "bcdc76334c54",
+  "strategy": "manual-commit",
+  "branch": "feat/lmcache-cpu-offload",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/bc/dc76334c54/0/metadata.json",
+      "transcript": "/bc/dc76334c54/0/full.jsonl",
+      "content_hash": "/bc/dc76334c54/0/content_hash.txt",
+      "prompt": "/bc/dc76334c54/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4342,
+    "cache_creation_tokens": 129078,
+    "cache_read_tokens": 1382854,
+    "output_tokens": 45275,
+    "api_call_count": 20
+  }
+}
