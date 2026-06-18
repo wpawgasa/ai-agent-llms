@@ -58,6 +58,15 @@ services:
       # Must be unset (not empty) when unused: vLLM parses it with int(), and
       # int("") crashes at import. The entrypoint unsets it if blank.
       VLLM_USE_V2_MODEL_RUNNER: ${VLLM_USE_V2_MODEL_RUNNER:-}
+      # --- LMCache CPU KV-cache offload (opt-in; see .env.example) ----------
+      VLLM_LMCACHE_ENABLED: ${VLLM_LMCACHE_ENABLED:-}
+      VLLM_LMCACHE_CPU_SIZE: ${VLLM_LMCACHE_CPU_SIZE:-20}
+      VLLM_LMCACHE_CHUNK_SIZE: ${VLLM_LMCACHE_CHUNK_SIZE:-256}
+      VLLM_LMCACHE_VERSION: ${VLLM_LMCACHE_VERSION:-}
+      VLLM_LMCACHE_KV_TRANSFER_CONFIG: ${VLLM_LMCACHE_KV_TRANSFER_CONFIG:-}
+      # Testing affordance: when non-empty, the entrypoint prints resolved args +
+      # LMCache env and exits 0 without pip-installing or launching vLLM.
+      VLLM_ENTRYPOINT_DRY_RUN: ${VLLM_ENTRYPOINT_DRY_RUN:-}
     volumes:
       - "${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/root/.cache/huggingface"
     networks:
@@ -101,7 +110,36 @@ services:
         if [ -n "$${VLLM_ENFORCE_EAGER}" ];  then args+=(--enforce-eager); fi
         if [ -n "$${VLLM_TRUST_REMOTE_CODE}" ]; then args+=(--trust-remote-code); fi
         if [ -n "$${VLLM_EXTRA_ARGS}" ];     then args+=($${VLLM_EXTRA_ARGS}); fi
+        # LMCache CPU KV-cache offload (opt-in). Full-precision KV is offloaded
+        # GPU->CPU and re-fetched on prefix reuse. Incompatible with the custom
+        # turboquant*/rotorquant* backends (both hook KV cache I/O) -> hard fail.
+        if [ -n "$${VLLM_LMCACHE_ENABLED:-}" ]; then
+          case "$${VLLM_KV_CACHE_DTYPE:-}" in
+            turboquant*|rotorquant*)
+              echo "ERROR: VLLM_LMCACHE_ENABLED + VLLM_KV_CACHE_DTYPE=$${VLLM_KV_CACHE_DTYPE} is unsupported (LMCache and the custom quant backends both hook KV cache I/O)." >&2
+              exit 1 ;;
+          esac
+          if [ -n "$${VLLM_ENTRYPOINT_DRY_RUN:-}" ]; then
+            echo "DRY_RUN: would pip install lmcache$${VLLM_LMCACHE_VERSION:+==$${VLLM_LMCACHE_VERSION}}"
+          else
+            pip install --no-cache-dir "lmcache$${VLLM_LMCACHE_VERSION:+==$${VLLM_LMCACHE_VERSION}}"
+          fi
+          export LMCACHE_LOCAL_CPU=true
+          export LMCACHE_MAX_LOCAL_CPU_SIZE="$${VLLM_LMCACHE_CPU_SIZE:-20}"
+          export LMCACHE_CHUNK_SIZE="$${VLLM_LMCACHE_CHUNK_SIZE:-256}"
+          kv_xfer="$${VLLM_LMCACHE_KV_TRANSFER_CONFIG:-}"
+          if [ -z "$${kv_xfer}" ]; then
+            kv_xfer='{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'
+          fi
+          args+=(--kv-transfer-config "$${kv_xfer}")
+        fi
         echo "Launching: python3 -m vllm.entrypoints.openai.api_server $${args[*]}"
+        if [ -n "$${VLLM_ENTRYPOINT_DRY_RUN:-}" ]; then
+          echo "LMCACHE_LOCAL_CPU=$${LMCACHE_LOCAL_CPU:-}"
+          echo "LMCACHE_MAX_LOCAL_CPU_SIZE=$${LMCACHE_MAX_LOCAL_CPU_SIZE:-}"
+          echo "LMCACHE_CHUNK_SIZE=$${LMCACHE_CHUNK_SIZE:-}"
+          exit 0
+        fi
         exec python3 -m vllm.entrypoints.openai.api_server "$${args[@]}"
 
 networks:
