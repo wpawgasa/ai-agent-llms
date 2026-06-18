@@ -76,6 +76,21 @@ class ProfileReport:
         return not self.defects
 
 
+def defective_conversation_ids(rep: ProfileReport) -> set[str]:
+    """Conversation IDs with at least one hard defect.
+
+    Hard defects recorded by :func:`profile_task_a` are ``"<conversation_id>: ..."``
+    strings; file-level defects use a ``"file: ..."`` prefix. This isolates the
+    per-sample id parsing so callers (e.g. the target-driven generation loop) can
+    filter unqualified samples without re-implementing the prefix contract.
+    """
+    return {
+        d.split(":", 1)[0].strip()
+        for d in rep.defects
+        if ":" in d and not d.startswith("file:")
+    }
+
+
 def _back_edges(graph: dict[str, Any]) -> list[tuple[str, str]]:
     """Transitions that jump to an earlier-or-equal state index (loops), excluding
     self-loops. State order is the declared ``states`` list order."""

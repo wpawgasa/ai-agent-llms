@@ -2,10 +2,10 @@
 # Generate supervised fine-tuning (SFT) training data.
 #
 # Curriculum-weighted: L1=3000, L2=3000, L3=2502, L4=2001, L5=2001 (~12504 total).
-# Each level is split evenly across three teacher/language runs:
-#   - 1/3: gpt-5.4-mini-2026-03-17  / English        / <behavior-preset>
-#   - 1/3: gemini-3-flash-preview    / Thai            / <behavior-preset>
-#   - 1/3: gpt-5.4-nano-2026-03-17  / code-switching  / <behavior-preset>
+# Each level is split evenly across three language runs (all use --teacher-model):
+#   - 1/3: <teacher-model>  / English        / <behavior-preset>
+#   - 1/3: <teacher-model>  / Thai            / <behavior-preset>
+#   - 1/3: <teacher-model>  / code-switching  / <behavior-preset>
 #
 # Behavior presets (--behavior-preset):
 #   default          cooperative=0.60, adversarial_probing=0.15, digressing=0.10, invalid_tool_inputs=0.15
@@ -13,7 +13,8 @@
 #   balanced         cooperative=0.25, adversarial_probing=0.25, digressing=0.25, invalid_tool_inputs=0.25
 #   cooperative_only cooperative=1.00, adversarial_probing=0.00, digressing=0.00, invalid_tool_inputs=0.00
 #
-# Required env vars: OPENAI_API_KEY, GEMINI_API_KEY
+# Required env var: matches the chosen --teacher-model provider prefix
+#   gemini-*  → GEMINI_API_KEY    gpt-*  → OPENAI_API_KEY    claude-*  → ANTHROPIC_API_KEY
 #
 # Usage:
 #   ./scripts/generate_sft_data.sh [OPTIONS]
@@ -23,6 +24,8 @@
 #   --seed <n>                 Random seed (default: 42)
 #   --samples-per-leg <n>      Override per-leg sample count for all levels
 #   --smoke-test               Shorthand for --samples-per-leg 3 (quick pipeline check)
+#   --teacher-model <name>     Teacher model for all three language legs
+#                              (default: gemini-3.5-flash; routed by prefix gemini-*/gpt-*/claude-*)
 #   --behavior-preset <preset> User behavior distribution (default: adversarial)
 #   --intent-category <preset> Intent mix: default (70/30 service/upsell),
 #                              service_only, upsell_heavy (default: default)
@@ -31,9 +34,10 @@
 #   --dry-run                  Print commands without executing
 #
 # Examples:
-#   OPENAI_API_KEY=sk-... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
+#   GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
 #   ./scripts/generate_sft_data.sh --smoke-test --dry-run
 #   ./scripts/generate_sft_data.sh --samples-per-leg 270 --behavior-preset cooperative_only
+#   ./scripts/generate_sft_data.sh --teacher-model gpt-5.4-mini-2026-03-17
 
 set -euo pipefail
 
@@ -44,6 +48,7 @@ OUTPUT_DIR="$PROJECT_ROOT/data/output"
 SEED=42
 DRY_RUN=false
 SAMPLES_PER_LEG=""  # empty = use curriculum defaults
+TEACHER_MODEL="gemini-3.5-flash"
 BEHAVIOR_PRESET="adversarial"
 INTENT_CATEGORY="default"
 INITIATION="default"
@@ -62,6 +67,7 @@ while [[ $# -gt 0 ]]; do
         --seed)             SEED="$2";             shift 2 ;;
         --samples-per-leg)  SAMPLES_PER_LEG="$2"; shift 2 ;;
         --smoke-test)       SAMPLES_PER_LEG=3;    shift ;;
+        --teacher-model)    TEACHER_MODEL="$2";   shift 2 ;;
         --behavior-preset)  BEHAVIOR_PRESET="$2"; shift 2 ;;
         --intent-category)  INTENT_CATEGORY="$2"; shift 2 ;;
         --initiation)       INITIATION="$2";      shift 2 ;;
@@ -83,9 +89,17 @@ case "$INITIATION" in
     *) echo "Unknown --initiation: $INITIATION (expected default, balanced, outbound_heavy)" >&2; exit 1 ;;
 esac
 
+# Required API key is determined by the teacher model's provider prefix
+# (mirrors call_teacher_model routing in data/_teacher_client.py).
+case "$TEACHER_MODEL" in
+    gemini*) REQUIRED_KEY="GEMINI_API_KEY" ;;
+    gpt*)    REQUIRED_KEY="OPENAI_API_KEY" ;;
+    claude*) REQUIRED_KEY="ANTHROPIC_API_KEY" ;;
+    *) echo "Unsupported --teacher-model: $TEACHER_MODEL (expected prefix gemini-*, gpt-*, or claude-*)" >&2; exit 1 ;;
+esac
+
 if [[ "$DRY_RUN" = false ]]; then
-    [[ -z "${OPENAI_API_KEY:-}" ]]     && { echo "Error: OPENAI_API_KEY is not set"     >&2; exit 1; }
-    [[ -z "${ANTHROPIC_API_KEY:-}" ]] && { echo "Error: ANTHROPIC_API_KEY is not set" >&2; exit 1; }
+    [[ -z "${!REQUIRED_KEY:-}" ]] && { echo "Error: $REQUIRED_KEY is not set (required for teacher model $TEACHER_MODEL)" >&2; exit 1; }
 fi
 
 run() {
@@ -117,11 +131,12 @@ fi
 echo "=== SFT Data Generation ==="
 echo "Output dir:    $DEST"
 echo "Seed:          $SEED"
+echo "Teacher model: $TEACHER_MODEL"
 echo "Behavior:      $BEHAVIOR_PRESET"
 echo "Intent mix:    $INTENT_CATEGORY"
 echo "Initiation:    $INITIATION"
 echo "Totals:        $TOTALS_MSG"
-echo "Split:         1/3 gpt-5.4-mini-2026-03-17/en  +  1/3 gemini-3-flash-preview/th  +  1/3 gpt-5.4-nano-2026-03-17/code_switch per level"
+echo "Split:         1/3 en  +  1/3 th  +  1/3 code_switch per level (teacher: $TEACHER_MODEL)"
 echo "==========================="
 
 for LEVEL in L1 L2 L3 L4 L5; do
@@ -130,14 +145,14 @@ for LEVEL in L1 L2 L3 L4 L5; do
     echo ""
     echo "  --- $LEVEL ($TOTAL samples) ---"
 
-    echo "  [$LEVEL] gpt-5.4-mini-2026-03-17 / English / $T samples..."
+    echo "  [$LEVEL] $TEACHER_MODEL / English / $T samples..."
     run python3 -c "
 from pathlib import Path
 from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
 meta = generate_workflow_dataset(
     complexity_level='$LEVEL',
     num_samples=$T,
-    teacher_model='gpt-5.4-mini-2026-03-17',
+    teacher_model='$TEACHER_MODEL',
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='en',
@@ -148,14 +163,14 @@ meta = generate_workflow_dataset(
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
 
-    echo "  [$LEVEL] gemini-3-flash-preview / Thai / $T samples..."
+    echo "  [$LEVEL] $TEACHER_MODEL / Thai / $T samples..."
     run python3 -c "
 from pathlib import Path
 from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
 meta = generate_workflow_dataset(
     complexity_level='$LEVEL',
     num_samples=$T,
-    teacher_model='gemini-3-flash-preview',
+    teacher_model='$TEACHER_MODEL',
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='th',
@@ -166,14 +181,14 @@ meta = generate_workflow_dataset(
 print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 "
 
-    echo "  [$LEVEL] gpt-5.4-nano-2026-03-17 / code-switching / $T samples..."
+    echo "  [$LEVEL] $TEACHER_MODEL / code-switching / $T samples..."
     run python3 -c "
 from pathlib import Path
 from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
 meta = generate_workflow_dataset(
     complexity_level='$LEVEL',
     num_samples=$T,
-    teacher_model='gpt-5.4-nano-2026-03-17',
+    teacher_model='$TEACHER_MODEL',
     output_dir=Path('$DEST'),
     seed=$SEED,
     language='code_switch',
