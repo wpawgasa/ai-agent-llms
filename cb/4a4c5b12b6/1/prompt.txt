@@ -1,1 +1,5 @@
 It takes too long just to generate one level and 100 samples-per-leg. How can I improve without data quality degradation?
+
+---
+
+/superpowers:using-superpowers implement the fix
