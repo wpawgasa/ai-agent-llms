@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cb4a4c5b12b6",
+  "strategy": "manual-commit",
+  "branch": "perf/parallel-teacher-generation",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "scripts/generate_sft_until_target.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cb/4a4c5b12b6/0/metadata.json",
+      "transcript": "/cb/4a4c5b12b6/0/full.jsonl",
+      "content_hash": "/cb/4a4c5b12b6/0/content_hash.txt",
+      "prompt": "/cb/4a4c5b12b6/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 11200,
+    "cache_creation_tokens": 110725,
+    "cache_read_tokens": 2099563,
+    "output_tokens": 14422,
+    "api_call_count": 33
+  }
+}

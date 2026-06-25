@@ -1,0 +1,17 @@
+Differences between samples-per-leg and batch-size
+
+---
+
+Differences between samples-per-leg and batch-size
+
+---
+
+values of behavior-preset, intent-category, and initiation
+
+---
+
+the output files are missing timestamp
+
+---
+
+Add VLLM_API_URL environment variable in @deployments/local/docker-compose.yml and @deployments/local/data/bifrost/config.json and @deployments/local/.env.example
