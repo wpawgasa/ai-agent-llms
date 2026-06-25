@@ -87,3 +87,12 @@ Drop L5_026 and L5_062 and Add a Thai-corruption QA gate
 
 ◇ ultraplan
 Starting Claude Code on the web…
+
+---
+
+◇ ultraplan · Monitor progress in Claude Code on the web https://claude.ai/code/REDACTED?from=cli
+You can continue working — when the ◇ fills, press ↓ to view results
+
+---
+
+cancel ultraplan and execute plan immediately
