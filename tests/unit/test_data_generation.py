@@ -624,12 +624,12 @@ class TestPostGenerationRepair:
             output_dir=tmp_output_dir,
             seed=5,
         )
-        # Every requested sample is still emitted, exhausting the global redraw
-        # budget of (max_sample_attempts - 1) * num_samples = 8 fresh redraws.
+        # Every requested sample is still emitted. With the per-sample redraw
+        # budget (max_sample_attempts - 1 = 2 redraws each), all 4 samples fall
+        # back after 3 attempts apiece.
         assert result.num_samples == 4
-        # The first sample drains the whole budget (1 + 8 attempts); the rest
-        # fall back after their single attempt. Totals match the old per-sample
-        # cap: 12 attempts, each exhausting max_repair_retries (default 2).
+        # 4 samples × 3 attempts = 12 attempts, each exhausting max_repair_retries
+        # (default 2). Totals are identical to the former shared-budget scheme.
         assert result.stats["sample_fallbacks"] == 4
         assert result.stats["sample_retries"] == 4 * (3 - 1)  # global redraw budget
         assert result.stats["repair_fallbacks"] == 4 * 3  # attempts incl. discarded
@@ -922,6 +922,61 @@ class TestRepairFeedback:
         # Initial attempt + one fresh redraw, both first calls of an attempt.
         assert len(prompts) == 2
         assert all("CORRECTIONS REQUIRED" not in p for p in prompts)
+
+
+class TestConcurrentGeneration:
+    """Per-sample concurrency (max_workers>1) is quality-neutral: output is
+    byte-identical to serial generation and independent of completion order,
+    because each sample draws from its own seed-derived RNG."""
+
+    def test_concurrent_output_matches_serial(self, tmp_output_dir: Path, monkeypatch) -> None:
+        # Deterministic coherent teacher → no repair fallback, no RNG use in the
+        # mock, so the only RNG consumer is the per-sample draw. rich_prompt_rate=0
+        # keeps any real teacher call out of the picture.
+        monkeypatch.setattr(
+            gw, "_generate_teacher_conversation",
+            TestPostGenerationRepair._coherent_conversation,
+        )
+        common = dict(
+            complexity_level="L3", num_samples=8, teacher_model="fake-teacher",
+            seed=123, rich_prompt_rate=0.0,
+        )
+        serial = generate_workflow_dataset(output_dir=tmp_output_dir / "serial", max_workers=1, **common)
+        parallel = generate_workflow_dataset(output_dir=tmp_output_dir / "parallel", max_workers=4, **common)
+
+        assert (
+            Path(serial.output_files[0]).read_text()
+            == Path(parallel.output_files[0]).read_text()
+        ), "parallel output must be byte-identical to serial"
+        # Stat deltas aggregated from threads must match the serial reduction.
+        for key in (
+            "repair_retries", "repair_fallbacks", "sample_retries", "sample_fallbacks",
+            "teacher_call_failures", "generation_source_counts", "behavior_distribution",
+            "domain_distribution", "redraws_used",
+        ):
+            assert serial.stats[key] == parallel.stats[key], f"stat {key} diverged"
+
+    def test_concurrent_seed_determinism(self, tmp_output_dir: Path, monkeypatch) -> None:
+        monkeypatch.setattr(
+            gw, "_generate_teacher_conversation",
+            TestPostGenerationRepair._coherent_conversation,
+        )
+        common = dict(
+            complexity_level="L2", num_samples=6, teacher_model="fake-teacher",
+            seed=7, rich_prompt_rate=0.0, max_workers=4,
+        )
+        r1 = generate_workflow_dataset(output_dir=tmp_output_dir / "a", **common)
+        r2 = generate_workflow_dataset(output_dir=tmp_output_dir / "b", **common)
+        assert (
+            Path(r1.output_files[0]).read_text() == Path(r2.output_files[0]).read_text()
+        )
+
+    def test_invalid_max_workers_rejected(self, tmp_output_dir: Path) -> None:
+        with pytest.raises(ValueError, match="max_workers"):
+            generate_workflow_dataset(
+                complexity_level="L1", num_samples=1, output_dir=tmp_output_dir,
+                seed=1, max_workers=0,
+            )
 
 
 class TestBackfillOverwrite:

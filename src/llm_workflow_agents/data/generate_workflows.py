@@ -17,28 +17,29 @@ Teacher model generation:
 from __future__ import annotations
 
 import json
-import re
 import random
-from datetime import datetime
+import re
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import structlog
 
-from llm_workflow_agents.data._teacher_client import call_teacher_model
-from llm_workflow_agents.data._workflow_script import (
-    find_continuity_violations,
-    find_shape_violations,
-    find_tool_placement_violations,
-)
-from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
 from llm_workflow_agents.config.schema import (
     COMPLEXITY_SPECS,
     TOOL_ERROR_RATE,
     USER_BEHAVIOR_DISTRIBUTION,
     ComplexityLevel,
     ComplexitySpec,
+)
+from llm_workflow_agents.data._teacher_client import call_teacher_model
+from llm_workflow_agents.data._workflow_script import (
+    find_continuity_violations,
+    find_shape_violations,
+    find_tool_placement_violations,
 )
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
@@ -48,6 +49,7 @@ from llm_workflow_agents.data.domain_registry import (
     OutboundReason,
     classify_intent,
 )
+from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
 
 logger = structlog.get_logger(__name__)
 
@@ -1314,6 +1316,7 @@ def generate_workflow_dataset(
     max_repair_retries: int = 2,
     max_sample_attempts: int = 3,
     max_total_redraws: int | None = None,
+    max_workers: int = 1,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1376,6 +1379,17 @@ def generate_workflow_dataset(
             attempt. Total teacher attempts are bounded by
             ``num_samples + budget`` even when the teacher never produces a
             coherent conversation.
+        max_workers: Number of teacher conversations generated concurrently.
+            Teacher generation is I/O-bound (one or more blocking API calls per
+            sample), so a thread pool hides per-call latency for a near-linear
+            speedup up to the provider's rate limit. Concurrency is used only
+            when ``teacher_model`` is set, ``max_workers > 1``, and
+            ``max_total_redraws`` is None (a shared global redraw budget is
+            order-dependent and therefore runs serially). Each sample draws from
+            its own per-sample RNG (seeded deterministically from ``seed``), so
+            output is **identical regardless of ``max_workers``** — the result
+            is reproducible and independent of completion order. Default 1
+            (serial).
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1405,6 +1419,8 @@ def generate_workflow_dataset(
         raise ValueError(
             f"max_total_redraws must be >= 0, got {max_total_redraws}"
         )
+    if max_workers < 1:
+        raise ValueError(f"max_workers must be >= 1, got {max_workers}")
     redraw_budget = (
         max_total_redraws
         if max_total_redraws is not None
@@ -1416,7 +1432,14 @@ def generate_workflow_dataset(
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
-    rng = random.Random(seed)
+    # Pre-draw one child seed per sample from the master RNG (a fast, serial,
+    # order-independent step). Each sample then builds from its own
+    # random.Random(child_seed) so generation can run concurrently while staying
+    # bit-for-bit reproducible and independent of completion order — a single
+    # shared RNG consumed in-loop would force serial execution and make output
+    # depend on thread scheduling.
+    master_rng = random.Random(seed)
+    child_seeds = [master_rng.getrandbits(64) for _ in range(num_samples)]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1454,7 +1477,7 @@ def generate_workflow_dataset(
     teacher_call_failures = 0
     source_counts: dict[str, int] = {}
 
-    def _attempt_sample() -> dict[str, Any]:
+    def _attempt_sample(rng: random.Random) -> dict[str, Any]:
         """Draw a fresh sample and run the teacher + repair loop once.
 
         Returns a bundle with the conversation and all of its context. The
@@ -1463,8 +1486,15 @@ def generate_workflow_dataset(
         decides whether to retry a fresh draw or accept the placeholder as a
         last resort. The placeholder-generator path (no ``teacher_model``)
         never falls back, since the placeholder is its intended output.
+
+        Thread-safety: mutates no enclosing state. Per-attempt counters are
+        returned in the bundle (``_repair_retries`` / ``_repair_fallbacks`` /
+        ``_teacher_call_failures``) and aggregated by the caller, so this is
+        safe to run concurrently across samples.
         """
-        nonlocal repair_retries, repair_fallbacks, teacher_call_failures
+        _repair_retries = 0
+        _repair_fallbacks = 0
+        _teacher_call_failures = 0
 
         behavior = _select_user_behavior(rng, active_distribution)
 
@@ -1521,7 +1551,7 @@ def generate_workflow_dataset(
                 # API/parse failure (already logged as teacher_model_fallback).
                 # Substitute the placeholder and mark the attempt fallen-back so
                 # the caller redraws under the budget instead of accepting it.
-                teacher_call_failures += 1
+                _teacher_call_failures += 1
                 messages = _placeholder()
                 fell_back = True
             # Normalise annotations from the inline markers before the repair
@@ -1573,11 +1603,11 @@ def generate_workflow_dataset(
                         break
                     if tries >= max_repair_retries:
                         messages = _placeholder()
-                        repair_fallbacks += 1
+                        _repair_fallbacks += 1
                         fell_back = True
                         break
                     tries += 1
-                    repair_retries += 1
+                    _repair_retries += 1
                     try:
                         messages = _generate_teacher_conversation(
                             workflow, tool_schemas, behavior, spec, rng, domain_spec,
@@ -1586,7 +1616,7 @@ def generate_workflow_dataset(
                             repair_feedback=violations,
                         )
                     except Exception:
-                        teacher_call_failures += 1
+                        _teacher_call_failures += 1
                         messages = _placeholder()
                         fell_back = True
                         break
@@ -1607,27 +1637,47 @@ def generate_workflow_dataset(
             "outbound_reason": outbound_reason,
             "intent_category": intent_category,
             "fell_back_inbound": fell_back_inbound,
+            "_repair_retries": _repair_retries,
+            "_repair_fallbacks": _repair_fallbacks,
+            "_teacher_call_failures": _teacher_call_failures,
         }
 
-    redraws_used = 0
-    for i in range(num_samples):
+    def _build_one_sample(
+        index: int, child_seed: int, permit: Callable[[], bool]
+    ) -> dict[str, Any]:
+        """Build one fully-formed sample (draw → teacher/repair → rich prompt).
+
+        Uses its own ``random.Random(child_seed)`` and returns the built
+        ConversationSample plus per-sample stat deltas; it mutates no enclosing
+        state, so it is safe to run concurrently across samples. ``permit()``
+        returns True while this sample is still allowed a fresh redraw — a
+        per-sample budget on the default path, or a shared global budget when
+        ``max_total_redraws`` is set (serial only).
+        """
+        rng = random.Random(child_seed)
+
         # Generate one sample, retrying a fresh draw if the teacher path falls
-        # back to the placeholder, so the dataset keeps `num_samples` real
-        # conversations. Redraws are budgeted globally across the run (not
-        # capped per sample), so a hard sample may redraw many times; the
-        # placeholder is emitted only once the shared budget is exhausted.
-        result = _attempt_sample()
+        # back to the placeholder, so the dataset keeps real conversations
+        # wherever the budget allows. Per-attempt counters are summed here.
+        result = _attempt_sample(rng)
         attempts = 1
-        while result["fell_back"] and redraws_used < redraw_budget:
-            redraws_used += 1
-            sample_retries += 1
-            result = _attempt_sample()
+        redraws = 0
+        repair_retries_d = result["_repair_retries"]
+        repair_fallbacks_d = result["_repair_fallbacks"]
+        teacher_call_failures_d = result["_teacher_call_failures"]
+        while result["fell_back"] and permit():
+            redraws += 1
+            result = _attempt_sample(rng)
             attempts += 1
+            repair_retries_d += result["_repair_retries"]
+            repair_fallbacks_d += result["_repair_fallbacks"]
+            teacher_call_failures_d += result["_teacher_call_failures"]
+
+        sample_fallback_d = 1 if result["fell_back"] else 0
         if result["fell_back"]:
-            sample_fallbacks += 1
             logger.warning(
                 "sample_fallback_placeholder_emitted",
-                conversation_index=i,
+                conversation_index=index,
                 attempts=attempts,
                 redraw_budget_exhausted=True,
             )
@@ -1638,9 +1688,6 @@ def generate_workflow_dataset(
             generation_source = "placeholder_fallback"
         else:
             generation_source = "teacher"
-        source_counts[generation_source] = (
-            source_counts.get(generation_source, 0) + 1
-        )
 
         messages = result["messages"]
         # Idempotent guarantee that the emitted sample carries normalised
@@ -1658,30 +1705,18 @@ def generate_workflow_dataset(
         outbound_reason = result["outbound_reason"]
         intent_category = result["intent_category"]
 
-        # Record distribution counters for the accepted attempt only, so that
-        # discarded fallen-back attempts do not pollute the reported totals.
-        behavior_counts[behavior] += 1
-        language_counts[sample_language] = language_counts.get(sample_language, 0) + 1
-        domain_counts[domain_key] = domain_counts.get(domain_key, 0) + 1
-        intent_category_counts[intent_category] = intent_category_counts.get(intent_category, 0) + 1
-        initiator_counts[initiator] += 1
-        if outbound_reason is not None:
-            outbound_reason_counts[outbound_reason.key] = \
-                outbound_reason_counts.get(outbound_reason.key, 0) + 1
-        if result["fell_back_inbound"]:
-            outbound_fallback_inbound += 1
-
         # Optionally replace the bare role line with a teacher-authored rich
         # natural-language system prompt (persona + named sections + dialogue
         # + intent-based branches). Applied before enrichment so the workflow
         # script still gets appended.
+        rich_used = 0
         use_rich_prompt = bool(teacher_model) and rng.random() < rich_prompt_rate
         if use_rich_prompt:
             rich_prompt = _generate_rich_system_prompt(
                 workflow, tool_schemas, domain_spec, sample_language, teacher_model
             )
             if rich_prompt:
-                rich_prompt_count += 1
+                rich_used = 1
                 if messages and messages[0].get("role") == "system":
                     messages[0] = {"role": "system", "content": rich_prompt}
                 else:
@@ -1708,18 +1743,20 @@ def generate_workflow_dataset(
             )
 
         # Count tool calls and errors
+        tool_calls_d = 0
+        tool_errors_d = 0
         for msg in messages:
             if msg.get("role") == "tool":
-                total_tool_calls += 1
+                tool_calls_d += 1
                 try:
                     content = json.loads(msg["content"])
                     if "error" in content:
-                        tool_error_count += 1
+                        tool_errors_d += 1
                 except (json.JSONDecodeError, TypeError):
                     pass
 
         sample = ConversationSample(
-            conversation_id=f"{complexity_level}_{i + 1:03d}",
+            conversation_id=f"{complexity_level}_{index + 1:03d}",
             complexity_level=complexity_level,
             domain=domain_key,
             num_states=len(workflow.states),
@@ -1736,7 +1773,115 @@ def generate_workflow_dataset(
             outbound_reason=(outbound_reason.key if outbound_reason else None),
             generation_source=generation_source,
         )
-        samples.append(sample)
+
+        return {
+            "sample": sample,
+            "generation_source": generation_source,
+            "behavior": behavior,
+            "sample_language": sample_language,
+            "domain_key": domain_key,
+            "intent_category": intent_category,
+            "initiator": initiator,
+            "outbound_reason": outbound_reason,
+            "fell_back_inbound": result["fell_back_inbound"],
+            "repair_retries": repair_retries_d,
+            "repair_fallbacks": repair_fallbacks_d,
+            "teacher_call_failures": teacher_call_failures_d,
+            "sample_retries": redraws,
+            "sample_fallback": sample_fallback_d,
+            "redraws": redraws,
+            "rich_used": rich_used,
+            "tool_calls": tool_calls_d,
+            "tool_errors": tool_errors_d,
+        }
+
+    # --- redraw-budget permit factory ---
+    # Default (max_total_redraws is None): each sample gets its own budget of
+    # (max_sample_attempts - 1) redraws. Per-sample budgets are order-independent,
+    # so generation may run concurrently and still produce identical output.
+    # Explicit max_total_redraws: a single shared budget consumed in sample-index
+    # order — order-dependent, so it runs serially.
+    if max_total_redraws is None:
+        per_sample_cap = max_sample_attempts - 1
+
+        def _make_permit() -> Callable[[], bool]:
+            used = 0
+
+            def permit() -> bool:
+                nonlocal used
+                if used < per_sample_cap:
+                    used += 1
+                    return True
+                return False
+
+            return permit
+
+        permits: list[Callable[[], bool]] = [_make_permit() for _ in range(num_samples)]
+        use_pool = bool(teacher_model) and max_workers > 1 and num_samples > 1
+    else:
+        remaining = max_total_redraws
+
+        def _shared_permit() -> bool:
+            nonlocal remaining
+            if remaining > 0:
+                remaining -= 1
+                return True
+            return False
+
+        permits = [_shared_permit] * num_samples
+        use_pool = False
+
+    # --- dispatch: thread pool hides teacher-call latency; results stay in
+    # sample-index order (executor.map preserves input order) ---
+    if use_pool:
+        logger.info("parallel_generation", max_workers=max_workers, num_samples=num_samples)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            outcomes = list(
+                executor.map(
+                    lambda a: _build_one_sample(*a),
+                    zip(range(num_samples), child_seeds, permits, strict=True),
+                )
+            )
+    else:
+        outcomes = [
+            _build_one_sample(i, child_seeds[i], permits[i])
+            for i in range(num_samples)
+        ]
+
+    # --- aggregate stat deltas (single-threaded reduction, sample-index order) ---
+    redraws_used = 0
+    for outcome in outcomes:
+        samples.append(outcome["sample"])
+        repair_retries += outcome["repair_retries"]
+        repair_fallbacks += outcome["repair_fallbacks"]
+        teacher_call_failures += outcome["teacher_call_failures"]
+        sample_retries += outcome["sample_retries"]
+        sample_fallbacks += outcome["sample_fallback"]
+        redraws_used += outcome["redraws"]
+        rich_prompt_count += outcome["rich_used"]
+        total_tool_calls += outcome["tool_calls"]
+        tool_error_count += outcome["tool_errors"]
+        source_counts[outcome["generation_source"]] = (
+            source_counts.get(outcome["generation_source"], 0) + 1
+        )
+        behavior_counts[outcome["behavior"]] += 1
+        language_counts[outcome["sample_language"]] = (
+            language_counts.get(outcome["sample_language"], 0) + 1
+        )
+        domain_counts[outcome["domain_key"]] = (
+            domain_counts.get(outcome["domain_key"], 0) + 1
+        )
+        intent_category_counts[outcome["intent_category"]] = (
+            intent_category_counts.get(outcome["intent_category"], 0) + 1
+        )
+        initiator_counts[outcome["initiator"]] += 1
+        outbound_reason = outcome["outbound_reason"]
+        if outbound_reason is not None:
+            outbound_reason_counts[outbound_reason.key] = (
+                outbound_reason_counts.get(outbound_reason.key, 0) + 1
+            )
+        if outcome["fell_back_inbound"]:
+            outbound_fallback_inbound += 1
 
     # Write JSONL
     with open(output_file, "w") as f:
