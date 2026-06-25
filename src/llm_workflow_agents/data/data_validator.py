@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,66 @@ from typing import Any
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+# --- Thai-corruption signals -------------------------------------------------
+# Teacher models occasionally emit transcription-corrupted Thai (Latin letters
+# glued inside a Thai word, or substituted/obsolete characters) that is invisible
+# to the structural validators — STATE/tool/JSON stay intact — but would teach an
+# SFT model to write broken Thai. Two conservative, near-zero-false-positive
+# signals (calibrated against a real L5 Thai batch: they flagged exactly the two
+# corrupted conversations with no false positives across the other 98).
+_THAI = r"฀-๿"
+# Signal A: a Latin run *sandwiched inside* a Thai word — Thai char, then one or
+# more Latin letters, then a Thai char, with no spaces (e.g. "เป๋locksตัว" in
+# "ผมเป๋locksตัวแทฒ"). Requiring Thai on BOTH sides is deliberate: it catches
+# corruption that splits a word while NOT flagging legitimate Thai+English
+# concatenation at a clause boundary like "เรื่องhotel booking" (Latin followed
+# by a space, not Thai). Legitimate in code-switch data, so the detector gates
+# this off when language == "code_switch".
+_LATIN_IN_THAI_RE = re.compile(rf"[{_THAI}][A-Za-z]+[{_THAI}]")
+# Signal B: obsolete Thai consonants kho khuat (ฃ, U+0E03) / kho khon (ฅ, U+0E05)
+# — absent from any modern standard Thai word, so their presence in generated
+# dialogue marks substitution corruption (e.g. "ฅุณ" for "คุณ").
+_OBSOLETE_THAI_RE = re.compile(r"[ฃฅ]")
+_CORRUPTION_SNIPPET = 40
+
+
+def detect_thai_corruption(record: dict[str, Any]) -> list[str]:
+    """Return reasons a record's Thai prose looks teacher-corrupted (empty ⇒ clean).
+
+    Scans non-system message content only (``system`` prompts are
+    machine-authored, not a corruption vector). Reports the first hit of each
+    signal per message, with a short context snippet. Signal A (Latin glued into
+    a Thai word) is skipped for ``language == "code_switch"``, which legitimately
+    mixes scripts; Signal B (obsolete ``ฃ``/``ฅ``) applies to every record (en /
+    code-switch English text will not contain those characters).
+    """
+    language = record.get("language", "")
+    reasons: list[str] = []
+
+    def _snippet(text: str, at: int) -> str:
+        start = max(0, at - _CORRUPTION_SNIPPET // 2)
+        return text[start:start + _CORRUPTION_SNIPPET]
+
+    for msg in record.get("messages", []):
+        if msg.get("role") == "system":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        if language != "code_switch":
+            m = _LATIN_IN_THAI_RE.search(content)
+            if m:
+                reasons.append(
+                    f"latin-glued-into-thai near '...{_snippet(content, m.start())}...'"
+                )
+        m = _OBSOLETE_THAI_RE.search(content)
+        if m:
+            reasons.append(
+                f"obsolete-thai-consonant near '...{_snippet(content, m.start())}...'"
+            )
+    return reasons
 
 
 @dataclass
@@ -303,11 +364,23 @@ def validate_dataset(
             else:
                 result.valid_samples += 1
 
+            # Thai-corruption is a quality warning, not a schema error: it does
+            # not affect `valid` / `valid_samples`, but surfaces rows that should
+            # be dropped or regenerated before SFT.
+            if dataset_type == "workflow":
+                corruption = detect_thai_corruption(sample)
+                if corruption:
+                    cid = sample.get("conversation_id", f"line {line_num}")
+                    result.warnings.append(
+                        f"{cid}: thai-corruption ({len(corruption)} hit(s)): {corruption[0]}"
+                    )
+
     result.valid = len(result.errors) == 0
     result.stats = {
         "total": result.total_samples,
         "valid": result.valid_samples,
         "error_count": len(result.errors),
+        "warning_count": len(result.warnings),
     }
 
     logger.info("validation_complete", **result.stats)
