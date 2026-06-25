@@ -1,0 +1,89 @@
+It takes too long just to generate one level and 100 samples-per-leg. How can I improve without data quality degradation?
+
+---
+
+/superpowers:using-superpowers implement the fix
+
+---
+
+what is recommended script command
+
+---
+
+(.venv) vscode ➜ /workspaces/ai-agent-llms (perf/parallel-teacher-generation) $ time python scripts/generate_sft_until_target.py \
+  --levels L1 --languages en --samples-per-leg 24 --max-workers 1
+time python scripts/generate_sft_until_target.py \
+  --levels L1 --languages en --samples-per-leg 24 --max-workers 8
+=== Target-Driven SFT Data Generation ===
+Output dir:    data/output/sft/task_a
+Teacher model: gemini-3.5-flash
+Levels:        L1
+Languages:     en
+Behavior:      adversarial   Intent: default   Initiation: default
+Base seed:     42   Batch size: remaining   Max iters/leg: 20
+Max workers:   1 (serial)
+Total target:  24 qualified samples (1 levels x 1 legs)
+==========================================
+
+  --- L1 / en (target 24) ---
+2026-06-25 04:22:30 [info     ] generating_workflow_dataset    behavior_preset=adversarial domain='random (18 domains)' intent_category_preset=default language=en num_samples=24 teacher_model=gemini-3.5-flash
+2026-06-25 04:23:54 [debug    ] teacher_coherence_violations   violations=["tool 'search_products' called in state 'UNDERSTAND_NEEDS' is not listed in that state's tools"]
+2026-06-25 04:24:37 [debug    ] teacher_coherence_violations   violations=["tool 'search_products' called in state 'UNDERSTAND_NEEDS' is not listed in that state's tools"]
+2026-06-25 04:27:49 [debug    ] teacher_coherence_violations   violations=["tool 'verify_coverage' called in state 'VERIFY_PATIENT' is not listed in that state's tools"]
+2026-06-25 04:30:27 [info     ] dataset_generated              avg_states=3.4583333333333335 behavior_distribution={'cooperative': 10, 'adversarial_probing': 4, 'digressing': 5, 'invalid_tool_inputs': 5} domain_distribution={'sales': 1, 'insurance': 2, 'travel': 2, 'scheduling': 2, 'product_info': 3, 'emergency': 3, 'utilities': 3, 'technical_support': 2, 'healthcare': 3, 'banking': 2, 'account_management': 1} generation_source_counts={'teacher': 24} initiator_distribution={'user': 24, 'agent': 0} intent_category_distribution={'service': 17, 'upsell_promo': 7} language_distribution={'en': 24} num_domains=11 outbound_fallback_inbound=0 outbound_reason_distribution={} output_file=/tmp/sftloop_L1_en_e198je9h/l1_conversations_en_gemini-3-5-flash_adversarial_20260625_042230.jsonl redraw_budget=48 redraws_used=0 repair_fallbacks=0 repair_retries=3 rich_prompt_count=3 rich_prompt_rate_effective=0.125 sample_fallbacks=0 sample_retries=0 stats_file=/tmp/sftloop_L1_en_e198je9h/l1_conversations_en_gemini-3-5-flash_adversarial_20260625_042230.stats.json teacher_call_failures=0 tool_error_rate=0.21428571428571427 total_tool_calls=28
+    iter 1: +24 qualified (gen 24, clean-drop 0, defect-drop 0) -> 24/24
+
+=== Done ===
+Kept 24 qualified samples across 1 legs.
+Loop stats: data/output/sft/task_a/loop_stats_20260625_042230.json
+
+Hybrid final step -- run the semantic verifier on the corpus:
+  Ask Claude Code: "Verify the Task A datasets in data/output/sft/task_a using the dataset-verifier agent"
+
+real    7m57.092s
+user    0m2.849s
+sys     0m0.136s
+=== Target-Driven SFT Data Generation ===
+Output dir:    data/output/sft/task_a
+Teacher model: gemini-3.5-flash
+Levels:        L1
+Languages:     en
+Behavior:      adversarial   Intent: default   Initiation: default
+Base seed:     42   Batch size: remaining   Max iters/leg: 20
+Max workers:   8 (concurrent teacher calls)
+Total target:  24 qualified samples (1 levels x 1 legs)
+==========================================
+
+  --- L1 / en (target 24) ---
+2026-06-25 04:30:27 [info     ] generating_workflow_dataset    behavior_preset=adversarial domain='random (18 domains)' intent_category_preset=default language=en num_samples=24 teacher_model=gemini-3.5-flash
+2026-06-25 04:30:27 [info     ] parallel_generation            max_workers=8 num_samples=24
+2026-06-25 04:30:41 [debug    ] teacher_coherence_violations   violations=["tool 'search_products' called in state 'UNDERSTAND_NEEDS' is not listed in that state's tools"]
+2026-06-25 04:30:56 [debug    ] teacher_coherence_violations   violations=["tool 'search_products' called in state 'UNDERSTAND_NEEDS' is not listed in that state's tools"]
+2026-06-25 04:31:02 [debug    ] teacher_coherence_violations   violations=["tool 'check_safety_status' called in state 'ALERT_RECEIVED' is not listed in that state's tools"]
+2026-06-25 04:31:07 [debug    ] teacher_coherence_violations   violations=["tool 'check_safety_status' called in state 'DISPATCH_RESPONSE' is not listed in that state's tools"]
+2026-06-25 04:31:37 [info     ] dataset_generated              avg_states=3.4583333333333335 behavior_distribution={'cooperative': 10, 'adversarial_probing': 4, 'digressing': 5, 'invalid_tool_inputs': 5} domain_distribution={'sales': 1, 'insurance': 2, 'travel': 2, 'scheduling': 2, 'product_info': 3, 'emergency': 3, 'utilities': 3, 'technical_support': 2, 'healthcare': 3, 'banking': 2, 'account_management': 1} generation_source_counts={'teacher': 24} initiator_distribution={'user': 24, 'agent': 0} intent_category_distribution={'service': 17, 'upsell_promo': 7} language_distribution={'en': 24} num_domains=11 outbound_fallback_inbound=0 outbound_reason_distribution={} output_file=/tmp/sftloop_L1_en_ip00a1fd/l1_conversations_en_gemini-3-5-flash_adversarial_20260625_043027.jsonl redraw_budget=48 redraws_used=0 repair_fallbacks=0 repair_retries=4 rich_prompt_count=3 rich_prompt_rate_effective=0.125 sample_fallbacks=0 sample_retries=0 stats_file=/tmp/sftloop_L1_en_ip00a1fd/l1_conversations_en_gemini-3-5-flash_adversarial_20260625_043027.stats.json teacher_call_failures=0 tool_error_rate=0.14814814814814814 total_tool_calls=27
+    iter 1: +24 qualified (gen 24, clean-drop 0, defect-drop 0) -> 24/24
+
+=== Done ===
+Kept 24 qualified samples across 1 legs.
+Loop stats: data/output/sft/task_a/loop_stats_20260625_043027.json
+
+Hybrid final step -- run the semantic verifier on the corpus:
+  Ask Claude Code: "Verify the Task A datasets in data/output/sft/task_a using the dataset-verifier agent"
+
+real    1m10.384s
+user    0m2.940s
+sys     0m0.157s
+
+---
+
+Verify the Task A datasets in @data/output/sft/task_a/l5_conversations_th_gemini-3-5-flash_adversarial_20260625_043428.jsonl using the dataset-verifier agent
+
+---
+
+Drop L5_026 and L5_062 and Add a Thai-corruption QA gate
+
+---
+
+◇ ultraplan
+Starting Claude Code on the web…

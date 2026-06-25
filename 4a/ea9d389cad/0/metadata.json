@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4aea9d389cad",
+  "session_id": "674f08cf-5e1b-4596-a493-000430c2c244",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-25T07:50:18.01501293Z",
+  "branch": "data/thai-corruption-gate",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "scripts/generate_sft_until_target.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "a4016a314c45",
+  "checkpoint_transcript_start": 422,
+  "transcript_lines_at_start": 422,
+  "token_usage": {
+    "input_tokens": 2961,
+    "cache_creation_tokens": 268197,
+    "cache_read_tokens": 11724237,
+    "output_tokens": 55320,
+    "api_call_count": 48
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-25T07:50:16.835888012Z",
+    "agent_lines": 0,
+    "human_added": 191,
+    "human_modified": 6,
+    "human_removed": 0,
+    "total_committed": 191,
+    "agent_percentage": 0
+  }
+}

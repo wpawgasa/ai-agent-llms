@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4aea9d389cad",
+  "strategy": "manual-commit",
+  "branch": "data/thai-corruption-gate",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "scripts/generate_sft_until_target.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4a/ea9d389cad/0/metadata.json",
+      "transcript": "/4a/ea9d389cad/0/full.jsonl",
+      "content_hash": "/4a/ea9d389cad/0/content_hash.txt",
+      "prompt": "/4a/ea9d389cad/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2961,
+    "cache_creation_tokens": 268197,
+    "cache_read_tokens": 11724237,
+    "output_tokens": 55320,
+    "api_call_count": 48
+  }
+}
