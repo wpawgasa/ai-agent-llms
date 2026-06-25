@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cb4a4c5b12b6",
+  "session_id": "ca72b430-92c5-481b-8ba7-061c1910b3b5",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-25T04:18:50.987712681Z",
+  "branch": "perf/parallel-teacher-generation",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/generate_sft_until_target.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "aeafaf86ee5c",
+  "checkpoint_transcript_start": 490,
+  "transcript_lines_at_start": 490,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 2
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-25T04:18:50.273017915Z",
+    "agent_lines": 13,
+    "human_added": 608,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 621,
+    "agent_percentage": 2.0933977455716586
+  }
+}
