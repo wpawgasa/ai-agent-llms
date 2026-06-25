@@ -54,6 +54,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # Project imports
@@ -181,6 +182,7 @@ def generate_leg(
     intent_category: str,
     initiation: str,
     keep_intermediates: bool,
+    max_workers: int = 1,
     verify_batches: bool = False,
     verify_timeout: int = 600,
 ) -> dict:
@@ -211,6 +213,7 @@ def generate_leg(
                 behavior_preset=behavior_preset,
                 intent_category_preset=intent_category,
                 initiation_preset=initiation,
+                max_workers=max_workers,
             )
             batch = _read_jsonl(meta.output_files[0])
             gen += len(batch)
@@ -313,6 +316,12 @@ def main() -> int:
                    help="Override per-leg target for all levels (else curriculum).")
     p.add_argument("--batch-size", type=int, default=None,
                    help="Samples generated per iteration (default: remaining-to-target).")
+    p.add_argument("--max-workers", type=int, default=8,
+                   help="Concurrent teacher API calls per batch (default: 8). Teacher "
+                        "generation is I/O-bound, so a thread pool hides per-call latency "
+                        "for a near-linear speedup up to the provider's rate limit. Output "
+                        "is identical regardless of this value (per-sample seeding). "
+                        "No effect on placeholder/offline runs. Set 1 to disable.")
     p.add_argument("--max-iterations", type=int, default=20,
                    help="Per-leg safety cap on iterations (default: 20).")
     p.add_argument("--behavior-preset", default="adversarial")
@@ -358,6 +367,14 @@ def main() -> int:
     out_dir = Path(args.output_dir)
     model_tag = _model_tag(teacher_model)
     preset_tag = f"_{args.behavior_preset}" if args.behavior_preset != "default" else ""
+    # One run-wide timestamp so all legs of this run share a suffix (matches the
+    # `_{timestamp}` convention in generate_workflow_dataset) and re-runs don't
+    # clobber prior output. concat_task_a globs `l<n>_*.jsonl`, so the suffix is
+    # transparent to the merge step.
+    run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def leg_fname(level: str, language: str) -> str:
+        return f"{level.lower()}_conversations_{language}_{model_tag}{preset_tag}_{run_ts}.jsonl"
 
     def target_for(level: str) -> int:
         return args.samples_per_leg if args.samples_per_leg is not None else CURRICULUM[level]
@@ -369,6 +386,11 @@ def main() -> int:
     print(f"Languages:     {','.join(languages)}")
     print(f"Behavior:      {args.behavior_preset}   Intent: {args.intent_category}   Initiation: {args.initiation}")
     print(f"Base seed:     {args.seed}   Batch size: {args.batch_size or 'remaining'}   Max iters/leg: {args.max_iterations}")
+    _workers_note = (
+        "serial" if args.max_workers <= 1 or teacher_model is None
+        else "concurrent teacher calls"
+    )
+    print(f"Max workers:   {args.max_workers} ({_workers_note})")
     if args.verify_batches:
         print(f"Verify gate:   dataset-verifier agent per batch (advisory, timeout {args.verify_timeout}s)")
     grand_target = sum(target_for(lv) for lv in levels for _ in languages)
@@ -379,7 +401,7 @@ def main() -> int:
     if args.dry_run:
         for level in levels:
             for language in languages:
-                fname = f"{level.lower()}_conversations_{language}_{model_tag}{preset_tag}.jsonl"
+                fname = leg_fname(level, language)
                 print(f"  [DRY RUN] {level}/{language}: target {target_for(level)} -> {out_dir / fname}")
         return 0
 
@@ -388,7 +410,7 @@ def main() -> int:
     for level in levels:
         for language in languages:
             target = target_for(level)
-            fname = f"{level.lower()}_conversations_{language}_{model_tag}{preset_tag}.jsonl"
+            fname = leg_fname(level, language)
             out_file = out_dir / fname
             print(f"\n  --- {level} / {language} (target {target}) ---")
             stats = generate_leg(
@@ -405,6 +427,7 @@ def main() -> int:
                 intent_category=args.intent_category,
                 initiation=args.initiation,
                 keep_intermediates=args.keep_intermediates,
+                max_workers=args.max_workers,
                 verify_batches=args.verify_batches,
                 verify_timeout=args.verify_timeout,
             )
@@ -416,6 +439,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "output_dir": str(out_dir),
+        "timestamp": run_ts,
         "teacher_model": teacher_model or "placeholder",
         "behavior_preset": args.behavior_preset,
         "intent_category": args.intent_category,
@@ -427,7 +451,7 @@ def main() -> int:
         "verify_batches": args.verify_batches,
         "total_batches_not_fit": sum(s.get("batches_not_fit", 0) for s in all_stats),
     }
-    stats_path = out_dir / "loop_stats.json"
+    stats_path = out_dir / f"loop_stats_{run_ts}.json"
     stats_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
 
     print("\n=== Done ===")
