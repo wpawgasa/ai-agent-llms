@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from llm_workflow_agents.data.data_validator import ValidationResult, validate_dataset
 from llm_workflow_agents.data._workflow_script import find_tool_placement_violations
+from llm_workflow_agents.data.data_validator import (
+    detect_thai_corruption,
+    validate_dataset,
+)
 
 
 @pytest.fixture
@@ -280,3 +283,102 @@ class TestFindToolPlacementViolations:
         allowed = {"PROCESS_CHANGE": {"change_plan"}}
         messages = [self._msg("MYSTERY_STATE", "TERMINAL", "change_plan")]
         assert find_tool_placement_violations(allowed, messages, {"change_plan"}) == []
+
+
+class TestDetectThaiCorruption:
+    """Conservative two-signal detector for teacher-corrupted Thai prose.
+    Snippets are taken from the real L5_026 / L5_062 corruption."""
+
+    @staticmethod
+    def _rec(content: str, *, language: str = "th", role: str = "assistant") -> dict:
+        return {
+            "conversation_id": "L5_001",
+            "language": language,
+            "messages": [
+                {"role": "system", "content": "ระบบ"},
+                {"role": role, "content": content},
+            ],
+        }
+
+    def test_latin_glued_into_thai_flagged(self) -> None:
+        # From L5_026: Latin "locks" injected mid-word.
+        reasons = self._rec("ครับคุณลูกค้า ผมเป๋locksตัวแทน")
+        assert any("latin-glued-into-thai" in r for r in detect_thai_corruption(reasons))
+
+    def test_obsolete_consonant_flagged(self) -> None:
+        # ฅ (kho khon) — from L5_026 ("ฅุณ") and L5_062 ("ขฅง").
+        assert any("obsolete" in r for r in detect_thai_corruption(self._rec("ฅุณโทรมาจากไหน")))
+        assert any("obsolete" in r for r in detect_thai_corruption(self._rec("โอนไปที่เบอร์ขฅงคุณ")))
+
+    def test_clean_thai_passes(self) -> None:
+        assert detect_thai_corruption(self._rec("สวัสดีค่ะ ดิฉันเป็นผู้ช่วยจากธนาคาร")) == []
+
+    def test_clause_boundary_thai_english_concat_passes(self) -> None:
+        # Legitimate Thai+English concatenation at a clause boundary (English word
+        # followed by a space, not glued *inside* a Thai word). The placeholder
+        # generator emits this shape ("...เรื่องhotel booking") — it must NOT be
+        # flagged, or the auto-drop gate would discard all such valid rows.
+        assert detect_thai_corruption(
+            self._rec("ต้องการความช่วยเหลือเรื่องhotel booking")
+        ) == []
+        assert detect_thai_corruption(self._rec("ขอสอบถามเรื่องcar rental ค่ะ")) == []
+
+    def test_code_switch_allows_latin_mixing(self) -> None:
+        # Identical Latin-in-Thai string: corruption under `th`, legitimate
+        # script-mixing under `code_switch` (Signal A gated off).
+        s = "ผมเป๋locksตัวแทน"
+        assert detect_thai_corruption(self._rec(s, language="th"))
+        assert detect_thai_corruption(self._rec(s, language="code_switch")) == []
+
+    def test_code_switch_still_flags_obsolete_consonant(self) -> None:
+        # Signal B applies regardless of language.
+        assert detect_thai_corruption(self._rec("เบอร์ขฅงคุณ", language="code_switch"))
+
+    def test_english_record_is_noop(self) -> None:
+        assert detect_thai_corruption(
+            self._rec("Hello, how can I help you today?", language="en")
+        ) == []
+
+    def test_system_message_is_ignored(self) -> None:
+        # Corruption only in the machine-authored system prompt is not flagged.
+        rec = {
+            "conversation_id": "L5_001",
+            "language": "th",
+            "messages": [
+                {"role": "system", "content": "ผมเป๋locksตัวแทน"},
+                {"role": "assistant", "content": "สวัสดีค่ะ"},
+            ],
+        }
+        assert detect_thai_corruption(rec) == []
+
+
+class TestValidateDatasetCorruptionWarning:
+    def test_corruption_is_warning_not_error(self, tmp_path: Path) -> None:
+        # Schema-valid sample (mirrors the valid_workflow fixture) with corrupted
+        # Thai in the user turn: stays valid, surfaces a warning.
+        sample = {
+            "conversation_id": "L5_026",
+            "complexity_level": "L1",
+            "domain": "faq_lookup",
+            "language": "th",
+            "workflow_graph": {
+                "states": ["S1", "S2", "S3"],
+                "transitions": [
+                    {"from": "S1", "to": "S2", "condition": "proceed"},
+                    {"from": "S2", "to": "S3", "condition": "proceed"},
+                ],
+                "initial": "S1",
+                "terminal": ["S3"],
+            },
+            "messages": [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "ผมเป๋locksตัวแทน"},
+            ],
+        }
+        path = tmp_path / "corrupt.jsonl"
+        path.write_text(json.dumps(sample, ensure_ascii=False) + "\n")
+        result = validate_dataset(path, "workflow")
+        assert result.valid is True
+        assert not any("thai-corruption" in e for e in result.errors)
+        assert any("thai-corruption" in w and "L5_026" in w for w in result.warnings)
+        assert result.stats["warning_count"] >= 1

@@ -61,6 +61,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for sibling clean_task_a_sft
 from clean_task_a_sft import clean_record  # noqa: E402
 
+from llm_workflow_agents.data.data_validator import detect_thai_corruption  # noqa: E402
 from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset  # noqa: E402
 from llm_workflow_agents.data.quality_profiler import (  # noqa: E402
     defective_conversation_ids,
@@ -193,7 +194,7 @@ def generate_leg(
     """
     accum: list[dict] = []
     seen_ids: dict[str, int] = {}
-    gen = clean_dropped = defect_dropped = 0
+    gen = clean_dropped = corruption_dropped = defect_dropped = 0
     iteration = 0
     batch_verdicts: list[dict] = []
 
@@ -226,13 +227,25 @@ def generate_leg(
                     clean_dropped += 1
                 else:
                     cleaned.append(rec2)
+            n_after_clean = len(cleaned)
+
+            # --- qualify: Thai-corruption gate (teacher transcription garble
+            # that is invisible to the structural validators) ---
+            uncorrupted: list[dict] = []
+            iter_corruption = 0
+            for rec in cleaned:
+                if detect_thai_corruption(rec):
+                    iter_corruption += 1
+                else:
+                    uncorrupted.append(rec)
+            corruption_dropped += iter_corruption
 
             # --- qualify: hard structural defects ---
             clean_file = scratch / "cleaned.jsonl"
-            _write_jsonl(clean_file, cleaned)
+            _write_jsonl(clean_file, uncorrupted)
             bad = defective_conversation_ids(profile_task_a(clean_file))
-            qualified = [r for r in cleaned if r.get("conversation_id") not in bad]
-            defect_dropped += len(cleaned) - len(qualified)
+            qualified = [r for r in uncorrupted if r.get("conversation_id") not in bad]
+            defect_dropped += len(uncorrupted) - len(qualified)
 
             # --- optional advisory gate: dataset-verifier agent on survivors ---
             verdict = None
@@ -267,8 +280,9 @@ def generate_leg(
                     verdict_msg += "  ⚠ NOT-FIT (advisory; rows kept)"
         print(
             f"    iter {iteration}: +{len(qualified)} qualified "
-            f"(gen {len(batch)}, clean-drop {len(batch) - len(cleaned)}, "
-            f"defect-drop {len(cleaned) - len(qualified)}) "
+            f"(gen {len(batch)}, clean-drop {len(batch) - n_after_clean}, "
+            f"corruption-drop {iter_corruption}, "
+            f"defect-drop {n_after_clean - iter_corruption - len(qualified)}) "
             f"-> {len(accum)}/{target}{verdict_msg}"
         )
 
@@ -291,6 +305,7 @@ def generate_leg(
         "shortfall": shortfall,
         "generated": gen,
         "clean_dropped": clean_dropped,
+        "corruption_dropped": corruption_dropped,
         "defect_dropped": defect_dropped,
         "iterations": iteration,
         "output_file": str(out_file),
