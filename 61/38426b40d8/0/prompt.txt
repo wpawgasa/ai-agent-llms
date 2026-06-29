@@ -1,0 +1,81 @@
+Verify @data/output/sft/task_a_merged/l1_merged_20260629.jsonl with data-verifier agent
+
+---
+
+Verify @data/output/sft/task_a_merged/l1_merged_20260629.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>af587a30009ae63a0</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/42d09af5-afed-4ac6-8d02-54a147747b0a/tasks/af587a30009ae63a0.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Task A L1 dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Here is the verdict report.
+
+---
+
+# Task A Dataset Verification Report
+
+**File:** `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l1_merged_20260629.jsonl`
+**Tier:** L1 · **Samples:** 1256 · **Source:** 100% teacher-generated
+
+## 1. Verdict
+
+**SOUND-WITH-CAVEATS — fit for SFT, not strictly fit for the L1 *tool* floor.**
+Every sample is structurally well-formed (0 hard defects) and the dialogues read as rational, on-domain, and behavior-faithful across both languages and both initiation directions. The one material spec gap is that **43.5% of samples carry zero tools**, undershooting the L1 floor of `num_tools ≥ 1`. Spread: L1 only; languages en 453 / th 405 / code_switch 398; initiator user 876 (69.7%) / agent 380 (30.3%, matches the `balanced` outbound preset).
+
+## 2. Hard defects
+
+**Zero.** Both deterministic passes are clean:
+- `validate_dataset(..., 'workflow')` → `valid: True`, `error_count=0`, 1256/1256 clean.
+- `quality_profiler` → `HARD STRUCTURAL DEFECTS: 0`. Specifically verified: `undeclared_nonloop_transitions=0`; STATE-seq matches ground truth; every one of the 1163 `&lt;tool_call&gt;` blocks is followed by a `tool`-role response (0 orphans); `num_tools == len(tool_schemas)` for all 1256; role sequencing valid; all terminals reached.
+
+## 3. Spec conformance (L1 `ComplexitySpec`)
+
+| Spec field | L1 expectation | Observed | Status |
+|---|---|---|---|
+| `target_path_len` | (3,4) | `num_states` ∈ {3,4} (3:651, 4:605) | PASS |
+| `chain_depth` | 0 | all 0 | PASS |
+| `num_branches`/`num_loops` | (0,0)/(0,0) | no back-edges; `tool_chain_propagation=0` | PASS |
+| `num_tools` (floor) | **≥ 1** | **547 samples = 0** | **VIOLATION** |
+| tool error rate (global ~20%) | ~20% | 18.5% (215/1163) | PASS |
+
+**The only conformance violation is `num_tools=0` on 547 samples.** Diagnosis = **generator undershoot / by-design, not domain impossibility**: all 547 have workflow_graphs that declare **no tools on any node** (not graphs where tools existed but were skipped), and every domain involved produces 1–5-tool samples elsewhere in the file (`num_tools` dist `{0:547, 1:490, 2:128, 3:33, 5:58}`). The profiler emitted **no STRUCTURAL-CEILING NOTES**, confirming the canonical graphs can support tools — the generator simply emitted tool-less L1 graphs. These samples are internally coherent but contribute nothing on the tool-call / chain-propagation training axis that the L1 floor exists to guarantee.
+
+Sub-finding worth noting: **102 of the zero-tool samples carry `user_behavior=invalid_tool_inputs`** (e.g., `L1_002` line 2, `L1_007` line 6). The behavior is satisfied *narratively* — the user supplies junk inputs and the agent verbally rejects them ("ระบบแจ้งว่าเป็น invalid input") — but no actual tool call/error payload is produced, so the canonical invalid-input→tool-error→recovery signal is absent in those rows.
+
+## 4. Qualitative findings (8 conversations read)
+
+Overall quality is high. Reads spanned all 3 languages, both initiators, and all four behaviors.
+
+- **Behavior fidelity is strong.** `adversarial_probing` users genuinely probe (`L1_012_9`, `L1_003_5`, `L1_042_7`: ask for confidential data, demand the agent skip verification, request the agent "hack" pricing — agent correctly refuses each). `invalid_tool_inputs` users genuinely supply bad inputs and the error→recovery arc reads naturally (`L1_004_5` line 401 `"ORDER_ID_INVALID_@!#"`→format error→correction; `L1_005_10` Thai patient-ID rejection→correction; `L1_090_7` "Nov 35" invalid date). `digressing` users genuinely digress and the agent acknowledges then re-rails (`L1_005_4`: cat/flower-pot/road-trip tangents).
+- **Tool realism / chain propagation.** Produced IDs and values reuse downstream correctly (e.g., `L1_005_4` `verify_policy`→`renew_policy` reuses `POL-98765`; coverage results echoed accurately). Error→retry recovery is natural (`Service temporarily unavailable`→retry→success in `L1_012_9`, `L1_005_4`). 213 samples carry a tool-error→inline-recovery turn — fine for L1 (graph-level `include_recovery=False` still holds; these are inline, not added recovery states).
+- **code_switch is intentional and natural** (`L1_011` line 10, `L1_006` line 5) — system prompts explicitly request Thai/English mixing for a bilingual service persona; not mid-sentence machine artifacts.
+- **The one `/execute_tool` "anomaly"** (`L1_096_9` line 1147) is inside a *user* turn simulating a malformed invocation — correct `invalid_tool_inputs` content, not a malformed agent emission.
+
+**Thai corruption — localized, not systemic.** The Thai-corruption QA gate is largely working, but a few corrupt rows slipped through:
+- `L1_012_9` (**line 863**) is badly garbled throughout: "มัสดีครับ" (→สวัสดี), "เช้าหน้าที่" (→เจ้าหน้าที่), "สฐานะ", "เบ็นระบบ", "จริกๆ", "ได๊รับ", "สวัสดิภาพนะคับ". This one should be excluded.
+- `L1_004_11` (line 855) and `L1_062_7` (line 1013) contain the garble "มัสดี".
+- Spot-checks of other rare-consonant hits (`L1_042_7`, `L1_142_3`, `L1_090_7`) were **clean** — the rare letters were legitimate words (ฐานข้อมูล, มาตรฐาน, พระราชบัญญัติ). So corruption is a handful of rows, not a corpus-wide problem.
+
+## 5. Cosmetic
+
+- **Behavior mix skews off the 60/15/10/15 target:** cooperative 45.7% (-14.3), adversarial_probing 22.8% (+7.8), digressing 15.4% (+5.4), invalid_tool_inputs 16.2% (+1.2). Cooperative is materially under-represented; non-cooperative over-represented. (Plausibly intentional for a robustness-leaning SFT mix, but it diverges from the documented distribution.)
+- **Arrow glyphs:** unicode `→` dominates (5581 vs 134 ASCII). Per the known latent-consumer issue, `serving/orchestrator.py`'s ASCII-only STATE regex would not parse these — relevant only if this data feeds that consumer.
+- Self-loop share 45.5% — expected convention, not a finding.
+- Minor persona drift: `L1_003_5` system prompt says "Care Shield Insurance / Alex" but the outbound opener says "CareSupport" — cosmetic inconsistency between the canned GREETING example and the outbound opener.
+
+## 6. Recommendations (prioritized)
+
+1. **Generator fix (medium priority):** enforce the L1 `num_tools ≥ 1` floor in the subgraph/graph selector so L1 graphs always declare ≥1 tool. This is an undershoot, not a domain limitation — the canonical graphs already support tools. Especially reconcile the 102 `invalid_tool_inputs` + zero-tool rows so the behavior actually exercises a tool call/error. If tool-less L1 dialogues are intentionally desired, update `COMPLEXITY_SPECS["L1"].num_tools` to `0` (or document a tool-less quota) so the data matches the spec rather than the spec flagging the data.
+2. **Exclude / regenerate the corrupted Thai rows (low effort):** drop or regen `L1_012_9` (line 863) at minimum; sweep for the "มัสดี" garble (`L1_004_11`, `L1_062_7`) and tighten the Thai-corruption gate threshold.
+3. **No action (cosmetic):** arrow glyphs (handle at the consumer if `orchestrator.py` ingests this), behavior-mix skew (confirm whether intentional), and the CareShield/CareSupport persona nit.</result>
+<usage><subagent_tokens>67351</subagent_tokens><tool_uses>19</tool_uses><duration_ms>486820</duration_ms></usage>
+</task-notification>
+
+---
+
+Write a reusable script to remove corrupted conversations and remove corrupted conversation from this set

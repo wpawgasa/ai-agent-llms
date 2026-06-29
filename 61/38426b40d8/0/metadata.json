@@ -1,0 +1,35 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "6138426b40d8",
+  "session_id": "42d09af5-afed-4ac6-8d02-54a147747b0a",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-29T10:02:54.767507654Z",
+  "branch": "data/clean-corrupted-conversations",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "scripts/clean_corrupted_conversations.py",
+    "tests/unit/test_clean_corrupted_conversations.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "9b3c9a755208",
+  "token_usage": {
+    "input_tokens": 7488,
+    "cache_creation_tokens": 81982,
+    "cache_read_tokens": 2102420,
+    "output_tokens": 27750,
+    "api_call_count": 29
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-29T10:02:54.450013369Z",
+    "agent_lines": 449,
+    "human_added": 21,
+    "human_modified": 1,
+    "human_removed": 0,
+    "total_committed": 471,
+    "agent_percentage": 95.32908704883228
+  }
+}
