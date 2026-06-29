@@ -79,3 +79,7 @@ Overall quality is high. Reads spanned all 3 languages, both initiators, and all
 ---
 
 Write a reusable script to remove corrupted conversations and remove corrupted conversation from this set
+
+---
+
+yes
