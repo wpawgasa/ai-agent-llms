@@ -1,0 +1,32 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "254d47fd88d0",
+  "session_id": "fe7244a0-b500-414d-8eed-081bbc014f64",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-30T04:59:37.750507697Z",
+  "branch": "deploy/bifrost-vllm-url-env",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "deployments/local/data/bifrost/config.json",
+    "deployments/local/docker-compose.yml",
+    "deployments/local/.env.example"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b453dfe97f44",
+  "token_usage": {
+    "input_tokens": 7485,
+    "cache_creation_tokens": 39592,
+    "cache_read_tokens": 245625,
+    "output_tokens": 1588,
+    "api_call_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-30T04:59:37.688265648Z",
+    "agent_lines": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 8,
+    "agent_percentage": 100
+  }
+}
