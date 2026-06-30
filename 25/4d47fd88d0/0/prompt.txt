@@ -1,0 +1,463 @@
+Verify @data/output/sft/task_a_merged/l1_merged_20260629.jsonl with data-verifier agent
+
+---
+
+Verify @data/output/sft/task_a_merged/l1_merged_20260629.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>af587a30009ae63a0</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/42d09af5-afed-4ac6-8d02-54a147747b0a/tasks/af587a30009ae63a0.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Task A L1 dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Here is the verdict report.
+
+---
+
+# Task A Dataset Verification Report
+
+**File:** `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l1_merged_20260629.jsonl`
+**Tier:** L1 · **Samples:** 1256 · **Source:** 100% teacher-generated
+
+## 1. Verdict
+
+**SOUND-WITH-CAVEATS — fit for SFT, not strictly fit for the L1 *tool* floor.**
+Every sample is structurally well-formed (0 hard defects) and the dialogues read as rational, on-domain, and behavior-faithful across both languages and both initiation directions. The one material spec gap is that **43.5% of samples carry zero tools**, undershooting the L1 floor of `num_tools ≥ 1`. Spread: L1 only; languages en 453 / th 405 / code_switch 398; initiator user 876 (69.7%) / agent 380 (30.3%, matches the `balanced` outbound preset).
+
+## 2. Hard defects
+
+**Zero.** Both deterministic passes are clean:
+- `validate_dataset(..., 'workflow')` → `valid: True`, `error_count=0`, 1256/1256 clean.
+- `quality_profiler` → `HARD STRUCTURAL DEFECTS: 0`. Specifically verified: `undeclared_nonloop_transitions=0`; STATE-seq matches ground truth; every one of the 1163 `&lt;tool_call&gt;` blocks is followed by a `tool`-role response (0 orphans); `num_tools == len(tool_schemas)` for all 1256; role sequencing valid; all terminals reached.
+
+## 3. Spec conformance (L1 `ComplexitySpec`)
+
+| Spec field | L1 expectation | Observed | Status |
+|---|---|---|---|
+| `target_path_len` | (3,4) | `num_states` ∈ {3,4} (3:651, 4:605) | PASS |
+| `chain_depth` | 0 | all 0 | PASS |
+| `num_branches`/`num_loops` | (0,0)/(0,0) | no back-edges; `tool_chain_propagation=0` | PASS |
+| `num_tools` (floor) | **≥ 1** | **547 samples = 0** | **VIOLATION** |
+| tool error rate (global ~20%) | ~20% | 18.5% (215/1163) | PASS |
+
+**The only conformance violation is `num_tools=0` on 547 samples.** Diagnosis = **generator undershoot / by-design, not domain impossibility**: all 547 have workflow_graphs that declare **no tools on any node** (not graphs where tools existed but were skipped), and every domain involved produces 1–5-tool samples elsewhere in the file (`num_tools` dist `{0:547, 1:490, 2:128, 3:33, 5:58}`). The profiler emitted **no STRUCTURAL-CEILING NOTES**, confirming the canonical graphs can support tools — the generator simply emitted tool-less L1 graphs. These samples are internally coherent but contribute nothing on the tool-call / chain-propagation training axis that the L1 floor exists to guarantee.
+
+Sub-finding worth noting: **102 of the zero-tool samples carry `user_behavior=invalid_tool_inputs`** (e.g., `L1_002` line 2, `L1_007` line 6). The behavior is satisfied *narratively* — the user supplies junk inputs and the agent verbally rejects them ("ระบบแจ้งว่าเป็น invalid input") — but no actual tool call/error payload is produced, so the canonical invalid-input→tool-error→recovery signal is absent in those rows.
+
+## 4. Qualitative findings (8 conversations read)
+
+Overall quality is high. Reads spanned all 3 languages, both initiators, and all four behaviors.
+
+- **Behavior fidelity is strong.** `adversarial_probing` users genuinely probe (`L1_012_9`, `L1_003_5`, `L1_042_7`: ask for confidential data, demand the agent skip verification, request the agent "hack" pricing — agent correctly refuses each). `invalid_tool_inputs` users genuinely supply bad inputs and the error→recovery arc reads naturally (`L1_004_5` line 401 `"ORDER_ID_INVALID_@!#"`→format error→correction; `L1_005_10` Thai patient-ID rejection→correction; `L1_090_7` "Nov 35" invalid date). `digressing` users genuinely digress and the agent acknowledges then re-rails (`L1_005_4`: cat/flower-pot/road-trip tangents).
+- **Tool realism / chain propagation.** Produced IDs and values reuse downstream correctly (e.g., `L1_005_4` `verify_policy`→`renew_policy` reuses `POL-98765`; coverage results echoed accurately). Error→retry recovery is natural (`Service temporarily unavailable`→retry→success in `L1_012_9`, `L1_005_4`). 213 samples carry a tool-error→inline-recovery turn — fine for L1 (graph-level `include_recovery=False` still holds; these are inline, not added recovery states).
+- **code_switch is intentional and natural** (`L1_011` line 10, `L1_006` line 5) — system prompts explicitly request Thai/English mixing for a bilingual service persona; not mid-sentence machine artifacts.
+- **The one `/execute_tool` "anomaly"** (`L1_096_9` line 1147) is inside a *user* turn simulating a malformed invocation — correct `invalid_tool_inputs` content, not a malformed agent emission.
+
+**Thai corruption — localized, not systemic.** The Thai-corruption QA gate is largely working, but a few corrupt rows slipped through:
+- `L1_012_9` (**line 863**) is badly garbled throughout: "มัสดีครับ" (→สวัสดี), "เช้าหน้าที่" (→เจ้าหน้าที่), "สฐานะ", "เบ็นระบบ", "จริกๆ", "ได๊รับ", "สวัสดิภาพนะคับ". This one should be excluded.
+- `L1_004_11` (line 855) and `L1_062_7` (line 1013) contain the garble "มัสดี".
+- Spot-checks of other rare-consonant hits (`L1_042_7`, `L1_142_3`, `L1_090_7`) were **clean** — the rare letters were legitimate words (ฐานข้อมูล, มาตรฐาน, พระราชบัญญัติ). So corruption is a handful of rows, not a corpus-wide problem.
+
+## 5. Cosmetic
+
+- **Behavior mix skews off the 60/15/10/15 target:** cooperative 45.7% (-14.3), adversarial_probing 22.8% (+7.8), digressing 15.4% (+5.4), invalid_tool_inputs 16.2% (+1.2). Cooperative is materially under-represented; non-cooperative over-represented. (Plausibly intentional for a robustness-leaning SFT mix, but it diverges from the documented distribution.)
+- **Arrow glyphs:** unicode `→` dominates (5581 vs 134 ASCII). Per the known latent-consumer issue, `serving/orchestrator.py`'s ASCII-only STATE regex would not parse these — relevant only if this data feeds that consumer.
+- Self-loop share 45.5% — expected convention, not a finding.
+- Minor persona drift: `L1_003_5` system prompt says "Care Shield Insurance / Alex" but the outbound opener says "CareSupport" — cosmetic inconsistency between the canned GREETING example and the outbound opener.
+
+## 6. Recommendations (prioritized)
+
+1. **Generator fix (medium priority):** enforce the L1 `num_tools ≥ 1` floor in the subgraph/graph selector so L1 graphs always declare ≥1 tool. This is an undershoot, not a domain limitation — the canonical graphs already support tools. Especially reconcile the 102 `invalid_tool_inputs` + zero-tool rows so the behavior actually exercises a tool call/error. If tool-less L1 dialogues are intentionally desired, update `COMPLEXITY_SPECS["L1"].num_tools` to `0` (or document a tool-less quota) so the data matches the spec rather than the spec flagging the data.
+2. **Exclude / regenerate the corrupted Thai rows (low effort):** drop or regen `L1_012_9` (line 863) at minimum; sweep for the "มัสดี" garble (`L1_004_11`, `L1_062_7`) and tighten the Thai-corruption gate threshold.
+3. **No action (cosmetic):** arrow glyphs (handle at the consumer if `orchestrator.py` ingests this), behavior-mix skew (confirm whether intentional), and the CareShield/CareSupport persona nit.</result>
+<usage><subagent_tokens>67351</subagent_tokens><tool_uses>19</tool_uses><duration_ms>486820</duration_ms></usage>
+</task-notification>
+
+---
+
+Write a reusable script to remove corrupted conversations and remove corrupted conversation from this set
+
+---
+
+yes
+
+---
+
+push and open PR. auto-merge if all checks pass
+
+---
+
+set up required status checks on main so future auto-merges actually gate on CI
+
+---
+
+Verify @data/output/sft/task_a_merged/l2_merged_20260630.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>a6ef6fdfcd02f9c25</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/b3ce099e-ec1c-438d-b328-3f0eb394b5c2/tasks/a6ef6fdfcd02f9c25.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify L2 merged Task A dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have enough evidence to compile the verdict. All deterministic checks plus 6 conversations read across the spread.
+
+---
+
+# Task A Dataset Verification — `l2_merged_20260630.jsonl`
+
+Absolute path: `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l2_merged_20260630.jsonl`
+
+## 1. Verdict
+
+**Sound-with-caveats.** 1308 samples, all L2, all structurally valid. Zero hard defects, zero Thai corruption. The dataset is internally consistent and the dialogue reads well — but it does **not land the L2 tier**: 83.6% of samples overshoot the L2 state ceiling into L3 territory, and 3 placeholder-fallback stubs are canned filler. Spread: lang code_switch 500 / en 405 / th 403; initiator agent 400 / user 908; behaviors cooperative 612 / adversarial 272 / invalid_tool 225 / digressing 199.
+
+## 2. Hard defects
+
+**Zero.** `validate_dataset(..., 'workflow')` → `valid: True | samples: 1308 | clean: 1308`, 0 errors. Profiler `HARD STRUCTURAL DEFECTS: 0`. Specifically: 0 undeclared non-loop transitions, STATE-seq matches ground truth on every sample, no off-schema tool names, no role-sequencing breaks, no malformed tool_call JSON.
+
+## 3. Spec conformance (advisory — tier did not land)
+
+1133 violations. `ceiling_notes` is **empty**, which is the key diagnostic: every domain's canonical graph is large enough, so this is a **generator overshoot** (the subgraph selector picked *too many* spine states), not a domain impossibility. Two distinct misses:
+
+- **State-count overshoot — 1093/1308 (83.6%).** L2 `target_path_len` is (5,7); actual `num_states` distribution is `{5:51, 6:27, 7:137, 8:399, 9:331, 10:214, 11:107, 12:32, 13:10}`. Only 215 samples (16.4%) sit in-band; the bulk lands squarely in L3's (8,12) range. This "L2" set is structurally L3-grade. Fix is on the generator's spine-length enforcement, not domain exclusion.
+- **Tool-count undershoot — 40 samples** have `num_tools=1`, below the L2 floor of 2 (e.g. L2_033, L2_048).
+
+## 4. Qualitative findings
+
+Read 6 samples spanning both languages, both initiators, and all three non-cooperative behaviors. Quality is high:
+
+- **L2_002_9** (insurance, th, adversarial, outbound): natural Thai; adversarial user genuinely probes ("prove it's you, read my policy number" / "can I name my cat as beneficiary?"); agent refuses appropriately on PDPA grounds. Tool chain real: `POL-998877` verify → error → retry recovery → `update_policy`. Error→recovery arc reads naturally.
+- **L2_006_8** (emergency, th, invalid_tool_inputs, inbound): user supplies an invalid check target ("fire truck #5"), agent rejects and offers the valid enum (person/location/facility). `INC-8892` propagates; dispatch error→retry works.
+- **L2_023** (utilities, code_switch, digressing): genuinely natural Thai/English code-switch (realistic for Thai CS); digressing user wanders to weather/global-warming; `ACC-99231` chains through analyze→enroll.
+- **L2_010_5** (scheduling, en, adversarial, outbound) and **L2_093** (insurance, code_switch, digressing, outbound, 12 states): both coherent; `APT-7788` / `CLM-443322` propagate across multi-tool chains; outbound openers are purposeful and on-domain.
+
+**Weakness — 3 placeholder-fallback stubs are canned, not real dialogue:**
+- **L2_050_4** (idx 345), **L2_147** (idx 438), **L2_023_10** (idx 1125) — `generation_source == "placeholder_fallback"`. Content is template filler: assistant turns like `"Handling Order Management in state GREETING."`, tool args `{"placeholder": "value"}`, tool returns `{"result": "ok"}`, and templated user turns (`"[ตา N] ข้ามขั้นตอน X แล้วทำaccessory upsellเลยได้ไหม?"`). They pass structural validation but should not train a model on "realistic dialogue." Trivially filterable via `generation_source != "teacher"`.
+
+## 5. Thai-corruption assessment
+
+**Clean — no action needed on corruption.** Three independent passes all returned zero:
+- Canonical `detect_thai_corruption()` (Latin-glued-into-Thai + obsolete ฃ/ฅ): **0 hits** across 1308 records.
+- `KNOWN_THAI_GARBLE` blocklist (7 entries): **0 hits**.
+- My own heuristic scan (doubled tone/above-mark stacks `[่-๋์็]{2,}`, and tone/above marks not preceded by a base consonant): **0 candidates**.
+
+Thai prose in every read sample is fluent and tone-mark-consistent. This file reads as already gated/cleaned (consistent with the recent Thai-corruption-gate + cleaner commits). No new blocklist entry is warranted on the current evidence.
+
+## 6. Cosmetic
+
+- **Arrow glyph mix:** 13146 unicode `→` vs 421 ascii `-&gt;` (96.9% unicode). The `serving/orchestrator.py` ASCII-only STATE regex would miss nearly all transitions if this data ever feeds that consumer. Latent, known; not a training-data defect. Note both glyphs even appear within single samples (L2_002_9 unicode vs L2_006_8 ascii).
+- **Behavior-mix skew vs 60/15/10/15 target:** cooperative 46.8% (target 60, ~13pts low), adversarial 20.8% (target 15), digressing 15.2% (target 10), invalid_tool_inputs 17.2% (target 15). Non-cooperative behaviors all over-represented — plausibly deliberate hard-case oversampling for a merged set, but worth confirming.
+- **Language split:** code_switch 38% / en 31% / th 31%. `code_switch` is a first-class, detector-supported category here; the share is high but legitimate.
+- Self-loop share 40.3% — expected, not a finding.
+
+## 7. Recommendations (prioritized)
+
+1. **Fix the generator's L2 spine-length enforcement (highest impact).** 83.6% overshoot means this file is mislabeled-difficulty, not L2. Because `ceiling_notes` is empty, this is a subgraph-selector overshoot — clamp selected spine states to `target_path_len` (5,7), don't exclude domains. Until fixed, treat this file as L2/L3-blended, not pure L2.
+2. **Drop the 3 placeholder-fallback rows** (L2_050_4, L2_147, L2_023_10) before SFT — filter `generation_source != "teacher"`. Optionally investigate why teacher generation fell back for these.
+3. **Lift the 40 single-tool samples to ≥2 tools** or accept them as a minor floor miss — low impact vs item 1.
+4. **No corruption action.** Detectors and independent scan agree the Thai is clean.
+5. **Orchestrator arrow regex** is a downstream consumer concern only; no change to this dataset.</result>
+<usage><subagent_tokens>62682</subagent_tokens><tool_uses>18</tool_uses><duration_ms>253534</duration_ms></usage>
+</task-notification>
+
+---
+
+Filter the placeholder stubs
+
+---
+
+Write a reusable script to remove placeholder_fallback conversations
+
+---
+
+yes and open auto-merged PR
+
+---
+
+Verify @data/output/sft/task_a_merged/l3_merged_20260630.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>ad1e1744283de2b72</task-id>
+<tool-use-id>toolu_01QAxCSVuAVKqoznMmFGSHxE</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/b3ce099e-ec1c-438d-b328-3f0eb394b5c2/tasks/ad1e1744283de2b72.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify L3 merged Task A dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Both below-floor domains (telecom, healthcare) reach 6 tools in other samples, so the 62 cases are selector undershoot, not domain impossibility.
+
+---
+
+# Verification Report: `l3_merged_20260630.jsonl`
+
+Absolute path: `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l3_merged_20260630.jsonl`
+
+## 1. Verdict
+**Sound-with-caveats — not fit to feed SFT as-is.** 1,215 samples, all L3. Three-way language split (en / th / code_switch = 405 each), inbound 816 / outbound 399. Every sample passes deterministic structural validation and the conversations I read are genuinely high quality. Two things must happen before training: **drop the 26 placeholder-fallback stub rows**, and decide whether the L3 tier-band misses (num_states overshoot, num_tools undershoot) matter for your difficulty target. No Thai corruption found.
+
+## 2. Hard defects
+**Zero structural defects.** `validate_dataset(..., 'workflow')` → `valid: True, 1215/1215 clean, 0 errors`. quality_profiler → `HARD STRUCTURAL DEFECTS: 0`, `undeclared_nonloop_transitions: 0`. No STATE-seq/ground-truth mismatch, no bad tool_call JSON, no off-schema tool names, no role-sequencing breaks.
+
+**One must-fix data-quality defect (passes structure, fails fitness): 26 `placeholder_fallback` stub rows.** Canned filler — assistant turns read `Handling &lt;Domain&gt; in state &lt;X&gt;.`, tool args are `{"placeholder": "value"}`, user turns repeat verbatim. Confirmed by reading `L3_037_2`. These should not train a model; remove with `scripts/remove_placeholder_conversations.py`. The 26 conversation_ids:
+
+```
+L3_037_2, L3_042_3, L3_104, L3_110, L3_001_6, L3_002_6, L3_003_6, L3_004_6,
+L3_005_6, L3_006_5, L3_007_5, L3_008_5, L3_027_5, L3_052_5, L3_080_5, L3_029_6,
+L3_041_6, L3_049_6, L3_098_6, L3_028_8, L3_080_9, L3_099_9, L3_117_2, L3_174_3,
+L3_184_3, L3_188_3
+```
+(2 of these — `L3_037_2`, plus one telecom — also count toward the num_tools-below-floor set.)
+
+## 3. Spec conformance (L3 target: path_len (8,12), branches (2,3), loops (0,1), tools ≥4, chain_depth 2)
+Profiler reports **384 spec-conformance violations** (advisory; data is valid, tier difficulty partially missed). Breakdown:
+
+- **num_states in-band [8,12]: 73.5% (893/1215). 322 out — all OVERSHOOT (13–16), zero undershoot.** Distribution: `8:54, 9:69, 10:377, 11:281, 12:112, 13:115, 14:104, 15:57, 16:46`. The overshoot comes entirely from the 5 rich domains (banking/insurance/healthcare/telecom/travel) whose canonical graphs exceed 12. This is a **generator undershoot-of-cap — the subgraph selector picked too many states for L3** on big-graph domains; it is fixable in the selector. The 13 STRUCTURAL-CEILING-noted domains (account_management, sales, product_info, etc.) cap at 8–11 states — that is an upper-bound *impossibility* but harmless here because 8–11 sits inside the [8,12] band on the floor side; they produce no violations.
+- **num_tools ≥4: 94.9% (1153/1215). 62 below floor** (49 at 3 tools, 13 at 2), concentrated in **telecom (50) and healthcare (12)**. Both domains reach 6 tools in other samples (telecom max 6, healthcare max 6), so this is **selector undershoot, NOT domain impossibility** — fixable in the generator's tool-selection, not a domain-exclusion case.
+- **chain_depth: 100% = 2.** Meets spec exactly.
+- **back-edges / num_loops spec (0,1): heuristic count shows only ~24% in-band; ~920 samples carry ≥2 backward transitions** (`0:12, 1:283, 2:680, 3:240`). This is an overshoot the profiler does not flag (it checks below-floor only). Caveat: my back-edge heuristic (target-index &lt; source-index) may not match the generator's exact loop semantics, so treat as a soft signal, not a hard count.
+
+## 4. Qualitative findings
+Read 5 teacher samples spanning all three languages, both initiators, and cooperative / adversarial_probing / digressing / invalid_tool_inputs. All coherent; no canned or off-domain dialogue.
+
+- **`L3_002_5`** (account_management, en, cooperative, inbound): clean error→recovery on the OTP `verify_identity` (Service temporarily unavailable → retry → authenticated); `CID-4820` and the pending→commit email update propagate correctly. State transitions match agent actions.
+- **`L3_002_9`** (insurance, th, adversarial_probing, outbound): outbound renewal-reminder opener is purposeful; user genuinely probes ("รู้เบอร์ผมได้ยังไง? ระบบปลอดภัยจริงหรือเปล่า?"). Thai is natural and fluent. `claim_id CLM-555666` is generated and reused downstream by `request_claim_documents` and `check_claim_status` — real chain propagation. Error→recovery on `verify_policy`.
+- **`L3_005`** (healthcare, code_switch, digressing, outbound): natural Thai-English code-switching; the digressing user actually digresses (weight, back pain, smartwatch giveaway) while the agent keeps the workflow on rails. `PAT88291`/`RX-99201` propagate; verify_coverage error→recovery present.
+- **`L3_003_5`** (sales, en, invalid_tool_inputs, outbound): textbook behavior fidelity — user supplies "budget = maybe $0 / timeline = yesterday or maybe never" → `qualify_lead` returns a format error → agent recovers and requests a standard range → valid retry. `TV-8842`, `QT-4402`, `DEMO-9981` all propagate.
+- **`L3_006_7`** (sales, th, cooperative, outbound): selected but not deep-read; header consistent with the others.
+
+**Thai corruption: none found.** Canonical `detect_thai_corruption()` → 0 hits; combined cleaner (`scripts/clean_corrupted_conversations.py --dry-run`, canonical signals + `KNOWN_THAI_GARBLE` blocklist) → 0 of 1215 flagged. My independent heuristic scan surfaced 140 repeated-Thai-character sequences, but inspection confirmed all are **legitimate** — emphatic elongation (`โหยยย`, `ช้ามากกกก`, `อืดมากกก`) or word-boundary consonant collisions (`ระบบ`+`บริการ`→`บบบ`, `คะแนน`+`นะ`→`นนน`). No new blocklist entry is warranted. The code_switch rows mix scripts deliberately (Signal A is correctly gated off for them) and read naturally.
+
+## 5. Cosmetic
+- **Arrow glyphs: 96.4% unicode** (15,606 `→` vs 587 ASCII `-&gt;`). Known latent consumer risk: `serving/orchestrator.py`'s ASCII-only STATE regex would not match these — relevant if this data flows to that path.
+- **Behavior mix vs the 60/15/15/10 target is skewed:** cooperative 558 (45.9%, target 60), adversarial_probing 282 (23.2%, target 15), digressing 173 (14.2%, target 10), invalid_tool_inputs 202 (16.6%, target 15). Cooperative is under-represented and adversarial over-represented by ~8pts each.
+- **Language is a forced 3-way equal split** (en/th/code_switch, 405 each) rather than a binary en/th — `code_switch` is treated as a first-class third language. Fine if intended; note it deviates from the binary split implied by the docs.
+- Recovery coverage 962/1215 (79%), max tool-chain hops in a single convo = 7, self-loop share 37.7% (expected, not a finding).
+
+## 6. Recommendations (prioritized)
+1. **Fix the generator — exclude before training: remove the 26 `placeholder_fallback` rows** via `scripts/remove_placeholder_conversations.py`, and investigate why the teacher pipeline fell back to stubs for these 26 (concentrated in `_5`/`_6`/`_3` merge shards) so the fallback isn't silently masking generation failures.
+2. **Fix the generator (subgraph selector), if L3 difficulty must land:** (a) cap L3 state selection at 12 for the 5 rich domains to eliminate the 322 num_states overshoots; (b) raise the tool floor enforcement for telecom/healthcare to remove the 62 sub-4-tool samples (both domains can reach 6 — undershoot, not impossibility). If, instead, you accept richer-than-spec L3 samples, document the band as advisory and leave them.
+3. **No action / cosmetic:** Thai (clean), back-edge overshoot (advisory, heuristic-only), behavior-mix skew and the 3-way language split (re-weight only if the downstream eval is sensitive to it). If `integration/orchestrator.py` is a consumer, normalize unicode `→` to ASCII at ingestion.</result>
+<usage><subagent_tokens>63734</subagent_tokens><tool_uses>18</tool_uses><duration_ms>292444</duration_ms></usage>
+</task-notification>
+
+---
+
+Filter the placeholder stubs
+
+---
+
+Verify @data/output/sft/task_a_merged/l4_merged_20260630.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>a2e3f94f409fd57d7</task-id>
+<tool-use-id>toolu_01DDHc3k12qcLTPS4p8o9fu8</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/b3ce099e-ec1c-438d-b328-3f0eb394b5c2/tasks/a2e3f94f409fd57d7.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify L4 merged Task A dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Verification complete. Here is the prioritized report.
+
+---
+
+# Task A L4 Dataset Verification — `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l4_merged_20260630.jsonl`
+
+## 1. Verdict
+
+**Sound-with-caveats.** 915 samples, all L4, balanced 305/305/305 across `en`/`th`/`code_switch`, ~30% outbound (276 agent-initiated / 639 user-initiated). Structurally clean (0 hard defects, 915/915 pass the project validator) and the teacher-generated dialogue is genuinely high quality. Two concrete actions are warranted before training: **remove 8 placeholder-fallback stubs** (must-fix) and **address an L4 tool-floor shortfall driven by domain tightness** (telecom/healthcare). No Thai corruption found.
+
+## 2. Hard defects
+
+**Zero.** `validate_dataset(..., 'workflow')` → `valid: True | samples: 915 | clean: 915`. The quality profiler reports `HARD STRUCTURAL DEFECTS: 0` — no undeclared non-self-loop transitions (0), no STATE-seq/ground-truth mismatch, no bad tool_call JSON, no off-schema tool names, no role-sequencing breaks. Outbound shape `[system, assistant(opener), user, …]` is correct in the samples read.
+
+## 3. Spec conformance (L4 tier)
+
+229 advisory spec-conformance violations (data is valid; tier difficulty partially missed):
+
+| Violation | Count | Diagnosis |
+|---|---|---|
+| `num_tools` below floor 6 | 221 (24%) | Mixed: **structural-ceiling tightness** + selector undershoot (see below) |
+| `num_states` = 11, outside (12,16) | 4 | telecom selector **undershoot** |
+| 0 back-edges below `num_loops` floor 1 | 4 | same 4 telecom samples (11 states / 2 tools) |
+
+**Tool-floor root cause — the key diagnostic.** `num_tools` undershoot is **not uniform**; it tracks each domain's canonical tool count in `DOMAIN_REGISTRY`:
+
+| Domain | Canonical tools | L4 floor | Samples below 6 |
+|---|---|---|---|
+| telecom | **6** | 6 | 184 / 215 (86%) |
+| healthcare | **6** | 6 | 37 / 204 (18%) |
+| travel | 7 | 6 | 0 |
+| insurance | 8 | 6 | 0 |
+| banking | 7 | 6 | 0 |
+
+telecom and healthcare have canonical tool sets of **exactly 6 = the L4 floor**, i.e. **zero headroom**: a conforming sample must include *every* canonical tool, so any subgraph selection that drops even one tool falls below floor. This is a **structural-ceiling tightness** (near-impossibility for reliable conformance), not a generator bug — it explains telecom's 86% miss. travel/insurance/banking carry 7–8 canonical tools and undershoot 0%, confirming the selector itself is fine when given headroom. The profiler's `ceiling_notes` is empty only because its reachability test is `max ≥ floor` (6≥6 passes); the practical reality is these two domains cannot comfortably satisfy the L4 tool floor.
+
+The 4 `num_states=11` / `num_tools=2` samples (`L4_010_3`, `L4_029_3`, `L4_081_5`, `L4_047_9`, all telecom) are a separate, severe **selector undershoot** — telecom's canonical graph is 16 states, so 11 states / 2 tools is well within reach; the selector simply picked a thin subgraph. These also fail the back-edge floor.
+
+All 5 domains are valid L4 domains (≥12 canonical states: telecom/healthcare/insurance 16, travel/banking 17), so the `_select_domain` ≥12-state filter is being honored. `num_states` lands in-band (12–16) for 911/915; recovery coverage is strong (769/915 = 84%, consistent with `include_recovery=True`); tool-chain propagation is real (474 samples, max 6 hops); chain_depth raised no violations.
+
+## 4. Placeholder-fallback stubs (MUST FIX)
+
+**Exactly 8 rows** with `generation_source == "placeholder_fallback"`:
+
+```
+L4_039_2  (travel, code_switch, agent)
+L4_096_3  (banking, code_switch, user)
+L4_017_5  (insurance, en, user)
+L4_046_8  (insurance, th, user)
+L4_050_8  (insurance, th, agent)
+L4_061_8  (banking, th, agent)
+L4_085_8  (banking, th, user)
+L4_088_8  (healthcare, th, user)
+```
+
+Confirmed canned by reading `L4_046_8`: every assistant turn is `"Handling Insurance in state &lt;STATE&gt;."`, every tool call is `{"name": &lt;real_tool&gt;, "arguments": {"placeholder": "value"}}`, and every user turn is the identical template `"[ตา N] จริงๆ ก่อนจะไปต่อเรื่อง... ขอถามเรื่องอื่นก่อน"`. These pass structural validation but are filler that should not train a model. Filter with `/workspaces/ai-agent-llms/scripts/remove_placeholder_conversations.py`.
+
+## 5. Thai-text corruption
+
+**None found.** Canonical `detect_thai_corruption()` (Signal A latin-glued-in-Thai, Signal B obsolete `ฃ`/`ฅ`) → **0 hits** across all 610 `th`+`code_switch` samples. Curated `KNOWN_THAI_GARBLE` blocklist (7 entries) → **0 hits**. The `code_switch` language tag is a legitimate third mode, not corruption: all 305 `code_switch` samples contain Thai script with intentional Thai-English mixing (the detector correctly gates Signal A off for `code_switch`). Read Thai/code-switch dialogue (`L4_001`, `L4_017`, `L4_003_9`, `L4_008_6`) reads natural and human — proper particles, honorifics, fluent embedded English clinical/telecom terms. No new blocklist entry needed for this file.
+
+## 6. Qualitative findings (conversations read)
+
+Read 6 teacher samples + 1 placeholder, spanning all 3 languages, both initiators, and all four behaviors. Teacher rows are strong:
+
+- **`L4_001`** (healthcare, code_switch, invalid_tool_inputs) — exemplary. User supplies bad inputs (`PT-INVALID-99`, `XYZ-999-ABC`) → tool error → agent requests correction → user gives valid `PT-88321`/`99214` → success. Behavior fidelity perfect; recovery arc (`Service temporarily unavailable` → retry) natural; real chain propagation (`AUTH-10928` minted then reused downstream). Reaches TERMINAL over 16 states.
+- **`L4_001_5`** (telecom, en, adversarial_probing) — user relentlessly probes (encryption, hidden fees, throttling, contract lock-in); agent answers each without breaking the workflow. ID propagation (`ACCT-98765`, `TXN-887126`). Faithful probing.
+- **`L4_003_9`** (telecom, th, digressing, outbound) — user digresses about making Thai desserts (ทองหยิบทองหยอด); agent warmly acknowledges then steers back. Genuine digression, not canned.
+- **`L4_017`** / **`L4_008_6`** (telecom/banking outbound) — purposeful, on-domain openers (roaming-reminder for Japan trip; new-card activation), agent self-introduces and states the reason before `VERIFY_*`. Correct outbound shape; 2FA OTP flow realistic in `L4_008_6`.
+
+No contradictory, off-domain, or pasted-back-input cases observed in teacher rows.
+
+## 7. Cosmetic / distribution
+
+- **Behavior mix skew vs 60/15/15/10 target:** cooperative **45.6%** (171 under the 60% target), adversarial_probing 21.3%, digressing 14.4%, invalid_tool_inputs 18.7%. Cooperative is meaningfully under-weighted and the non-cooperative classes correspondingly over-weighted. Advisory only.
+- **Arrow glyphs:** overwhelmingly unicode `→` (14,220) vs ASCII `-&gt;` (404) — mixed. Known latent consumer issue: `serving/orchestrator.py`'s ASCII-only `[STATE: X -&gt; Y]` regex would silently miss unicode-arrow transitions. Not a defect in this training file, but flag for any downstream parser reuse.
+- Self-loop share 31.8% (4,646/14,624) — expected generator convention, not a finding.
+
+## 8. Recommendations (prioritized)
+
+1. **Remove the 8 placeholder stubs** (must-fix before SFT) — run `/workspaces/ai-agent-llms/scripts/remove_placeholder_conversations.py`. They are canned and will teach the "Handling X in state Y" / `{"placeholder":"value"}` antipattern.
+2. **Fix the telecom/healthcare tool-floor shortfall** (generator, two-part):
+   - *Structural-ceiling (telecom, healthcare):* canonical tool sets = 6 = the L4 floor with zero headroom. Either **enrich these domains' canonical tool sets to ≥7** so L4 subgraphs have room to satisfy the floor, or **exclude telecom/healthcare from L4 tool-floor expectations** and pin L4 to the headroom domains (travel/insurance/banking). Do not treat this as a pure selector bug — it is domain tightness.
+   - *Selector undershoot:* the 4 telecom 11-state/2-tool samples (`L4_010_3`, `L4_029_3`, `L4_081_5`, `L4_047_9`) are a thin-subgraph bug independent of domain size; tighten the subgraph selector's lower bound to the tier `target_path_len` floor (12) and `num_tools` floor (6).
+3. **No action on Thai corruption** — clean by both signals; `code_switch` is legitimate.
+4. **Optional:** rebalance behavior sampling toward 60% cooperative if tier realism matters; cosmetic otherwise.
+
+Relevant files: dataset `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l4_merged_20260630.jsonl`; cleaners `/workspaces/ai-agent-llms/scripts/remove_placeholder_conversations.py` and `/workspaces/ai-agent-llms/scripts/clean_corrupted_conversations.py`; canonical detector `/workspaces/ai-agent-llms/src/llm_workflow_agents/data/data_validator.py`.</result>
+<usage><subagent_tokens>61114</subagent_tokens><tool_uses>20</tool_uses><duration_ms>302979</duration_ms></usage>
+</task-notification>
+
+---
+
+Filter the placeholder stubs
+
+---
+
+Verify @data/output/sft/task_a_merged/l5_merged_20260630.jsonl with data-verifier agent
+
+---
+
+<task-notification>
+<task-id>acf9ce8f7ea9d9e01</task-id>
+<tool-use-id>toolu_011CmMFSYaUzpkN9FGAFU4EE</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/b3ce099e-ec1c-438d-b328-3f0eb394b5c2/tasks/acf9ce8f7ea9d9e01.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify L5 merged Task A dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All evidence gathered. Here is the verdict.
+
+---
+
+# Task A L5 Dataset Verification — `l5_merged_20260630.jsonl`
+
+File: `/workspaces/ai-agent-llms/data/output/sft/task_a_merged/l5_merged_20260630.jsonl` (912 samples, 26 MB)
+
+## 1. Verdict
+
+**Sound-with-caveats.** Structurally clean (0 hard defects across all 912 samples) and qualitatively strong dialogue. Two action items before training: **drop the 15 placeholder-fallback stubs**, and accept (or re-scope) a **real L5 tier miss** — only 38% of teacher rows land fully in-band, driven mostly by genuine domain-impossibility, not generator undershoot.
+
+Spread: 912 samples — language en 305 / th 303 / code_switch 304 (even three-way); initiator user 619 / agent 293 (~32% outbound); domains telecom 237, insurance 184, banking 168, healthcare 163, travel 160 (correctly the 5 L5-eligible rich domains only); behavior cooperative 453 / adversarial 175 / invalid_tool_inputs 164 / digressing 120.
+
+## 2. Hard defects
+
+**Zero.** `validate_dataset(..., 'workflow')` → `valid: True | samples: 912 | clean: 912`, error_count 0, warning_count 0. quality_profiler → `HARD STRUCTURAL DEFECTS: 0`, `undeclared_nonloop_transitions: 0`, off-schema tool names 0, STATE-seq vs ground-truth mismatch 0.
+
+(Note: an apparent `num_tools=4` schema with null names in `L5_045_5` was a false alarm on my part — the names are nested under `function.name`; the schemas are well-formed. It is just telecom's smallest 4-tool subset.)
+
+## 3. Placeholder-fallback stubs — MUST REMOVE (15 rows)
+
+`generation_source == "placeholder_fallback"`, confirmed by `scripts/remove_placeholder_conversations.py --dry-run` (would remove 15). These are canned filler — assistant turns "Handling Banking &amp; Financial Services in state X." and tool args `{"placeholder": "value"}` (verified in `L5_041`). They pass structural validation but must not train a model.
+
+Full list (line / conversation_id):
+`L5_041`, `L5_057`, `L5_081`, `L5_010_2`, `L5_074_2`, `L5_083_2`, `L5_063_3`, `L5_012_4`, `L5_049_5`, `L5_055_5`, `L5_024_6`, `L5_006_8`, `L5_077_8`, `L5_043_9`, `L5_092_9`.
+
+Fix: run `scripts/remove_placeholder_conversations.py &lt;FILE&gt;` → yields 897 clean teacher rows.
+
+## 4. Thai-text corruption — NONE FOUND
+
+Both detectors agree on zero:
+- `detect_thai_corruption()` (canonical structural signals) → 0 records flagged.
+- `scripts/clean_corrupted_conversations.py --dry-run` (structural + `KNOWN_THAI_GARBLE` blocklist) → `kept 912, would remove 0`.
+
+I also hand-read 3 Thai / Thai-bearing conversations (`L5_002`, `L5_001_9`, `L5_009_7`): the Thai is natural, register-consistent (polite ค่ะ/ครับ), and not machine-literal. One **cosmetic** oddity in `L5_009_7`: the phrase "ราเม็งข้อสอบ" ("exam ramen") appears twice — a teacher word-choice slip (likely intended "ร้านราเม็งเด็ดๆ"), not transcription garble. It would slip past both signals (no Latin-in-Thai, no obsolete consonant, not in blocklist) and does not warrant a new blocklist entry — it is a one-off semantic typo, not systematic corruption.
+
+## 5. Spec conformance — REAL TIER MISS (mostly domain-impossibility)
+
+Among the 897 teacher rows: **only 38.2% are fully in-band** (tools ≥ 7 AND states ≥ 16). `num_tools &lt; 7`: 61.8%. `num_states &lt; 16`: 44.4%. quality_profiler reported 960 spec-conformance violation lines.
+
+**num_tools floor (≥7) — predominantly STRUCTURAL-CEILING (genuine impossibility):**
+
+| domain | max tools available | meets L5 floor 7? | diagnosis |
+|---|---|---|---|
+| insurance | 8 | yes | ok |
+| banking | 7 | yes (exactly) | ok |
+| telecom | 6 | **no** | canonical inventory &lt; floor → impossible |
+| healthcare | 6 | **no** | canonical inventory &lt; floor → impossible |
+| travel | 6 | **no** | canonical inventory &lt; floor → impossible |
+
+This confirms and extends the L4 finding: telecom and healthcare have only 6 canonical tools, and **travel does too**. L5 did **not** exclude them — it admitted all 5 rich domains and 3 of them structurally cannot reach the 7-tool floor. The profiler's STRUCTURAL-CEILING notes only cover *state* ceilings and silently miss this tool-floor impossibility, so it reads as 554 "violations" that are actually unfixable for those domains.
+
+**num_states band (16,20) — mix of ceiling + undershoot:**
+- No sample anywhere reaches above 16; the band's mid/upper range (17–20) is **unreachable** for every L5 domain (canonical max 16–17) — genuine ceiling, matching the profiler notes.
+- banking / travel / insurance reach 16 (floor, ok).
+- **telecom** max produced 15 (canonical 16) and **healthcare** max produced 14 (canonical 16) — these are **generator subgraph-selector undershoots**: the canonical graph is large enough to hit the floor of 16, but the selector picked fewer states. These two are the only genuinely *fixable* state shortfalls.
+
+**chain_depth / loops / recovery — pass:** tool-chain propagation present in 452 samples (max 5 hops in a single conversation, ≥ chain_depth 4); recovery arcs in 837 samples (`include_recovery` satisfied); back-edge/self-loop behavior healthy.
+
+## 6. Qualitative findings (5 conversations hand-read)
+
+Dialogue quality is high. Behavior fidelity, tool realism, and chain propagation all hold up:
+- `L5_002` (telecom, code_switch, adversarial_probing, inbound): user genuinely probes — challenges why identity verification is needed, asks about hidden 12-month contract lock-in, pushes back on an 899-baht upsell and counter-offers a cheaper plan. `account_id ACT9988` propagates through all 5 tool calls; `change_plan` → `activate_roaming` chains correctly; `error: Service temporarily unavailable` → retry recovery reads naturally.
+- `L5_005_5` (travel, en, invalid_tool_inputs, inbound): user supplies genuinely bad inputs ("some day next month", "super-first-class", "redeem minus 500 points") and the agent rejects each with a correct-format request. `reservation_id RSV98765` from `book_reservation` feeds `redeem_points`. Real propagation, not pasted-back input.
+- `L5_001_9` (healthcare, th, cooperative, outbound): purposeful agent opener (physiotherapy appointment reminder). `patient_id P10245` and `auth_id AUTH-44332` propagate downstream; verify_coverage → check_claim → submit_prior_auth → review chains coherently.
+- `L5_009_7` (travel, th, digressing, inbound): user actually digresses (weather small-talk, "can I bring pork snacks to Japan", Shinjuku ramen) and the agent gracefully acknowledges then steers back to task.
+
+Minor realism quibble (cosmetic, both travel samples): the `ISSUE_DOCUMENTS` state re-calls `check_visa_requirements` as a stand-in for a document-issuance tool — an artifact of travel's 6-tool inventory having no dedicated issuance tool. Not a defect, but a visible symptom of the same tool-floor shortage flagged in §5.
+
+## 7. Cosmetic
+
+- **Arrow glyphs:** unicode `→` dominates 15093 vs ASCII `-&gt;` 433 (97% unicode). The `serving/orchestrator.py` ASCII-only STATE regex is a known latent consumer issue — flag if that path ever ingests this data.
+- **Behavior mix vs 60/15/15/10 target:** cooperative is under-weight at 49.5% (target 60), with adversarial 19% / invalid 18.2% / digressing 13.4% all running hot. Non-blocking skew but worth noting for tier balance.
+- **Self-loop share** 35.7% — expected generator convention, not a finding.
+
+## 8. Recommendations (prioritized)
+
+1. **[MUST, before training] Remove the 15 placeholder stubs** — `python scripts/remove_placeholder_conversations.py /workspaces/ai-agent-llms/data/output/sft/task_a_merged/l5_merged_20260630.jsonl`. They are canned and will teach degenerate "Handling X in state Y" / `{"placeholder":"value"}` behavior.
+2. **[Decide] Re-scope L5 domain eligibility or relax the L5 tool floor.** telecom, healthcare, and travel cannot reach `num_tools ≥ 7` (canonical inventory is 6) — this is genuine impossibility, not a generator bug. Either (a) restrict L5 to banking + insurance (the only domains that can satisfy num_tools ≥ 7), or (b) lower the L5 floor to 6 and/or expand the canonical tool sets for those three domains. Do **not** chase this as a generator subgraph fix — it can't be fixed by the selector.
+3. **[Fix generator] Bump the subgraph selector's state floor for telecom (15→16) and healthcare (14→16).** These two undershoot a reachable canonical max of 16; this *is* a selector bug and is fixable, unlike the 17–20 upper-band which is a hard ceiling for all 5 domains.
+4. **[Profiler enhancement, optional] Add tool-floor STRUCTURAL-CEILING detection.** The profiler emits state-ceiling notes but reports tool-floor impossibility as plain violations, obscuring the undershoot-vs-impossible distinction that drives recommendations 2 vs 3.
+5. **[No action] Thai corruption** — clean; no blocklist additions needed.</result>
+<usage><subagent_tokens>66766</subagent_tokens><tool_uses>19</tool_uses><duration_ms>246275</duration_ms></usage>
+</task-notification>
+
+---
+
+Filter the placeholder stubs
