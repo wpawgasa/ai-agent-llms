@@ -45,6 +45,8 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Local vLLM (DiffusionGemma) bearer token — referenced as env.VLLM_API_KEY in config.json
       VLLM_API_KEY: ${VLLM_API_KEY:-}
+      # Local vLLM base URL — referenced as env.VLLM_API_URL in config.json
+      VLLM_API_URL: ${VLLM_API_URL:-http://vllm:8000}
       # BiFrost Configuration
       APP_PORT: '8080'
       APP_HOST: 0.0.0.0
