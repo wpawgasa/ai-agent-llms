@@ -49,9 +49,9 @@ stages:
     outs:
     - path: data/output/benchmark/task_a
       hash: md5
-      md5: bca6a9943285f0ac7f026b558fe0badc.dir
-      size: 8410342
-      nfiles: 21
+      md5: 2a0d3203e1d4f0b0cb4b3780deff8fba.dir
+      size: 4874485
+      nfiles: 11
   task_a_sft:
     cmd: "./scripts/generate_sft_data.sh && python scripts/clean_task_a_sft.py\n \
       \ --input-dir data/output/sft/task_a\n  --output-dir data/output/sft/task_a_cleaned\n\
@@ -71,19 +71,19 @@ stages:
       size: 6445
     - path: scripts/generate_sft_data.sh
       hash: md5
-      md5: 81aacfbf2b7507ea32ca8670c8b10bae
-      size: 5774
+      md5: 47c0102aacda10ae78e3965e5134b72f
+      size: 7704
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: 224d2229344cac0e18f0f377d9047aca
-      size: 55421
+      md5: 74ad560b819135ce9f16d7c8cb9558ad
+      size: 83914
     outs:
     - path: data/output/sft/task_a
       hash: md5
-      md5: d112a5e4b77be6c495a8fbe163141273.dir
-      size: 114044226
-      nfiles: 128
+      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
+      size: 220921413
+      nfiles: 11
     - path: data/output/sft/task_a_cleaned
       hash: md5
       md5: 8ef8681808e348f82eac36edbbd6c2ae.dir
