@@ -166,5 +166,57 @@ stages:
       - checkpoints/grpo_cat_a/gemma-4-26B-A4B-it
 
   # ---------------------------------------------------------------------------
-  # Task B and Task C stages will be added once recipes are defined.
+  # Task B stages will be added once the recipe is defined.
   # ---------------------------------------------------------------------------
+
+  task_c_pairs_generate:
+    desc: >-
+      ~5,000 playbook -> WorkflowGraph pairs (Task C SFT corpus), seed=142.
+      Requires OPENAI_API_KEY and GEMINI_API_KEY. See
+      docs/data_generation_recipes_task_c.md.
+    cmd: ./scripts/generate_playbook_sft_data.sh
+    deps:
+      - scripts/generate_playbook_sft_data.sh
+      - src/llm_workflow_agents/data/generate_playbook_pairs.py
+      - src/llm_workflow_agents/data/_graph_invention.py
+      - src/llm_workflow_agents/data/_playbook_render.py
+      - src/llm_workflow_agents/data/_playbook_verify.py
+      - src/llm_workflow_agents/data/_workflow_script.py
+      - src/llm_workflow_agents/data/domain_registry.py
+      - src/llm_workflow_agents/eval/graph_extraction_eval.py
+      - data/templates/graph_output_schema.json
+    outs:
+      - data/output/sft/task_c
+
+  task_c_pairs_clean:
+    desc: >-
+      Re-validate, dedupe, and drop malformed Task C pairs.
+    cmd: >-
+      python scripts/clean_task_c_pairs.py
+      --input-dir data/output/sft/task_c
+      --output-dir data/output/sft/task_c_cleaned
+      --quiet
+    deps:
+      - scripts/clean_task_c_pairs.py
+      - data/output/sft/task_c
+    outs:
+      - data/output/sft/task_c_cleaned
+
+  task_c_pairs_split:
+    desc: >-
+      Group-wise train/validation/test partition of Task C pairs by the
+      generator-recorded split field, with held-out domain/register checks.
+    cmd: >-
+      python scripts/split_task_c_pairs.py
+      --input-dir data/output/sft/task_c_cleaned
+      --output-dir data/output/sft/task_c_splits
+      --group-key graph_id
+      --heldout-domains utilities,surveys
+      --heldout-registers manager_transcript
+      --seed 142
+      --force
+    deps:
+      - scripts/split_task_c_pairs.py
+      - data/output/sft/task_c_cleaned
+    outs:
+      - data/output/sft/task_c_splits
