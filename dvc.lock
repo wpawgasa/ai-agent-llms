@@ -201,3 +201,23 @@ stages:
       md5: 3c3617fbc657a15a0d205bed5cb8d08a.dir
       size: 323904051
       nfiles: 26
+  task_a_sft_splits:
+    cmd: "python scripts/split_task_a_sft.py\n  --input-dir data/output/sft/task_a_cleaned\n\
+      \  --output-dir data/output/sft/task_a_splits\n  --force"
+    deps:
+    - path: data/output/sft/task_a_cleaned
+      hash: md5
+      md5: 1cd63b31be6d6d9300a68816b65adaea.dir
+      size: 337941953
+      nfiles: 136
+    - path: scripts/split_task_a_sft.py
+      hash: md5
+      md5: ffc86e6669759a6db26a240011c851d9
+      size: 5581
+      isexec: true
+    outs:
+    - path: data/output/sft/task_a_splits
+      hash: md5
+      md5: 0e97723f0fc35b4d9ca2a2ac70c9e66c.dir
+      size: 223962683
+      nfiles: 3
