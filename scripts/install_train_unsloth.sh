@@ -89,12 +89,25 @@ python3 -m pip freeze 2>/dev/null \
     > "$CONSTRAINTS_FILE" || true
 echo "  -> $(wc -l < "$CONSTRAINTS_FILE") constraints captured (transformers/hf-hub/tokenizers excluded)"
 
-# Overrides: torch 2.10.0+cu128 declares cuda-bindings==12.9.4 in its
-# metadata, but the unsloth container ships and runs against
-# cuda-bindings==12.8.0.  Force the resolver to honor the container's
-# working version (matches the system-site-packages install) instead of
-# pulling a divergent cuda-bindings into the venv overlay.
-echo "cuda-bindings==12.8.0" > "$OVERRIDES_FILE"
+# Overrides: torch's +cu128 wheel pins an exact cuda-bindings build in its
+# metadata, and the unsloth container may ship a different build than that
+# pin (historically metadata wanted 12.9.4 while the image had 12.8.0).  A
+# hardcoded pin here goes stale the moment the base image is rebuilt: if it
+# names a version the image no longer has, the resolver sees torch pinned to
+# BOTH the override and its real metadata pin and declares the graph
+# unsatisfiable.  Instead, derive the override from the cuda-bindings that
+# is ACTUALLY installed in the container.  That always matches the
+# system-site-packages install; when it also equals torch's metadata pin
+# (the current 12.9.4 == 12.9.4 case) the override is a harmless no-op, and
+# when they diverge it forces the resolver onto the container's working
+# build without a manual edit.
+CUDA_BINDINGS_VER="$(python3 -c 'import importlib.metadata as m; print(m.version("cuda-bindings"))' 2>/dev/null || true)"
+if [[ -n "$CUDA_BINDINGS_VER" ]]; then
+    echo "cuda-bindings==$CUDA_BINDINGS_VER" > "$OVERRIDES_FILE"
+    echo "  -> pinning cuda-bindings override to container version $CUDA_BINDINGS_VER"
+else
+    echo "  -> cuda-bindings not found in container; no override written"
+fi
 
 # ── 3. Install project src (editable, no dep re-resolution) ──────────────────
 # --no-deps registers the src/ package as importable without touching the
