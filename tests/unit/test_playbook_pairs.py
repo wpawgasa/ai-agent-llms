@@ -2,15 +2,65 @@
 
 from __future__ import annotations
 
+import json
 import random
 
+import llm_workflow_agents.data._playbook_render as pr
+import llm_workflow_agents.data._playbook_verify as pv
 import llm_workflow_agents.data.generate_playbook_pairs as gpp
+from tests.unit._task_c_helpers import CompliantTeacher
 from llm_workflow_agents.data.generate_playbook_pairs import (
     TASK_C_LEVEL_WEIGHTS,
+    GraphPoolEntry,
+    RenderingPlan,
     assign_splits,
     build_graph_pool,
     plan_renderings,
+    produce_rendering,
 )
+
+_VERIFY_TEACHERS = {"gpt": "gemini-3-flash", "gemini": "gpt-5.4-nano-2026-03-17"}
+
+_TINY_ENTRY = GraphPoolEntry(
+    graph_id="G0001",
+    source="registry",
+    domain="testdomain",
+    complexity_level="L1",
+    graph={
+        "states": ["START", "WORK", "TERMINAL"],
+        "state_details": [
+            {"name": "START", "tools": [], "entry_actions": [], "instruction": ""},
+            {"name": "WORK", "tools": ["do_thing"], "entry_actions": [], "instruction": ""},
+            {"name": "TERMINAL", "tools": [], "entry_actions": [], "instruction": ""},
+        ],
+        "transitions": [
+            {"from": "START", "to": "WORK", "condition": "begin", "priority": 0},
+            {"from": "WORK", "to": "TERMINAL", "condition": "done", "priority": 0},
+        ],
+        "initial": "START",
+        "terminal": ["TERMINAL"],
+    },
+    tool_schemas=[{"type": "function", "function": {"name": "do_thing", "description": "do",
+                                                    "parameters": {"type": "object", "properties": {}}}}],
+)
+
+
+def _plan(register="prose_narrative", distractor_count=0):
+    return RenderingPlan(
+        pair_id="G0001_r1", graph_id="G0001", register=register, language="en",
+        distractor_count=distractor_count, paraphrase_density="low", condition_explicitness="explicit",
+    )
+
+
+def _produce_one(monkeypatch, teacher, register="prose_narrative", distractor_count=0,
+                 do_back_extraction=False, verifier_response=None):
+    monkeypatch.setattr(pr, "call_teacher_model", teacher)
+    if do_back_extraction and verifier_response is not None:
+        monkeypatch.setattr(pv, "call_teacher_model", lambda m, s, u: verifier_response)
+    return produce_rendering(
+        _TINY_ENTRY, _plan(register, distractor_count), "train", "gpt-5.4-mini-2026-03-17",
+        _VERIFY_TEACHERS, do_back_extraction, random.Random(1),
+    )
 
 _TINY_GRAPH = {
     "states": ["START", "WORK", "TERMINAL"],
@@ -112,3 +162,89 @@ def test_plan_renderings_knob_language_distribution(monkeypatch):
 
 def test_level_weights_sum_to_one():
     assert abs(sum(TASK_C_LEVEL_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+# --- Task 6: produce_rendering ---
+
+def test_row_schema_complete(monkeypatch):
+    row, reason = _produce_one(monkeypatch, CompliantTeacher())
+    assert reason == "accepted"
+    expected = {"pair_id", "graph_id", "source", "domain", "complexity_level", "register",
+                "language", "num_states", "num_edges", "distractor_count", "paraphrase_density",
+                "condition_explicitness", "verification", "graph", "messages", "split"}
+    assert set(row) == expected
+    assert json.loads(row["messages"][2]["content"]) == row["graph"]
+    assert row["messages"][2]["content"].isascii()
+    assert set(row["verification"]) == {"anchor_coverage", "edge_ref_coverage", "back_extraction"}
+    assert row["num_states"] == 3 and row["num_edges"] == 2
+    assert row["pair_id"] == "G0001_r1"
+
+
+def test_repair_then_accept(monkeypatch):
+    teacher = CompliantTeacher(drop_anchor_on_first_call="WORK")
+    row, reason = _produce_one(monkeypatch, teacher)
+    assert reason == "accepted" and teacher.calls == 2
+    assert "missing state anchor: WORK" in teacher.prompts[1]
+
+
+def test_drop_after_exhausted_repairs(monkeypatch):
+    teacher = CompliantTeacher(always_drop_anchor="WORK")
+    row, reason = _produce_one(monkeypatch, teacher)
+    assert row is None and reason == "verification" and teacher.calls == 3
+
+
+def test_distractor_purity_filtered_no_teacher_recall(monkeypatch):
+    # Poison the first en distractor with a tool name; draw_distractors must exclude it.
+    poisoned = ("Always audit every do_thing invocation in the ledger.",) + pr.DISTRACTOR_LIBRARY["en"]
+    monkeypatch.setattr(pr, "DISTRACTOR_LIBRARY", {**pr.DISTRACTOR_LIBRARY, "en": poisoned})
+    teacher = CompliantTeacher()
+    row, reason = _produce_one(monkeypatch, teacher, distractor_count=1)
+    assert reason == "accepted" and teacher.calls == 1  # filtering is free, no re-render
+    assert "do_thing invocation in the ledger" not in row["messages"][1]["content"]
+
+
+def test_back_extraction_failure_drops(monkeypatch):
+    empty = json.dumps({"nodes": [], "edges": [], "initial_state": "", "terminal_states": []})
+    row, reason = _produce_one(monkeypatch, CompliantTeacher(), do_back_extraction=True,
+                               verifier_response=empty)
+    assert row is None and reason == "back_extraction"
+
+
+def test_ids_rederived_per_rendering(monkeypatch):
+    # Graph with a branch: START ->(p0) X, START ->(p1) Y, both -> TERMINAL.
+    entry = GraphPoolEntry(
+        graph_id="G0001", source="registry", domain="d", complexity_level="L1",
+        graph={
+            "states": ["START", "X", "Y", "TERMINAL"],
+            "state_details": [
+                {"name": n, "tools": [], "entry_actions": [], "instruction": ""}
+                for n in ["START", "X", "Y", "TERMINAL"]
+            ],
+            "transitions": [
+                {"from": "START", "to": "X", "condition": "default", "priority": 0},
+                {"from": "START", "to": "Y", "condition": "fallback", "priority": 1},
+                {"from": "X", "to": "TERMINAL", "condition": "d", "priority": 0},
+                {"from": "Y", "to": "TERMINAL", "condition": "d", "priority": 0},
+            ],
+            "initial": "START", "terminal": ["TERMINAL"],
+        },
+        tool_schemas=[],
+    )
+    playbook_a = ("### START\nBegin. Proceed to X priority 0. Alternatively go to Y priority 1.\n\n"
+                  "### X\nDo X. Proceed to TERMINAL.\n\n### Y\nDo Y. Proceed to TERMINAL.\n\n"
+                  "### TERMINAL\nDone.")
+    playbook_b = ("### START\nBegin. Consider fallback Y priority 1, otherwise proceed to X priority 0.\n\n"
+                  "### X\nDo X. Proceed to TERMINAL.\n\n### Y\nDo Y. Proceed to TERMINAL.\n\n"
+                  "### TERMINAL\nDone.")
+
+    def make_row(text):
+        monkeypatch.setattr(pr, "call_teacher_model", lambda m, s, u: json.dumps({"playbook": text}))
+        row, reason = produce_rendering(entry, _plan("prose_narrative"), "train",
+                                        "gpt-5.4-mini-2026-03-17", _VERIFY_TEACHERS, False,
+                                        random.Random(1))
+        assert reason == "accepted", row
+        return row
+
+    name_a = {n["id"]: n["name"] for n in make_row(playbook_a)["graph"]["nodes"]}
+    name_b = {n["id"]: n["name"] for n in make_row(playbook_b)["graph"]["nodes"]}
+    assert name_a["S2"] == "X" and name_b["S2"] == "Y"

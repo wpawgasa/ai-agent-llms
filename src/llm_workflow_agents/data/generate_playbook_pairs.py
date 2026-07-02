@@ -10,6 +10,7 @@ built in three layers:
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from typing import Any
@@ -18,7 +19,14 @@ import structlog
 
 from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
 from llm_workflow_agents.data._graph_invention import DOMAIN_BRIEFS, invent_novel_graphs
-from llm_workflow_agents.data._playbook_render import Register
+from llm_workflow_agents.data._playbook_render import Register, draw_distractors, render_playbook
+from llm_workflow_agents.data._playbook_verify import (
+    EXTRACTION_SYSTEM_PROMPT,
+    back_extract_check,
+    graph_to_eval_shape,
+    pick_verifier,
+    verify_rendering,
+)
 from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
 from llm_workflow_agents.data.generate_workflows import _select_domain, select_subgraph
 
@@ -212,3 +220,93 @@ def plan_renderings(
                 )
             )
     return plans
+
+
+def produce_rendering(
+    entry: GraphPoolEntry,
+    plan: RenderingPlan,
+    split: str | None,
+    render_teacher: str,
+    verify_teachers: dict[str, str],
+    do_back_extraction: bool,
+    rng: random.Random,
+    max_repair_retries: int = 2,
+) -> tuple[dict[str, Any] | None, str]:
+    """Render -> verify -> repair -> (optional) back-extract -> assemble one JSONL row.
+
+    Returns (row, "accepted") or (None, drop_reason) where drop_reason is one of
+    "teacher_error", "verification", "back_extraction".
+    """
+    graph = entry.graph
+    state_names = list(graph["states"])
+    tool_names = sorted({t for sd in graph["state_details"] for t in sd["tools"]})
+    # draw_distractors already excludes any paragraph leaking a state/tool name.
+    distractors = draw_distractors(
+        plan.distractor_count, plan.language, rng, forbidden_terms=state_names + tool_names
+    )
+    knobs = {
+        "distractor_count": plan.distractor_count,
+        "paraphrase_density": plan.paraphrase_density,
+        "condition_explicitness": plan.condition_explicitness,
+        "_distractors": distractors,
+    }
+
+    corrections: list[str] | None = None
+    report = None
+    playbook = ""
+    for _attempt in range(max_repair_retries + 1):
+        try:
+            playbook = render_playbook(
+                graph, entry.tool_schemas, plan.register, plan.language, knobs,
+                render_teacher, rng, corrections=corrections,
+            )
+        except Exception as exc:  # noqa: BLE001 - teacher/parse failures drop the rendering
+            logger.warning("playbook_render_failure", pair_id=plan.pair_id, error=str(exc))
+            return None, "teacher_error"
+        report = verify_rendering(playbook, graph, tool_names)
+        if report.accepted:
+            break
+        corrections = report.corrections
+    else:
+        return None, "verification"
+
+    assert report is not None and report.state_ids is not None
+    gold_eval = graph_to_eval_shape(graph, report.state_ids)
+
+    back_extraction: dict[str, Any] | None = None
+    if do_back_extraction:
+        verifier = pick_verifier(render_teacher, verify_teachers)
+        result = back_extract_check(playbook, gold_eval, verifier)
+        if not result["passed"]:
+            return None, "back_extraction"
+        back_extraction = {"node_f1": result["node_f1"], "edge_f1": result["edge_f1"]}
+
+    assistant = json.dumps(gold_eval, separators=(",", ":"), ensure_ascii=True)
+    row: dict[str, Any] = {
+        "pair_id": plan.pair_id,
+        "graph_id": plan.graph_id,
+        "source": entry.source,
+        "domain": entry.domain,
+        "complexity_level": entry.complexity_level,
+        "register": plan.register,
+        "language": plan.language,
+        "num_states": len(gold_eval["nodes"]),
+        "num_edges": len(gold_eval["edges"]),
+        "distractor_count": len(distractors),
+        "paraphrase_density": plan.paraphrase_density,
+        "condition_explicitness": plan.condition_explicitness,
+        "verification": {
+            "anchor_coverage": report.anchor_coverage,
+            "edge_ref_coverage": report.edge_ref_coverage,
+            "back_extraction": back_extraction,
+        },
+        "graph": gold_eval,
+        "messages": [
+            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": playbook},
+            {"role": "assistant", "content": assistant},
+        ],
+    }
+    if split is not None:
+        row["split"] = split
+    return row, "accepted"
