@@ -100,17 +100,17 @@ stages:
       size: 1133
     - path: configs/training/sft_cat_a.yaml
       hash: md5
-      md5: 6323c277ca12a706ef5ddeab2fe3505f
-      size: 1822
+      md5: 20fdd78e013a93ce74eb84bf160b9cd8
+      size: 2254
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 8ef8681808e348f82eac36edbbd6c2ae.dir
-      size: 227958540
-      nfiles: 131
+      md5: 1cd63b31be6d6d9300a68816b65adaea.dir
+      size: 337941953
+      nfiles: 136
     - path: scripts/run_phase2_sft.sh
       hash: md5
-      md5: 204fa36d41a44c9b3467dadbf006ebdb
-      size: 8227
+      md5: c96377e88e5b0e1d07fda5fcb4a9b599
+      size: 7426
       isexec: true
     - path: src/llm_workflow_agents/training/lora_targets.py
       hash: md5
@@ -118,14 +118,14 @@ stages:
       size: 9466
     - path: src/llm_workflow_agents/training/sft.py
       hash: md5
-      md5: dc74aa236b849724220ed0cf9b7dfbaf
-      size: 34398
+      md5: a0e31d2c1dcc2980b46fff937cf40eb4
+      size: 40119
     outs:
     - path: checkpoints/sft_cat_a/gemma-4-26B-A4B-it
       hash: md5
-      md5: 7c6bd069b79501949ff60b8079af082a.dir
-      size: 560242205
-      nfiles: 46
+      md5: f89238076f5b09ca0d76e5b9ab98e4ec.dir
+      size: 980680259
+      nfiles: 79
   task_a_grpo:
     cmd: "python scripts/filter_grpo_data.py\n  --input-dir data/output/sft/task_a_splits\n\
       \  --output-dir data/output/grpo/task_a"
