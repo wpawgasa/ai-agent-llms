@@ -1,0 +1,40 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "ed83b8b7bf3e",
+  "session_id": "80f45bce-cf74-4f45-8c11-3ace032165a2",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-02T07:56:05.765137933Z",
+  "branch": "feat/task-c-playbook-pairs",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/clean_task_c_pairs.py",
+    "scripts/split_task_c_pairs.py",
+    "src/llm_workflow_agents/data/_graph_invention.py",
+    "src/llm_workflow_agents/data/generate_playbook_pairs.py",
+    "tests/unit/test_playbook_pairs.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-fable-5",
+  "turn_id": "8e7751e6f518",
+  "checkpoint_transcript_start": 794,
+  "transcript_lines_at_start": 794,
+  "token_usage": {
+    "input_tokens": 291,
+    "cache_creation_tokens": 20211,
+    "cache_read_tokens": 6840030,
+    "output_tokens": 13327,
+    "api_call_count": 17
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-02T07:56:03.1178972Z",
+    "agent_lines": 0,
+    "human_added": 33,
+    "human_modified": 9,
+    "human_removed": 0,
+    "total_committed": 33,
+    "agent_percentage": 0
+  }
+}
