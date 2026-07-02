@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -310,3 +313,230 @@ def produce_rendering(
     if split is not None:
         row["split"] = split
     return row, "accepted"
+
+
+_MIN_RENDERINGS_PER_GRAPH = 3
+_HALT_MIN_CHECKS = 10
+_HALT_FAILURE_RATIO = 0.20
+
+
+@dataclass
+class DatasetStats:
+    """Summary of a playbook-pair generation run (mirrors DatasetMetadata)."""
+
+    output_dir: Path
+    output_files: list[Path] = field(default_factory=list)
+    stats_file: Path | None = None
+    graphs_registry: int = 0
+    graphs_invented: int = 0
+    graphs_dropped_lt3: int = 0
+    renderings_attempted: int = 0
+    renderings_accepted: int = 0
+    dropped_by_reason: dict[str, int] = field(default_factory=dict)
+    back_extraction: dict[str, int] = field(default_factory=dict)
+    halted_legs: list[str] = field(default_factory=list)
+    rows_by_register: dict[str, int] = field(default_factory=dict)
+    rows_by_language: dict[str, int] = field(default_factory=dict)
+    rows_by_split: dict[str, int] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "graphs_registry": self.graphs_registry,
+            "graphs_invented": self.graphs_invented,
+            "graphs_dropped_lt3": self.graphs_dropped_lt3,
+            "renderings_attempted": self.renderings_attempted,
+            "renderings_accepted": self.renderings_accepted,
+            "dropped_by_reason": self.dropped_by_reason,
+            "back_extraction": self.back_extraction,
+            "halted_legs": self.halted_legs,
+            "rows_by_register": self.rows_by_register,
+            "rows_by_language": self.rows_by_language,
+            "rows_by_split": self.rows_by_split,
+        }
+
+
+def _leg_should_halt(checked: int, failed: int) -> bool:
+    """A language leg halts once it has enough checks and the failure ratio exceeds the bound."""
+    return checked >= _HALT_MIN_CHECKS and (failed / checked) > _HALT_FAILURE_RATIO
+
+
+def _drop_undersized_graphs(
+    rows: list[dict[str, Any]], min_renderings: int = _MIN_RENDERINGS_PER_GRAPH
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Drop all rows of any graph with fewer than `min_renderings` accepted renderings.
+
+    Returns (kept_rows, num_graphs_dropped, num_rows_dropped).
+    """
+    counts = Counter(r["graph_id"] for r in rows)
+    undersized = {gid for gid, c in counts.items() if c < min_renderings}
+    kept = [r for r in rows if r["graph_id"] not in undersized]
+    rows_dropped = len(rows) - len(kept)
+    return kept, len(undersized), rows_dropped
+
+
+def _plan_all_registers(
+    pool: list[GraphPoolEntry], language_mix: dict[str, float], rng: random.Random
+) -> list[RenderingPlan]:
+    """Benchmark planning: every graph gets all six registers, no split constraint."""
+    plans: list[RenderingPlan] = []
+    for entry in pool:
+        registers = list(REGISTERS)
+        rng.shuffle(registers)
+        for i, register in enumerate(registers, start=1):
+            distractor_count = 0 if rng.random() >= 0.30 else rng.randint(1, 3)
+            plans.append(
+                RenderingPlan(
+                    pair_id=f"{entry.graph_id}_r{i}",
+                    graph_id=entry.graph_id,
+                    register=register,
+                    language=_weighted_choice(rng, language_mix),
+                    distractor_count=distractor_count,
+                    paraphrase_density=rng.choices(["low", "medium", "high"], weights=[0.4, 0.4, 0.2], k=1)[0],
+                    condition_explicitness=rng.choices(
+                        ["explicit", "narrative_order", "listing_order"], weights=[0.4, 0.35, 0.25], k=1
+                    )[0],
+                )
+            )
+    return plans
+
+
+def _sanitize_model(model: str) -> str:
+    return model.replace(".", "-")
+
+
+def generate_playbook_dataset(
+    num_graphs: int = 850,
+    renderings_per_graph: tuple[int, int] = (4, 6),  # noqa: ARG001 - documented; planning uses (4,6)
+    invented_ratio: float = 0.30,
+    language_mix: dict[str, float] | None = None,
+    render_teachers: dict[str, str] | None = None,
+    verify_teachers: dict[str, str] | None = None,
+    back_extraction_rate: float = 0.10,
+    seed: int = 142,
+    output_dir: Path = Path("data/output/sft/task_c"),
+    invention_teacher: str = "gpt-5.4-mini-2026-03-17",
+    benchmark_mode: bool = False,
+) -> DatasetStats:
+    """Generate the Task C playbook->graph dataset. Returns a DatasetStats summary.
+
+    In benchmark_mode: all six registers per graph, no `split` field, and a compact
+    output filename. Otherwise splits are pre-assigned at the graph level and every
+    row carries its split.
+    """
+    language_mix = language_mix or {"en": 0.5, "th": 0.3, "code_switch": 0.2}
+    render_teachers = render_teachers or {
+        "en": "gpt-5.4-mini-2026-03-17",
+        "th": "gemini-3-flash-preview",
+        "code_switch": "gpt-5.4-nano-2026-03-17",
+    }
+    verify_teachers = verify_teachers or {"gpt": "gemini-3-flash", "gemini": "gpt-5.4-nano-2026-03-17"}
+
+    rng = random.Random(seed)
+    pool = build_graph_pool(num_graphs, invented_ratio, invention_teacher, rng)
+    by_id = {e.graph_id: e for e in pool}
+
+    if benchmark_mode:
+        splits: dict[str, str] = {}
+        plans = _plan_all_registers(pool, language_mix, rng)
+    else:
+        splits = assign_splits(pool, seed=seed)
+        plans = plan_renderings(pool, splits, language_mix, rng)
+
+    leg_state: dict[str, dict[str, int]] = defaultdict(lambda: {"checked": 0, "failed": 0})
+    halted: set[str] = set()
+    dropped: dict[str, int] = defaultdict(int)
+    accepted_rows: list[dict[str, Any]] = []
+    attempted = 0
+
+    for plan in plans:
+        attempted += 1
+        leg = plan.language
+        if leg in halted:
+            dropped["leg_halted"] += 1
+            continue
+        do_back = rng.random() < back_extraction_rate
+        render_teacher = render_teachers[leg]
+        split = None if benchmark_mode else splits[plan.graph_id]
+        row, reason = produce_rendering(
+            by_id[plan.graph_id], plan, split, render_teacher, verify_teachers, do_back, rng
+        )
+        if do_back:
+            st = leg_state[leg]
+            st["checked"] += 1
+            if reason == "back_extraction":
+                st["failed"] += 1
+            if _leg_should_halt(st["checked"], st["failed"]):
+                halted.add(leg)
+        if row is None:
+            dropped[reason] += 1
+        else:
+            accepted_rows.append(row)
+
+    kept, graphs_dropped, rows_dropped = _drop_undersized_graphs(accepted_rows)
+    if rows_dropped:
+        dropped["graph_dropped_lt3"] += rows_dropped
+
+    # Write output files bucketed by (source, language).
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_files: list[Path] = []
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in kept:
+        buckets[(row["source"], row["language"])].append(row)
+    for (source, language), rows in sorted(buckets.items()):
+        model = _sanitize_model(render_teachers[language])
+        if benchmark_mode:
+            filename = f"playbook_pairs_{model}_{timestamp}.jsonl"
+        else:
+            filename = f"pairs_{source}_{language}_{model}_{timestamp}.jsonl"
+        path = output_dir / filename
+        with path.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        output_files.append(path)
+
+    stats = DatasetStats(
+        output_dir=output_dir,
+        output_files=output_files,
+        graphs_registry=sum(1 for e in pool if e.source == "registry"),
+        graphs_invented=sum(1 for e in pool if e.source == "invented"),
+        graphs_dropped_lt3=graphs_dropped,
+        renderings_attempted=attempted,
+        renderings_accepted=len(kept),
+        dropped_by_reason=dict(dropped),
+        back_extraction={
+            "checked": sum(s["checked"] for s in leg_state.values()),
+            "failed": sum(s["failed"] for s in leg_state.values()),
+        },
+        halted_legs=sorted(halted),
+        rows_by_register=dict(Counter(r["register"] for r in kept)),
+        rows_by_language=dict(Counter(r["language"] for r in kept)),
+        rows_by_split=dict(Counter(r.get("split", "NA") for r in kept)),
+    )
+    stats_file = output_dir / f"stats_{timestamp}.json"
+    stats_file.write_text(json.dumps(stats.to_dict(), indent=2), encoding="utf-8")
+    stats.stats_file = stats_file
+    return stats
+
+
+def merge_benchmark_runs(input_paths: list[Path], output_path: Path) -> int:
+    """Merge benchmark run files by pair_id (first-listed run wins). Returns merged row count."""
+    seen: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for path in input_paths:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            pid = row["pair_id"]
+            if pid not in seen:
+                seen[pid] = row
+                order.append(pid)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as fh:
+        for pid in order:
+            fh.write(json.dumps(seen[pid], ensure_ascii=False) + "\n")
+    return len(order)

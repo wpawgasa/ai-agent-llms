@@ -8,13 +8,17 @@ import random
 import llm_workflow_agents.data._playbook_render as pr
 import llm_workflow_agents.data._playbook_verify as pv
 import llm_workflow_agents.data.generate_playbook_pairs as gpp
-from tests.unit._task_c_helpers import CompliantTeacher
+from tests.unit._task_c_helpers import CompliantTeacher, _patch_all_teachers
 from llm_workflow_agents.data.generate_playbook_pairs import (
     TASK_C_LEVEL_WEIGHTS,
     GraphPoolEntry,
     RenderingPlan,
+    _drop_undersized_graphs,
+    _leg_should_halt,
     assign_splits,
     build_graph_pool,
+    generate_playbook_dataset,
+    merge_benchmark_runs,
     plan_renderings,
     produce_rendering,
 )
@@ -248,3 +252,98 @@ def test_ids_rederived_per_rendering(monkeypatch):
     name_a = {n["id"]: n["name"] for n in make_row(playbook_a)["graph"]["nodes"]}
     name_b = {n["id"]: n["name"] for n in make_row(playbook_b)["graph"]["nodes"]}
     assert name_a["S2"] == "X" and name_b["S2"] == "Y"
+
+
+# --- Task 7: dataset orchestration ---
+
+def test_leg_should_halt():
+    assert not _leg_should_halt(5, 5)      # too few checks
+    assert not _leg_should_halt(10, 2)     # ratio 0.20 not > 0.20
+    assert _leg_should_halt(10, 3)         # 0.30 > 0.20
+    assert _leg_should_halt(20, 5)         # 0.25 > 0.20
+
+
+def test_drop_undersized_graphs():
+    rows = (
+        [{"graph_id": "G1"}] * 3
+        + [{"graph_id": "G2"}] * 2   # undersized
+        + [{"graph_id": "G3"}] * 5
+    )
+    kept, n_graphs, n_rows = _drop_undersized_graphs(rows, min_renderings=3)
+    assert n_graphs == 1 and n_rows == 2
+    assert {r["graph_id"] for r in kept} == {"G1", "G3"}
+
+
+def test_generate_dataset_end_counts(monkeypatch, tmp_path):
+    _patch_all_teachers(monkeypatch, CompliantTeacher())
+    stats = generate_playbook_dataset(num_graphs=8, invented_ratio=0.5, back_extraction_rate=0.0,
+                                      seed=142, output_dir=tmp_path)
+    assert stats.renderings_attempted == stats.renderings_accepted + sum(stats.dropped_by_reason.values())
+    assert stats.graphs_registry + stats.graphs_invented == 8
+    assert stats.output_files and all(f.exists() for f in stats.output_files)
+    assert stats.stats_file.exists()
+    # Every row of a graph shares one split; splits are valid.
+    rows = [json.loads(line) for f in stats.output_files for line in f.read_text().splitlines()]
+    by_graph: dict[str, set] = {}
+    for r in rows:
+        assert r["split"] in ("train", "validation", "test")
+        by_graph.setdefault(r["graph_id"], set()).add(r["split"])
+    assert all(len(s) == 1 for s in by_graph.values())
+
+
+def test_seed_determinism(monkeypatch, tmp_path):
+    def run(out):
+        _patch_all_teachers(monkeypatch, CompliantTeacher())
+        generate_playbook_dataset(num_graphs=6, invented_ratio=0.5, back_extraction_rate=0.0,
+                                  seed=142, output_dir=out)
+        rows = [line for f in sorted(out.glob("pairs_*.jsonl")) for line in f.read_text().splitlines()]
+        return sorted(rows)
+
+    assert run(tmp_path / "a") == run(tmp_path / "b")
+
+
+def test_halt_leg_on_back_extraction(monkeypatch, tmp_path):
+    import llm_workflow_agents.data._playbook_verify as pvmod
+    _patch_all_teachers(monkeypatch, CompliantTeacher())
+    # Verifier always returns an empty graph -> every back-extraction check fails.
+    monkeypatch.setattr(pvmod, "call_teacher_model",
+                        lambda m, s, u: json.dumps({"nodes": [], "edges": [],
+                                                    "initial_state": "", "terminal_states": []}))
+    stats = generate_playbook_dataset(num_graphs=40, invented_ratio=0.0, back_extraction_rate=1.0,
+                                      seed=142, output_dir=tmp_path)
+    assert stats.halted_legs  # at least one leg halted
+    assert stats.dropped_by_reason.get("leg_halted", 0) > 0
+
+
+def test_benchmark_mode(monkeypatch, tmp_path):
+    _patch_all_teachers(monkeypatch, CompliantTeacher())
+    stats = generate_playbook_dataset(num_graphs=4, invented_ratio=0.0, back_extraction_rate=0.0,
+                                      seed=200, output_dir=tmp_path, benchmark_mode=True)
+    rows = [json.loads(line) for f in stats.output_files for line in f.read_text().splitlines()]
+    assert rows and all("split" not in r for r in rows)
+    by_graph: dict[str, set] = {}
+    for r in rows:
+        by_graph.setdefault(r["graph_id"], set()).add(r["register"])
+    assert all(len(regs) == 6 for regs in by_graph.values())
+    assert all(f.name.startswith("playbook_pairs_") for f in stats.output_files)
+
+
+def test_merge_benchmark_runs_dedup(tmp_path):
+    def write(path, pair_ids, tag):
+        path.write_text("\n".join(json.dumps({"pair_id": p, "tag": tag}) for p in pair_ids) + "\n")
+
+    a = tmp_path / "run_a.jsonl"
+    b = tmp_path / "run_b.jsonl"
+    write(a, ["p1", "p2", "p3"], "a")
+    write(b, ["p2", "p3", "p4"], "b")  # p2,p3 shared
+    out = tmp_path / "merged.jsonl"
+    count = merge_benchmark_runs([a, b], out)
+    merged = [json.loads(line) for line in out.read_text().splitlines()]
+    assert count == 4
+    by_id = {r["pair_id"]: r["tag"] for r in merged}
+    assert by_id == {"p1": "a", "p2": "a", "p3": "a", "p4": "b"}  # first wins
+
+
+def test_public_export():
+    from llm_workflow_agents.data import generate_playbook_dataset as exported
+    assert exported is generate_playbook_dataset
