@@ -2,16 +2,44 @@
 
 from __future__ import annotations
 
+import json
 import random
 
+import pytest
+
+import llm_workflow_agents.data._playbook_verify as pv
 from llm_workflow_agents.data._playbook_verify import (
+    EXTRACTION_SYSTEM_PROMPT,
     assign_state_ids,
+    back_extract_check,
     check_distractor_purity,
     check_edge_references,
     find_anchor_occurrences,
     graph_to_eval_shape,
+    pick_verifier,
     verify_rendering,
 )
+
+GOLD_EVAL = {
+    "nodes": [
+        {"id": "S1", "name": "VERIFY_POLICYHOLDER", "tools": ["verify_policy"], "entry_actions": []},
+        {"id": "S2", "name": "CLAIM_INTAKE", "tools": ["file_claim"], "entry_actions": []},
+        {"id": "S3", "name": "ASSESS_COVERAGE", "tools": [], "entry_actions": []},
+        {"id": "S4", "name": "RESOLVE", "tools": [], "entry_actions": []},
+        {"id": "S5", "name": "REQUEST_DOCUMENTATION", "tools": [], "entry_actions": []},
+        {"id": "S6", "name": "TERMINAL", "tools": [], "entry_actions": []},
+    ],
+    "edges": [
+        {"from_state": "S1", "to_state": "S2", "condition": "policyholder verified", "priority": 0},
+        {"from_state": "S2", "to_state": "S3", "condition": "claim filed", "priority": 0},
+        {"from_state": "S3", "to_state": "S4", "condition": "coverage assessed", "priority": 0},
+        {"from_state": "S3", "to_state": "S5", "condition": "documentation missing", "priority": 1},
+        {"from_state": "S5", "to_state": "S3", "condition": "documents received", "priority": 0},
+        {"from_state": "S4", "to_state": "S6", "condition": "case closed", "priority": 0},
+    ],
+    "initial_state": "S1",
+    "terminal_states": ["S6"],
+}
 
 # Worked-example insurance graph, name-keyed interchange shape.
 INSURANCE_GRAPH = {
@@ -154,3 +182,41 @@ def test_check_distractor_purity():
     bad = ["Log every do_thing call.", "A clean paragraph about the weather."]
     offending = check_distractor_purity(bad, ["START", "WORK"], ["do_thing"])
     assert offending == ["Log every do_thing call."]
+
+
+def test_back_extraction_pass_and_prompt(monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake(model, system_prompt, user_prompt):
+        captured["sys"] = system_prompt
+        captured["user"] = user_prompt
+        return json.dumps(GOLD_EVAL)
+
+    monkeypatch.setattr(pv, "call_teacher_model", fake)
+    res = back_extract_check("the playbook text", GOLD_EVAL, "gemini-3-flash")
+    assert res == {"node_f1": 1.0, "edge_f1": 1.0, "passed": True}
+    assert captured["sys"] == EXTRACTION_SYSTEM_PROMPT
+    assert captured["user"] == "the playbook text"
+
+
+def test_back_extraction_fail_thresholds(monkeypatch):
+    partial = json.loads(json.dumps(GOLD_EVAL))
+    partial["edges"] = partial["edges"][:3]  # 3 of 6 edges -> edge F1 = 0.667 < 0.80
+    monkeypatch.setattr(pv, "call_teacher_model", lambda m, s, u: json.dumps(partial))
+    res = back_extract_check("x", GOLD_EVAL, "gemini-3-flash")
+    assert not res["passed"]
+    assert res["edge_f1"] < 0.80
+
+
+def test_back_extraction_unparseable(monkeypatch):
+    monkeypatch.setattr(pv, "call_teacher_model", lambda m, s, u: "sorry, I cannot help")
+    res = back_extract_check("x", GOLD_EVAL, "gpt-5.4-nano-2026-03-17")
+    assert res == {"node_f1": 0.0, "edge_f1": 0.0, "passed": False}
+
+
+def test_pick_verifier_cross_family():
+    vt = {"gpt": "gemini-3-flash", "gemini": "gpt-5.4-nano-2026-03-17"}
+    assert pick_verifier("gpt-5.4-mini-2026-03-17", vt) == "gemini-3-flash"
+    assert pick_verifier("gemini-3-flash-preview", vt) == "gpt-5.4-nano-2026-03-17"
+    with pytest.raises(ValueError):
+        pick_verifier("claude-x", vt)

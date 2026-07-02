@@ -14,10 +14,33 @@ is what lets the programmatic `state_script` register pass the edge-reference ga
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
+from llm_workflow_agents.data._teacher_client import call_teacher_model
+from llm_workflow_agents.eval.graph_extraction_eval import (
+    WorkflowGraph,
+    compute_edge_f1,
+    compute_node_f1,
+    parse_graph_json,
+)
+
 _EDGE_COVERAGE_THRESHOLD = 0.90
+_BACK_EXTRACTION_NODE_F1 = 0.90
+_BACK_EXTRACTION_EDGE_F1 = 0.80
+
+# Fixed extraction prompt (verbatim from docs/data_generation_recipes_task_c.md §System prompt).
+# Single source of truth: the orchestrator reuses this for messages[0] of every training pair.
+EXTRACTION_SYSTEM_PROMPT = (
+    "You are a workflow-graph extraction engine. Read the playbook and output ONLY a JSON "
+    "object with keys `nodes`, `edges`, `initial_state`, `terminal_states`. Nodes: "
+    '{"id": "S<n>", "name": "<SCREAMING_SNAKE state name as written in the playbook>", '
+    '"tools": [...], "entry_actions": [...]}. Number states in order of first mention; S1 is '
+    "the starting state. Edges: {\"from_state\", \"to_state\", \"condition\", \"priority\"} — "
+    "priority 0 for the default path, 1+ for alternatives in the order the playbook lists them. "
+    "Ignore content that does not describe workflow states, transitions, or tools. Output "
+    "English/ASCII JSON regardless of the playbook language. No markdown fences."
+)
 _HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s|\*\*|\d+(?:\.\d+)*[.)]?\s)")
 
 
@@ -193,3 +216,40 @@ def verify_rendering(
         initial_first=initial_first,
         state_ids=state_ids,
     )
+
+
+def _family_of(model: str) -> str:
+    if model.startswith("gpt"):
+        return "gpt"
+    if model.startswith("gemini"):
+        return "gemini"
+    raise ValueError(f"cannot determine model family for: {model}")
+
+
+def pick_verifier(render_model: str, verify_teachers: dict[str, str]) -> str:
+    """Return the cross-family verifier model for a rendering produced by `render_model`.
+
+    `verify_teachers` maps renderer family -> the (different-family) verifier model.
+    """
+    return verify_teachers[_family_of(render_model)]
+
+
+def back_extract_check(playbook: str, gold_eval_dict: dict[str, Any], verifier_model: str) -> dict[str, Any]:
+    """Have a cross-family teacher re-extract the graph; score node/edge F1 against gold.
+
+    Returns {"node_f1", "edge_f1", "passed"}. Unparseable verifier output fails at 0.0.
+    """
+    raw = call_teacher_model(verifier_model, EXTRACTION_SYSTEM_PROMPT, playbook)
+    parsed, ok = parse_graph_json(raw)
+    if not ok or parsed is None:
+        return {"node_f1": 0.0, "edge_f1": 0.0, "passed": False}
+    gold = WorkflowGraph(
+        nodes=gold_eval_dict["nodes"],
+        edges=gold_eval_dict["edges"],
+        initial_state=gold_eval_dict["initial_state"],
+        terminal_states=gold_eval_dict["terminal_states"],
+    )
+    node_f1 = compute_node_f1(parsed, gold)
+    edge_f1 = compute_edge_f1(parsed, gold)
+    passed = node_f1 >= _BACK_EXTRACTION_NODE_F1 and edge_f1 >= _BACK_EXTRACTION_EDGE_F1
+    return {"node_f1": node_f1, "edge_f1": edge_f1, "passed": passed}
