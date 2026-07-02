@@ -1,5 +1,11 @@
 """Experiment C: Generate (prompt, graph) pairs for graph extraction training.
 
+.. deprecated::
+    Superseded by ``generate_playbook_pairs.py`` (see
+    ``docs/data_generation_recipes_task_c.md``), which pairs multi-register
+    natural-language playbooks with graph JSON via graph-first inverse rendering.
+    Kept in-tree for the legacy Task A-derived path.
+
 Constructs 5,000 pairs from workflow prompts with gold annotations,
 teacher-generated pairs, and paraphrase augmentation.
 
