@@ -16,7 +16,8 @@ from llm_workflow_agents.data._playbook_verify import assign_state_ids, graph_to
 
 _JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 _PROCEED_RE = re.compile(r"Proceed to (\w+) priority (\d+)")
-_HEADING_RE = re.compile(r"^### (\w+)$", re.MULTILINE)
+_BRACKET_RE = re.compile(r"\[(\w+)\]")
+_HEAD_NAME_RE = re.compile(r"\[?(\w+)\]?")
 
 
 def _parse_render_prompt(user_prompt: str) -> tuple[dict[str, Any], list[str]]:
@@ -84,18 +85,26 @@ class CompliantTeacher:
 
 
 def compliant_back_extract(playbook: str) -> str:
-    """Reconstruct the id-keyed eval graph from a CompliantTeacher playbook (echo gold)."""
-    names = _HEADING_RE.findall(playbook)
+    """Reconstruct the id-keyed eval graph from a playbook (echo gold).
+
+    Handles both the CompliantTeacher format (`### NAME` + `Proceed to X priority N`)
+    and the programmatic state_script format (`### [NAME]` + `[TARGET]` bullets).
+    """
     blocks = re.split(r"^### ", playbook, flags=re.MULTILINE)[1:]
+    names: list[str] = []
+    details: list[dict[str, Any]] = []
     transitions: list[dict[str, Any]] = []
-    details = []
     for block in blocks:
-        name = block.splitlines()[0].strip()
-        tools_match = re.search(r"Tools: ([^.\n]+)", block)
+        lines = block.splitlines()
+        name = _HEAD_NAME_RE.match(lines[0].strip()).group(1)
+        body = "\n".join(lines[1:])
+        names.append(name)
+        tools_match = re.search(r"Tools: ([^.\n]+)", body)
         tools = [t.strip() for t in tools_match.group(1).split(",")] if tools_match else []
         details.append({"name": name, "tools": tools, "entry_actions": [], "instruction": ""})
-        for tgt, prio in _PROCEED_RE.findall(block):
-            transitions.append({"from": name, "to": tgt, "condition": "", "priority": int(prio)})
+        targets = {tgt for tgt, _prio in _PROCEED_RE.findall(body)} | set(_BRACKET_RE.findall(body))
+        for tgt in targets:
+            transitions.append({"from": name, "to": tgt, "condition": "", "priority": 0})
     with_out = {t["from"] for t in transitions}
     graph = {
         "states": names,
