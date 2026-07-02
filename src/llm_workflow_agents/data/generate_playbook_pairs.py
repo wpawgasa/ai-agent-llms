@@ -18,6 +18,7 @@ import structlog
 
 from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
 from llm_workflow_agents.data._graph_invention import DOMAIN_BRIEFS, invent_novel_graphs
+from llm_workflow_agents.data._playbook_render import Register
 from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
 from llm_workflow_agents.data.generate_workflows import _select_domain, select_subgraph
 
@@ -26,16 +27,9 @@ logger = structlog.get_logger(__name__)
 # Task C shifts mass toward mid-size graphs vs Task A (tiny L1 graphs saturate).
 TASK_C_LEVEL_WEIGHTS: dict[str, float] = {"L1": 0.10, "L2": 0.25, "L3": 0.35, "L4": 0.20, "L5": 0.10}
 
-# The six playbook registers (final home is _playbook_render.Register; string values match).
-REGISTERS: tuple[str, ...] = (
-    "sop_document",
-    "prose_narrative",
-    "bullet_quick_reference",
-    "wiki_training_notes",
-    "state_script",
-    "manager_transcript",
-)
-_ANCHOR_REGISTERS = ("sop_document", "prose_narrative")
+# The six playbook registers, as plain strings (single source of truth: Register enum).
+REGISTERS: tuple[str, ...] = tuple(r.value for r in Register)
+_ANCHOR_REGISTERS = (Register.SOP_DOCUMENT.value, Register.PROSE_NARRATIVE.value)
 
 _HELDOUT_DOMAINS = ("utilities", "surveys")
 _HELDOUT_REGISTER = "manager_transcript"
