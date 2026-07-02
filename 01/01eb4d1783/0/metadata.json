@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "0101eb4d1783",
+  "session_id": "80f45bce-cf74-4f45-8c11-3ace032165a2",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-02T07:11:29.23571513Z",
+  "branch": "feat/task-c-playbook-pairs",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-fable-5",
+  "turn_id": "8e7751e6f518",
+  "token_usage": {
+    "input_tokens": 40284,
+    "cache_creation_tokens": 828939,
+    "cache_read_tokens": 8036341,
+    "output_tokens": 103501,
+    "api_call_count": 53
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}
