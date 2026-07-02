@@ -1,0 +1,9 @@
+/superpowers:brainstorming Think about data generation recipe for training a small LLM (4B-12B) capable of converting playbook described in natural language to workflow script. Write a recipe similar to @docs/data_generation_recipes.md
+
+---
+
+continue
+
+---
+
+continue
