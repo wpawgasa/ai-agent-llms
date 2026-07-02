@@ -80,7 +80,7 @@ def validate_partition(
 def _load_rows(input_dir: Path) -> list[dict]:
     rows: list[dict] = []
     for src in sorted(input_dir.glob("*.jsonl")):
-        for lineno, line in enumerate(src.read_text().splitlines(), 1):
+        for lineno, line in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
             line = line.strip()
             if not line:
                 continue

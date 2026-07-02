@@ -33,8 +33,16 @@ from llm_workflow_agents.eval.graph_extraction_eval import (
 logger = structlog.get_logger(__name__)
 
 _SCHEMA_PATH = Path(__file__).parents[3] / "data/templates/graph_output_schema.json"
-_SCHEMA: dict[str, Any] = json.loads(_SCHEMA_PATH.read_text())
 _NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_SCHEMA_CACHE: dict[str, Any] | None = None
+
+
+def _schema() -> dict[str, Any]:
+    """Load the graph-output JSON schema lazily (avoids file I/O at import time)."""
+    global _SCHEMA_CACHE
+    if _SCHEMA_CACHE is None:
+        _SCHEMA_CACHE = json.loads(_SCHEMA_PATH.read_text())
+    return _SCHEMA_CACHE
 
 
 @dataclass(frozen=True)
@@ -138,7 +146,7 @@ DOMAIN_BRIEFS: tuple[DomainBrief, ...] = (
 def validate_gold_graph(graph_dict: dict[str, Any]) -> list[str]:
     """Validate an id-keyed eval-shape graph. Returns itemized violations (empty = valid)."""
     try:
-        jsonschema.validate(graph_dict, _SCHEMA)
+        jsonschema.validate(graph_dict, _schema())
     except jsonschema.ValidationError as exc:
         return [f"schema: {exc.message}"]
 

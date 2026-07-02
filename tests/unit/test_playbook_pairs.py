@@ -328,6 +328,19 @@ def test_benchmark_mode(monkeypatch, tmp_path):
     assert all(f.name.startswith("playbook_pairs_") for f in stats.output_files)
 
 
+def test_benchmark_single_teacher_no_file_collision(monkeypatch, tmp_path):
+    # A single teacher across all language legs must not collapse (source, language)
+    # buckets onto one filename and overwrite rows.
+    _patch_all_teachers(monkeypatch, CompliantTeacher())
+    same = {"en": "gemini-3-flash", "th": "gemini-3-flash", "code_switch": "gemini-3-flash"}
+    stats = generate_playbook_dataset(num_graphs=6, invented_ratio=0.5, back_extraction_rate=0.0,
+                                      seed=200, output_dir=tmp_path, benchmark_mode=True,
+                                      render_teachers=same, invention_teacher="gemini-3-flash")
+    assert len(stats.output_files) == len(set(stats.output_files))  # no path collisions
+    written = sum(len(f.read_text().splitlines()) for f in tmp_path.glob("*.jsonl"))
+    assert written == stats.renderings_accepted  # nothing overwritten/lost
+
+
 def test_merge_benchmark_runs_dedup(tmp_path):
     def write(path, pair_ids, tag):
         path.write_text("\n".join(json.dumps({"pair_id": p, "tag": tag}) for p in pair_ids) + "\n")

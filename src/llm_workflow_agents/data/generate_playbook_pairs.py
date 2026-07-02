@@ -454,13 +454,23 @@ def generate_playbook_dataset(
         if leg in halted:
             dropped["leg_halted"] += 1
             continue
-        do_back = rng.random() < back_extraction_rate
         render_teacher = render_teachers[leg]
+        do_back = rng.random() < back_extraction_rate
+        if do_back:
+            # Only attempt back-extraction when a cross-family verifier is resolvable;
+            # an unsupported render-teacher family (e.g. claude) skips the check.
+            try:
+                pick_verifier(render_teacher, verify_teachers)
+            except (ValueError, KeyError):
+                logger.warning("back_extraction_skipped_unknown_verifier", teacher=render_teacher)
+                do_back = False
         split = None if benchmark_mode else splits[plan.graph_id]
         row, reason = produce_rendering(
             by_id[plan.graph_id], plan, split, render_teacher, verify_teachers, do_back, rng
         )
-        if do_back:
+        # Count a back-extraction check only when it actually ran (i.e. rendering
+        # reached verification); renderings dropped earlier never invoke the verifier.
+        if do_back and reason in ("accepted", "back_extraction"):
             st = leg_state[leg]
             st["checked"] += 1
             if reason == "back_extraction":
@@ -476,7 +486,9 @@ def generate_playbook_dataset(
     if rows_dropped:
         dropped["graph_dropped_lt3"] += rows_dropped
 
-    # Write output files bucketed by (source, language).
+    # Write output files bucketed by (source, language) — both are in the filename
+    # so buckets never collide even when a single teacher serves all language legs
+    # (as in benchmark mode).
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -487,7 +499,7 @@ def generate_playbook_dataset(
     for (source, language), rows in sorted(buckets.items()):
         model = _sanitize_model(render_teachers[language])
         if benchmark_mode:
-            filename = f"playbook_pairs_{model}_{timestamp}.jsonl"
+            filename = f"playbook_pairs_{source}_{language}_{model}_{timestamp}.jsonl"
         else:
             filename = f"pairs_{source}_{language}_{model}_{timestamp}.jsonl"
         path = output_dir / filename

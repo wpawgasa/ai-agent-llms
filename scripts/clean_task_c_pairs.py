@@ -115,7 +115,7 @@ def clean_record(record: dict) -> tuple[dict | None, str | None]:
 
 def _load_records(src: Path) -> list[dict]:
     records: list[dict] = []
-    with open(src) as fh:
+    with open(src, encoding="utf-8") as fh:
         for lineno, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
@@ -171,7 +171,7 @@ def main() -> None:
         if not args.dry_run:
             dst = output_dir / src.name
             dst.parent.mkdir(parents=True, exist_ok=True)
-            with open(dst, "w") as fh:
+            with open(dst, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(kept_lines))
                 if kept_lines:
                     fh.write("\n")
