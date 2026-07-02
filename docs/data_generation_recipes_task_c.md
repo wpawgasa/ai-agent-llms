@@ -2,9 +2,9 @@
 
 This document is the sibling of [`data_generation_recipes.md`](data_generation_recipes.md) (Task A). It specifies the data generation recipe for training a small LLM (4B–12B) to convert a **playbook described in natural language** into a structured **WorkflowGraph JSON** — the schema in `data/templates/graph_output_schema.json`, scored by `src/llm_workflow_agents/eval/graph_extraction_eval.py`.
 
-> **Status: recipe only.** The generator scripts named below are *intended interfaces* — none are implemented yet. The existing `src/llm_workflow_agents/data/generate_graph_pairs.py` is **superseded** by this recipe: its NL side is a reused Task A system message (weak extraction signal), its augmentation is trivial prefixing, and it has never been materialized to `data/output/`. It stays in-tree until `generate_playbook_pairs.py` lands.
+> **Status: implemented.** The pipeline described here is live: `src/llm_workflow_agents/data/generate_playbook_pairs.py` (`generate_playbook_dataset`, exported from `llm_workflow_agents.data`), the helper modules `_graph_invention.py` / `_playbook_render.py` / `_playbook_verify.py`, the runners `scripts/generate_playbook_sft_data.sh` and `scripts/generate_playbook_benchmark_data.sh`, the `scripts/clean_task_c_pairs.py` / `scripts/split_task_c_pairs.py` scripts, and the DVC stages `task_c_pairs_{generate,clean,split}`. The older `src/llm_workflow_agents/data/generate_graph_pairs.py` is now formally **superseded** by this recipe (its NL side was a reused Task A system message and it was never materialized to `data/output/`); it stays in-tree for the legacy Task A-derived path, its removal tracked separately.
 
-| Split | Purpose | Generator (intended) | Approx. size |
+| Split | Purpose | Generator | Approx. size |
 |-------|---------|----------------------|--------------|
 | Benchmark | Rank pre-trained 4B–12B candidates before fine-tuning | `generate_playbook_benchmark_data.sh` (Gemini teachers) | **~150 pairs** (25 graphs × 6 registers) |
 | SFT | Fine-tuning; supplies train / validation / test splits | `generate_playbook_sft_data.sh` (GPT + Gemini legs) | **~5,000 pairs** (~850 graphs × 4–6 registers) |
@@ -222,7 +222,7 @@ Output:       data/output/sft/task_c/          (raw)
               data/output/sft/task_c_cleaned/  (after clean_task_c_pairs.py)
 ```
 
-Intended entry point:
+Entry point:
 
 ```python
 def generate_playbook_dataset(
