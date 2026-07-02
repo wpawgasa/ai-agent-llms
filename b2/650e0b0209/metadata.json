@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b2650e0b0209",
+  "strategy": "manual-commit",
+  "branch": "feat/task-c-playbook-pairs",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/data_generation_recipes_task_c.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b2/650e0b0209/0/metadata.json",
+      "transcript": "/b2/650e0b0209/0/full.jsonl",
+      "content_hash": "/b2/650e0b0209/0/content_hash.txt",
+      "prompt": "/b2/650e0b0209/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 54112,
+    "cache_creation_tokens": 970731,
+    "cache_read_tokens": 34319012,
+    "output_tokens": 220015,
+    "api_call_count": 137
+  }
+}
