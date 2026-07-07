@@ -1,0 +1,483 @@
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+model is up-to-date
+
+---
+
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+pull the exact beta / lr / max_grad_norm / num_generations / dynamic-sampling values from configs/training/grpo_cat_a.yaml
+
+---
+
+Did you read @docs/grpo_diagnosis_gemma4_26b.md? This run train GRPO on new dataset for which qualified by LLM (Opus).
+
+---
+
+Documented this and design the corrected experiment plan
+
+---
+
+yes and open an auto-merged PR
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>bfb01ilvj</task-id>
+<tool-use-id>toolu_018cPRvJMR7nnwstjwqi7SRx</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/bfb01ilvj.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR 39 until merged, failed, or timeout" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+What's next?
+
+---
+
+Verify data provenance first
+
+---
+
+yes, write the script
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>bmqrrc67c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/bmqrrc67c.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR 40 until merged/failed/timeout" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Are you sure these fixes will work? We've gone through many diagnosis already and dataset was even re-generated and qualified. Can you use Fable to explore dataset and GRPO training mechanism and reward function even further?
+
+---
+
+<task-notification>
+<task-id>a5a6be6b4330b0d8f</task-id>
+<tool-use-id>toolu_015kdFbLkuXvUGWG8DUMEuNq</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a5a6be6b4330b0d8f.output</output-file>
+<status>completed</status>
+<summary>Agent "Dataset qualification + multi-turn feasibility" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have a complete picture. Here is my report.
+
+---
+
+# GRPO Investigation Report
+
+## 1. What "re-generated and qualified by an LLM (Opus)" actually means in the pipeline
+
+There are **two distinct mechanisms**, and it is important not to conflate them:
+
+### A. The `dataset-verifier` agent — REPORT ONLY, never touches data
+`/workspaces/ai-agent-llms/.claude/agents/dataset-verifier.md`
+
+The agent is explicitly **read-only**. Its own frontmatter and body say so twice:
+- L8: *"Read-only — never edits data."*
+- L21-22: *"You are read-only. Never edit the dataset, the generator, or any source file. Your output is a report, not a code change."*
+
+It runs two deterministic tools (`validate_dataset`, `quality_profiler`) then does a **qualitative LLM rationality read** of 5-8 sampled conversations (dialogue coherence, Thai naturalness, tool realism, behavior fidelity) and emits a prioritized verdict. It produces **no filtered/regenerated files**.
+
+### B. The target-driven generation loop — this is what WRITES data
+`/workspaces/ai-agent-llms/scripts/generate_sft_until_target.py`
+
+This is the actual "re-generate + qualify" pipeline that changes DATA. Docstring (L4-22):
+&gt; *"keeps generating, verifies each batch, removes unqualified samples, and loops until the qualified count reaches the per-level target — so the delivered corpus has a guaranteed number of clean samples."*
+
+Its qualification bar (L13-17) is **purely deterministic**, using two library helpers, NOT the LLM:
+- `clean_task_a_sft.clean_record` — drops truncated / role-confused rows, sets `terminal_reached`
+- `quality_profiler.profile_task_a` + `defective_conversation_ids` — drops rows with **hard structural defects**
+
+Critically, the LLM (`dataset-verifier`) is only an **advisory** step here. L24-26 and L44-46:
+&gt; *"The *hybrid* final step — a semantic rationality verdict from the `dataset-verifier` LLM agent — is a Claude-driven post-step: this script writes a manifest and prints the exact follow-up command."*
+&gt; *"--verify-batches … logged only — the deterministic filter still does the removal"*
+
+**Answer to Q1:** The LLM ("Opus") qualification does **not** change the data — it only emits a report/verdict. Data removal/regeneration is done by the **deterministic** filters (`clean_record` + `profile_task_a`). The phrase "qualified by an LLM" refers to the advisory rationality verdict layered on top of a deterministic filter-and-regenerate loop.
+
+### Criteria checked — all SURFACE quality, none reward-relevant
+
+**`data_validator.py`** (`validate_dataset` / `_check_workflow_rationality`, L169-260) checks:
+1. Required fields, graph shape (states/initial/terminal), first-message-is-system
+2. Conversation-shape / strict-alternation (`find_shape_violations`)
+3. Tool-state coherence — listed tools exist in `tool_schemas`; GT-called tools are listed in their state (L195-222)
+4. Instruction completeness per non-terminal state
+5. Terminal reachability via BFS (L241-258)
+6. State-sequence continuity
+7. **Thai-corruption** as a *warning only* — explicitly "does not affect `valid`" (L367-369): *"surfaces rows that should be dropped or regenerated before SFT."*
+
+**`quality_profiler.py`** (`profile_task_a`) checks:
+- **Hard structural defects** (must be 0): initial/terminal in states, edge endpoints in states, GT transition legality, message STATE-seq == `ground_truth.state_sequence`, role sequencing, tool_call JSON validity + schema membership (L203-265)
+- **Spec-conformance** (advisory): `num_states` vs `target_path_len`, `num_tools` floor, `chain_depth`, back-edge/loop count (L180-201)
+- **Structural-ceiling** analysis: undershoot vs hard impossibility (L275-306)
+- **Distributions**: behavior mix, language, self-loop share, arrow glyphs, tool-chain propagation, recovery coverage
+
+### Does any of it touch reward-relevant properties? — NO
+
+Neither validator scores or gates on **within-group variance**, **tool-call presence relative to a GRPO group**, or **state-transition diversity across rollouts**. Note the profiler *computes* diagnostics that look adjacent — `_propagation_hops` (L106-129, tool-chain propagation) and `self_loops` share — but these are **descriptive distribution stats on the static ground-truth corpus**, not reward-signal properties. Tool-call presence is only checked for schema membership / placement legality (does the GT tool call belong in its state), never for *whether a prompt will elicit varied tool emission across policy rollouts*.
+
+The GRPO diagnosis doc confirms this gap directly (`grpo_diagnosis_gemma4_26b.md` L1145-1147):
+&gt; *"`frac_reward_zero_std ≈ 77%` on the new data — worse than `df4dot2d`… LLM-qualifying the corpus did not, on its own, produce the within-group reward spread GRPO needs."*
+
+**So qualification/regeneration touches only surface quality (schema, dedup, rationality, structural conformance) — it is blind to every reward-relevant property.**
+
+---
+
+## 2. Data lineage — GRPO data was FILTERED, not regenerated with new content
+
+`/workspaces/ai-agent-llms/dvc.yaml`, stage `task_a_grpo` (L64-79):
+&gt; desc: *"GRPO prompts: L3–L5 subset of the cleaned SFT splits **(no new generation)**."*
+&gt; cmd: `python scripts/filter_grpo_data.py --input-dir data/output/sft/task_a_splits --output-dir data/output/grpo/task_a`
+&gt; comment (L78): *"Filter only — L3-L5 of train.jsonl + validation.jsonl."*
+
+`scripts/filter_grpo_data.py` module docstring (L4-8) confirms:
+&gt; *"GRPO reuses the SFT corpus… GRPO needs prompts — not new ground-truth labels. The standard refinement is to filter the SFT splits to the harder complexity levels (L3-L5)."*
+
+It is a pure `complexity_level ∈ {L3,L4,L5}` line filter (L69-72), writing `train.jsonl` + `validation.jsonl`; `test.jsonl` is deliberately excluded (L40-41).
+
+**Lineage:**
+```
+generate_sft_until_target.py / generate_sft_data.sh  (raw teacher generation)
+  → data/output/sft/task_a  (raw)
+  → clean_task_a_sft.py → data/output/sft/task_a_cleaned
+  → split_task_a_sft.py (85/10/5, seed 42) → data/output/sft/task_a_splits
+  → filter_grpo_data.py (L3-L5 filter, NO new gen) → data/output/grpo/task_a
+```
+
+The `task_a_grpo_gemma4_26b_a4b` training stage (L130-166) runs with `--skip-filter` (L153) and lists `data/output/grpo/task_a` as a dep — it consumes the filtered output directly.
+
+**Nuance:** The "regeneration" that the doc's 2026-07-07 entry mentions happened **upstream at the SFT-corpus level** (via `generate_sft_until_target.py`), NOT in the GRPO stage. The on-disk timestamps confirm a 2026-07-07 rebuild: `data/output/grpo/task_a/train.jsonl` (2026-07-07 03:10, 75 MB) and `sft/task_a_splits/*` (2026-07-07 03:13). The diagnosis doc flags a **provenance hazard** here (`grpo_diagnosis_gemma4_26b.md` L1170):
+&gt; *"`data/output/sft/task_a_splits` was rewritten ~11 min after the `uklfswk5` checkpoints, and GRPO `validation.jsonl` (Jun 29) lags `train.jsonl` (Jul 7) by 8 days — verify against the W&amp;B artifact hashes before trusting on-disk files."*
+
+(Indeed `validation.jsonl` is dated 2026-06-29, `train.jsonl` 2026-07-07 — a mixed-vintage GRPO set.)
+
+**Answer to Q2:** The GRPO data was **re-filtered** from a freshly regenerated SFT corpus. The *content* regeneration is an SFT-corpus event; the GRPO stage itself only re-ran its L3-L5 filter over the new splits. No GRPO-specific new content was generated.
+
+---
+
+## 3. Multi-turn rollout scaffolding — what exists vs. net-new
+
+The doc names multi-turn rollouts (`(a*)`) as *the* real structural variance lever (e.g. `grpo_diagnosis_gemma4_26b.md` L316-335, L1003-1005). Search results:
+
+### What EXISTS (reusable, but none is a training rollout simulator)
+
+1. **Eval-time replay harness** — `/workspaces/ai-agent-llms/src/llm_workflow_agents/eval/agent_benchmark.py`, `_replay_conversation` (L433-597). This is the closest existing scaffolding. It walks a recorded conversation, substitutes **model completions at assistant turns**, and **replays ground-truth tool responses** (L442-445: *"Ground-truth tool responses are kept as-is so the conversation stays on track"*; L582-583). It already handles multi-turn continuation (L567-580, *"do NOT early-exit on terminal state. Multi-turn negotiations…"*) and synthesizes tool_call IDs. **But**: it calls a **vLLM/HTTP endpoint** (`_call_vllm`), does **no user-turn simulation** (it replays the recorded user turns), and produces no rewards/advantages. It is an evaluation replayer, not a GRPO training environment.
+
+2. **Preflight rollout scorer** — `/workspaces/ai-agent-llms/scripts/preflight_entropy_diag.py` (L4, L191, L204). Generates K single-turn completions per prompt and scores within-group reward std. Single-turn only — no trajectory.
+
+3. **GRPO trainer** — `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/grpo.py`. Uses TRL's K-rollout-per-prompt loop with **HF `model.generate()` fallback** (L33, L525-538). `_load_grpo_jsonl` emits **one row per `user→assistant` boundary** — single-assistant-turn targets (see diagnosis L218-223). No multi-turn trajectory generation. Comment L164: *"The synthetic corpus stores full multi-turn conversations (~49 messages)"* — but training only slices single turns out of them.
+
+### What would be NET-NEW (does not exist anywhere)
+
+Per the doc's own scoping (`grpo_diagnosis_gemma4_26b.md` L316-335):
+- A **rollout simulator that mocks USER replies** (teacher LLM or scripted replays) — does not exist. `_replay_conversation` replays recorded users; it does not generate new user turns for on-policy trajectories.
+- A **tool-response simulator for novel paths** — L330-331: *"the data's recorded tool responses work for replay; novel paths need a fallback."* No such fallback exists.
+- An **environment/gym wrapper** or **multi-turn GRPO harness** feeding whole-trajectory rewards — none found. Grep for `simulator|gym|environment wrapper|trajectory` returns only prose in docs and the single-turn code above.
+
+The doc estimates this at *"~1 week of engineering, plus meaningfully more rollout compute"* (L332-333) and repeatedly defers it (L648, L1003-1005). 
+
+**Answer to Q3:** The eval-side `_replay_conversation` is a partial, reusable skeleton (multi-turn walk + GT tool-response replay + tool_call-ID synthesis), but the training-side **user-turn simulator, novel-path tool-response fallback, whole-trajectory reward wiring, and gym/env wrapper are entirely net-new.**
+
+---
+
+## 4. Candidate structural fixes the doc already enumerated
+
+From `/workspaces/ai-agent-llms/docs/grpo_diagnosis_gemma4_26b.md`, the "Three Fix Candidates" section (L279-377) plus the later reframing. The findings that motivate them:
+- **Reward-lattice / bucket-clumping** (L716-724): active components pool into *"a small finite reward lattice… at most ~16 possible reward values per prompt"* — 8 diverse completions land in 1-3 buckets.
+- **Tool-emission gap** (L775-795): *"In all 10 collapsed groups: 0/8 rollouts attempt a tool call"* — the model deterministically tool-skips.
+- **Saturated-correct** (L782, L956 step 49): 6/10 collapsed groups are *"8 different ways of saying the same correct thing"* scored identically — *"fundamentally unreachable by any tool- or state-side reward change."*
+
+### The candidate fixes, with the doc's stated pros/cons:
+
+**(a) Row-per-conversation / single-turn target** (L281-315)
+- **Pro:** Fixes train/deploy distribution mismatch; raises effective `task_completion` weight from ~1.4% → ~8.4% (fires on 83.5% of rows instead of 14.3%).
+- **Con:** Does **not** fix within-group variance — *"same prompt + same policy = same completions"* (L307-309); `chain_propagation` stays dead (single turn, `n_pairs ≤ 1`); 5.86× smaller dataset → ~6× fewer optimizer steps (L313-314). Explicitly **re-classified as a reward-calibration/alignment fix, NOT the variance lever** (L286-289).
+- **Code scope:** ~30 lines in `_load_grpo_jsonl`.
+
+**(b) Drop saturated components / reweight** (L338-355) — *landed*
+- **Pro:** Zero-risk cleanup; reweights binary state/tool from 0.30→0.40 each for slightly stronger gradients.
+- **Con:** *"Effect on reward variance: marginal"* — the dropped components contributed 0 variance anyway.
+- **Code scope:** ~5 lines in `reward_business_logic.py`.
+
+**(c) Graded state/tool components (continuous scoring)** (L357-377) — *landed*
+- **Pro:** *"highest leverage"* — per-argument tool F1 (0.4 name + 0.6 pro-rata args) and graded state matching spread completions across a range; *"Expected mean_reward_std jumps from ~0.05 to ~0.15+"* (L372-373).
+- **Con:** Risk of divergence between training reward and benchmark eval — must keep the strict metric separate (L374-376). And it *"can't manufacture variance"* where the policy emits identical/saturated-correct completions (L456-461).
+- **Code scope:** ~150 lines + tests; ~half day.
+
+**(a\*) Multi-turn rollouts with simulator** (L316-335, L1003-1005) — *deferred, the "real" lever*
+- **Pro:** Makes `chain_propagation` and `task_completion` per-trajectory signals that vary across K rollouts; *"Within-group reward_std should jump substantially: the variance space is N-fold larger (one decision per turn × N turns)"*; best deployment alignment.
+- **Con:** *"~1 week of engineering, plus meaningfully more rollout compute"*; simulator bugs *"that silently corrupt training signal"* need unit tests + held-out replay validation (L333-335); crucially **does not help the "saturated correct" case** (L1005).
+
+**A continuous prose-quality component** was later added as a candidate specifically for the saturated-correct groups (L792-793, L811): *"semantic similarity to GT assistant message via sentence-transformers"* — the only reward-side lever that could differentiate 8 correct prose surfaces.
+
+**Doc's recommended ordering** (L378-404): land **(b) first** (free cleanup) → **(c)** (variance where signal exists) → retry GRPO with hygiene fixes (ckpt-500, `beta=0.1`, `loss_type=grpo`, `max_completion_length=512`) → **(a)** for alignment only → **(a\*)** as last resort if (b)+(c) don't lift `frac_reward_zero_std`.
+
+**Important caveat for the reader:** the most recent addenda (2026-05-29 L1026-1117, 2026-07-07 L1125-1170) **supersede** the structural-fix framing — they conclude the primary failure was never reward-variance but **optimizer instability**: `scale_rewards="group"` dividing advantages by a near-zero group std (60-1060× amplification → grad-norm up to 50,853, KL up to 529.8 on the newest run `bqbxnqxw`), compounded by `loss_type="grpo"` length bias and no explicit `max_grad_norm`. The 2026-05-29 fixes (`scale_rewards:"none"`, `loss_type:"dr_grpo"`, `max_grad_norm:0.2`) were written only into `grpo_cat_a_diagnostic.yaml` and **never promoted to production `grpo_cat_a.yaml`**, which is why the 2026-07-07 run on the new LLM-qualified dataset re-exploded. So per the newest reading, multi-turn rollouts `(a*)` and the reward-lattice fixes remain the correct **second** step, unreachable until the optimizer config is stabilized and promoted.</result>
+<usage><subagent_tokens>88472</subagent_tokens><tool_uses>16</tool_uses><duration_ms>130667</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a49b18a302251173c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a49b18a302251173c.output</output-file>
+<status>completed</status>
+<summary>Agent "Empirical stats on new GRPO dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Analysis complete. All numbers below are computed at the GRPO-ROW level, mirroring `_load_grpo_jsonl`'s per-`user/system→assistant`-boundary emission (tool-preceded assistant turns skipped exactly as the loader does).
+
+## Results — `data/output/grpo/task_a/train.jsonl`
+
+| # | Metric | Value |
+|---|--------|-------|
+| 1 | Conversations | 2,502 |
+| 1 | Emitted GRPO rows | **14,682** |
+| 1 | Rows / conversation | 5.868 |
+| 1 | Skipped tool-preceded asst turns | 18,311 |
+| 2 | Rows with ≥1 tool_call | 5,715 (**38.9%**) |
+| 2 | Rows with 0 tool_calls | 8,967 (**61.1%**) |
+| 3 | state_sequence len 0 | 3,164 (21.6%) |
+| 3 | state_sequence len 1 | 11,518 (78.4%) |
+| 3 | state_sequence len 2+ | **0 (0.0%)** |
+| 4 | terminal_reached=True | 2,089 (**14.2%**) |
+| 5 | #tool_calls dist (tool rows) | 1→5,672; 2→42; ≥5→1 (**99.2% are single-call**) |
+| 5 | args/call | min 0, med 2, max 5, mean 2.24 |
+| 5 | args/call dist | 0→7, 1→1668, 2→1759, 3→1646, 4→648, 5→36 |
+| 6 | Distinct tool names | **110** |
+| 6 | valid_transitions/conv | min 10, med 21, max 57, mean 26.9 |
+| 7 | Prompt chars/row (raw, pre-enrichment) | min 1,934 / med 6,296 / p90 14,002 / max 31,123 |
+| 7 | Prompt chars/row (WITH enrichment, the real prompt) | min 5,330 / med **9,845** / p90 17,517 / p99 26,433 / max 33,368 |
+| 7 | Rows over ~7,680-tok cap | 23 (0.2%) @4 char/tok; 125 (0.9%) @3.5 char/tok |
+| 8 | Distinct reward values reachable/prompt (approx) | min 2 / med 8 / mean 10.2 / max 32 |
+| 8 | Rows with ≤2 reachable reward values (near-degenerate) | 3,164 (**21.6%**) |
+
+Notes on methodology: item 7's "with enrichment" row rebuilds the system message the way the loader does (`build_enriched_system_prompt` prepends workflow-script + tool-schema JSON + FORMAT_RULES ≈2,695 chars); I approximated the workflow-script term because the package can't be imported in this sandbox (missing `dotenv`), so treat the enriched numbers as ±10%. Item 8's lattice is a coarse product of state-transition buckets ({0,0.3,0.5,1.0} → up to 4 when a transition exists, else 1) × tool graded-F1 buckets (~args+calls+1, capped at 8, and only 2 when no tools).
+
+## Is train.jsonl structurally DIFFERENT from the prior corpus?
+
+**No — it is structurally near-identical to the prior corpus.** `docs/grpo_diagnosis_gemma4_26b.md:221` records the prior corpus as "Train rows: 14,656; terminal_reached=True: 2,089 (14.3%)." The re-generated file gives **14,682 rows / 2,089 terminal (14.2%)** — a +26-row drift (+0.18%) and the same absolute terminal count. Line 207/295 of that doc states task_completion was "dead in 85.7% of train rows" (i.e. terminal_reached=False), which matches exactly (100−14.2 = 85.8%). No field, tool density, or terminal rate changed materially.
+
+## Bearing on the Cat-A within-group-variance question
+
+The numbers say re-generation did **not** relieve the structural variance ceiling that `docs/grpo_diagnosis_gemma4_26b.md` blames for `reward_std ≈ 0.003–0.05`. Every variance-carrying reward component is starved on most rows:
+
+- **task_completion (0.10 weight):** rescaled out on 85.8% of rows (`terminal_reached=False`) — unchanged from prior.
+- **chain_propagation:** state_sequence is **never** length ≥2 (0.0% of rows), so multi-link chains never exist → its score is a constant 1.0 on every row, as the loader comment predicts.
+- **tool graded-arg-F1:** 61.1% of rows have zero tool_calls (F1 collapses to a binary 0/1), and of the tool-bearing 38.9%, **99.2% are single-call** with a median of 2 args — so graded arg-F1 has at most ~3-4 partial-credit levels even in the best case, and none on 6-in-10 rows.
+- **state_transition:** the only broadly-live graded signal, but 21.6% of rows have no transition at all (len-0), leaving that fifth of the corpus with ≤2 reachable reward values regardless of rollout diversity.
+
+So on ~22% of prompts the reward is effectively binary before rollouts even run, and the graded components that were supposed to inject smooth within-group variance (chain_propagation, tool-F1) are dead or near-binary on the majority of rows. The re-generated dataset presents the same reward-lattice sparsity the prior diagnosis attributed the collapse to; the variance problem is not fixed by this corpus.
+
+Relevant files: `data/output/grpo/task_a/train.jsonl`, `src/llm_workflow_agents/training/grpo.py` (loader lines 161-302, reward adapter 315+), `src/llm_workflow_agents/data/system_prompt.py:60` (enrichment), `docs/grpo_diagnosis_gemma4_26b.md` (prior-corpus baselines at lines 207, 221, 295).</result>
+<usage><subagent_tokens>31841</subagent_tokens><tool_uses>11</tool_uses><duration_ms>195343</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a2a424f09e0bb7044</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a2a424f09e0bb7044.output</output-file>
+<status>completed</status>
+<summary>Agent "Reward + GRPO advantage mechanics" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Here is the complete root-cause picture, with file:line citations. (This was a read-only investigation; no files were modified.)
+
+---
+
+# GRPO reward-variance root-cause: findings
+
+## 1. `reward_business_logic.py` — reward structure &amp; discretization
+
+**Component weights** (`reward_business_logic.py:41-44`):
+- `W_STATE_TRANSITION = 0.40`, `W_TOOL_CALL_F1 = 0.40`, `W_TASK_COMPLETION = 0.10`, `W_TRANSITION_LEGALITY = 0.10`.
+
+**`_graded_state_match` tiers** (`reward_business_logic.py:82-113`):
+- Empty GT: `1.0 if not predicted else 0.0` (`:100-101`).
+- Per `(pred, gt)` pair: exact `(from,to)` match → `+1.0` (`:107-108`); `from`-only **or** `to`-only match → `+0.5` (`:109-110`); reverse direction `pred[0]==gt[1] and pred[1]==gt[0]` → `+0.3` (`:111-112`); no overlap → `+0.0`. Score = `total / len(ground_truth)` (`:113`).
+- **On a single-turn row `len(ground_truth)==1`** (the loader emits `state_seq = [state_trans]`, one element — `grpo.py:264-265`). The loop only compares index `i=0`, i.e. `predicted[0]` vs the single GT pair. So `r_state` collapses to exactly one of **{0.0, 0.3, 0.5, 1.0}** — 4 discrete rungs, and only the model's *first* emitted transition can move it.
+
+**`graded_tool_call_f1` on no-tool rows (GT empty)**: delegates to `compute_argument_graded_f1` (`reward_utils.py:50-60`), whose head is `if not ground_truth and not predicted: return 1.0` / `if not ground_truth or not predicted: return 0.0` (`tool_call_f1.py:277-280`). So on a no-tool GT row it is **binary {1.0, 0.0}**: 1.0 iff the model emits no parseable tool call, 0.0 the instant it emits any.
+
+**Active-component mean + renormalization** (`reward_business_logic.py:168-192`): components start as `[(0.40, r_state), (0.40, r_tool)]`. `transition_legality` `(0.10, r_legality)` is appended only if `valid_transitions` is non-empty (`:173-176`); `task_completion` `(0.10, r_completion)` only if `terminal_reached` (`:181-184`). Then `total_weight = sum(w)` and `score = sum(w*s)/total_weight` (`:186-191`), renormalized so dropping components keeps `score ∈ [0,1]`. **Clamp**: `max(0.0, min(1.0, score))` (`:192`).
+
+**Where the reward is forced onto a small discrete set (single-turn rows):**
+- Per the loader, non-final rows have `terminal_reached=False` (`grpo.py:268-269, 281`), so `task_completion` is dropped; `valid_transitions` come from the workflow graph and are present, so legality stays active. Active set = state(0.40) + tool(0.40) + legality(0.10), `total_weight = 0.90`.
+- `r_state ∈ {0, 0.3, 0.5, 1.0}` (4 values).
+- `r_tool` on no-tool rows ∈ {0, 1}; on 1-GT-tool rows it collapses too (see §2).
+- `r_legality = transition_legality_score` = fraction of emitted transitions that are legal edges or self-loops, `0.0` if none emitted (`reward_utils.py:112-135`); with a single emitted transition it is **{0, 1}**.
+- `r_completion ∈ {0, 1}` (`reward_business_logic.py:183`).
+
+So a typical single-turn, no-tool, non-terminal row yields `score = (0.40·r_state + 0.40·r_tool + 0.10·r_legality)/0.90` with `r_state∈{0,0.3,0.5,1}`, `r_tool∈{0,1}`, `r_legality∈{0,1}` → a **small finite lattice of possible reward values** (at most ~16 combinations, fewer in practice). This is the core variance-starvation fact.
+
+## 2. `compute_argument_graded_f1` / `_pair_match_graded` — the cliffs
+
+**`_pair_match_graded`** (`tool_call_f1.py:227-255`), `name_weight=0.4`:
+- Name mismatch → `0.0` (`:239-240`) — no partial credit for arg overlap.
+- Non-dict args → `1.0 if _deep_equals else name_weight(0.4)` (`:244-245`).
+- Names match, GT has no args → `1.0` (`:247-248`).
+- Names match, GT has args → `name_weight + (1-name_weight)·(matched/len(gt_args)) = 0.4 + 0.6·arg_frac` (`:250-255`).
+
+**`compute_argument_graded_f1`** (`tool_call_f1.py:258-309`): both empty → `1.0` (`:277`); exactly one empty → `0.0` (`:279`); else greedy best-first 1:1 assignment (`:288-302`), `partial_tp = Σ pair_scores`, `precision = partial_tp/|pred|`, `recall = partial_tp/|gt|`, `F1 = 2pr/(p+r)`, with `precision+recall==0 → 0.0` (`:307-308`).
+
+**Collapses to exactly 0.0**: GT non-empty and pred empty (or vice-versa); or every predicted name mismatches every GT name (all pair scores 0 → no pairs → `partial_tp=0`).
+**Collapses to exactly 1.0**: both empty; or `|pred|=|gt|=1`, name matches, GT has no args (or args stripped to `{}` by `_strip_placeholder_args`, `reward_business_logic.py:116-131`) → pair `1.0`, `p=r=1`.
+**Single-turn 1-GT-tool geometry**: with `|pred|=|gt|=1`, `F1` equals the single pair score, so `r_tool ∈ {0.0} ∪ {0.4 + 0.6·(m/K)}` for `K` GT args and `m` matched → e.g. K=1 gives **{0, 0.4, 1.0}**, K=2 gives **{0, 0.4, 0.7, 1.0}**. Emitting an extra (2nd) tool call rescales F1 by ~2/3 but stays discrete. Net: on single-turn rows the "graded" tool reward is still only a handful of values.
+
+## 3. `compute_transition_accuracy` / `parse_state_transitions` (strict, held-out path)
+
+`parse_state_transitions` (`state_accuracy.py:64-79`) regex-extracts `(from,to)` tuples from assistant messages; a completion is wrapped as one assistant message by `extract_state_annotations` (`reward_utils.py:17-22`).
+
+`compute_transition_accuracy` (`state_accuracy.py:103-126`): empty GT → `(1.0 if not predicted else 0.0, 0)` (`:112-113`); else `correct = #{i : i&lt;len(gt) and pred[i]==gt[i]}`, `accuracy = correct/len(ground_truth)` (`:119-125`). **For a single-turn row `len(gt)==1`, only `i=0` is checked, so `accuracy ∈ {0.0, 1.0}` — strictly binary.** This strict scorer is what `state_sequence_match` wraps (`reward_utils.py:32-40`) and is used **only** in the held-out composite (`grpo.py:437`, `_heldout_composite_score`), deliberately kept numerically independent of the graded training reward (`grpo.py:398-411`). The training reward instead uses the graded `_graded_state_match` (§1).
+
+## 4. `grpo.py` — reward adapter feed + generation geometry
+
+**Adapter → TRL**: `reward_funcs=_make_reward_adapter(reward_fn)` (`grpo.py:818`). The adapter is keyword-only (`grpo.py:334-340`) to match TRL 0.23.1, JSON-decodes the `ground_truth` column, aliases `state_sequence → state_annotations` reshaping dicts to `(from,to)` tuples (`:350-361`), flattens chat completions to assistant strings (`:363-370`), and returns `reward_fn(prompts, flat_completions, gts)` (`:389`). Single reward function ⇒ TRL `reward_weights=[1.0]`, default `multi_objective_aggregation="sum_then_normalize"`.
+
+**Geometry** (TRL divisibility in `grpo_config.py:882-919`; `steps_per_generation = generation_batch_size/(per_device_train_batch_size·num_processes)`; advantages are normalized per group of `num_generations` at generation time over the whole generation batch, then consumed across `steps_per_generation` optimizer steps):
+
+- **Diagnostic** (`grpo_cat_a_diagnostic.yaml`: `num_generations=16`, `generation_batch_size=32`, `per_device_train_batch_size=8`, `gradient_accumulation_steps=1`; single GPU): `32 % 16 = 0 → 2 prompt-groups per generation batch` = **2 unique prompts per generation round**, each with **16 samples** for the within-group std estimate. `steps_per_generation = 32/8 = 4`.
+- **Production** (`grpo_cat_a.yaml`: `num_generations=8`, no `generation_batch_size`, `per_device_train_batch_size`/`gradient_accumulation_steps` unset → TRL defaults 8/1): `generation_batch_size = 8·1·1 = 8`, `8 % 8 = 0 → 1 prompt-group` = **1 unique prompt per optimizer step**, 8 samples. This is the "df4dot2d ran 8/8 = 1 prompt/step → high prompt-draw noise" case (`grpo.py:648`).
+
+So the diagnostic doubles prompt diversity (2 vs 1) and doubles group size (16 vs 8), i.e. more samples over which the discrete reward can vary.
+
+## 5. TRL 0.23.1 advantage standardization &amp; loss_type
+
+Installed at `.venv/lib/python3.12/site-packages/trl/trainer/grpo_trainer.py`.
+
+**Advantage computation** (`sum_then_normalize` branch, `grpo_trainer.py:1964-1990`):
+- `rewards = (rewards_per_func · reward_weights).nansum(1)` (`:1966`).
+- `mean_grouped_rewards` = per-group mean over `num_generations`, `repeat_interleave`d (`:1967-1968`).
+- `if scale_rewards in ["group","none"]: std_rewards =` per-group `std` over `num_generations`, repeat-interleaved (`:1971-1973`); for `"none"` this std is computed **only for zero-std logging** (`:1970`).
+- `advantages = rewards - mean_grouped_rewards` (`:1987`) — always mean-subtract.
+- `if scale_rewards != "none": advantages = advantages / (std_rewards + 1e-4)` (`:1988-1989`).
+
+**`scale_rewards="group"` (TRL default, `grpo_config.py:872,697-698`) vs `"none"`**: `"group"` divides each advantage by its per-group reward std (+1e-4). On the near-constant discrete groups from §1–§3, that std is ~0.003–0.04, so the `+1e-4` floor barely helps and advantages are amplified 60–1060× — the documented instability (grad-norm 1126, KL 40) in `grpo.py:642-644`. `"none"` skips the division entirely (`:1988`): advantages are the raw group-mean-centered rewards, magnitude ≈ the reward spread itself. This is the "primary fix" (`grpo_cat_a_diagnostic.yaml:56`).
+
+**loss_type handling** (`grpo_trainer.py:2388-2409`):
+- `"grpo"`: `loss = ((per_token_loss·mask).sum(-1) / mask.sum(-1).clamp(min=1)).mean()` (`:2389`) — **per-sequence** normalization by each completion's own length → the documented short-completion length bias.
+- `"bnpo"`: `(per_token_loss·mask).sum() / mask.sum().clamp(min=1)` (`:2393`) — normalize by total active tokens in the **local** batch (batch-size-sensitive).
+- `"dr_grpo"`: `(per_token_loss·mask).sum() / (per_token_loss.size(0) · self.max_completion_length)` (`:2397`) — normalize by a **fixed global constant** (`batch × max_completion_length`), independent of actual completion length → removes length bias.
+- Default `"dapo"` (`grpo_config.py:709`): normalize by `num_items_in_batch/num_processes` (`:2400-2402`).
+
+**What `dr_grpo` changes about length normalization**: it replaces the per-sequence `1/len` denominator (which up-weights short completions with positive advantage / long with negative — the mechanism behind the `211→29`-token collapse noted at `grpo.py:635-636`) with a constant `1/max_completion_length` denominator applied uniformly, so gradient magnitude no longer depends on completion length.
+
+## Bottom line
+On single-turn rows the per-prompt reward is confined to a small discrete lattice: strict state accuracy is binary {0,1} (§3); graded state is {0,0.3,0.5,1} (§1); tool F1 is binary on no-tool rows and ~3–4 valued on 1-tool rows (§2); legality and completion are binary. The active-mean over `{0.40, 0.40, 0.10}` weights (`total_weight=0.90` on non-terminal rows) maps those onto a finite set of composite reward values. GRPO subtracts the group mean and (default `scale_rewards="group"`) divides by that group's tiny std (§5), so whenever the whole group of 8/16 lands on the same rung the advantage is 0 (`frac_reward_zero_std≈1`), and when it barely splits the `÷std` explodes the advantage. The diagnostic config attacks exactly this: `scale_rewards="none"` (no ÷std), `loss_type="dr_grpo"` (no length bias), and 2 prompts × 16 samples/group instead of 1 × 8 to give the discrete reward more chances to vary within a group.</result>
+<usage><subagent_tokens>60122</subagent_tokens><tool_uses>15</tool_uses><duration_ms>196071</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aceabc0c730ac2a75</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/aceabc0c730ac2a75.output</output-file>
+<status>completed</status>
+<summary>Agent "Fable GRPO viability verdict" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All key claims verified against the repo (actual reward path is `src/llm_workflow_agents/training/rewards/reward_business_logic.py` — the `_graded_state_match` {0, 0.3, 0.5, 1.0} ladder and 0.40/0.40/0.10/0.10 weights match; `configs/training/grpo_cat_a_diagnostic.yaml:39-69` matches fact D; `scripts/preflight_entropy_diag.py:297-343` already computes per-prompt rewards, `reward_std`, `frac_collapsed_groups`; `_HeldOutEvalCallback`/`_heldout_composite_score` wired at `src/llm_workflow_agents/training/grpo.py:394-813`; the 2026-07-07 addendum in `docs/grpo_diagnosis_gemma4_26b.md` confirms 77% zero-std steps, grad-norm 50,853, KL 529 on `bqbxnqxw`). Dataset composition stats (61.1% zero-tool, 14.2% terminal, median 8 rungs) taken as ground truth per the brief — not independently recounted.
+
+---
+
+# DECISION MEMO — Go/No-Go: Online GRPO for Gemma-4-26B-A4B Cat A
+**Date:** 2026-07-07 · **Runs killed to date:** 4 · **Author:** ML strategy review
+
+---
+
+## 1. VERDICT
+
+**No — single-turn online GRPO with the current reward cannot learn a useful policy on this data as configured, and the just-merged stabilization does not change that. Conditional revival only if a directly measurable bar is met:**
+
+&gt; Online GRPO is admissible only if a preflight on the actual GRPO training distribution (T=0.8, 16 samples/prompt, SFT ckpt-1000) measures **`frac_collapsed_groups` &lt; 0.50 AND median within-group `reward_std` ≥ 0.05**. Every measurement to date fails this bar: 116/150 steps (~77%) at whole-batch zero reward std on `bqbxnqxw` (`checkpoints/grpo_cat_a/.../checkpoint-150/trainer_state.json`), median 8 reachable reward values per prompt, 22% of prompts with ≤2 reachable values, and the 2026-05-26 preflight's "diverse text, identical scores" finding (7/8 unique completions, near-zero reward spread).
+
+The mechanistic argument, from the advantage math rather than the run history:
+
+- GRPO's gradient per group is ∝ (r_i − r̄). On a lattice where the whole 16-sample group lands on one rung, the gradient is **exactly zero** — no hyperparameter recovers it. With `scale_rewards="none"` (the fix), a 2-rung group with spread 0.02 produces advantages of ±0.01: nonzero but ~50× weaker than a healthy continuous-reward group. So the stabilized config converts "explode on 77% of steps" into "no-op on ~77% of steps and whisper on most of the rest." That is fact D's predicted STABLE-BUT-FLAT, and I concur with the prediction.
+- **Step economics:** diagnostic geometry is 2 unique prompts/step. A 1000-step production run = 2,000 prompt-groups = 32,000 generations, of which (at 77% dead) only ~460 groups carry any gradient — ~3% coverage of the 14,682-row corpus, on coarse rungs, at lr 1e-6. The expected held-out composite movement is below the noise floor of the eval (200-prompt held-out, single seed).
+- **The premise mismatch is structural, not a bug:** the reward was designed for trajectories, but the data feeds it single turns. `chain_propagation` is dead-constant (no `state_sequence` ≥ 2 anywhere), `task_completion` is dropped on 85.8% of rows, tool reward is binary on the 61.1% zero-tool rows. Three of five reward components are inert or binary on the majority of the data **by construction of the row layout**. No reward-side reweighting fixes a support problem.
+- **Saturated-correct groups are not a problem to be solved** — a group where 8 phrasings all score 1.0 is the reward correctly reporting "nothing left to learn here." Manufacturing variance inside them (lever c) optimizes an off-target axis. The correct treatment is to *exclude* them from training, which online GRPO cannot do cheaply and offline methods do for free.
+
+---
+
+## 2. RANKED INTERVENTIONS
+
+| # | Path | Will it unlock learning? (mechanism) | Eng cost | Compute | Risk | Falsifier |
+|---|------|--------------------------------------|----------|---------|------|-----------|
+| **1** | **RFT / rejection-sampling SFT** — sample N=8/prompt with the existing reward as ranker, SFT on per-prompt winners (via existing `sft.py`) | **High.** Needs only argmax within group — a 2-rung split suffices, no std, no advantage normalization, no optimizer fragility. Extracts signal from *every* prompt with ≥2 occupied rungs (the ~23–39% learnable frontier) and silently skips saturated/collapsed prompts. Same 32k generations a GRPO run would burn, consumed offline with 100% extraction. | ~1–2 days (generalize `preflight_entropy_diag.py` sampling loop + a keep-top filter; SFT path already exists) | ~10–20 H100-h full corpus; ~1–2 h for the 500-prompt gate (prefix caching: 8 samples share one long prompt) | Distills only capabilities the policy can already sample (no exploration beyond best-of-8); can amplify GT annotation noise in "winners" | **Best-of-8 headroom probe: if `max(r) &gt; r_greedy + 0.05` on &lt;15% of 500 prompts, there is nothing to distill — kill** |
+| **2** | **DPO/KTO from reward-ranked pairs** (byproduct of the same N=8 corpus) | **Medium-high.** Pairwise preference needs 2 rungs/prompt; adds the *negative* gradient RFT lacks (suppress wrong-transition / missing-tool completions). KTO handles the 22% of prompts with ≤2 rungs via unpaired desirable/undesirable rows. | ~1–2 days on top of #1 (pair builder + TRL DPOTrainer config) | Reuses #1's samples; training ~4–8 h | DPO on narrow formulaic pairs can degrade fluency/format; needs the strict held-out guardrail | **Pair yield &lt; ~2,000 usable (chosen−rejected gap ≥ 0.1) pairs → underpowered, skip** |
+| 3 | **Stabilized 50-step GRPO diagnostic** (already merged, fact D) | **Low as learning; moderate as measurement.** Confirms numerics are tamed; predicted flat. Its informational content w.r.t. this decision (`frac0`, `reward_std`) is subsumed by the 12-min preflight at ~1/10 the cost. | 0 (built) | ~2–4 H100-h | Sunk-cost gravity: a stable-flat run invites "just 200 more steps" | `reward_std` &gt; 0.05 sustained AND `eval/held_out_composite` trending up would falsify "GRPO is dead here" |
+| 4 | **Data enrichment targeting the gap** (multi-tool turns, terminal-bearing windows, ≥2-transition rows — generator change, not re-filter) | **Medium, slow.** Attacks the true support problem (61% no-tool, 99.2% single-call, 14.2% terminal). Helps *all* downstream methods. But B established that regenerate+qualify with unchanged generator specs changes nothing — this requires generator/spec work, not pipeline reruns. | ~3–5 days + teacher API cost | Teacher tokens, no H100 | Distribution drift from the eval; another "new data, same lattice" cycle if specs aren't verified against reward-variance directly | New batch's preflight `frac_collapsed_groups` unchanged (±5pts) vs current corpus |
+| 5 | **(a\*) Multi-turn rollout env + trajectory reward** | **High ceiling, wrong time.** The only path that makes `task_completion`/`chain_propagation` live and matches the actual deployment task. But ~1 wk net-new (user-sim + tool-sim; `_replay_conversation` in `eval/agent_benchmark.py` is replay-only), 3–5× rollout compute, and inherits every GRPO fragility on top of sim-fidelity risk. | ~1 wk+ | High | Sim-to-real gap; compounding failure surface after 4 kills | Only worth building if #1/#2 improve held-out composite but plateau below target — i.e., single-turn signal exhausted |
+| 6 | **(c) Semantic prose-similarity reward component** | **Low / negative.** Manufactures continuous variance on an axis the strict held-out composite deliberately excludes. GRPO will optimize the only continuous dial it has → paraphrase-similarity hacking. The `length_band` episode ("load-bearing reward hacking," 2026-05-21 addendum) is the exact precedent. | ~1 day | — | High (documented failure mode class) | Guardrail fires: train reward ↑ while `eval/held_out_composite` ↓ — predicted, not hypothetical |
+| 7 | **(a) Row-per-conversation retarget / (b) reweighting** | Alignment hygiene only; creates zero within-group variance. (b) already landed with marginal effect. | low | — | low | Already effectively falsified by B (structural stats unchanged) |
+| 8 | **SFT hygiene: seed from loss-elbow ckpt (~1000), add early-stop/`load_best_model_at_end`** | Not a standalone unlock (E: preflight showed cold ckpt-500 already samples 7/8 unique — entropy wasn't the bottleneck), but mandatory base for whichever path wins. | hours | — | none | — |
+
+---
+
+## 3. THE RECOMMENDATION
+
+**Abandon single-turn online GRPO. Adopt Path #1 — rejection-sampling fine-tuning (RFT) using the existing graded reward as an offline ranker — gated by a 1-day headroom probe, with #2 (DPO/KTO) as a second stage built from the same sample corpus. Keep the graded reward; retire the online optimizer.**
+
+Why #1 beats the runner-up (#3, running the already-built stabilized GRPO):
+
+1. **Identical compute, strictly greater extraction.** A 1000-step GRPO run and a full RFT sampling pass generate the same order of completions (~32k vs ~117k for full corpus, ~same for matched budgets). GRPO consumes them online, paying full price for the ~77% dead groups and extracting a coarse-lattice gradient from the rest at lr 1e-6. RFT consumes the same completions offline: every prompt with any reward spread contributes a full-strength SFT target, and dead/saturated prompts cost only their sampling tokens. There is no configuration of GRPO on this reward that extracts more information per generated token than argmax-and-distill does.
+2. **It removes the entire failure class that killed four runs.** All four post-mortems trace to the advantage-normalization machinery interacting with near-zero group variance (÷std amplification → grad 1,126 then 50,853; KL 40 then 529). RFT has no advantage, no group std, no KL controller, no reference policy — the discrete lattice, which is *fatal* to GRPO's variance requirement, is *sufficient* for RFT's ranking requirement. Fact A's lattice is exactly enough structure to rank and no more; use it for ranking.
+3. **The stabilized diagnostic answers a question whose answer doesn't change the plan.** Fact D already predicts STABLE-BUT-FLAT; confirming it costs 2–4 H100-hours and, per this project's demonstrated pattern (10 addenda), invites another iteration cycle on a dead mechanism. The 12-minute preflight measures the same decision-relevant quantities (`frac_collapsed_groups`, `reward_std`) plus the RFT headroom that GRPO telemetry can't measure. Run the GRPO diagnostic only in the branch where the preflight *surprises us* (see §5).
+4. **Honest ceiling, honestly priced.** RFT cannot exceed best-of-8 of the current policy. But with beta=0.05 KL-anchoring and lr 1e-6, neither could this GRPO — it was never going to explore meaningfully beyond the SFT policy either. If best-of-8 headroom is real (probe will tell us in a day), RFT captures it at near-zero risk; if it's not, *no* single-turn method works and the answer is #5 (multi-turn env) or shipping SFT-only — a decision worth reaching in 1 day instead of after a fifth kill.
+
+Explicitly rejected: lever (c) semantic-similarity component (predicted reward-hack, precedent on file), and #5 multi-turn env as the *next* step (right ceiling, wrong sequencing — 1 week of net-new simulator is not justified before a 1-day probe of the cheap path).
+
+---
+
+## 4. NEXT-EXPERIMENT SPEC — "Headroom Probe → RFT Pilot" (gated, &lt;1 H100-day total)
+
+**Base checkpoint for all stages:** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000` (loss-elbow seed per the 2026-07-07 addendum; ckpt-500 as fallback). First resolve the data-provenance caveat: verify `data/output/grpo/task_a/{train,validation}.jsonl` hashes against the W&amp;B `uklfswk5`/`bqbxnqxw` artifacts (validation.jsonl lags train.jsonl by 8 days).
+
+### Stage 0 — Headroom probe (~2 H100-hours)
+- **Harness:** extend `scripts/preflight_entropy_diag.py` — it already samples N completions/prompt and scores per-prompt `rewards[]`, `reward_std`, `frac_collapsed_groups` (lines 297–343). **Net-new (~50–80 LOC):** (i) one greedy (T=0) completion per prompt, scored; (ii) per-prompt `headroom = max(rewards) − r_greedy`; (iii) summary: `frontier_frac = %prompts with headroom &gt; 0.05`, `mean_headroom`, plus rung-occupancy histogram. Nothing else is new.
+- **Config:** 500 prompts stratified by (has-tool × terminal_reached × L-band) from `train.jsonl`, N=8, T=0.8/top_p 0.95 (matching `grpo_cat_a_diagnostic.yaml` sampling so numbers transfer). 500 prompts → ±4% CI on frontier_frac.
+- **GO (RFT):** `frontier_frac ≥ 15%` AND `mean_headroom ≥ 0.03`.
+- **GRPO-revival branch:** `frac_collapsed_groups &lt; 0.50` AND median `reward_std ≥ 0.05` → the §1 condition is met; run the already-built 50-step diagnostic via `./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_a_diagnostic.yaml` before committing to RFT.
+- **NO-GO (both):** `frontier_frac &lt; 10%` → no single-turn method has material headroom; escalate to the §3.4 decision (multi-turn env vs ship SFT-only). **Kill the single-turn RL/RFT track entirely.**
+
+### Stage 1 — RFT pilot (~6–10 H100-hours, only on Stage-0 GO)
+- **Sampling:** N=8, T=0.8 over a 4,000-prompt stratified subset (bias toward tool-bearing and terminal rows). Serve the *merged* SFT checkpoint via `training/merge_adapter.py` + `serving/launch_vllm.sh` (R9: no Unsloth `fast_inference` for gemma4; plain vLLM is fine). Prefix caching on — 8 samples share each long prompt.
+- **Filter:** keep top-1 per prompt where `max(reward) ≥ max(0.8, r_greedy + 0.05)`; drop saturated (headroom &lt; 0.05) and collapsed prompts. Expected yield ~600–1,500 rows.
+- **Train:** existing `training/sft.py` config, 1 epoch, lr 5e-6, LoRA on top of ckpt-1000.
+- **Gate metric (go/no-go for scale-up):** `_heldout_composite_score` (the strict, training-reward-independent composite already in `src/llm_workflow_agents/training/grpo.py:394`) on 200 fixed `validation.jsonl` prompts, greedy decode, before vs after.
+  - **GO:** Δcomposite ≥ **+0.02** absolute → scale to full corpus, then build DPO/KTO pairs from the same samples (Stage 2).
+  - **KILL:** Δcomposite &lt; +0.01, or *any* decline in tool-emission rate on tool-GT rows (guard against distilling the no-tool majority into over-caution).
+- **Budget cap:** Stage 0 + Stage 1 ≤ 1 H100-day. No stage may be "extended to see" past its gate — that pattern produced runs 2–4.
+
+---
+
+## 5. WHAT WOULD CHANGE THIS
+
+1. **Preflight surprises high:** `frac_collapsed_groups &lt; 0.50` with median `reward_std ≥ 0.05` at the diagnostic's exact sampling settings → the §1 condition is met, GRPO's death certificate is withdrawn, and the stabilized 50-step diagnostic (already merged, zero eng cost) becomes the correct next run — online RL then plausibly beats RFT by also learning from negatives.
+2. **No headroom anywhere:** `frontier_frac &lt; 10%` AND greedy composite already ≥ target → the SFT policy is effectively at the single-turn ceiling; the correct move is to *stop training on this row layout entirely* — ship SFT-only for Phase 2 Cat A, or fund the multi-turn env (#5) if the E2E Phase 4 numbers demand more.
+3. **RFT pilot fails its gate (Δ &lt; +0.01)** despite real measured headroom → best-of-8 winners aren't transferring, implying GT/reward misspecification (e.g., the ~17% placeholder-args stubs noted in `reward_business_logic.py:46-51` corrupting winner selection) → audit the reward against human judgment on 50 winner/loser pairs before any further training of any kind.
+4. **Dataset provenance check fails** (on-disk train/validation don't match `uklfswk5`/`bqbxnqxw` artifacts) → all of fact B's structural stats need re-measurement before this memo's quantitative conditions are trusted.
+5. **A generator-side data revision** (intervention #4) demonstrably shifts the lattice — preflight on a new batch showing `frac_collapsed_groups` down ≥ 20 points → re-run this memo's Stage 0 on the new corpus; both the GRPO condition and the RFT headroom could flip.
+
+**Unverified-claim flags:** dataset composition stats (B), the "median 8 rungs / 22% ≤2 rungs" lattice census (A), and old-corpus comparison numbers are adopted from the session's three investigations, not re-derived here. The 77% `frac0` figure is from `bqbxnqxw`'s production geometry (8 gens, 1 prompt/step) and is directional, not exact, for the 16-gen diagnostic geometry — which is precisely why Stage 0 re-measures it at matched settings before anything else runs.</result>
+<usage><subagent_tokens>65709</subagent_tokens><tool_uses>9</tool_uses><duration_ms>229401</duration_ms></usage>
+</task-notification>
