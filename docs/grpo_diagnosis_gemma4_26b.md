@@ -1120,3 +1120,52 @@ grpo:
 
 Run directly via the `model-training-eval` skill (not Codex — Codex CLI v0.134.0 requires the Responses **WebSocket** endpoint, which 401s for this `sk-proj-*` key; the HTTP Responses API and the key itself are fine, so it is a CLI transport limitation in this container, not an auth problem). Evidence base: all 51 W&B completions tables + the 50-entry `trainer_state.json` scalar log. GPU time: 0.
 
+---
+
+## New-Dataset Retry (2026-07-07): Run `bqbxnqxw` Re-hit the `scale_rewards` Explosion
+
+**Run analyzed:** `wpawgasa/huggingface/bqbxnqxw` — GRPO on the **new, LLM-qualified (dataset-verifier agent) dataset** (`data/output/grpo/task_a`, 2,502 conversations regenerated 2026-07-07), seeded from the new SFT `uklfswk5`. Local artifact: `checkpoints/grpo_cat_a/gemma-4-26B-A4B-it/checkpoint-150/`. **Analyzed at step 150** (only checkpoints 50/100/150 on disk; W&B run is auth-gated). GPU time: 0 (read `trainer_state.json` + `training_args.bin`).
+
+### TL;DR — the dataset changed but the optimizer bugs did not
+
+`bqbxnqxw` **reproduced the exact 2026-05-29 optimization-instability failure, more violently.** It used the **un-stabilized production `grpo_cat_a.yaml`** (`scale_rewards="group"`, `loss_type="grpo"`, no explicit `max_grad_norm`) — confirmed by decoding `checkpoint-150/training_args.bin` (`scale_rewards` → `"group"`, `loss_type` → `"grpo"`). The 2026-05-29 fixes were only ever written into `grpo_cat_a_diagnostic.yaml` and **never promoted to production**, so swapping in the new dataset changed the wrong variable on top of a known-broken optimizer.
+
+### Evidence — steps 1–150, `checkpoint-150/trainer_state.json`
+
+| Signal | `df4dot2d` (2026-05-29 worst) | **`bqbxnqxw`** |
+|---|---:|---:|
+| grad_norm max | 1,126 | **50,853** (step-1 already 1,323) |
+| KL max | 40.2 | **529.8** |
+| loss max | 4.02 | **52.98** |
+| `loss ≡ 0.1·kl` (scale_rewards signature) | yes | yes |
+| `frac_reward_zero_std==1.0` | ~2/50 steps | **116/150 steps (~77%)** |
+
+The run explodes through warmup (steps 1–50), then — because per-batch reward std on the new data is sometimes large enough to blunt the `÷group-std` amplification — settles after ~step 50 (KL <1, grad_norm single digits) with reward drifting 0.64→0.75. **That drift is untrustworthy:** ~77% of steps carry zero gradient, and held-out eval was dead code (see below), so there is no independent corroboration. By the diagnostic's own kill criteria (grad-norm > 50 for 3 consecutive steps OR KL > 10 → stop), this earned a kill in its first ~15 steps.
+
+### The new dataset did not fix within-group variance
+
+`frac_reward_zero_std ≈ 77%` on the new data — *worse* than `df4dot2d`. (Caveat: cross-run `frac0` numbers in this doc have been revised repeatedly and the run geometries differ; treat the cross-run delta as directional, but the absolute 77% is measured directly from `checkpoint-150/trainer_state.json`.) LLM-qualifying the corpus did not, on its own, produce the within-group reward spread GRPO needs.
+
+### Correction: the 2026-05-29 passthrough gap is FIXED
+
+The 2026-05-29 addendum's load-bearing action item — "`scale_rewards`/`max_grad_norm` aren't forwarded by `grpo.py`'s optional-kwargs loop; patch it or the fixes are silently ignored" — **is done.** `src/llm_workflow_agents/training/grpo.py:554-574` now forwards `scale_rewards`, `max_grad_norm`, `generation_batch_size`, `epsilon`, `per_device_train_batch_size`, `gradient_accumulation_steps`. Config-only stabilization now takes effect. `bqbxnqxw` still blew up only because it ran the production config, which was never given the fixes.
+
+### Verdict
+
+Continuing `bqbxnqxw` past ~step 15 was not justified. The correct move is the stabilized 50-step diagnostic (`grpo_cat_a_diagnostic.yaml`) on the new SFT + new data, gated before any 1000-step run — see the corrected experiment plan below.
+
+### What landed this session (code + config, tested)
+
+- **Held-out R5 guardrail wired for real** in `grpo.py`. The old `_RewardHackingCallback` never appended to `held_out_history`, so the auto-stop could never fire. Replaced with `_HeldOutEvalCallback`: every `monitoring.eval_held_out_every` steps it greedily generates on a fixed held-out subset (`data/output/grpo/task_a/validation.jsonl`, `eval_held_out_num_prompts`), scores with the new **strict** `_heldout_composite_score` (0.4 state + 0.4 strict-tool-F1 + 0.2 task — deliberately independent of the graded training reward), logs `eval/held_out_composite`, and stops on `_is_reward_hacking` (reward ↑ + held-out ↓). Both helpers are pure/CPU-only and unit-tested (10 new tests in `tests/unit/test_reward_functions.py`; 82 pass).
+- **Config guardrails:** `grpo_cat_a_diagnostic.yaml` gained `eval_held_out_every: 10` + `eval_held_out_num_prompts: 20` so the wiring is exercised over the 50-step run; `grpo_cat_a.yaml` gained `eval_held_out_num_prompts: 50` and a header **⚠️ warning** that it is the un-stabilized config and must not be launched for 1000 steps until the diagnostic gate passes and the optimizer keys are promoted.
+
+### Corrected experiment (seed = new SFT `uklfswk5`)
+
+The new SFT still over-trained (3 epochs / 3426 steps, loss elbow ~step 500–600, no early-stop / no `load_best_model_at_end`), so seed GRPO from **`checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000`** (just past the elbow), `checkpoint-500` as the higher-entropy fallback — not checkpoint-2000+.
+
+1. **Preflight (no GRPO, ~12 min):** `scripts/preflight_entropy_diag.py --checkpoints .../checkpoint-1000 --data-dir data/output/grpo/task_a --split validation --n-prompts 20 --n-completions 8 --output runs/preflight/newdata_20x8_ckpt1000.json`. Gate: `frac_collapsed_groups < 0.5`, `mean_unique_per_group > 3`. This is the within-group-variance check `bqbxnqxw` skipped — it isolates the dataset on a *stable measurement* (no optimizer).
+2. **Stabilized 50-step diagnostic:** `./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_a_diagnostic.yaml --sft-checkpoint .../checkpoint-1000 --skip-filter`. Kill criteria: grad-norm > 50 ×3 consecutive OR KL > 10 → stop. Watch `train/grad_norm`, `train/kl`, `train/frac_reward_zero_std`, `train/unique_completions_per_group`, `eval/held_out_composite`.
+3. **Gate:** stable + `reward_std > 0.02` + `frac0` trending down → promote the optimizer keys into `grpo_cat_a.yaml` (`training_steps: 1000`, `save_steps: 50`) and launch the full run with the held-out guardrail live. Stable but `reward_std < 0.02` → reward-resolution / tool-emission work (Option B / continuous prose component), not a 1000-step run. Unstable → LR / `max_grad_norm` tuning first.
+
+**Data-provenance caveat:** `data/output/sft/task_a_splits` was rewritten ~11 min *after* the `uklfswk5` checkpoints, and GRPO `validation.jsonl` (Jun 29) lags `train.jsonl` (Jul 7) by 8 days — verify against the W&B `uklfswk5`/`bqbxnqxw` artifact hashes before trusting on-disk files.
+

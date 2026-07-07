@@ -1,3 +1,19 @@
+# ⚠️ UNSTABILIZED OPTIMIZER — DO NOT LAUNCH A 1000-STEP RUN AS-IS.
+# The `grpo:` block below still carries the three bugs that blew up runs
+# df4dot2d and bqbxnqxw: scale_rewards defaults to "group" (÷ near-zero group
+# std → 60–1060× advantage amplification, grad-norm 50k / KL 530), loss_type
+# "grpo" (short-completion length bias), and no explicit max_grad_norm. See
+# docs/grpo_diagnosis_gemma4_26b.md, addendum "New-Dataset Retry (2026-07-07)".
+#
+# CORRECT SEQUENCE: run the stabilized 50-step diagnostic first
+# (configs/training/grpo_cat_a_diagnostic.yaml, which has the fixes). ONLY after
+# it passes the go/no-go gate, promote these into this file:
+#     scale_rewards: "none"   loss_type: "dr_grpo"   max_grad_norm: 0.2
+#     learning_rate: 1.0e-6   beta: 0.05   num_generations: 16
+#     generation_batch_size: 32   sampling.temperature: 0.8
+# and keep training_steps: 1000 / save_steps: 50. The held-out R5 guardrail
+# (monitoring below) is already wired and applies to the full run.
+
 stage: "grpo"
 framework: "unsloth"
 
@@ -80,7 +96,10 @@ data:
 
 monitoring:
   eval_held_out_every: 50
-  reward_hacking_detector: true
+  eval_held_out_num_prompts: 50   # greedy held-out generations scored by the
+                                  #   independent composite metric every 50 steps
+  reward_hacking_detector: true   # activates _HeldOutEvalCallback (held-out
+                                  #   composite eval + reward-hacking auto-stop, R5)
   kl_divergence_log: true
 
 logging:
