@@ -19,3 +19,7 @@ Did you read @docs/grpo_diagnosis_gemma4_26b.md? This run train GRPO on new data
 ---
 
 Documented this and design the corrected experiment plan
+
+---
+
+yes and open an auto-merged PR
