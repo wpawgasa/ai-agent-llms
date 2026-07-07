@@ -154,17 +154,17 @@ stages:
     deps:
     - path: checkpoints/sft_cat_a/gemma-4-26B-A4B-it
       hash: md5
-      md5: 7c6bd069b79501949ff60b8079af082a.dir
-      size: 560242205
-      nfiles: 46
+      md5: f89238076f5b09ca0d76e5b9ab98e4ec.dir
+      size: 980680259
+      nfiles: 79
     - path: configs/models_exp_a/gemma4_26b_a4b.yaml
       hash: md5
       md5: 9894665b15093cecef5b4c4f4675a5ed
       size: 1133
     - path: configs/training/grpo_cat_a.yaml
       hash: md5
-      md5: 049098861b4183a105d32ccdf58f2c2e
-      size: 3077
+      md5: c853f90299b81ef97359ab4d0a56a8b3
+      size: 3595
     - path: data/output/grpo/task_a
       hash: md5
       md5: 60831c6695e943fd354b86d816b799d3.dir
@@ -172,8 +172,8 @@ stages:
       nfiles: 2
     - path: scripts/run_phase2_grpo.sh
       hash: md5
-      md5: 9a711915ed34745a4ab935ff29ecd7d0
-      size: 9077
+      md5: 5859236747ad27cb7c4199798a73aeff
+      size: 9311
       isexec: true
     - path: src/llm_workflow_agents/eval/tool_call_f1.py
       hash: md5
@@ -181,26 +181,26 @@ stages:
       size: 15629
     - path: src/llm_workflow_agents/training/grpo.py
       hash: md5
-      md5: b6916f554a2210bc81bc8a2171328087
-      size: 22915
+      md5: 9391fc65beb52e3557964f2f1c4ee5e2
+      size: 30473
     - path: src/llm_workflow_agents/training/lora_targets.py
       hash: md5
       md5: 4668724b2b8bb7feb1207fb48c44effa
       size: 9466
     - path: src/llm_workflow_agents/training/reward_utils.py
       hash: md5
-      md5: 11323a7bfd3e67b5aac60b78be904af2
-      size: 5762
+      md5: d416b9cdcd4f055ef999029116bba7f6
+      size: 6799
     - path: src/llm_workflow_agents/training/rewards/reward_business_logic.py
       hash: md5
-      md5: b27e6e42d71ef649b61f4eb8144849d7
-      size: 6716
+      md5: b91b50718b6f23aa3a11e42c3174e5e8
+      size: 7441
     outs:
     - path: checkpoints/grpo_cat_a/gemma-4-26B-A4B-it
       hash: md5
-      md5: 3c3617fbc657a15a0d205bed5cb8d08a.dir
-      size: 323904051
-      nfiles: 26
+      md5: e9b711c1f71cf07e6659423766cd23ce.dir
+      size: 486840964
+      nfiles: 35
   task_a_sft_splits:
     cmd: "python scripts/split_task_a_sft.py\n  --input-dir data/output/sft/task_a_cleaned\n\
       \  --output-dir data/output/sft/task_a_splits\n  --force"
