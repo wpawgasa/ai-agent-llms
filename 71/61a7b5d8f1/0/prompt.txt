@@ -1,0 +1,21 @@
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+model is up-to-date
+
+---
+
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+pull the exact beta / lr / max_grad_norm / num_generations / dynamic-sampling values from configs/training/grpo_cat_a.yaml
+
+---
+
+Did you read @docs/grpo_diagnosis_gemma4_26b.md? This run train GRPO on new dataset for which qualified by LLM (Opus).
+
+---
+
+Documented this and design the corrected experiment plan
