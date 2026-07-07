@@ -481,3 +481,7 @@ Explicitly rejected: lever (c) semantic-similarity component (predicted reward-h
 **Unverified-claim flags:** dataset composition stats (B), the "median 8 rungs / 22% ≤2 rungs" lattice census (A), and old-corpus comparison numbers are adopted from the session's three investigations, not re-derived here. The 77% `frac0` figure is from `bqbxnqxw`'s production geometry (8 gens, 1 prompt/step) and is directional, not exact, for the 16-gen diagnostic geometry — which is precisely why Stage 0 re-measures it at matched settings before anything else runs.</result>
 <usage><subagent_tokens>65709</subagent_tokens><tool_uses>9</tool_uses><duration_ms>229401</duration_ms></usage>
 </task-notification>
+
+---
+
+Both
