@@ -149,11 +149,15 @@ def _generate_for_checkpoint(
     max_seq_length: int,
     batch_size: int,
     seed: int,
+    do_sample: bool = True,
 ) -> list[list[str]]:
     """Load `checkpoint`, generate K completions per prompt, return per-prompt lists.
 
-    Each prompt → list[str] of length n_completions. Generation matches GRPO
-    sampling (T=1.0, top_p=0.95) so reward_std here predicts what GRPO sees.
+    Each prompt → list[str] of length n_completions. With ``do_sample=True``
+    (default) generation matches GRPO sampling (T=1.0, top_p=0.95) so reward_std
+    here predicts what GRPO sees. With ``do_sample=False`` it decodes greedily
+    (temperature/top_p ignored) — used by the RFT headroom probe to score the
+    deterministic baseline each prompt's best-of-K is measured against.
     """
     # Unsloth must be imported before torch so its monkey-patches take effect.
     from unsloth import FastLanguageModel  # noqa: I001
@@ -216,15 +220,16 @@ def _generate_for_checkpoint(
                 truncation=True,
                 max_length=max_seq_length - max_new_tokens,
             ).to(model.device)
+            gen_kwargs: dict[str, Any] = {
+                "max_new_tokens": max_new_tokens,
+                "pad_token_id": inner_tok.pad_token_id or inner_tok.eos_token_id,
+            }
+            if do_sample:
+                gen_kwargs.update(do_sample=True, temperature=temperature, top_p=top_p)
+            else:
+                gen_kwargs.update(do_sample=False)
             with torch.inference_mode():
-                out = model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=True,
-                    temperature=temperature,
-                    top_p=top_p,
-                    pad_token_id=inner_tok.pad_token_id or inner_tok.eos_token_id,
-                )
+                out = model.generate(**inputs, **gen_kwargs)
             # Strip prompt tokens; decode only the new portion.
             for j, seq in enumerate(out):
                 prompt_len = inputs["input_ids"][j].shape[0]

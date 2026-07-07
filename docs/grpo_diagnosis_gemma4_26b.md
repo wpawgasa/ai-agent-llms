@@ -1169,3 +1169,9 @@ The new SFT still over-trained (3 epochs / 3426 steps, loss elbow ~step 500–60
 
 **Data-provenance caveat:** `data/output/sft/task_a_splits` was rewritten ~11 min *after* the `uklfswk5` checkpoints, and GRPO `validation.jsonl` (Jun 29) lags `train.jsonl` (Jul 7) by 8 days — verify against the W&B `uklfswk5`/`bqbxnqxw` artifact hashes before trusting on-disk files.
 
+---
+
+## Strategic follow-up (2026-07-07): viability verdict → pivot to RFT
+
+A first-principles review (Fable-authored, Opus-vetted) of whether single-turn online GRPO can learn on this reward/dataset **at all** is in **[`grpo_viability_investigation.md`](grpo_viability_investigation.md)**. Verdict: **No, as configured** — the reward is a discrete lattice (median 8 rungs/prompt, ~22% ≤2), the re-generated dataset is structurally the old failing corpus, and the merged stabilization only converts "explode on ~77% of steps" into "no-op on ~77%." Recommendation: **abandon online GRPO; adopt rejection-sampling fine-tuning (RFT)** using the existing graded reward as an offline ranker, gated by a 1-day headroom probe (extend `scripts/preflight_entropy_diag.py`), with DPO/KTO as a second stage. GRPO is revived only if a matched-settings preflight measures `frac_collapsed_groups < 0.50` AND median `reward_std ≥ 0.05`.
+
