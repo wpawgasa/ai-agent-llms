@@ -43,6 +43,8 @@ from llm_workflow_agents.training.sft import SFTResult
 from llm_workflow_agents.training.grpo import (
     GRPOResult,
     _LATEST_INSTRUMENTATION,
+    _heldout_composite_score,
+    _is_reward_hacking,
     _make_reward_adapter,
     _resolve_reward_fn,
 )
@@ -654,3 +656,67 @@ class TestPilotResult:
         )
         assert r.degraded is True
         assert r.final_loss > r.initial_loss
+
+
+# --- Held-Out Eval Guardrail Tests (Risk R5) ---
+
+
+class TestHeldOutCompositeScore:
+    """Locks _heldout_composite_score: strict, deployment-aligned held-out
+    quality (0.4 state + 0.4 strict-tool-F1 + 0.2 task), deliberately
+    independent of the graded training reward so reward hacking is detectable.
+    """
+
+    GT = {
+        "state_sequence": [{"from": "A", "to": "B"}],
+        "tool_calls": [],
+        "terminal_state": "B",
+    }
+
+    def test_perfect_completion_scores_one(self) -> None:
+        comp = "[STATE: A → B]\ndone"
+        assert _heldout_composite_score([comp], [self.GT]) == pytest.approx(1.0)
+
+    def test_wrong_transition_loses_state_and_task(self) -> None:
+        # Wrong target: state_acc 0, no terminal reached; only the (empty/empty)
+        # tool component (0.4) survives.
+        comp = "[STATE: A → C]\nhmm"
+        assert _heldout_composite_score([comp], [self.GT]) == pytest.approx(0.4)
+
+    def test_no_annotation_scores_below_perfect(self) -> None:
+        comp = "nothing structured here"
+        score = _heldout_composite_score([comp], [self.GT])
+        assert score < 1.0
+        assert 0.0 <= score <= 1.0
+
+    def test_no_completions_scores_zero(self) -> None:
+        assert _heldout_composite_score([], []) == 0.0
+
+    def test_averages_across_rows(self) -> None:
+        good = "[STATE: A → B]\ndone"
+        bad = "[STATE: A → C]\nhmm"
+        # mean(1.0, 0.4) = 0.7
+        assert _heldout_composite_score([good, bad], [self.GT, self.GT]) == pytest.approx(
+            0.7
+        )
+
+
+class TestIsRewardHacking:
+    """Locks the R5 divergence trigger: fires only when training reward rises
+    while held-out quality falls, with enough history.
+    """
+
+    def test_fires_on_reward_up_heldout_down(self) -> None:
+        assert _is_reward_hacking([0.1, 0.2, 0.3, 0.4, 0.5], [0.8, 0.7]) is True
+
+    def test_no_fire_when_both_rise(self) -> None:
+        assert _is_reward_hacking([0.1, 0.2, 0.3, 0.4, 0.5], [0.7, 0.8]) is False
+
+    def test_no_fire_when_reward_flat(self) -> None:
+        assert _is_reward_hacking([0.5, 0.5, 0.5, 0.5, 0.5], [0.8, 0.7]) is False
+
+    def test_no_fire_with_insufficient_reward_history(self) -> None:
+        assert _is_reward_hacking([0.5], [0.7, 0.6]) is False
+
+    def test_no_fire_with_insufficient_heldout_history(self) -> None:
+        assert _is_reward_hacking([0.1, 0.2, 0.3, 0.4, 0.5], [0.7]) is False

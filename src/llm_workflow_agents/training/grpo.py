@@ -391,6 +391,83 @@ def _make_reward_adapter(reward_fn: Callable) -> Callable:
     return adapter
 
 
+def _heldout_composite_score(
+    completions: list[str],
+    ground_truths: list[dict[str, Any]],
+) -> float:
+    """Deployment-aligned held-out quality score, computed with STRICT metrics.
+
+    Mirrors ``eval.composite_score.compute_weighted_workflow_score``:
+    ``0.4 * state_transition_acc + 0.4 * strict_tool_f1 + 0.2 * task_completion``,
+    averaged over the held-out rows.
+
+    Deliberately uses the *strict* scorers (``state_sequence_match``,
+    ``tool_call_f1`` = ``compute_ast_f1``, ``reached_terminal``) rather than the
+    graded components the training reward optimizes (``graded_tool_call_f1``,
+    ``_graded_state_match``, ``transition_legality``). Keeping the held-out metric
+    numerically independent of the training reward is what makes a reward-vs-
+    quality divergence (reward hacking, Risk R5) detectable — see
+    docs/grpo_diagnosis_gemma4_26b.md. Pure/CPU-only and unit-tested.
+    """
+    from llm_workflow_agents.training.reward_utils import (
+        extract_state_annotations,
+        extract_tool_calls,
+        reached_terminal,
+        state_sequence_match,
+        tool_call_f1,
+    )
+
+    if not completions:
+        return 0.0
+
+    scores: list[float] = []
+    for comp, gt in zip(completions, ground_truths):
+        gt = gt or {}
+        gt_seq = gt.get("state_sequence") or []
+        gt_trans = [
+            (s.get("from", ""), s.get("to", ""))
+            if isinstance(s, dict)
+            else tuple(s)
+            if isinstance(s, (list, tuple)) and len(s) == 2
+            else ("", "")
+            for s in gt_seq
+        ]
+        pred_trans = extract_state_annotations(comp)
+        if gt_trans:
+            state_acc = state_sequence_match(pred_trans, gt_trans)
+        else:
+            state_acc = 1.0 if not pred_trans else 0.0
+
+        tool_f1 = tool_call_f1(extract_tool_calls(comp), gt.get("tool_calls") or [])
+
+        terminal = gt.get("terminal_state") or ""
+        task = 1.0 if terminal and reached_terminal(comp, terminal) else 0.0
+
+        scores.append(0.4 * state_acc + 0.4 * tool_f1 + 0.2 * task)
+
+    return sum(scores) / len(scores)
+
+
+def _is_reward_hacking(
+    reward_history: list[float],
+    held_out_history: list[float],
+    lookback: int = 5,
+) -> bool:
+    """Reward-hacking test: training reward rising while held-out quality falls.
+
+    Returns True only when there is enough history AND the latest training
+    reward is above the reward ``lookback`` logs ago AND the latest held-out
+    composite is below the previous one. Pure/unit-tested — the callback wires
+    it to ``control.should_training_stop``.
+    """
+    if len(reward_history) < lookback or len(held_out_history) < 2:
+        return False
+    return (
+        reward_history[-1] > reward_history[-lookback]
+        and held_out_history[-1] < held_out_history[-2]
+    )
+
+
 def train_grpo(config_path: Path) -> GRPOResult:
     """Run Unsloth GRPO RL pipeline.
 
@@ -495,6 +572,24 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     data_source = data_cfg.get("source", "")
     train_ds = _load_grpo_jsonl(Path(data_source), split="train")
+
+    # Held-out subset for the R5 reward-hacking guardrail. Loaded once; the
+    # callback generates greedy completions on these prompts every
+    # ``eval_held_out_every`` steps and scores them with an independent
+    # composite metric (see _HeldOutEvalCallback / _heldout_composite_score).
+    held_out_rows: list[dict[str, Any]] = []
+    if monitoring_cfg.get("reward_hacking_detector", False):
+        n_held_out = int(monitoring_cfg.get("eval_held_out_num_prompts", 50))
+        try:
+            val_ds = _load_grpo_jsonl(Path(data_source), split="validation")
+            held_out_rows = [val_ds[i] for i in range(min(n_held_out, len(val_ds)))]
+            logger.info("grpo_heldout_loaded", n_prompts=len(held_out_rows))
+        except FileNotFoundError:
+            logger.warning(
+                "grpo_heldout_split_missing",
+                note="validation split not found; held-out eval disabled",
+                data_source=data_source,
+            )
 
     from trl import GRPOConfig, GRPOTrainer
 
@@ -612,43 +707,111 @@ def train_grpo(config_path: Path) -> GRPOResult:
     callbacks.append(_UniqueCompletionsCallback())
 
     if monitoring_cfg.get("reward_hacking_detector", False):
-        class _RewardHackingCallback(TrainerCallback):
-            """Monitor for reward hacking: reward ↑ + held-out ↓."""
+        held_out_max_new = int(grpo_cfg.get("max_completion_length", 512))
 
-            def __init__(self) -> None:
+        class _HeldOutEvalCallback(TrainerCallback):
+            """Real held-out quality guardrail (Risk R5).
+
+            Every ``eval_held_out_every`` steps, greedily generates completions
+            on a fixed held-out prompt subset, scores them with the independent
+            ``_heldout_composite_score`` (strict metrics, distinct from the
+            graded training reward), logs ``eval/held_out_composite``, and stops
+            training when ``_is_reward_hacking`` fires (train reward ↑ while
+            held-out quality ↓). Replaces the previous stub whose
+            ``held_out_history`` was never populated, so the auto-stop could
+            never trigger.
+            """
+
+            def __init__(self, model, tokenizer, rows) -> None:  # noqa: ANN001
+                self.model = model
+                self.tokenizer = tokenizer
+                self.rows = rows
                 self.reward_history: list[float] = []
                 self.held_out_history: list[float] = []
+
+            def _evaluate(self) -> float | None:
+                if not self.rows:
+                    return None
+                import torch
+
+                tok = self.tokenizer
+                model = self.model
+                was_training = model.training
+                model.eval()
+                completions: list[str] = []
+                gts: list[dict[str, Any]] = []
+                try:
+                    with torch.no_grad():
+                        for row in self.rows:
+                            text = tok.apply_chat_template(
+                                row["prompt"],
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+                            enc = tok(
+                                text,
+                                return_tensors="pt",
+                                truncation=True,
+                                max_length=7680,
+                            ).to(model.device)
+                            out = model.generate(
+                                **enc,
+                                max_new_tokens=held_out_max_new,
+                                do_sample=False,
+                            )
+                            gen = tok.decode(
+                                out[0][enc["input_ids"].shape[1] :],
+                                skip_special_tokens=True,
+                            )
+                            completions.append(gen)
+                            gt_raw = row.get("ground_truth")
+                            gts.append(
+                                json.loads(gt_raw)
+                                if isinstance(gt_raw, str)
+                                else (gt_raw or {})
+                            )
+                except Exception as exc:  # noqa: BLE001 — never kill training on eval
+                    logger.warning("grpo_heldout_eval_failed", error=str(exc))
+                    return None
+                finally:
+                    if was_training:
+                        model.train()
+                return _heldout_composite_score(completions, gts)
 
             def on_log(self, args, state, control, logs=None, **kwargs):  # noqa: ANN001
                 if logs and "reward" in logs:
                     self.reward_history.append(logs["reward"])
-                if logs and "kl" in logs:
-                    pass  # KL logged automatically by GRPOTrainer
+                    if self.held_out_history:
+                        logs["eval/held_out_composite"] = self.held_out_history[-1]
 
+            def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
                 if (
                     state.global_step > 0
                     and state.global_step % eval_held_out_every == 0
                 ):
-                    # Check for reward hacking pattern
-                    if (
-                        len(self.reward_history) >= 5
-                        and len(self.held_out_history) >= 2
-                    ):
-                        recent_reward = self.reward_history[-1]
-                        prev_reward = self.reward_history[-5]
-                        recent_held_out = self.held_out_history[-1]
-                        prev_held_out = self.held_out_history[-2]
+                    score = self._evaluate()
+                    if score is None:
+                        return
+                    self.held_out_history.append(score)
+                    logger.info(
+                        "grpo_heldout_eval",
+                        step=state.global_step,
+                        held_out_composite=score,
+                    )
+                    if _is_reward_hacking(self.reward_history, self.held_out_history):
+                        logger.warning(
+                            "reward_hacking_detected",
+                            step=state.global_step,
+                            reward_recent=self.reward_history[-1],
+                            reward_prev=self.reward_history[-5],
+                            held_out_recent=self.held_out_history[-1],
+                            held_out_prev=self.held_out_history[-2],
+                        )
+                        control.should_training_stop = True
 
-                        if recent_reward > prev_reward and recent_held_out < prev_held_out:
-                            logger.warning(
-                                "reward_hacking_detected",
-                                step=state.global_step,
-                                reward_delta=recent_reward - prev_reward,
-                                held_out_delta=recent_held_out - prev_held_out,
-                            )
-                            control.should_training_stop = True
-
-        callbacks.append(_RewardHackingCallback())
+        callbacks.append(
+            _HeldOutEvalCallback(model, tokenizer, held_out_rows)
+        )
 
     trainer = GRPOTrainer(
         model=model,

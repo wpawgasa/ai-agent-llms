@@ -88,8 +88,14 @@ data:
     test: 0.05
 
 monitoring:
-  eval_held_out_every: 50
-  reward_hacking_detector: true
+  # Diagnostic cadence: every 10 steps (5 held-out evals over the 50-step run)
+  # so the R5 guardrail wiring is actually exercised — at eval_held_out_every=50
+  # it would fire only once and never get 2 points to compare. Production
+  # (grpo_cat_a.yaml) uses 50.
+  eval_held_out_every: 10
+  eval_held_out_num_prompts: 20   # greedy generations per eval; keep small here
+  reward_hacking_detector: true   # activates _HeldOutEvalCallback (held-out
+                                  #   composite eval + reward-hacking auto-stop)
   kl_divergence_log: true
 
 logging:
