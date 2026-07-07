@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "14aea83336c3",
+  "strategy": "manual-commit",
+  "branch": "chore/grpo-corrected-experiment-runner",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "scripts/run_grpo_corrected_experiment.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/14/aea83336c3/0/metadata.json",
+      "transcript": "/14/aea83336c3/0/full.jsonl",
+      "content_hash": "/14/aea83336c3/0/content_hash.txt",
+      "prompt": "/14/aea83336c3/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 15040,
+    "cache_creation_tokens": 311992,
+    "cache_read_tokens": 16217524,
+    "output_tokens": 108600,
+    "api_call_count": 72
+  }
+}
