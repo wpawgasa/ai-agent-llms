@@ -61,7 +61,12 @@ train = [
     # transformers==5.5.0 and xformers==0.0.34+cu130. Keep version ranges
     # permissive here so uv doesn't fight the override.
     "transformers>=4.57.6",
-    "trl==1.0.0",
+    # Baseline pin resolvable with unsloth==2026.4.8 (which caps trl<=0.24.0).
+    # The multi-turn trajectory rollout needs trl==1.0.0 (rollout_func + env_mask
+    # hooks); install_train.sh bumps trl to 1.0.0 post-override alongside the
+    # unsloth-from-main reinstall, and trajectory_rollout.assert_trajectory_rollout_support()
+    # enforces it at runtime.
+    "trl==0.24.0",
     "vllm==0.19.1",
     "unsloth==2026.4.8",
     "unsloth-zoo==2026.4.9",
