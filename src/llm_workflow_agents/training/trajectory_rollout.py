@@ -19,8 +19,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from llm_workflow_agents.training.reward_utils import (
+    extract_state_annotations,
+    extract_tool_calls,
+)
+
+_SUPPORT_CHECKED = False
 
 
 def assert_trajectory_rollout_support() -> None:
@@ -187,3 +194,312 @@ def classify_turn(
     if effective == window:  # window is non-empty here (equal to non-empty effective)
         return ("advance", cursor + len(effective))
     return ("diverged", cursor)
+
+
+# --------------------------------------------------------------------------- #
+# In-process replay rollout (HF model.generate, one assistant turn per round).
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class TrajectoryRolloutConfig:
+    """Knobs for the replay rollout (subset surfaced in the YAML config)."""
+
+    max_turns: int = 24  # gold p90 length ~21
+    per_turn_max_new_tokens: int = 256
+    max_completion_tokens: int = 4096  # must equal GRPOConfig.max_completion_length
+    stall_turn_limit: int = 2  # consecutive no-transition turns before stop
+    temperature: float = 0.8
+    top_p: float = 0.95
+    do_sample: bool = True
+
+
+@dataclass
+class RolloutSample:
+    """One completed trajectory: token ids + the env_mask + scored inputs."""
+
+    prompt_ids: list[int]
+    completion_ids: list[int]
+    env_mask: list[int]  # len == len(completion_ids); 1=model token, 0=injected/forced
+    turn_texts: list[str]  # decoded model turns, in order
+    meta: dict[str, Any]
+
+
+@dataclass
+class _RolloutState:
+    """Mutable per-conversation bookkeeping during the turn loop."""
+
+    script: GoldScript
+    prompt_ids: list[int]
+    completion_ids: list[int] = field(default_factory=list)
+    env_mask: list[int] = field(default_factory=list)
+    turn_texts: list[str] = field(default_factory=list)
+    pred_transitions: list[tuple[str, str]] = field(default_factory=list)
+    cursor: int = 0
+    n_stall: int = 0
+    consec_stall: int = 0
+    active: bool = True
+    stop_reason: str = ""
+
+
+def _derive_turn_end_id(tokenizer: Any) -> int:
+    """Return the token id that terminates an assistant turn for this template.
+
+    Rendered from a dummy ``[user, assistant]`` exchange without a generation
+    prompt — the last token is the assistant turn terminator (``<|im_end|>`` for
+    Qwen ChatML, ``<end_of_turn>`` for Gemma). Tokenizer-agnostic.
+    """
+    ids = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "u"}, {"role": "assistant", "content": "a"}],
+        add_generation_prompt=False,
+        tokenize=True,
+    )
+    return int(ids[-1])
+
+
+def _segment_suffix_ids(tokenizer: Any, segment_msgs: list[dict[str, str]]) -> list[int]:
+    """Token ids for injecting a gold segment + the next assistant gen header.
+
+    Uses the dummy-conversation diff (as TRL's ``_get_tool_suffix_ids``): render
+    a throwaway ``[user, assistant]`` prefix, then the prefix + the segment with
+    a generation prompt, and return the tokens beyond the shared prefix. These
+    ids (gold tool/user text + the ``<assistant>`` header) are injected with
+    ``env_mask=0`` so they are context-only, never trained.
+    """
+    dummy = [
+        {"role": "user", "content": "x"},
+        {"role": "assistant", "content": "y"},
+    ]
+    prefix = tokenizer.apply_chat_template(
+        dummy, add_generation_prompt=False, tokenize=True
+    )
+    full = tokenizer.apply_chat_template(
+        dummy + list(segment_msgs), add_generation_prompt=True, tokenize=True
+    )
+    n = len(prefix)
+    if full[:n] != prefix:  # template not exactly prefix-stable — trim the common run
+        n = 0
+        while n < len(prefix) and n < len(full) and prefix[n] == full[n]:
+            n += 1
+    return [int(t) for t in full[n:]]
+
+
+def _left_pad(seqs: list[list[int]], pad_id: int):  # noqa: ANN201
+    """Left-pad a batch of id lists into ``(input_ids, attention_mask)`` tensors."""
+    import torch
+
+    maxlen = max(len(s) for s in seqs)
+    input_ids = torch.full((len(seqs), maxlen), pad_id, dtype=torch.long)
+    attn = torch.zeros((len(seqs), maxlen), dtype=torch.long)
+    for i, s in enumerate(seqs):
+        if s:
+            input_ids[i, maxlen - len(s) :] = torch.tensor(s, dtype=torch.long)
+            attn[i, maxlen - len(s) :] = 1
+    return input_ids, attn
+
+
+def _truncate_at_turn_end(
+    ids: list[int], turn_end_ids: set[int]
+) -> tuple[list[int], bool]:
+    """Cut generated ids at (and including) the first turn-end token."""
+    for i, tok in enumerate(ids):
+        if tok in turn_end_ids:
+            return ids[: i + 1], True
+    return ids, False
+
+
+def _decide_stop(
+    state: _RolloutState, label: str, turn_idx: int, cfg: TrajectoryRolloutConfig
+) -> str:
+    """Return a stop reason for this turn, or '' to continue to the next turn."""
+    n_gold = len(state.script.gold_transitions)
+    if label == "diverged":
+        return "diverged"
+    if state.cursor >= n_gold:
+        return "gold_complete"
+    if state.consec_stall >= cfg.stall_turn_limit:
+        return "stall"
+    if turn_idx + 1 >= len(state.script.segments):
+        return "script_exhausted"
+    if turn_idx + 1 >= cfg.max_turns:
+        return "turn_cap"
+    return ""
+
+
+def run_replay_rollout(
+    model: Any,
+    tokenizer: Any,
+    scripts: list[GoldScript],
+    cfg: TrajectoryRolloutConfig,
+) -> list[RolloutSample]:
+    """Free-run each conversation's assistant turns against its replayed gold script.
+
+    Per round, all still-active conversations generate one assistant turn in a
+    single batched ``model.generate`` (left-padded), each turn is aligned via
+    :func:`classify_turn`, and unless a stop condition fires the matching gold
+    segment (user + tool turns) is injected with ``env_mask=0``. The trajectory
+    is force-terminated on ``tokenizer.eos_token_id`` so a divergence-truncated
+    completion is never zeroed by TRL's ``mask_truncated_completions``.
+    """
+    import torch
+
+    pad_id = (
+        tokenizer.pad_token_id
+        if tokenizer.pad_token_id is not None
+        else tokenizer.eos_token_id
+    )
+    eos_id = int(tokenizer.eos_token_id)
+    turn_end_ids = {_derive_turn_end_id(tokenizer), eos_id}
+
+    states = [
+        _RolloutState(
+            script=sc,
+            prompt_ids=[
+                int(t)
+                for t in tokenizer.apply_chat_template(
+                    sc.prompt_messages, add_generation_prompt=True, tokenize=True
+                )
+            ],
+        )
+        for sc in scripts
+    ]
+
+    was_training = getattr(model, "training", False)
+    if hasattr(model, "eval"):
+        model.eval()
+    try:
+        for turn_idx in range(cfg.max_turns):
+            active = [s for s in states if s.active]
+            if not active:
+                break
+            seqs = [s.prompt_ids + s.completion_ids for s in active]
+            input_ids, attn = _left_pad(seqs, pad_id)
+            gen_kwargs: dict[str, Any] = {
+                "max_new_tokens": cfg.per_turn_max_new_tokens,
+                "do_sample": cfg.do_sample,
+                "eos_token_id": list(turn_end_ids),
+                "pad_token_id": pad_id,
+            }
+            if cfg.do_sample:
+                gen_kwargs["temperature"] = cfg.temperature
+                gen_kwargs["top_p"] = cfg.top_p
+            with torch.no_grad():
+                out = model.generate(input_ids=input_ids, attention_mask=attn, **gen_kwargs)
+            in_len = input_ids.shape[1]
+            for i, s in enumerate(active):
+                new_ids = [int(t) for t in out[i, in_len:].tolist() if int(t) != pad_id]
+                turn_ids, had_end = _truncate_at_turn_end(new_ids, turn_end_ids)
+                s.completion_ids.extend(turn_ids)
+                s.env_mask.extend([1] * len(turn_ids))
+                if not had_end:  # ran out of budget mid-turn — force a masked turn-end
+                    s.completion_ids.append(eos_id)
+                    s.env_mask.append(0)
+
+                turn_text = tokenizer.decode(turn_ids, skip_special_tokens=True)
+                s.turn_texts.append(turn_text)
+                transitions = extract_state_annotations(turn_text)
+                s.pred_transitions.extend(transitions)
+                label, s.cursor = classify_turn(
+                    transitions, s.cursor, s.script.gold_transitions
+                )
+                if label == "stall":
+                    s.n_stall += 1
+                    s.consec_stall += 1
+                else:
+                    s.consec_stall = 0
+
+                stop = _decide_stop(s, label, turn_idx, cfg)
+                if stop:
+                    s.active = False
+                    s.stop_reason = stop
+                    continue
+
+                seg_ids = _segment_suffix_ids(
+                    tokenizer, s.script.segments[turn_idx]
+                )
+                s.completion_ids.extend(seg_ids)
+                s.env_mask.extend([0] * len(seg_ids))
+                if (
+                    len(s.completion_ids) + cfg.per_turn_max_new_tokens
+                    > cfg.max_completion_tokens
+                ):
+                    s.active = False
+                    s.stop_reason = "budget"
+    finally:
+        if was_training and hasattr(model, "train"):
+            model.train()
+
+    samples: list[RolloutSample] = []
+    for s in states:
+        if s.active:  # exhausted the turn loop without an explicit stop
+            s.stop_reason = "turn_cap"
+            s.active = False
+        if not s.completion_ids or s.completion_ids[-1] != eos_id:
+            s.completion_ids.append(eos_id)
+            s.env_mask.append(0)
+        samples.append(
+            RolloutSample(
+                prompt_ids=s.prompt_ids,
+                completion_ids=s.completion_ids,
+                env_mask=s.env_mask,
+                turn_texts=s.turn_texts,
+                meta={
+                    "cursor": s.cursor,
+                    "stop_reason": s.stop_reason,
+                    "n_model_turns": len(s.turn_texts),
+                    "n_stall_turns": s.n_stall,
+                    "gold_len": len(s.script.gold_transitions),
+                    "conversation_id": s.script.conversation_id,
+                },
+            )
+        )
+    return samples
+
+
+def make_replay_rollout_func(
+    script_index: dict[str, GoldScript],
+    cfg: TrajectoryRolloutConfig,
+) -> Callable[[list, Any], dict[str, Any]]:
+    """Build the TRL ``rollout_func`` closure over a prompt→GoldScript index.
+
+    The returned callable takes ``(prompts, trainer)``, looks up each prompt's
+    gold script by :func:`prompt_key` (a missing key is a hard ``KeyError`` — we
+    never silently fall back to single-turn), runs the in-process replay, and
+    returns the TRL contract dict plus the ``env_mask``/``trajectory``/
+    ``rollout_meta`` extra fields.
+    """
+
+    def rollout_func(prompts: list, trainer: Any) -> dict[str, Any]:
+        global _SUPPORT_CHECKED
+        if not _SUPPORT_CHECKED:
+            assert_trajectory_rollout_support()
+            _SUPPORT_CHECKED = True
+
+        scripts = [script_index[prompt_key(p)] for p in prompts]
+
+        args = getattr(trainer, "args", None)
+        run_cfg = cfg
+        if args is not None:
+            run_cfg = TrajectoryRolloutConfig(
+                max_turns=cfg.max_turns,
+                per_turn_max_new_tokens=cfg.per_turn_max_new_tokens,
+                max_completion_tokens=cfg.max_completion_tokens,
+                stall_turn_limit=cfg.stall_turn_limit,
+                temperature=getattr(args, "temperature", cfg.temperature),
+                top_p=getattr(args, "top_p", cfg.top_p),
+                do_sample=cfg.do_sample,
+            )
+
+        samples = run_replay_rollout(
+            trainer.model, trainer.processing_class, scripts, run_cfg
+        )
+        return {
+            "prompt_ids": [s.prompt_ids for s in samples],
+            "completion_ids": [s.completion_ids for s in samples],
+            "logprobs": None,
+            "env_mask": [s.env_mask for s in samples],
+            "trajectory": [json.dumps(s.turn_texts, ensure_ascii=False) for s in samples],
+            "rollout_meta": [json.dumps(s.meta, ensure_ascii=False) for s in samples],
+        }
+
+    return rollout_func
