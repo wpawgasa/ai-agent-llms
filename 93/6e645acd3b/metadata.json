@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "936e645acd3b",
+  "strategy": "manual-commit",
+  "branch": "feat/multiturn-trajectory-reward-impl",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/93/6e645acd3b/0/metadata.json",
+      "transcript": "/93/6e645acd3b/0/full.jsonl",
+      "content_hash": "/93/6e645acd3b/0/content_hash.txt",
+      "prompt": "/93/6e645acd3b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 35901,
+    "cache_creation_tokens": 921077,
+    "cache_read_tokens": 51248713,
+    "output_tokens": 350257,
+    "api_call_count": 199
+  }
+}
