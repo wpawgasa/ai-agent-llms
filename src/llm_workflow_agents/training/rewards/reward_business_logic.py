@@ -35,6 +35,7 @@ from llm_workflow_agents.training.reward_utils import (
     reached_terminal,
     transition_legality_score,
 )
+from llm_workflow_agents.training.trajectory_rollout import classify_turn
 
 logger = structlog.get_logger(__name__)
 
@@ -182,6 +183,99 @@ def reward_business_logic(
             terminal = gt.get("terminal_state", "")
             r_completion = 1.0 if reached_terminal(completion, terminal) else 0.0
             components.append((W_TASK_COMPLETION, r_completion))
+
+        total_weight = sum(w for w, _ in components)
+        score = (
+            sum(w * s for w, s in components) / total_weight
+            if total_weight > 0
+            else 0.0
+        )
+        rewards.append(max(0.0, min(1.0, score)))
+
+    return rewards
+
+
+def reward_business_logic_trajectory(
+    prompts: list[Any],
+    trajectories: list[list[str]],
+    metas: list[dict[str, Any]],
+    ground_truths: list[dict[str, Any]],
+) -> list[float]:
+    """Trajectory-level Cat A reward — coverage + outcome blend.
+
+    One scalar per whole-conversation replay rollout, aggregating correctness
+    across all emitted model turns:
+
+      coverage (0.40)             fraction of the gold ``state_sequence``
+                                  traversed IN ORDER (cursor / T; capped at 1.0)
+      tool_call_f1 (0.40)         argument-graded F1 over the whole trajectory's
+                                  emitted tool calls vs. the gold tool chain
+      task_completion (0.10)      1.0 iff the rollout reached the gold terminal
+      transition_legality (0.10)  legal-edge fraction × stall penalty
+
+    Aggregating over T turns turns the per-turn discrete reward lattice into a
+    near-continuous distribution, restoring the within-group variance GRPO's
+    advantage needs (see the design spec). Alignment is recomputed here from the
+    turn texts via :func:`classify_turn` — the single source of truth — rather
+    than trusting the rollout's ``meta`` cursor. Components renormalize exactly
+    like :func:`reward_business_logic`.
+
+    Args:
+        prompts: unused (kept for interface symmetry with the adapter).
+        trajectories: per-completion list of decoded model turn texts.
+        metas: per-completion rollout metadata (``stop_reason`` etc.) — trusted,
+            produced by the rollout, not the model.
+        ground_truths: per-completion decoded ``ground_truth`` dicts with keys
+            ``state_sequence``, ``tool_calls``, ``terminal_state``,
+            ``terminal_reached``, ``valid_transitions``.
+    """
+    rewards: list[float] = []
+    for traj, meta, gt in zip(trajectories, metas, ground_truths):
+        gold = [
+            (s.get("from", ""), s.get("to", ""))
+            for s in gt.get("state_sequence", [])
+            if isinstance(s, dict)
+        ]
+        n_gold = len(gold)
+
+        cursor = 0
+        n_stall = 0
+        pred_transitions_all: list[tuple[str, str]] = []
+        pred_tools_all: list[dict[str, Any]] = []
+        for turn in traj:
+            turn_transitions = extract_state_annotations(turn)
+            pred_transitions_all.extend(turn_transitions)
+            pred_tools_all.extend(extract_tool_calls(turn))
+            label, cursor = classify_turn(turn_transitions, cursor, gold)
+            if label == "stall":
+                n_stall += 1
+        n_model_turns = len(traj)
+
+        r_coverage = cursor / n_gold if n_gold > 0 else 0.0
+        r_tool = graded_tool_call_f1(
+            pred_tools_all, _strip_placeholder_args(gt.get("tool_calls", []))
+        )
+
+        components: list[tuple[float, float]] = [
+            (W_STATE_TRANSITION, r_coverage),
+            (W_TOOL_CALL_F1, r_tool),
+        ]
+
+        valid_transitions = gt.get("valid_transitions", [])
+        if valid_transitions:
+            raw_legality = transition_legality_score(
+                pred_transitions_all, valid_transitions
+            )
+            stall_factor = 1.0 - n_stall / max(n_model_turns, 1)
+            components.append((W_TRANSITION_LEGALITY, raw_legality * stall_factor))
+
+        if gt.get("terminal_reached", True):
+            reached = (
+                meta.get("stop_reason") == "gold_complete"
+                and bool(pred_transitions_all)
+                and pred_transitions_all[-1][1] == gt.get("terminal_state", "")
+            )
+            components.append((W_TASK_COMPLETION, 1.0 if reached else 0.0))
 
         total_weight = sum(w for w, _ in components)
         score = (

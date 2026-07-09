@@ -53,6 +53,14 @@ VIRTUAL_ENV="$VENV" uv pip install --no-deps "git+https://github.com/unslothai/u
 VIRTUAL_ENV="$VENV" uv pip install --no-build-isolation \
     "unsloth[cu130-torch2100] @ git+https://github.com/unslothai/unsloth.git"
 
+# Multi-turn GRPO needs trl==1.0.0 (GRPOTrainer rollout_func + env_mask hooks;
+# absent in 0.24.0). The [train] extra pins 0.24.0 to stay resolvable with the
+# baseline unsloth==2026.4.8 wheel; bump it here now that unsloth-from-main
+# (transformers 5.x) is in place. assert_trajectory_rollout_support() re-checks
+# the installed GRPOTrainer._generate at runtime.
+echo "Bumping trl to 1.0.0 for multi-turn trajectory rollout ..."
+VIRTUAL_ENV="$VENV" uv pip install --no-deps "trl==1.0.0"
+
 echo
 echo "Done. Activate with:  source .venv-train/bin/activate"
 "$VENV/bin/python" -c "
