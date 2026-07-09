@@ -19,7 +19,7 @@ torchaudio==2.10.0
 # If installing manually, follow scripts/install_train.sh to use Unsloth's
 # auto-installer recommended command instead of the plain pip wheel.
 transformers>=4.57.6
-trl==0.24.0
+trl==1.0.0
 peft>=0.14.0
 accelerate>=0.34.0
 
