@@ -348,6 +348,20 @@ def run_replay_rollout(
     eos_id = int(tokenizer.eos_token_id)
     turn_end_ids = {_derive_turn_end_id(tokenizer), eos_id}
 
+    # ``_left_pad`` builds CPU tensors; a real ``model.generate`` needs them on
+    # the model's device (embedding index_select fails otherwise). Resolve once,
+    # tolerating mock models with neither ``.device`` nor ``.parameters()`` — for
+    # those ``gen_device`` stays None and the move below is skipped (tensors stay
+    # on CPU, which is where a mock generates them anyway).
+    gen_device = getattr(model, "device", None)
+    if gen_device is None:
+        params = getattr(model, "parameters", None)
+        if callable(params):
+            try:
+                gen_device = next(params()).device
+            except StopIteration:
+                gen_device = None
+
     states = [
         _RolloutState(
             script=sc,
@@ -371,6 +385,9 @@ def run_replay_rollout(
                 break
             seqs = [s.prompt_ids + s.completion_ids for s in active]
             input_ids, attn = _left_pad(seqs, pad_id)
+            if gen_device is not None:
+                input_ids = input_ids.to(gen_device)
+                attn = attn.to(gen_device)
             gen_kwargs: dict[str, Any] = {
                 "max_new_tokens": cfg.per_turn_max_new_tokens,
                 "do_sample": cfg.do_sample,
