@@ -297,6 +297,18 @@ Per conversation (default 50, from `validation.jsonl`, seeded sample): duplicate
 
 Runtime estimate: 400 trajectories, batch 32, ~6–13 turns → **~30–60 min on the H100**. Command in §6.
 
+**Result (2026-07-09, ckpt-1000, 48 validation conversations [2 skipped: gold-transition/turn mismatch], N=8, T=0.8 / top_p 0.95, ~29 min wall):** verdict **MARGINAL** — 3 of 4 GO checks pass, only median std misses.
+- `median_reward_std = 0.0294` (GO ≥ 0.05 — miss; but clears the 0.02 NO_GO_VARIANCE floor). `mean_reward_std = 0.0503` → right-skewed: a minority of high-variance groups sit at/above the bar while the median is below.
+- `frac_collapsed_groups = 0.271` (GO ✓) — **down from 0.716 on the single-turn headroom probe (same checkpoint)**; the collapse that killed four single-turn GRPO runs is largely resolved. Rung histogram `{1:9, 2:18, 3:12, 4:7, 5:2}` → 81% of groups occupy ≥2 rungs (vs. 29% single-turn).
+- `mean_model_turns = 4.60` (GO ✓, no over-truncation — R3 clear); `mean_coverage = 0.292`, p10→p90 0.07→0.67, within-group spread 0.25 (GO ✓).
+- Stop reasons `{diverged: 334, gold_complete: 20, script_exhausted: 26, stall: 4}` — divergence (the variance source) dominates as expected; only 4/384 stalls.
+- **Mask audit PASS** (R1): `len_match=True`, model_frac=0.826 (in the ~0.35–0.7… note: above band, worth a glance), ends_on_eos=True. Env-token masking wired correctly.
+- Env (R2): `trl==1.0.0` re-synced into `.venv-train` via `install_train.sh:62`; `assert_trajectory_rollout_support()` passes.
+
+The premise holds — trajectory aggregation *does* manufacture within-group variance the single-turn reward could not. But median std lands just under the GO line on n=48. Per the MARGINAL branch, **re-probe with ~150 conversations** to tighten the estimate before building trainer wiring; the structural signal (collapse frac, turn count, coverage, mask) is already strongly favorable. Artifact: `runs/preflight/trajectory_variance_probe.json` (gitignored).
+
+**Probe-runnability note:** the first live run surfaced three Gemma-4 26B-A4B GPU-path bugs in the probe/rollout (the GPU path was never executed when this spec was authored — `.venv-train` absent, R2). Fixed under PR #45: (1) use `_patch_unsloth_gemma4_proxy_iter` not grpo.py's `_unwrap_...` for the KV-zero proxy (validator hits `__getattr__`, proxy must stay live); (2) return the inner `.tokenizer` not the multimodal `Gemma4Processor` (nested-ids); (3) move `_left_pad` tensors to the model device before `generate`.
+
 ## 5. Risk register
 
 | # | Failure mode | Detection signal | Mitigation |
