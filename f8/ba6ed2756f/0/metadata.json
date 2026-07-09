@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f8ba6ed2756f",
+  "session_id": "9e33f6cf-5242-4d27-99e5-3a5284846ff4",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-09T07:32:34.4113519Z",
+  "branch": "feat/multiturn-trajectory-reward-impl",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "1603f22da4b4",
+  "token_usage": {
+    "input_tokens": 35345,
+    "cache_creation_tokens": 866058,
+    "cache_read_tokens": 43613292,
+    "output_tokens": 298366,
+    "api_call_count": 177
+  },
+  "session_metrics": {
+    "turn_count": 31
+  }
+}
