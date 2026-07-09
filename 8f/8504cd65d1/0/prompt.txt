@@ -1,0 +1,1165 @@
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+model is up-to-date
+
+---
+
+/superpowers:brainstorming use /model-routing and /model-training-eval to review GRPO training for the first 1000 steps as logged in https://wandb.ai/wpawgasa/huggingface/runs/bqbxnqxw?nw=nwuserwpawgasa Was it good to continue?
+
+---
+
+pull the exact beta / lr / max_grad_norm / num_generations / dynamic-sampling values from configs/training/grpo_cat_a.yaml
+
+---
+
+Did you read @docs/grpo_diagnosis_gemma4_26b.md? This run train GRPO on new dataset for which qualified by LLM (Opus).
+
+---
+
+Documented this and design the corrected experiment plan
+
+---
+
+yes and open an auto-merged PR
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>bfb01ilvj</task-id>
+<tool-use-id>toolu_018cPRvJMR7nnwstjwqi7SRx</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/bfb01ilvj.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR 39 until merged, failed, or timeout" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+What's next?
+
+---
+
+Verify data provenance first
+
+---
+
+yes, write the script
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>bmqrrc67c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/bmqrrc67c.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR 40 until merged/failed/timeout" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Are you sure these fixes will work? We've gone through many diagnosis already and dataset was even re-generated and qualified. Can you use Fable to explore dataset and GRPO training mechanism and reward function even further?
+
+---
+
+<task-notification>
+<task-id>a5a6be6b4330b0d8f</task-id>
+<tool-use-id>toolu_015kdFbLkuXvUGWG8DUMEuNq</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a5a6be6b4330b0d8f.output</output-file>
+<status>completed</status>
+<summary>Agent "Dataset qualification + multi-turn feasibility" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have a complete picture. Here is my report.
+
+---
+
+# GRPO Investigation Report
+
+## 1. What "re-generated and qualified by an LLM (Opus)" actually means in the pipeline
+
+There are **two distinct mechanisms**, and it is important not to conflate them:
+
+### A. The `dataset-verifier` agent — REPORT ONLY, never touches data
+`/workspaces/ai-agent-llms/.claude/agents/dataset-verifier.md`
+
+The agent is explicitly **read-only**. Its own frontmatter and body say so twice:
+- L8: *"Read-only — never edits data."*
+- L21-22: *"You are read-only. Never edit the dataset, the generator, or any source file. Your output is a report, not a code change."*
+
+It runs two deterministic tools (`validate_dataset`, `quality_profiler`) then does a **qualitative LLM rationality read** of 5-8 sampled conversations (dialogue coherence, Thai naturalness, tool realism, behavior fidelity) and emits a prioritized verdict. It produces **no filtered/regenerated files**.
+
+### B. The target-driven generation loop — this is what WRITES data
+`/workspaces/ai-agent-llms/scripts/generate_sft_until_target.py`
+
+This is the actual "re-generate + qualify" pipeline that changes DATA. Docstring (L4-22):
+&gt; *"keeps generating, verifies each batch, removes unqualified samples, and loops until the qualified count reaches the per-level target — so the delivered corpus has a guaranteed number of clean samples."*
+
+Its qualification bar (L13-17) is **purely deterministic**, using two library helpers, NOT the LLM:
+- `clean_task_a_sft.clean_record` — drops truncated / role-confused rows, sets `terminal_reached`
+- `quality_profiler.profile_task_a` + `defective_conversation_ids` — drops rows with **hard structural defects**
+
+Critically, the LLM (`dataset-verifier`) is only an **advisory** step here. L24-26 and L44-46:
+&gt; *"The *hybrid* final step — a semantic rationality verdict from the `dataset-verifier` LLM agent — is a Claude-driven post-step: this script writes a manifest and prints the exact follow-up command."*
+&gt; *"--verify-batches … logged only — the deterministic filter still does the removal"*
+
+**Answer to Q1:** The LLM ("Opus") qualification does **not** change the data — it only emits a report/verdict. Data removal/regeneration is done by the **deterministic** filters (`clean_record` + `profile_task_a`). The phrase "qualified by an LLM" refers to the advisory rationality verdict layered on top of a deterministic filter-and-regenerate loop.
+
+### Criteria checked — all SURFACE quality, none reward-relevant
+
+**`data_validator.py`** (`validate_dataset` / `_check_workflow_rationality`, L169-260) checks:
+1. Required fields, graph shape (states/initial/terminal), first-message-is-system
+2. Conversation-shape / strict-alternation (`find_shape_violations`)
+3. Tool-state coherence — listed tools exist in `tool_schemas`; GT-called tools are listed in their state (L195-222)
+4. Instruction completeness per non-terminal state
+5. Terminal reachability via BFS (L241-258)
+6. State-sequence continuity
+7. **Thai-corruption** as a *warning only* — explicitly "does not affect `valid`" (L367-369): *"surfaces rows that should be dropped or regenerated before SFT."*
+
+**`quality_profiler.py`** (`profile_task_a`) checks:
+- **Hard structural defects** (must be 0): initial/terminal in states, edge endpoints in states, GT transition legality, message STATE-seq == `ground_truth.state_sequence`, role sequencing, tool_call JSON validity + schema membership (L203-265)
+- **Spec-conformance** (advisory): `num_states` vs `target_path_len`, `num_tools` floor, `chain_depth`, back-edge/loop count (L180-201)
+- **Structural-ceiling** analysis: undershoot vs hard impossibility (L275-306)
+- **Distributions**: behavior mix, language, self-loop share, arrow glyphs, tool-chain propagation, recovery coverage
+
+### Does any of it touch reward-relevant properties? — NO
+
+Neither validator scores or gates on **within-group variance**, **tool-call presence relative to a GRPO group**, or **state-transition diversity across rollouts**. Note the profiler *computes* diagnostics that look adjacent — `_propagation_hops` (L106-129, tool-chain propagation) and `self_loops` share — but these are **descriptive distribution stats on the static ground-truth corpus**, not reward-signal properties. Tool-call presence is only checked for schema membership / placement legality (does the GT tool call belong in its state), never for *whether a prompt will elicit varied tool emission across policy rollouts*.
+
+The GRPO diagnosis doc confirms this gap directly (`grpo_diagnosis_gemma4_26b.md` L1145-1147):
+&gt; *"`frac_reward_zero_std ≈ 77%` on the new data — worse than `df4dot2d`… LLM-qualifying the corpus did not, on its own, produce the within-group reward spread GRPO needs."*
+
+**So qualification/regeneration touches only surface quality (schema, dedup, rationality, structural conformance) — it is blind to every reward-relevant property.**
+
+---
+
+## 2. Data lineage — GRPO data was FILTERED, not regenerated with new content
+
+`/workspaces/ai-agent-llms/dvc.yaml`, stage `task_a_grpo` (L64-79):
+&gt; desc: *"GRPO prompts: L3–L5 subset of the cleaned SFT splits **(no new generation)**."*
+&gt; cmd: `python scripts/filter_grpo_data.py --input-dir data/output/sft/task_a_splits --output-dir data/output/grpo/task_a`
+&gt; comment (L78): *"Filter only — L3-L5 of train.jsonl + validation.jsonl."*
+
+`scripts/filter_grpo_data.py` module docstring (L4-8) confirms:
+&gt; *"GRPO reuses the SFT corpus… GRPO needs prompts — not new ground-truth labels. The standard refinement is to filter the SFT splits to the harder complexity levels (L3-L5)."*
+
+It is a pure `complexity_level ∈ {L3,L4,L5}` line filter (L69-72), writing `train.jsonl` + `validation.jsonl`; `test.jsonl` is deliberately excluded (L40-41).
+
+**Lineage:**
+```
+generate_sft_until_target.py / generate_sft_data.sh  (raw teacher generation)
+  → data/output/sft/task_a  (raw)
+  → clean_task_a_sft.py → data/output/sft/task_a_cleaned
+  → split_task_a_sft.py (85/10/5, seed 42) → data/output/sft/task_a_splits
+  → filter_grpo_data.py (L3-L5 filter, NO new gen) → data/output/grpo/task_a
+```
+
+The `task_a_grpo_gemma4_26b_a4b` training stage (L130-166) runs with `--skip-filter` (L153) and lists `data/output/grpo/task_a` as a dep — it consumes the filtered output directly.
+
+**Nuance:** The "regeneration" that the doc's 2026-07-07 entry mentions happened **upstream at the SFT-corpus level** (via `generate_sft_until_target.py`), NOT in the GRPO stage. The on-disk timestamps confirm a 2026-07-07 rebuild: `data/output/grpo/task_a/train.jsonl` (2026-07-07 03:10, 75 MB) and `sft/task_a_splits/*` (2026-07-07 03:13). The diagnosis doc flags a **provenance hazard** here (`grpo_diagnosis_gemma4_26b.md` L1170):
+&gt; *"`data/output/sft/task_a_splits` was rewritten ~11 min after the `uklfswk5` checkpoints, and GRPO `validation.jsonl` (Jun 29) lags `train.jsonl` (Jul 7) by 8 days — verify against the W&amp;B artifact hashes before trusting on-disk files."*
+
+(Indeed `validation.jsonl` is dated 2026-06-29, `train.jsonl` 2026-07-07 — a mixed-vintage GRPO set.)
+
+**Answer to Q2:** The GRPO data was **re-filtered** from a freshly regenerated SFT corpus. The *content* regeneration is an SFT-corpus event; the GRPO stage itself only re-ran its L3-L5 filter over the new splits. No GRPO-specific new content was generated.
+
+---
+
+## 3. Multi-turn rollout scaffolding — what exists vs. net-new
+
+The doc names multi-turn rollouts (`(a*)`) as *the* real structural variance lever (e.g. `grpo_diagnosis_gemma4_26b.md` L316-335, L1003-1005). Search results:
+
+### What EXISTS (reusable, but none is a training rollout simulator)
+
+1. **Eval-time replay harness** — `/workspaces/ai-agent-llms/src/llm_workflow_agents/eval/agent_benchmark.py`, `_replay_conversation` (L433-597). This is the closest existing scaffolding. It walks a recorded conversation, substitutes **model completions at assistant turns**, and **replays ground-truth tool responses** (L442-445: *"Ground-truth tool responses are kept as-is so the conversation stays on track"*; L582-583). It already handles multi-turn continuation (L567-580, *"do NOT early-exit on terminal state. Multi-turn negotiations…"*) and synthesizes tool_call IDs. **But**: it calls a **vLLM/HTTP endpoint** (`_call_vllm`), does **no user-turn simulation** (it replays the recorded user turns), and produces no rewards/advantages. It is an evaluation replayer, not a GRPO training environment.
+
+2. **Preflight rollout scorer** — `/workspaces/ai-agent-llms/scripts/preflight_entropy_diag.py` (L4, L191, L204). Generates K single-turn completions per prompt and scores within-group reward std. Single-turn only — no trajectory.
+
+3. **GRPO trainer** — `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/grpo.py`. Uses TRL's K-rollout-per-prompt loop with **HF `model.generate()` fallback** (L33, L525-538). `_load_grpo_jsonl` emits **one row per `user→assistant` boundary** — single-assistant-turn targets (see diagnosis L218-223). No multi-turn trajectory generation. Comment L164: *"The synthetic corpus stores full multi-turn conversations (~49 messages)"* — but training only slices single turns out of them.
+
+### What would be NET-NEW (does not exist anywhere)
+
+Per the doc's own scoping (`grpo_diagnosis_gemma4_26b.md` L316-335):
+- A **rollout simulator that mocks USER replies** (teacher LLM or scripted replays) — does not exist. `_replay_conversation` replays recorded users; it does not generate new user turns for on-policy trajectories.
+- A **tool-response simulator for novel paths** — L330-331: *"the data's recorded tool responses work for replay; novel paths need a fallback."* No such fallback exists.
+- An **environment/gym wrapper** or **multi-turn GRPO harness** feeding whole-trajectory rewards — none found. Grep for `simulator|gym|environment wrapper|trajectory` returns only prose in docs and the single-turn code above.
+
+The doc estimates this at *"~1 week of engineering, plus meaningfully more rollout compute"* (L332-333) and repeatedly defers it (L648, L1003-1005). 
+
+**Answer to Q3:** The eval-side `_replay_conversation` is a partial, reusable skeleton (multi-turn walk + GT tool-response replay + tool_call-ID synthesis), but the training-side **user-turn simulator, novel-path tool-response fallback, whole-trajectory reward wiring, and gym/env wrapper are entirely net-new.**
+
+---
+
+## 4. Candidate structural fixes the doc already enumerated
+
+From `/workspaces/ai-agent-llms/docs/grpo_diagnosis_gemma4_26b.md`, the "Three Fix Candidates" section (L279-377) plus the later reframing. The findings that motivate them:
+- **Reward-lattice / bucket-clumping** (L716-724): active components pool into *"a small finite reward lattice… at most ~16 possible reward values per prompt"* — 8 diverse completions land in 1-3 buckets.
+- **Tool-emission gap** (L775-795): *"In all 10 collapsed groups: 0/8 rollouts attempt a tool call"* — the model deterministically tool-skips.
+- **Saturated-correct** (L782, L956 step 49): 6/10 collapsed groups are *"8 different ways of saying the same correct thing"* scored identically — *"fundamentally unreachable by any tool- or state-side reward change."*
+
+### The candidate fixes, with the doc's stated pros/cons:
+
+**(a) Row-per-conversation / single-turn target** (L281-315)
+- **Pro:** Fixes train/deploy distribution mismatch; raises effective `task_completion` weight from ~1.4% → ~8.4% (fires on 83.5% of rows instead of 14.3%).
+- **Con:** Does **not** fix within-group variance — *"same prompt + same policy = same completions"* (L307-309); `chain_propagation` stays dead (single turn, `n_pairs ≤ 1`); 5.86× smaller dataset → ~6× fewer optimizer steps (L313-314). Explicitly **re-classified as a reward-calibration/alignment fix, NOT the variance lever** (L286-289).
+- **Code scope:** ~30 lines in `_load_grpo_jsonl`.
+
+**(b) Drop saturated components / reweight** (L338-355) — *landed*
+- **Pro:** Zero-risk cleanup; reweights binary state/tool from 0.30→0.40 each for slightly stronger gradients.
+- **Con:** *"Effect on reward variance: marginal"* — the dropped components contributed 0 variance anyway.
+- **Code scope:** ~5 lines in `reward_business_logic.py`.
+
+**(c) Graded state/tool components (continuous scoring)** (L357-377) — *landed*
+- **Pro:** *"highest leverage"* — per-argument tool F1 (0.4 name + 0.6 pro-rata args) and graded state matching spread completions across a range; *"Expected mean_reward_std jumps from ~0.05 to ~0.15+"* (L372-373).
+- **Con:** Risk of divergence between training reward and benchmark eval — must keep the strict metric separate (L374-376). And it *"can't manufacture variance"* where the policy emits identical/saturated-correct completions (L456-461).
+- **Code scope:** ~150 lines + tests; ~half day.
+
+**(a\*) Multi-turn rollouts with simulator** (L316-335, L1003-1005) — *deferred, the "real" lever*
+- **Pro:** Makes `chain_propagation` and `task_completion` per-trajectory signals that vary across K rollouts; *"Within-group reward_std should jump substantially: the variance space is N-fold larger (one decision per turn × N turns)"*; best deployment alignment.
+- **Con:** *"~1 week of engineering, plus meaningfully more rollout compute"*; simulator bugs *"that silently corrupt training signal"* need unit tests + held-out replay validation (L333-335); crucially **does not help the "saturated correct" case** (L1005).
+
+**A continuous prose-quality component** was later added as a candidate specifically for the saturated-correct groups (L792-793, L811): *"semantic similarity to GT assistant message via sentence-transformers"* — the only reward-side lever that could differentiate 8 correct prose surfaces.
+
+**Doc's recommended ordering** (L378-404): land **(b) first** (free cleanup) → **(c)** (variance where signal exists) → retry GRPO with hygiene fixes (ckpt-500, `beta=0.1`, `loss_type=grpo`, `max_completion_length=512`) → **(a)** for alignment only → **(a\*)** as last resort if (b)+(c) don't lift `frac_reward_zero_std`.
+
+**Important caveat for the reader:** the most recent addenda (2026-05-29 L1026-1117, 2026-07-07 L1125-1170) **supersede** the structural-fix framing — they conclude the primary failure was never reward-variance but **optimizer instability**: `scale_rewards="group"` dividing advantages by a near-zero group std (60-1060× amplification → grad-norm up to 50,853, KL up to 529.8 on the newest run `bqbxnqxw`), compounded by `loss_type="grpo"` length bias and no explicit `max_grad_norm`. The 2026-05-29 fixes (`scale_rewards:"none"`, `loss_type:"dr_grpo"`, `max_grad_norm:0.2`) were written only into `grpo_cat_a_diagnostic.yaml` and **never promoted to production `grpo_cat_a.yaml`**, which is why the 2026-07-07 run on the new LLM-qualified dataset re-exploded. So per the newest reading, multi-turn rollouts `(a*)` and the reward-lattice fixes remain the correct **second** step, unreachable until the optimizer config is stabilized and promoted.</result>
+<usage><subagent_tokens>88472</subagent_tokens><tool_uses>16</tool_uses><duration_ms>130667</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a49b18a302251173c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a49b18a302251173c.output</output-file>
+<status>completed</status>
+<summary>Agent "Empirical stats on new GRPO dataset" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Analysis complete. All numbers below are computed at the GRPO-ROW level, mirroring `_load_grpo_jsonl`'s per-`user/system→assistant`-boundary emission (tool-preceded assistant turns skipped exactly as the loader does).
+
+## Results — `data/output/grpo/task_a/train.jsonl`
+
+| # | Metric | Value |
+|---|--------|-------|
+| 1 | Conversations | 2,502 |
+| 1 | Emitted GRPO rows | **14,682** |
+| 1 | Rows / conversation | 5.868 |
+| 1 | Skipped tool-preceded asst turns | 18,311 |
+| 2 | Rows with ≥1 tool_call | 5,715 (**38.9%**) |
+| 2 | Rows with 0 tool_calls | 8,967 (**61.1%**) |
+| 3 | state_sequence len 0 | 3,164 (21.6%) |
+| 3 | state_sequence len 1 | 11,518 (78.4%) |
+| 3 | state_sequence len 2+ | **0 (0.0%)** |
+| 4 | terminal_reached=True | 2,089 (**14.2%**) |
+| 5 | #tool_calls dist (tool rows) | 1→5,672; 2→42; ≥5→1 (**99.2% are single-call**) |
+| 5 | args/call | min 0, med 2, max 5, mean 2.24 |
+| 5 | args/call dist | 0→7, 1→1668, 2→1759, 3→1646, 4→648, 5→36 |
+| 6 | Distinct tool names | **110** |
+| 6 | valid_transitions/conv | min 10, med 21, max 57, mean 26.9 |
+| 7 | Prompt chars/row (raw, pre-enrichment) | min 1,934 / med 6,296 / p90 14,002 / max 31,123 |
+| 7 | Prompt chars/row (WITH enrichment, the real prompt) | min 5,330 / med **9,845** / p90 17,517 / p99 26,433 / max 33,368 |
+| 7 | Rows over ~7,680-tok cap | 23 (0.2%) @4 char/tok; 125 (0.9%) @3.5 char/tok |
+| 8 | Distinct reward values reachable/prompt (approx) | min 2 / med 8 / mean 10.2 / max 32 |
+| 8 | Rows with ≤2 reachable reward values (near-degenerate) | 3,164 (**21.6%**) |
+
+Notes on methodology: item 7's "with enrichment" row rebuilds the system message the way the loader does (`build_enriched_system_prompt` prepends workflow-script + tool-schema JSON + FORMAT_RULES ≈2,695 chars); I approximated the workflow-script term because the package can't be imported in this sandbox (missing `dotenv`), so treat the enriched numbers as ±10%. Item 8's lattice is a coarse product of state-transition buckets ({0,0.3,0.5,1.0} → up to 4 when a transition exists, else 1) × tool graded-F1 buckets (~args+calls+1, capped at 8, and only 2 when no tools).
+
+## Is train.jsonl structurally DIFFERENT from the prior corpus?
+
+**No — it is structurally near-identical to the prior corpus.** `docs/grpo_diagnosis_gemma4_26b.md:221` records the prior corpus as "Train rows: 14,656; terminal_reached=True: 2,089 (14.3%)." The re-generated file gives **14,682 rows / 2,089 terminal (14.2%)** — a +26-row drift (+0.18%) and the same absolute terminal count. Line 207/295 of that doc states task_completion was "dead in 85.7% of train rows" (i.e. terminal_reached=False), which matches exactly (100−14.2 = 85.8%). No field, tool density, or terminal rate changed materially.
+
+## Bearing on the Cat-A within-group-variance question
+
+The numbers say re-generation did **not** relieve the structural variance ceiling that `docs/grpo_diagnosis_gemma4_26b.md` blames for `reward_std ≈ 0.003–0.05`. Every variance-carrying reward component is starved on most rows:
+
+- **task_completion (0.10 weight):** rescaled out on 85.8% of rows (`terminal_reached=False`) — unchanged from prior.
+- **chain_propagation:** state_sequence is **never** length ≥2 (0.0% of rows), so multi-link chains never exist → its score is a constant 1.0 on every row, as the loader comment predicts.
+- **tool graded-arg-F1:** 61.1% of rows have zero tool_calls (F1 collapses to a binary 0/1), and of the tool-bearing 38.9%, **99.2% are single-call** with a median of 2 args — so graded arg-F1 has at most ~3-4 partial-credit levels even in the best case, and none on 6-in-10 rows.
+- **state_transition:** the only broadly-live graded signal, but 21.6% of rows have no transition at all (len-0), leaving that fifth of the corpus with ≤2 reachable reward values regardless of rollout diversity.
+
+So on ~22% of prompts the reward is effectively binary before rollouts even run, and the graded components that were supposed to inject smooth within-group variance (chain_propagation, tool-F1) are dead or near-binary on the majority of rows. The re-generated dataset presents the same reward-lattice sparsity the prior diagnosis attributed the collapse to; the variance problem is not fixed by this corpus.
+
+Relevant files: `data/output/grpo/task_a/train.jsonl`, `src/llm_workflow_agents/training/grpo.py` (loader lines 161-302, reward adapter 315+), `src/llm_workflow_agents/data/system_prompt.py:60` (enrichment), `docs/grpo_diagnosis_gemma4_26b.md` (prior-corpus baselines at lines 207, 221, 295).</result>
+<usage><subagent_tokens>31841</subagent_tokens><tool_uses>11</tool_uses><duration_ms>195343</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a2a424f09e0bb7044</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/a2a424f09e0bb7044.output</output-file>
+<status>completed</status>
+<summary>Agent "Reward + GRPO advantage mechanics" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Here is the complete root-cause picture, with file:line citations. (This was a read-only investigation; no files were modified.)
+
+---
+
+# GRPO reward-variance root-cause: findings
+
+## 1. `reward_business_logic.py` — reward structure &amp; discretization
+
+**Component weights** (`reward_business_logic.py:41-44`):
+- `W_STATE_TRANSITION = 0.40`, `W_TOOL_CALL_F1 = 0.40`, `W_TASK_COMPLETION = 0.10`, `W_TRANSITION_LEGALITY = 0.10`.
+
+**`_graded_state_match` tiers** (`reward_business_logic.py:82-113`):
+- Empty GT: `1.0 if not predicted else 0.0` (`:100-101`).
+- Per `(pred, gt)` pair: exact `(from,to)` match → `+1.0` (`:107-108`); `from`-only **or** `to`-only match → `+0.5` (`:109-110`); reverse direction `pred[0]==gt[1] and pred[1]==gt[0]` → `+0.3` (`:111-112`); no overlap → `+0.0`. Score = `total / len(ground_truth)` (`:113`).
+- **On a single-turn row `len(ground_truth)==1`** (the loader emits `state_seq = [state_trans]`, one element — `grpo.py:264-265`). The loop only compares index `i=0`, i.e. `predicted[0]` vs the single GT pair. So `r_state` collapses to exactly one of **{0.0, 0.3, 0.5, 1.0}** — 4 discrete rungs, and only the model's *first* emitted transition can move it.
+
+**`graded_tool_call_f1` on no-tool rows (GT empty)**: delegates to `compute_argument_graded_f1` (`reward_utils.py:50-60`), whose head is `if not ground_truth and not predicted: return 1.0` / `if not ground_truth or not predicted: return 0.0` (`tool_call_f1.py:277-280`). So on a no-tool GT row it is **binary {1.0, 0.0}**: 1.0 iff the model emits no parseable tool call, 0.0 the instant it emits any.
+
+**Active-component mean + renormalization** (`reward_business_logic.py:168-192`): components start as `[(0.40, r_state), (0.40, r_tool)]`. `transition_legality` `(0.10, r_legality)` is appended only if `valid_transitions` is non-empty (`:173-176`); `task_completion` `(0.10, r_completion)` only if `terminal_reached` (`:181-184`). Then `total_weight = sum(w)` and `score = sum(w*s)/total_weight` (`:186-191`), renormalized so dropping components keeps `score ∈ [0,1]`. **Clamp**: `max(0.0, min(1.0, score))` (`:192`).
+
+**Where the reward is forced onto a small discrete set (single-turn rows):**
+- Per the loader, non-final rows have `terminal_reached=False` (`grpo.py:268-269, 281`), so `task_completion` is dropped; `valid_transitions` come from the workflow graph and are present, so legality stays active. Active set = state(0.40) + tool(0.40) + legality(0.10), `total_weight = 0.90`.
+- `r_state ∈ {0, 0.3, 0.5, 1.0}` (4 values).
+- `r_tool` on no-tool rows ∈ {0, 1}; on 1-GT-tool rows it collapses too (see §2).
+- `r_legality = transition_legality_score` = fraction of emitted transitions that are legal edges or self-loops, `0.0` if none emitted (`reward_utils.py:112-135`); with a single emitted transition it is **{0, 1}**.
+- `r_completion ∈ {0, 1}` (`reward_business_logic.py:183`).
+
+So a typical single-turn, no-tool, non-terminal row yields `score = (0.40·r_state + 0.40·r_tool + 0.10·r_legality)/0.90` with `r_state∈{0,0.3,0.5,1}`, `r_tool∈{0,1}`, `r_legality∈{0,1}` → a **small finite lattice of possible reward values** (at most ~16 combinations, fewer in practice). This is the core variance-starvation fact.
+
+## 2. `compute_argument_graded_f1` / `_pair_match_graded` — the cliffs
+
+**`_pair_match_graded`** (`tool_call_f1.py:227-255`), `name_weight=0.4`:
+- Name mismatch → `0.0` (`:239-240`) — no partial credit for arg overlap.
+- Non-dict args → `1.0 if _deep_equals else name_weight(0.4)` (`:244-245`).
+- Names match, GT has no args → `1.0` (`:247-248`).
+- Names match, GT has args → `name_weight + (1-name_weight)·(matched/len(gt_args)) = 0.4 + 0.6·arg_frac` (`:250-255`).
+
+**`compute_argument_graded_f1`** (`tool_call_f1.py:258-309`): both empty → `1.0` (`:277`); exactly one empty → `0.0` (`:279`); else greedy best-first 1:1 assignment (`:288-302`), `partial_tp = Σ pair_scores`, `precision = partial_tp/|pred|`, `recall = partial_tp/|gt|`, `F1 = 2pr/(p+r)`, with `precision+recall==0 → 0.0` (`:307-308`).
+
+**Collapses to exactly 0.0**: GT non-empty and pred empty (or vice-versa); or every predicted name mismatches every GT name (all pair scores 0 → no pairs → `partial_tp=0`).
+**Collapses to exactly 1.0**: both empty; or `|pred|=|gt|=1`, name matches, GT has no args (or args stripped to `{}` by `_strip_placeholder_args`, `reward_business_logic.py:116-131`) → pair `1.0`, `p=r=1`.
+**Single-turn 1-GT-tool geometry**: with `|pred|=|gt|=1`, `F1` equals the single pair score, so `r_tool ∈ {0.0} ∪ {0.4 + 0.6·(m/K)}` for `K` GT args and `m` matched → e.g. K=1 gives **{0, 0.4, 1.0}**, K=2 gives **{0, 0.4, 0.7, 1.0}**. Emitting an extra (2nd) tool call rescales F1 by ~2/3 but stays discrete. Net: on single-turn rows the "graded" tool reward is still only a handful of values.
+
+## 3. `compute_transition_accuracy` / `parse_state_transitions` (strict, held-out path)
+
+`parse_state_transitions` (`state_accuracy.py:64-79`) regex-extracts `(from,to)` tuples from assistant messages; a completion is wrapped as one assistant message by `extract_state_annotations` (`reward_utils.py:17-22`).
+
+`compute_transition_accuracy` (`state_accuracy.py:103-126`): empty GT → `(1.0 if not predicted else 0.0, 0)` (`:112-113`); else `correct = #{i : i&lt;len(gt) and pred[i]==gt[i]}`, `accuracy = correct/len(ground_truth)` (`:119-125`). **For a single-turn row `len(gt)==1`, only `i=0` is checked, so `accuracy ∈ {0.0, 1.0}` — strictly binary.** This strict scorer is what `state_sequence_match` wraps (`reward_utils.py:32-40`) and is used **only** in the held-out composite (`grpo.py:437`, `_heldout_composite_score`), deliberately kept numerically independent of the graded training reward (`grpo.py:398-411`). The training reward instead uses the graded `_graded_state_match` (§1).
+
+## 4. `grpo.py` — reward adapter feed + generation geometry
+
+**Adapter → TRL**: `reward_funcs=_make_reward_adapter(reward_fn)` (`grpo.py:818`). The adapter is keyword-only (`grpo.py:334-340`) to match TRL 0.23.1, JSON-decodes the `ground_truth` column, aliases `state_sequence → state_annotations` reshaping dicts to `(from,to)` tuples (`:350-361`), flattens chat completions to assistant strings (`:363-370`), and returns `reward_fn(prompts, flat_completions, gts)` (`:389`). Single reward function ⇒ TRL `reward_weights=[1.0]`, default `multi_objective_aggregation="sum_then_normalize"`.
+
+**Geometry** (TRL divisibility in `grpo_config.py:882-919`; `steps_per_generation = generation_batch_size/(per_device_train_batch_size·num_processes)`; advantages are normalized per group of `num_generations` at generation time over the whole generation batch, then consumed across `steps_per_generation` optimizer steps):
+
+- **Diagnostic** (`grpo_cat_a_diagnostic.yaml`: `num_generations=16`, `generation_batch_size=32`, `per_device_train_batch_size=8`, `gradient_accumulation_steps=1`; single GPU): `32 % 16 = 0 → 2 prompt-groups per generation batch` = **2 unique prompts per generation round**, each with **16 samples** for the within-group std estimate. `steps_per_generation = 32/8 = 4`.
+- **Production** (`grpo_cat_a.yaml`: `num_generations=8`, no `generation_batch_size`, `per_device_train_batch_size`/`gradient_accumulation_steps` unset → TRL defaults 8/1): `generation_batch_size = 8·1·1 = 8`, `8 % 8 = 0 → 1 prompt-group` = **1 unique prompt per optimizer step**, 8 samples. This is the "df4dot2d ran 8/8 = 1 prompt/step → high prompt-draw noise" case (`grpo.py:648`).
+
+So the diagnostic doubles prompt diversity (2 vs 1) and doubles group size (16 vs 8), i.e. more samples over which the discrete reward can vary.
+
+## 5. TRL 0.23.1 advantage standardization &amp; loss_type
+
+Installed at `.venv/lib/python3.12/site-packages/trl/trainer/grpo_trainer.py`.
+
+**Advantage computation** (`sum_then_normalize` branch, `grpo_trainer.py:1964-1990`):
+- `rewards = (rewards_per_func · reward_weights).nansum(1)` (`:1966`).
+- `mean_grouped_rewards` = per-group mean over `num_generations`, `repeat_interleave`d (`:1967-1968`).
+- `if scale_rewards in ["group","none"]: std_rewards =` per-group `std` over `num_generations`, repeat-interleaved (`:1971-1973`); for `"none"` this std is computed **only for zero-std logging** (`:1970`).
+- `advantages = rewards - mean_grouped_rewards` (`:1987`) — always mean-subtract.
+- `if scale_rewards != "none": advantages = advantages / (std_rewards + 1e-4)` (`:1988-1989`).
+
+**`scale_rewards="group"` (TRL default, `grpo_config.py:872,697-698`) vs `"none"`**: `"group"` divides each advantage by its per-group reward std (+1e-4). On the near-constant discrete groups from §1–§3, that std is ~0.003–0.04, so the `+1e-4` floor barely helps and advantages are amplified 60–1060× — the documented instability (grad-norm 1126, KL 40) in `grpo.py:642-644`. `"none"` skips the division entirely (`:1988`): advantages are the raw group-mean-centered rewards, magnitude ≈ the reward spread itself. This is the "primary fix" (`grpo_cat_a_diagnostic.yaml:56`).
+
+**loss_type handling** (`grpo_trainer.py:2388-2409`):
+- `"grpo"`: `loss = ((per_token_loss·mask).sum(-1) / mask.sum(-1).clamp(min=1)).mean()` (`:2389`) — **per-sequence** normalization by each completion's own length → the documented short-completion length bias.
+- `"bnpo"`: `(per_token_loss·mask).sum() / mask.sum().clamp(min=1)` (`:2393`) — normalize by total active tokens in the **local** batch (batch-size-sensitive).
+- `"dr_grpo"`: `(per_token_loss·mask).sum() / (per_token_loss.size(0) · self.max_completion_length)` (`:2397`) — normalize by a **fixed global constant** (`batch × max_completion_length`), independent of actual completion length → removes length bias.
+- Default `"dapo"` (`grpo_config.py:709`): normalize by `num_items_in_batch/num_processes` (`:2400-2402`).
+
+**What `dr_grpo` changes about length normalization**: it replaces the per-sequence `1/len` denominator (which up-weights short completions with positive advantage / long with negative — the mechanism behind the `211→29`-token collapse noted at `grpo.py:635-636`) with a constant `1/max_completion_length` denominator applied uniformly, so gradient magnitude no longer depends on completion length.
+
+## Bottom line
+On single-turn rows the per-prompt reward is confined to a small discrete lattice: strict state accuracy is binary {0,1} (§3); graded state is {0,0.3,0.5,1} (§1); tool F1 is binary on no-tool rows and ~3–4 valued on 1-tool rows (§2); legality and completion are binary. The active-mean over `{0.40, 0.40, 0.10}` weights (`total_weight=0.90` on non-terminal rows) maps those onto a finite set of composite reward values. GRPO subtracts the group mean and (default `scale_rewards="group"`) divides by that group's tiny std (§5), so whenever the whole group of 8/16 lands on the same rung the advantage is 0 (`frac_reward_zero_std≈1`), and when it barely splits the `÷std` explodes the advantage. The diagnostic config attacks exactly this: `scale_rewards="none"` (no ÷std), `loss_type="dr_grpo"` (no length bias), and 2 prompts × 16 samples/group instead of 1 × 8 to give the discrete reward more chances to vary within a group.</result>
+<usage><subagent_tokens>60122</subagent_tokens><tool_uses>15</tool_uses><duration_ms>196071</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aceabc0c730ac2a75</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/aceabc0c730ac2a75.output</output-file>
+<status>completed</status>
+<summary>Agent "Fable GRPO viability verdict" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All key claims verified against the repo (actual reward path is `src/llm_workflow_agents/training/rewards/reward_business_logic.py` — the `_graded_state_match` {0, 0.3, 0.5, 1.0} ladder and 0.40/0.40/0.10/0.10 weights match; `configs/training/grpo_cat_a_diagnostic.yaml:39-69` matches fact D; `scripts/preflight_entropy_diag.py:297-343` already computes per-prompt rewards, `reward_std`, `frac_collapsed_groups`; `_HeldOutEvalCallback`/`_heldout_composite_score` wired at `src/llm_workflow_agents/training/grpo.py:394-813`; the 2026-07-07 addendum in `docs/grpo_diagnosis_gemma4_26b.md` confirms 77% zero-std steps, grad-norm 50,853, KL 529 on `bqbxnqxw`). Dataset composition stats (61.1% zero-tool, 14.2% terminal, median 8 rungs) taken as ground truth per the brief — not independently recounted.
+
+---
+
+# DECISION MEMO — Go/No-Go: Online GRPO for Gemma-4-26B-A4B Cat A
+**Date:** 2026-07-07 · **Runs killed to date:** 4 · **Author:** ML strategy review
+
+---
+
+## 1. VERDICT
+
+**No — single-turn online GRPO with the current reward cannot learn a useful policy on this data as configured, and the just-merged stabilization does not change that. Conditional revival only if a directly measurable bar is met:**
+
+&gt; Online GRPO is admissible only if a preflight on the actual GRPO training distribution (T=0.8, 16 samples/prompt, SFT ckpt-1000) measures **`frac_collapsed_groups` &lt; 0.50 AND median within-group `reward_std` ≥ 0.05**. Every measurement to date fails this bar: 116/150 steps (~77%) at whole-batch zero reward std on `bqbxnqxw` (`checkpoints/grpo_cat_a/.../checkpoint-150/trainer_state.json`), median 8 reachable reward values per prompt, 22% of prompts with ≤2 reachable values, and the 2026-05-26 preflight's "diverse text, identical scores" finding (7/8 unique completions, near-zero reward spread).
+
+The mechanistic argument, from the advantage math rather than the run history:
+
+- GRPO's gradient per group is ∝ (r_i − r̄). On a lattice where the whole 16-sample group lands on one rung, the gradient is **exactly zero** — no hyperparameter recovers it. With `scale_rewards="none"` (the fix), a 2-rung group with spread 0.02 produces advantages of ±0.01: nonzero but ~50× weaker than a healthy continuous-reward group. So the stabilized config converts "explode on 77% of steps" into "no-op on ~77% of steps and whisper on most of the rest." That is fact D's predicted STABLE-BUT-FLAT, and I concur with the prediction.
+- **Step economics:** diagnostic geometry is 2 unique prompts/step. A 1000-step production run = 2,000 prompt-groups = 32,000 generations, of which (at 77% dead) only ~460 groups carry any gradient — ~3% coverage of the 14,682-row corpus, on coarse rungs, at lr 1e-6. The expected held-out composite movement is below the noise floor of the eval (200-prompt held-out, single seed).
+- **The premise mismatch is structural, not a bug:** the reward was designed for trajectories, but the data feeds it single turns. `chain_propagation` is dead-constant (no `state_sequence` ≥ 2 anywhere), `task_completion` is dropped on 85.8% of rows, tool reward is binary on the 61.1% zero-tool rows. Three of five reward components are inert or binary on the majority of the data **by construction of the row layout**. No reward-side reweighting fixes a support problem.
+- **Saturated-correct groups are not a problem to be solved** — a group where 8 phrasings all score 1.0 is the reward correctly reporting "nothing left to learn here." Manufacturing variance inside them (lever c) optimizes an off-target axis. The correct treatment is to *exclude* them from training, which online GRPO cannot do cheaply and offline methods do for free.
+
+---
+
+## 2. RANKED INTERVENTIONS
+
+| # | Path | Will it unlock learning? (mechanism) | Eng cost | Compute | Risk | Falsifier |
+|---|------|--------------------------------------|----------|---------|------|-----------|
+| **1** | **RFT / rejection-sampling SFT** — sample N=8/prompt with the existing reward as ranker, SFT on per-prompt winners (via existing `sft.py`) | **High.** Needs only argmax within group — a 2-rung split suffices, no std, no advantage normalization, no optimizer fragility. Extracts signal from *every* prompt with ≥2 occupied rungs (the ~23–39% learnable frontier) and silently skips saturated/collapsed prompts. Same 32k generations a GRPO run would burn, consumed offline with 100% extraction. | ~1–2 days (generalize `preflight_entropy_diag.py` sampling loop + a keep-top filter; SFT path already exists) | ~10–20 H100-h full corpus; ~1–2 h for the 500-prompt gate (prefix caching: 8 samples share one long prompt) | Distills only capabilities the policy can already sample (no exploration beyond best-of-8); can amplify GT annotation noise in "winners" | **Best-of-8 headroom probe: if `max(r) &gt; r_greedy + 0.05` on &lt;15% of 500 prompts, there is nothing to distill — kill** |
+| **2** | **DPO/KTO from reward-ranked pairs** (byproduct of the same N=8 corpus) | **Medium-high.** Pairwise preference needs 2 rungs/prompt; adds the *negative* gradient RFT lacks (suppress wrong-transition / missing-tool completions). KTO handles the 22% of prompts with ≤2 rungs via unpaired desirable/undesirable rows. | ~1–2 days on top of #1 (pair builder + TRL DPOTrainer config) | Reuses #1's samples; training ~4–8 h | DPO on narrow formulaic pairs can degrade fluency/format; needs the strict held-out guardrail | **Pair yield &lt; ~2,000 usable (chosen−rejected gap ≥ 0.1) pairs → underpowered, skip** |
+| 3 | **Stabilized 50-step GRPO diagnostic** (already merged, fact D) | **Low as learning; moderate as measurement.** Confirms numerics are tamed; predicted flat. Its informational content w.r.t. this decision (`frac0`, `reward_std`) is subsumed by the 12-min preflight at ~1/10 the cost. | 0 (built) | ~2–4 H100-h | Sunk-cost gravity: a stable-flat run invites "just 200 more steps" | `reward_std` &gt; 0.05 sustained AND `eval/held_out_composite` trending up would falsify "GRPO is dead here" |
+| 4 | **Data enrichment targeting the gap** (multi-tool turns, terminal-bearing windows, ≥2-transition rows — generator change, not re-filter) | **Medium, slow.** Attacks the true support problem (61% no-tool, 99.2% single-call, 14.2% terminal). Helps *all* downstream methods. But B established that regenerate+qualify with unchanged generator specs changes nothing — this requires generator/spec work, not pipeline reruns. | ~3–5 days + teacher API cost | Teacher tokens, no H100 | Distribution drift from the eval; another "new data, same lattice" cycle if specs aren't verified against reward-variance directly | New batch's preflight `frac_collapsed_groups` unchanged (±5pts) vs current corpus |
+| 5 | **(a\*) Multi-turn rollout env + trajectory reward** | **High ceiling, wrong time.** The only path that makes `task_completion`/`chain_propagation` live and matches the actual deployment task. But ~1 wk net-new (user-sim + tool-sim; `_replay_conversation` in `eval/agent_benchmark.py` is replay-only), 3–5× rollout compute, and inherits every GRPO fragility on top of sim-fidelity risk. | ~1 wk+ | High | Sim-to-real gap; compounding failure surface after 4 kills | Only worth building if #1/#2 improve held-out composite but plateau below target — i.e., single-turn signal exhausted |
+| 6 | **(c) Semantic prose-similarity reward component** | **Low / negative.** Manufactures continuous variance on an axis the strict held-out composite deliberately excludes. GRPO will optimize the only continuous dial it has → paraphrase-similarity hacking. The `length_band` episode ("load-bearing reward hacking," 2026-05-21 addendum) is the exact precedent. | ~1 day | — | High (documented failure mode class) | Guardrail fires: train reward ↑ while `eval/held_out_composite` ↓ — predicted, not hypothetical |
+| 7 | **(a) Row-per-conversation retarget / (b) reweighting** | Alignment hygiene only; creates zero within-group variance. (b) already landed with marginal effect. | low | — | low | Already effectively falsified by B (structural stats unchanged) |
+| 8 | **SFT hygiene: seed from loss-elbow ckpt (~1000), add early-stop/`load_best_model_at_end`** | Not a standalone unlock (E: preflight showed cold ckpt-500 already samples 7/8 unique — entropy wasn't the bottleneck), but mandatory base for whichever path wins. | hours | — | none | — |
+
+---
+
+## 3. THE RECOMMENDATION
+
+**Abandon single-turn online GRPO. Adopt Path #1 — rejection-sampling fine-tuning (RFT) using the existing graded reward as an offline ranker — gated by a 1-day headroom probe, with #2 (DPO/KTO) as a second stage built from the same sample corpus. Keep the graded reward; retire the online optimizer.**
+
+Why #1 beats the runner-up (#3, running the already-built stabilized GRPO):
+
+1. **Identical compute, strictly greater extraction.** A 1000-step GRPO run and a full RFT sampling pass generate the same order of completions (~32k vs ~117k for full corpus, ~same for matched budgets). GRPO consumes them online, paying full price for the ~77% dead groups and extracting a coarse-lattice gradient from the rest at lr 1e-6. RFT consumes the same completions offline: every prompt with any reward spread contributes a full-strength SFT target, and dead/saturated prompts cost only their sampling tokens. There is no configuration of GRPO on this reward that extracts more information per generated token than argmax-and-distill does.
+2. **It removes the entire failure class that killed four runs.** All four post-mortems trace to the advantage-normalization machinery interacting with near-zero group variance (÷std amplification → grad 1,126 then 50,853; KL 40 then 529). RFT has no advantage, no group std, no KL controller, no reference policy — the discrete lattice, which is *fatal* to GRPO's variance requirement, is *sufficient* for RFT's ranking requirement. Fact A's lattice is exactly enough structure to rank and no more; use it for ranking.
+3. **The stabilized diagnostic answers a question whose answer doesn't change the plan.** Fact D already predicts STABLE-BUT-FLAT; confirming it costs 2–4 H100-hours and, per this project's demonstrated pattern (10 addenda), invites another iteration cycle on a dead mechanism. The 12-minute preflight measures the same decision-relevant quantities (`frac_collapsed_groups`, `reward_std`) plus the RFT headroom that GRPO telemetry can't measure. Run the GRPO diagnostic only in the branch where the preflight *surprises us* (see §5).
+4. **Honest ceiling, honestly priced.** RFT cannot exceed best-of-8 of the current policy. But with beta=0.05 KL-anchoring and lr 1e-6, neither could this GRPO — it was never going to explore meaningfully beyond the SFT policy either. If best-of-8 headroom is real (probe will tell us in a day), RFT captures it at near-zero risk; if it's not, *no* single-turn method works and the answer is #5 (multi-turn env) or shipping SFT-only — a decision worth reaching in 1 day instead of after a fifth kill.
+
+Explicitly rejected: lever (c) semantic-similarity component (predicted reward-hack, precedent on file), and #5 multi-turn env as the *next* step (right ceiling, wrong sequencing — 1 week of net-new simulator is not justified before a 1-day probe of the cheap path).
+
+---
+
+## 4. NEXT-EXPERIMENT SPEC — "Headroom Probe → RFT Pilot" (gated, &lt;1 H100-day total)
+
+**Base checkpoint for all stages:** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000` (loss-elbow seed per the 2026-07-07 addendum; ckpt-500 as fallback). First resolve the data-provenance caveat: verify `data/output/grpo/task_a/{train,validation}.jsonl` hashes against the W&amp;B `uklfswk5`/`bqbxnqxw` artifacts (validation.jsonl lags train.jsonl by 8 days).
+
+### Stage 0 — Headroom probe (~2 H100-hours)
+- **Harness:** extend `scripts/preflight_entropy_diag.py` — it already samples N completions/prompt and scores per-prompt `rewards[]`, `reward_std`, `frac_collapsed_groups` (lines 297–343). **Net-new (~50–80 LOC):** (i) one greedy (T=0) completion per prompt, scored; (ii) per-prompt `headroom = max(rewards) − r_greedy`; (iii) summary: `frontier_frac = %prompts with headroom &gt; 0.05`, `mean_headroom`, plus rung-occupancy histogram. Nothing else is new.
+- **Config:** 500 prompts stratified by (has-tool × terminal_reached × L-band) from `train.jsonl`, N=8, T=0.8/top_p 0.95 (matching `grpo_cat_a_diagnostic.yaml` sampling so numbers transfer). 500 prompts → ±4% CI on frontier_frac.
+- **GO (RFT):** `frontier_frac ≥ 15%` AND `mean_headroom ≥ 0.03`.
+- **GRPO-revival branch:** `frac_collapsed_groups &lt; 0.50` AND median `reward_std ≥ 0.05` → the §1 condition is met; run the already-built 50-step diagnostic via `./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_a_diagnostic.yaml` before committing to RFT.
+- **NO-GO (both):** `frontier_frac &lt; 10%` → no single-turn method has material headroom; escalate to the §3.4 decision (multi-turn env vs ship SFT-only). **Kill the single-turn RL/RFT track entirely.**
+
+### Stage 1 — RFT pilot (~6–10 H100-hours, only on Stage-0 GO)
+- **Sampling:** N=8, T=0.8 over a 4,000-prompt stratified subset (bias toward tool-bearing and terminal rows). Serve the *merged* SFT checkpoint via `training/merge_adapter.py` + `serving/launch_vllm.sh` (R9: no Unsloth `fast_inference` for gemma4; plain vLLM is fine). Prefix caching on — 8 samples share each long prompt.
+- **Filter:** keep top-1 per prompt where `max(reward) ≥ max(0.8, r_greedy + 0.05)`; drop saturated (headroom &lt; 0.05) and collapsed prompts. Expected yield ~600–1,500 rows.
+- **Train:** existing `training/sft.py` config, 1 epoch, lr 5e-6, LoRA on top of ckpt-1000.
+- **Gate metric (go/no-go for scale-up):** `_heldout_composite_score` (the strict, training-reward-independent composite already in `src/llm_workflow_agents/training/grpo.py:394`) on 200 fixed `validation.jsonl` prompts, greedy decode, before vs after.
+  - **GO:** Δcomposite ≥ **+0.02** absolute → scale to full corpus, then build DPO/KTO pairs from the same samples (Stage 2).
+  - **KILL:** Δcomposite &lt; +0.01, or *any* decline in tool-emission rate on tool-GT rows (guard against distilling the no-tool majority into over-caution).
+- **Budget cap:** Stage 0 + Stage 1 ≤ 1 H100-day. No stage may be "extended to see" past its gate — that pattern produced runs 2–4.
+
+---
+
+## 5. WHAT WOULD CHANGE THIS
+
+1. **Preflight surprises high:** `frac_collapsed_groups &lt; 0.50` with median `reward_std ≥ 0.05` at the diagnostic's exact sampling settings → the §1 condition is met, GRPO's death certificate is withdrawn, and the stabilized 50-step diagnostic (already merged, zero eng cost) becomes the correct next run — online RL then plausibly beats RFT by also learning from negatives.
+2. **No headroom anywhere:** `frontier_frac &lt; 10%` AND greedy composite already ≥ target → the SFT policy is effectively at the single-turn ceiling; the correct move is to *stop training on this row layout entirely* — ship SFT-only for Phase 2 Cat A, or fund the multi-turn env (#5) if the E2E Phase 4 numbers demand more.
+3. **RFT pilot fails its gate (Δ &lt; +0.01)** despite real measured headroom → best-of-8 winners aren't transferring, implying GT/reward misspecification (e.g., the ~17% placeholder-args stubs noted in `reward_business_logic.py:46-51` corrupting winner selection) → audit the reward against human judgment on 50 winner/loser pairs before any further training of any kind.
+4. **Dataset provenance check fails** (on-disk train/validation don't match `uklfswk5`/`bqbxnqxw` artifacts) → all of fact B's structural stats need re-measurement before this memo's quantitative conditions are trusted.
+5. **A generator-side data revision** (intervention #4) demonstrably shifts the lattice — preflight on a new batch showing `frac_collapsed_groups` down ≥ 20 points → re-run this memo's Stage 0 on the new corpus; both the GRPO condition and the RFT headroom could flip.
+
+**Unverified-claim flags:** dataset composition stats (B), the "median 8 rungs / 22% ≤2 rungs" lattice census (A), and old-corpus comparison numbers are adopted from the session's three investigations, not re-derived here. The 77% `frac0` figure is from `bqbxnqxw`'s production geometry (8 gens, 1 prompt/step) and is directional, not exact, for the 16-gen diagnostic geometry — which is precisely why Stage 0 re-measures it at matched settings before anything else runs.</result>
+<usage><subagent_tokens>65709</subagent_tokens><tool_uses>9</tool_uses><duration_ms>229401</duration_ms></usage>
+</task-notification>
+
+---
+
+Both
+
+---
+
+<task-notification>
+<task-id>b3rvb7092</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/ea66c5c1-6c59-4952-ac03-013dcbbe4685/tasks/b3rvb7092.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll PR 41 until merged/failed/timeout" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Is GRPO is a subset of RFT? What does make the differences when using RFT over GRPO?
+
+---
+
+Did you mention that our generated samples have nearly the same reward most of the times?
+
+---
+
+Can we just make samples to be varied more in response completions, state transitions and tool calls?
+
+---
+
+/superpowers:brainstorming and /model-training-eval think about multi-turn reward for GRPO training. Use /model-routing to select model to design and plan multi-turn reward training.
+
+---
+
+<task-notification>
+<task-id>a6bce2eecae62a853</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/0576e378-97b7-4aa5-8a7c-2ad56c36301a/tasks/a6bce2eecae62a853.output</output-file>
+<status>completed</status>
+<summary>Agent "Map multi-turn rollout &amp; reward code" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have a complete map of the terrain. Here is my report.
+
+---
+
+# Multi-Turn GRPO: Terrain Map
+
+## 1. `_replay_conversation` — the eval-side conversation-replay skeleton
+
+**File:** `src/llm_workflow_agents/eval/agent_benchmark.py:433-597`
+
+**Signature** (`agent_benchmark.py:433-440`):
+```
+_replay_conversation(endpoint, model, sample, temperature=0.0,
+                     enable_thinking=False, engine="vllm")
+  -&gt; (predicted_messages, latencies_ms_per_turn, ttfts_ms_per_turn)
+```
+
+**What it does:** Walks the ground-truth `sample["messages"]` list turn-by-turn. It rebuilds a sliding `context` and, at each **assistant** turn, calls the model (`_call_vllm`, `agent_benchmark.py:499`) instead of using the GT assistant text; system/user/tool turns are passed through from GT. Returns the model-substituted message list plus per-turn latency/TTFT.
+
+Key behaviors relevant to multi-turn:
+- **Tool results are NOT executed — they are replayed from ground truth** (`agent_benchmark.py:582-595`, comment "Use ground-truth tool response to avoid cascading failures"). It only re-threads `tool_call_id` from the model's actual tool call (`:590-593`).
+- **User turns are NOT simulated** — they come verbatim from `sample["messages"]` (`:466-468`). There is no next-user generation.
+- Handles a system→assistant preamble edge case with no model call (`:478-497`), and synthesizes structured `tool_calls` from inline `&lt;tool_call&gt;` text (`:517-534`).
+- Does NOT early-exit on terminal state; walks every GT turn (`:567-580`).
+
+**Training-usable?** **Eval-only as written.** It is a module-level function reachable only from the `__main__` benchmark block (callers at `agent_benchmark.py:746` and `:800`). It talks to an **HTTP OpenAI-compatible endpoint** (`_call_vllm`, `agent_benchmark.py:273-430`, uses streaming `chat.completions`), not an in-process `model.generate`. So its rollout loop is reusable as a *pattern* for multi-turn trajectory generation, but it is coupled to a served endpoint and to GT tool/user turns — it is not wired into the trainer, and it produces no rewards/advantages. Net: the replay *skeleton* exists; the training integration does not.
+
+## 2. Current GRPO rollout — single-turn-per-row
+
+**`_load_grpo_jsonl`** — `src/llm_workflow_agents/training/grpo.py:161-302`. This is the flattening step. It slices each multi-turn conversation at every `user→assistant` (or `system→assistant`) boundary and emits **one GRPO row per boundary** (`:245-291`). Assistant turns preceded by a `tool` message are dropped (`:248-252`, TRL rejects `tool` as last role — noted `:168-170`). Each row is `{prompt: messages up to the user turn, ground_truth: JSON string}` where the GT is **just that one turn's** state transition + tool calls (`:262-283`). `terminal_reached` is True only on the final row of a conversation that reached terminal (`:268-270`).
+
+**Consequence:** the "trajectory" is destroyed before training. Each row is a single (context → one assistant turn) example.
+
+**Generation:** GRPO completions are produced by **TRL's internal `GRPOTrainer`** (`grpo.py:816-823`), backend either Unsloth colocate vLLM or HF `model.generate` (`:515-571`, `:670-677`). `num_generations` completions per prompt (`:610`), but each completion is a **single assistant turn** — TRL generates one continuation of the prompt. There is no multi-turn rollout loop in the trainer path.
+
+**Reward adapter** — `_make_reward_adapter`, `grpo.py:315-391`. Bridges TRL's keyword call to `(prompts, completions, ground_truths)`. JSON-decodes the `ground_truth` string column (`:341-361`), aliases `state_sequence`→`state_annotations` reshaping dicts to tuples (`:350-360`), and flattens conversational completions to last-assistant-content strings (`:363-370`). Stashes `unique_completions_per_group` and `group_size` into module-global `_LATEST_INSTRUMENTATION` (`grpo.py:312`, written `:372-387`).
+
+**Callbacks:**
+- `_UniqueCompletionsCallback` (`grpo.py:690-707`) — copies `_LATEST_INSTRUMENTATION` into `on_log`.
+- `_HeldOutEvalCallback` (`grpo.py:712-814`) — every `eval_held_out_every` steps, greedily generates on held-out rows with **single-turn** `model.generate` (`:757-761`), scores with `_heldout_composite_score`, and auto-stops on reward-hacking (`:801-810`). Also single-turn.
+
+## 3. Reward function — single-completion, not trajectory
+
+**Signature:** `reward_business_logic(prompts, completions, ground_truths) -&gt; list[float]` — `src/llm_workflow_agents/training/rewards/reward_business_logic.py:134-138`. Four weighted components (`:41-44`): state_transition 0.40, tool_call_f1 0.40, task_completion 0.10, transition_legality 0.10; conditionally renormalized (`:166-192`).
+
+**Scoring loop** (`reward_business_logic.py:156-192`) iterates `zip(completions, ground_truths)` — **each reward is computed from ONE completion string against ONE turn's GT.** It is not a trajectory scorer.
+
+Helpers used by the active reward (all single-turn / single-completion):
+- `_graded_state_match` — `reward_business_logic.py:82-113` (graded {0,0.3,0.5,1.0} ladder over state pairs within one completion).
+- `graded_tool_call_f1` → `compute_argument_graded_f1` — `reward_utils.py:50-60`, impl in `eval/tool_call_f1.py`.
+- `reached_terminal` — `reward_utils.py:104-109`.
+- `transition_legality_score` — `reward_utils.py:112-135`.
+- `extract_state_annotations` / `extract_tool_calls` — `reward_utils.py:17-29`.
+
+Strict helpers (`state_sequence_match` `reward_utils.py:32-40`; `tool_call_f1`=`compute_ast_f1` `:43-47`, `compute_ast_f1` at `eval/tool_call_f1.py:174`) are used only by the held-out guardrail `_heldout_composite_score` (`grpo.py:394-448`) and `reward_subagent` (`rewards/reward_subagent.py:83,89`). Also single-completion.
+
+**Trajectory-aware scorer that exists but is NOT used in training:** `chain_propagation_score(pred_messages, gt_messages)` — `reward_utils.py:63-84` — operates over a **full message list** (a conversation), scoring value propagation across tool-call links. It is defined but **not imported by any reward** (`reward_business_logic.py:31-37` does not include it). The eval equivalent is `evaluate_chain_propagation` (`eval/tool_chain_propagation.py`), called only from the benchmark (`agent_benchmark.py:621,813`). So a sequence/trajectory scorer exists on the eval/util side; nothing in the GRPO reward path invokes it.
+
+## 4. Environment / user-simulator / tool-executor / state-machine-execution
+
+**No true environment exists.** Nothing anywhere generates a *next user message* or *executes a tool to produce a novel result*. What exists:
+
+- **`_replay_conversation`** (`agent_benchmark.py:433-597`) — replays fixed GT user + GT tool turns; model fills only assistant turns. Tool "results" are GT strings (`:582-595`). Not an executor/simulator.
+- **`MultiAgentOrchestrator.run_workflow`** — `src/llm_workflow_agents/serving/orchestrator.py:118-244` (re-exported via `integration/__init__.py:6-9`). Async turn loop that routes each turn to an orchestrator vs. specialist model via `_select_model` (`:72-93`), tracks `current_state` from emitted `[STATE: X-&gt;Y]` annotations (`:95-103,182-183`), and stops at terminal states (`:205-206`). BUT: user messages are iterated from a **fixed `conversation`** passed in (`:151-153`, `messages[:turn_idx+1]`); tool calls are only *extracted/recorded* (`_extract_tool_calls`, `:105-116`), **never executed**; no tool result is fed back. It is a serving/benchmark harness, not a training env, and is `async` over an HTTP endpoint.
+- `serving/benchmark_e2e.py`, `eval/concurrency_benchmark.py` — throughput/latency harnesses, no env stepping.
+- `integration/` package (`src/llm_workflow_agents/integration/`) contains only `__init__.py` re-exports (`integration/__init__.py`); no orchestrator/env code of its own.
+- `data/` generators (`generate_workflows.py`, `_graph_invention.py`, `generate_orchestrator_data.py`) build workflow graphs and synthetic conversations offline; they define the state machine *structure* (graph nodes/edges/transitions, terminal states) but do not execute it at rollout time.
+
+The workflow graph itself (nodes, `transitions` with from/to, `terminal`) is available per-sample in the data (`workflow_graph` field, read at `grpo.py:233-243` and `agent_benchmark.py:451`) — so a state-machine *definition* is on hand, but there is **no runtime that, given a model action, computes the next state + tool result + next user turn.**
+
+---
+
+## Summary: reusable vs. net-new
+
+**(a) Exists and is reusable for multi-turn rollout:**
+- Turn-walking replay loop with context threading, tool_call_id re-binding, and inline-`&lt;tool_call&gt;` synthesis — `_replay_conversation` (`agent_benchmark.py:433-597`). Reusable as the rollout skeleton, but endpoint-coupled and GT-tool/GT-user based.
+- A trajectory-level scorer already written: `chain_propagation_score` (`reward_utils.py:63-84`) + `evaluate_chain_propagation` (`eval/tool_chain_propagation.py`); plus conversation-level state/tool eval (`evaluate_state_machine`, `evaluate_tool_calls_conversation`, called `agent_benchmark.py:810-813`).
+- Per-turn scoring primitives (state, tool-F1 graded+strict, terminal, legality) in `reward_utils.py` — composable across a sequence.
+- Workflow-graph definition per sample (`workflow_graph.transitions`/`terminal`) already parsed into rows (`grpo.py:233-243`).
+- An orchestrator turn-router with state tracking + terminal stop (`orchestrator.py:118-244`) — pattern reference for a stepping loop.
+
+**(b) Genuinely net-new:**
+- Multi-turn generation **inside the GRPO training loop.** TRL rollout is single-turn (`grpo.py:816-823`); `_load_grpo_jsonl` (`:161-302`) actively flattens conversations into single-turn rows — a multi-turn design must replace/augment both.
+- A **tool executor** (produces a tool result from a model tool call) — nowhere; replay uses GT results (`agent_benchmark.py:582-595`), orchestrator never executes (`orchestrator.py:105-116`).
+- A **user simulator** (produces the next user message from model state) — nowhere; all user turns are fixed GT.
+- A **trajectory-level reward** wired into training: `reward_business_logic` scores one completion vs. one turn (`reward_business_logic.py:156-192`); the reward adapter collapses completions to a single string (`grpo.py:363-370`). No sequence reward is plumbed in, and `chain_propagation_score` is unused by any reward.
+- An in-process (non-HTTP) rollout path: `_replay_conversation`/orchestrator both require a served endpoint; the trainer holds the model in-process (`grpo.py:565-571`), so multi-turn rollout would need `model.generate`-based turn stepping (the held-out callback at `grpo.py:757-761` is the only in-process generate, and it is single-turn).</result>
+<usage><subagent_tokens>54500</subagent_tokens><tool_uses>20</tool_uses><duration_ms>135625</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a10f54fd9ea99c839</task-id>
+<tool-use-id>toolu_016W7CxCAh8WCFPaeEzxw487</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/0576e378-97b7-4aa5-8a7c-2ad56c36301a/tasks/a10f54fd9ea99c839.output</output-file>
+<status>completed</status>
+<summary>Agent "Map TRL GRPOTrainer integration seam" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have mapped the entire seam. Here are the findings with file:line anchors.
+
+## Headline: the installed TRL is 1.0.0, not 0.23.1 — and it already has native multi-turn machinery
+
+The comments throughout `grpo.py` (e.g. lines 306–311, 316–324) repeatedly claim "TRL 0.23.1", and `pyproject.toml:64` / `requirements-train.txt:22` pin `trl==0.24.0`. But the actually-installed package is **TRL 1.0.0**:
+- `/workspaces/ai-agent-llms/.venv/lib/python3.12/site-packages/trl-1.0.0.dist-info/METADATA` → `Version: 1.0.0`
+- `uv.lock:4000` and `uv.lock:10019-10021` resolve `trl` to `version = "1.0.0"` (sdist uploaded 2026-03-30)
+
+This matters enormously: TRL 1.0.0's `grpo_trainer.py` exposes **three experimental multi-turn hooks** that 0.23.1/0.24.0 do not. The seam you are looking for already exists in the installed code.
+
+---
+
+## 1. How grpo.py constructs and calls GRPOTrainer
+
+All in `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/grpo.py`.
+
+**GRPOConfig construction** — `grpo_kwargs` dict built at lines 608–678:
+- `num_generations` (line 610, default 8), `max_steps` (611), `learning_rate` (612), `beta` (613), `temperature`/`top_p` (617–618), `warmup_ratio` (622), `save_steps`/`save_total_limit` (627–628), `report_to="wandb"` (629).
+- Optional pass-through keys only set when present in YAML (lines 649–669): `loss_type`, `max_completion_length`, `max_prompt_length`, `log_completions`, `num_completions_to_print`, `scale_rewards`, `max_grad_norm`, `generation_batch_size`, `epsilon`, `per_device_train_batch_size`, `gradient_accumulation_steps`.
+- vLLM block (lines 670–677): `use_vllm=True`, `vllm_mode="colocate"`, `vllm_gpu_memory_utilization`, `vllm_tensor_parallel_size=1`, `vllm_importance_sampling_correction=True`.
+- `GRPOConfig(**grpo_kwargs)` at line 678.
+
+**vLLM vs HF fallback** — `_detect_model_family` at lines 96–126 resolves `config.model_type` from the PEFT adapter's base model. `train_grpo` disables vLLM when the family is in `UNSLOTH_VLLM_INCOMPATIBLE_FAMILIES = frozenset({"gemma4"})` (lines 35–37, decision at 526–543). HF fallback path uses `FastLanguageModel.from_pretrained` without `fast_inference` (lines 557–571).
+
+**Trainer construction block** (lines 816–823):
+```python
+trainer = GRPOTrainer(
+    model=model,
+    reward_funcs=_make_reward_adapter(reward_fn),
+    args=grpo_config,
+    train_dataset=train_ds,
+    processing_class=tokenizer,
+    callbacks=callbacks,
+)
+```
+Note what is **not** passed: `tools=`, `rollout_func=`, `environment_factory=`. A single reward function (wrapped adapter) is passed as `reward_funcs`. Dataset is `train_ds` from `_load_grpo_jsonl` (line 574), which emits **one row per user→assistant turn** (lines 161–302) — i.e. the current design already flattens multi-turn conversations into single-turn GRPO rows.
+
+---
+
+## 2. TRL GRPOTrainer generation — there IS a custom rollout hook
+
+File: `/workspaces/ai-agent-llms/.venv/lib/python3.12/site-packages/trl/trainer/grpo_trainer.py`.
+
+**Three public multi-turn extension points exist**, all accepted by `__init__` (lines 264–279):
+- `tools: list[Callable] | None` (line 276)
+- `rollout_func: RolloutFunc | None` (line 277)
+- `environment_factory: EnvironmentFactory | None` (line 278)
+
+**`rollout_func` contract** (type at lines 114–117): `Callable[[list[str], "GRPOTrainer"], dict[str, Any]]` — receives the per-process prompt slice + the trainer, must return a dict with `"prompt_ids"`, `"completion_ids"`, `"logprobs"`; **any extra keys are forwarded per-completion to the reward functions** (docstring 230–237; enforced 1606–1613; `extra_fields` merged into reward inputs at 1949–1955). It is responsible for returning `num_generations` completions per prompt itself.
+
+**Generation dispatch** — `_generate(self, prompts)` at line 1589:
+- If `self.rollout_func is not None` → calls `output = self.rollout_func(prompts, self)` (line 1606) and bypasses the built-in generator entirely.
+- Else → `_tokenize_prompts` + `_generate_single_turn` (lines 1615–1616).
+- After decoding, if `self.tools` → runs `self._tool_call_loop(...)` (lines 1635–1646).
+
+**`_generate_single_turn`** (line 1285) is the single prompt→num_generations method: vLLM path calls `self.vllm_generation.generate(..., num_generations=...)` (lines 1293–1305); HF path is the `else` branch (from ~1333) using `unwrap_model_for_generation` + `model.generate`.
+
+**`_tool_call_loop`** (line 1410) is a full native multi-turn generator: executes tool calls, appends `{"role":"tool",...}` messages (line 1474), regenerates via `_generate_single_turn` (line 1531), masks tool-result tokens (`tool_mask`, 0 for external tokens), loops up to `self.max_tool_calling_iterations` (line 1419; set from `args.max_tool_calling_iterations` at line 518).
+
+**`environment_factory`** (lines 446–489, 462–476): creates one env per generation slot; `environment.reset(**reset_kwargs)` is called at the top of `_generate_and_score_completions` (lines 1712–1717) and its returned string is appended to the last user message.
+
+**Where generation is scored**: `_generate_and_score_completions` (line 1704) calls `_generate` (line 1753 via the tuple unpack at 1930–1938), then `_calculate_rewards` (line 1959). `_prepare_inputs` (line 1094) calls `_generate_and_score_completions` (lines 1113/1122). Generation is **not** hardwired to single-completion — the `rollout_func`/`tools`/`environment_factory` seams are first-class.
+
+---
+
+## 3. The reward-func contract
+
+`_calculate_rewards` (line 1151). Sync reward funcs are invoked at lines 1196–1198:
+```python
+output_reward_func = reward_func(
+    prompts=prompts, completions=completions, completion_ids=completion_ids_list, **reward_kwargs
+)
+```
+`reward_kwargs` is built at lines 1155–1156 as **every dataset input column except `prompt`/`completion`/`completion_ids`**, so `ground_truth` (and any per-conversation column you add) is passed straight through. Also injected: `trainer_state=self.state` (1160), `log_extra` (1163), `log_metric` (1166), and `environments=self.environments` when environments are active (1194–1195). Extra fields returned by `rollout_func` are merged into `inputs` before this call (1949–1955), so a custom rollout can attach per-trajectory metadata that reaches the reward.
+
+The project's adapter matches this exactly: `_make_reward_adapter.adapter(*, prompts, completions, completion_ids, **kwargs)` at grpo.py:334–340, reading `kwargs["ground_truth"]` at line 341. So a trajectory-aware reward **can** already receive per-conversation ground truth via a dataset column.
+
+`completions` shape when conversational: `list[list[{role,content}]]` — one inner list per sample, extended in place across tool turns (see `_tool_call_loop` appending at lines 1474, 1587). A multi-turn reward would see the full turn list here; the current adapter collapses it to the last assistant message (grpo.py:363–370).
+
+---
+
+## 4. Advantage computation
+
+`_generate_and_score_completions`, lines 1959–2016:
+- `rewards_per_func = self._calculate_rewards(...)` (1959); `num_generations` selected at 1960.
+- **`sum_then_normalize`** branch (1962–1991): `mean_grouped_rewards` = mean over `view(-1, num_generations)` (1965–1966); `std_rewards` per `scale_rewards ∈ {group, none, batch}` (1967–1985); `advantages = rewards - mean_grouped_rewards` (1987); `if scale_rewards != "none": advantages /= (std_rewards + 1e-4)` (1988–1989).
+- **`normalize_then_sum`** branch (1993–2002): normalizes per reward-func over the group then sums.
+- Local slice + logging (2005–2033); advantages placed into the output dict at line 2096 (`"advantages": advantages`).
+
+`loss_type` (grpo/dr_grpo/dapo/bnpo/cispo/luspo/sapo/vespo) is read at line 536 and applied in `compute_loss` (line 2176): per-token loss formulas at 2344–2373, normalization/reduction at 2388–2409 (`dr_grpo` uses a fixed `max_completion_length` divisor at 2396; `grpo` masked mean at 2388), clip-ratio metrics at 2427–2450. Advantages feed in at 2115–2136 (`advantages = inputs["advantages"]`, unsqueezed at 2118–2119). A trajectory-level scalar reward would land in `rewards_per_func` and flow through this same group-relative machinery unchanged.
+
+---
+
+## Seam verdict (evidence, not design)
+
+- The **group-relative advantage math (1962–2002) and loss (2176+) are turn-count-agnostic** — they operate on one scalar reward per generation. Nothing there needs to change for multi-turn.
+- The **reward contract (1196–1198) already forwards arbitrary dataset columns and receives `completions` as full turn-lists**, so a trajectory-aware reward is reachable as a **reward-function + dataset-column change** — no TRL override needed for scoring.
+- **The generation loop is NOT hardwired to single-completion.** TRL 1.0.0 exposes `rollout_func` (line 1606), `tools`/`_tool_call_loop` (1635, 1410), and `environment_factory` (1712) as native multi-turn rollout seams. grpo.py currently uses **none** of them (constructor at 816–823) and instead pre-flattens conversations into single-turn rows (`_load_grpo_jsonl`, 161–302).
+
+So the three options map concretely to:
+- (a) reward-only: viable for scoring a trajectory *if the trajectory is already in one completion*, but current data flattening (grpo.py:161–302) prevents a full trajectory from ever appearing in one row.
+- (b) dataset restructuring: needed to stop the per-turn slicing; combined with `environment_factory`/`reset` (1712–1717) or leaving prompts multi-turn.
+- (c) overriding generation: **not required** — you would *pass* `rollout_func=`, `tools=`, or `environment_factory=` to the existing `GRPOTrainer(...)` call, not subclass it. The only blocker is that the installed version must stay 1.0.0; the `trl==0.24.0` pin in `pyproject.toml:64`/`requirements-train.txt:22` does **not** match what is installed (uv.lock resolved 1.0.0), and 0.24.0 lacks these hooks — a version-consistency risk worth flagging.</result>
+<usage><subagent_tokens>55364</subagent_tokens><tool_uses>16</tool_uses><duration_ms>133641</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9fc20983636b3eea</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/0576e378-97b7-4aa5-8a7c-2ad56c36301a/tasks/a9fc20983636b3eea.output</output-file>
+<status>completed</status>
+<summary>Agent "Map Task A ground-truth for trajectory scoring" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed. Here is my report.
+
+---
+
+# Task A ground-truth map for trajectory-level GRPO reward
+
+All paths under `/workspaces/ai-agent-llms/`. Generator: `src/llm_workflow_agents/data/generate_workflows.py`. Loader: `src/llm_workflow_agents/training/grpo.py`. Real samples: `data/output/grpo/task_a/{train,validation}.jsonl` (290 conversations in validation) and `data/output/sft/task_a/*.jsonl`.
+
+## 1. Task A sample schema
+
+The on-disk JSONL row is `ConversationSample.to_dict()`, defined at `generate_workflows.py:744-786`. Verified top-level keys of a real GRPO sample (`data/output/grpo/task_a/validation.jsonl`, conversation `L4_013`):
+
+`conversation_id, complexity_level, domain, num_states, num_tools, chain_depth, workflow_graph, workflow_script, tool_schemas, messages, user_behavior, language, ground_truth`
+
+Field-by-field against your checklist:
+
+- **`workflow_graph`** — present, `dict`. Serialized by `WorkflowGraph.to_dict()` at `generate_workflows.py:217-241`. Sub-keys: `states` (list[str] names), `state_details` (list of `{name, tools, entry_actions, instruction}`), `transitions` (list of `{from, to, condition, priority}`), `initial` (str), `terminal` (list[str]). So it carries nodes (`states`/`state_details`), edges (`transitions`), initial (`initial`), terminals (`terminal`). Note the key is `initial`/`terminal`, not `initial_state`/`terminal_states`.
+- **`tool_schemas`** — present, `list[dict]`, OpenAI function-schema shape (`{"type":"function","function":{name,description,parameters}}`). Verified 6 tools in the sample.
+- **`ground_truth.state_sequence`** — present, `list[{from,to}]`. Built at `generate_workflows.py:692-711, 737`. In the sample: 11 ordered transition dicts.
+- **`ground_truth.tool_chain_dependencies`** — present, `list[list[{name,arguments}]]` (per-assistant-turn grouping). Built at `generate_workflows.py:694, 727-728, 739`.
+- **`ground_truth.terminal_state`** — present, `str` (e.g. `"TERMINAL"`); empty string if the last state isn't terminal. `generate_workflows.py:730-734, 740`.
+- **`messages` with `[STATE: X → Y]` and `&lt;tool_call&gt;`** — present. Assistant messages carry `content` with inline `[STATE: A → B]` markers and `&lt;tool_call&gt;{...}&lt;/tool_call&gt;` blocks, PLUS a structured `annotations` dict `{"state_transition":{from,to}, "tool_calls":[...]}`. Regexes that parse the inline form: `_STATE_ANNOTATION_RE` (`generate_workflows.py:613`) and `_TOOL_CALL_RE` (`generate_workflows.py:616`). Roles seen: `system`(1), `user`(2), `assistant`(11), `tool`(5).
+- **`conversation_initiator` / `outbound_reason`** — defined on the dataclass (`generate_workflows.py:761-762`) and emitted by `to_dict()` (`:783-784`). PRESENT in SFT rows (`data/output/sft/task_a/l1_merged_20260629.jsonl` shows `conversation_initiator="agent"`, `outbound_reason="appointment_reminder"`, plus a `generation_source` key). **ABSENT from all 290 GRPO `task_a` rows** — they were dropped during the GRPO conversion. So for a GRPO reward you cannot rely on initiator/outbound_reason unless you re-derive from SFT source.
+
+Extra ground_truth fields beyond your list, present in the GRPO data: `ground_truth.tool_calls` (flat `list[{name,arguments}]` across the whole conversation; `generate_workflows.py:738`) and `ground_truth.terminal_reached` (`bool`).
+
+## 2. Per-conversation gold trajectory (the spine + tool chain)
+
+Yes — a single conversation sample fully recovers both the intended state path and the intended tool-call sequence:
+
+- **Full gold state path**: `ground_truth.state_sequence` is the complete ordered list of `{from,to}` transitions the reference trajectory traverses (11 entries in the sample, ending at the terminal). This is the spine-plus-branches actually walked, not just the canonical spine. You can reconstruct the node visitation order as `[state_sequence[0].from, then each .to]`.
+- **Full gold tool chain, two granularities**:
+  - `ground_truth.tool_calls` — flat ordered `list[{name, arguments}]` (5 in the sample), the entire chain.
+  - `ground_truth.tool_chain_dependencies` — same calls grouped per assistant turn (`list[list[...]]`), preserving turn boundaries so you can align tool calls to state transitions.
+- **Terminal check**: `ground_truth.terminal_state` (str) and `ground_truth.terminal_reached` (bool) let you score "did the rollout end in the correct terminal."
+- Per-turn alignment is also available inline: each assistant message's `annotations.state_transition` and `annotations.tool_calls` (e.g. `{"state_transition":{"from":"ALERT_RECEIVED","to":"ASSESS_SEVERITY"},"tool_calls":[]}`), so you can map each gold transition to the exact turn that produced it.
+
+So scoring "did the multi-turn rollout traverse the gold `state_sequence` and emit the gold tool chain" is fully supported by one sample. Construction logic: `_extract_ground_truth`, `generate_workflows.py:667-741`.
+
+## 3. Workflow graph as a deterministic environment — with a serialization caveat
+
+Edge structure in the SERIALIZED graph (`workflow_graph.transitions`) is exactly `{from, to, condition, priority}` (`generate_workflows.py:230-238`). Measured across all 290 validation graphs:
+
+- **`priority`**: only two values — `0` (spine edges, n=4668) and `1` (branch/loop/optional edges, n=3122).
+- **`condition`**: opaque synthetic labels only — `proceed_from_&lt;state&gt;` on every priority-0 spine edge, and `branch_S#_to_S#` on every priority-1 branch edge. There are 1866 branch points (states with &gt;1 outgoing edge) across the 290 graphs.
+
+What a deterministic environment CAN do from this:
+- **(a) Validate a proposed transition is legal**: yes. `(from,to)` adjacency is fully specified. This is already how the reward works — `grpo.py:239-243` builds `valid_transitions = [[from,to], ...]` from `workflow_graph.transitions` and passes it as `valid_transitions` into the row ground truth (`grpo.py:282`) for a transition-legality reward component.
+- **(b) Decide the next state given the model's action**: only partially/heuristically. The serialized `condition` is a human-readable label, NOT an evaluable predicate, and `priority` is just spine(0) vs branch(1). The machine-evaluable trigger semantics — `_VALID_TRIGGERS_SET = {always, tool_success, tool_error, intent_match, slot_present, user_declines}` (`generate_workflows.py:476-479`) — live on the in-memory `WorkflowTransition.trigger`/`.optional` fields (`:203-204`) and are **NOT emitted by `to_dict()`**, so they are absent from the JSONL. The reference traversal `walk_path` (`generate_workflows.py:482-545`) resolves branches by simulating triggers stochastically (`rng.random() &lt; TOOL_ERROR_RATE`, behavior/intent-conditioned coin flips at `:519-530`) and then ranking edges by `edge_priority` (`:533-540`). So next-state selection at branch points was non-deterministic at generation time and its deciding inputs (trigger type, optional flag) are not in the data.
+
+Net: from the serialized graph you get a deterministic legality validator and a spine-vs-branch preference (via priority), but not a deterministic condition-evaluating transition function. Note also that the prose `workflow_script` field (a rendered string, e.g. `- On success: proceed to [ASSESS_SEVERITY]` / `- If ...`) encodes some trigger semantics in natural language, but not machine-parseable structured form.
+
+## 4. `_load_grpo_jsonl` — conversation → per-turn rows
+
+`grpo.py:161-302`. It does NOT store per-turn rows on disk; `train.jsonl`/`validation.jsonl` are per-conversation (same schema as §1), sliced into per-turn rows at load time.
+
+- **Slicing rule** (`grpo.py:245-252`): find all assistant message indices; keep only those whose immediately preceding message role is `user` or `system` (`valid_pairs`). Assistant turns preceded by a `tool` message are **skipped** (TRL rejects `tool` as the last prompt role) — this drops tool-response continuations. Docstring: `:161-191`.
+- **Prompt per row** (`grpo.py:255-261`): `raw_msgs[:asst_idx]` — i.e. the FULL prior context (system + all prior user/assistant/tool turns) up to but excluding the target assistant turn, each slimmed to `{role, content}` via `_slim_content`. The leading system message is re-enriched via `build_enriched_system_prompt(raw, ...)` (`:216-224`) so rollouts see the same system prompt as the benchmark. So the prompt is NOT just system+one-user; it grows with each successive turn (prefix of the conversation).
+- **Target / reference per row** (`grpo.py:271-283`): a `ground_truth` JSON-string column containing:
+  - `state_sequence` = the SINGLE `{from,to}` from this turn's `annotations.state_transition` (`:264-265`) — per-turn, not the whole spine.
+  - `tool_calls` = this turn's `annotations.tool_calls` only (`:266`).
+  - `messages` = just this one assistant message's slimmed content (`:274-279`).
+  - `terminal_state` = conversation-level value; `terminal_reached` = True ONLY on the final emitted row of a conversation whose overall `terminal_reached` was true (`:268-270, 281`).
+  - `valid_transitions` = the full conversation's legal `(from,to)` edge list (`:282`).
+  - There is no free-form "target completion" text stored; the reference for reward is this structured `ground_truth`, decoded in `_make_reward_adapter` (`grpo.py:326-361`).
+- **Rows per conversation**: one per `user|system → assistant` boundary. Measured on the 290-conversation validation split: **1609 rows total, avg ≈ 5.55 per conversation, min 1, max 28** (assistant turns that follow `tool` messages are excluded from the count).
+
+### Key implication for a trajectory-level reward
+The existing GRPO pipeline is **per-turn / single-step**, not trajectory-level: each row's reference is one transition + one turn's tool calls, and `chain_propagation`/completion sub-rewards are explicitly neutralized for single-turn rows (`grpo.py:183-191`). The conversation-level gold trajectory you need (`ground_truth.state_sequence` full path, `ground_truth.tool_chain_dependencies`, `ground_truth.terminal_state/terminal_reached`) exists intact in the on-disk per-conversation JSONL (§1-2) but is currently discarded by the `_load_grpo_jsonl` slicing — a trajectory reward would need a different loader that keeps the whole conversation's ground_truth per row.</result>
+<usage><subagent_tokens>39965</subagent_tokens><tool_uses>21</tool_uses><duration_ms>185563</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a7298df4781bd68a4</task-id>
+<tool-use-id>toolu_01KLskxf7L7RtnkBy58m9FF9</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/0576e378-97b7-4aa5-8a7c-2ad56c36301a/tasks/a7298df4781bd68a4.output</output-file>
+<status>completed</status>
+<summary>Agent "Author multi-turn trajectory-reward spec" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Spec &amp; Implementation Plan: Multi-Turn Trajectory Reward for GRPO — Cat A (Gemma-4-26B-A4B-it)
+
+**Status:** design complete, verified against installed code (2026-07-09)
+**Author:** Fable 5 → **Target implementer:** claude-opus-4-8 (multi-file, correctness-critical: a masking bug produces silently-garbage gradients on a multi-hour H100 run)
+**Locked decisions (do not revisit):** (1) replay-scripted environment; (2) free-run + truncate-on-divergence; (3) coverage+outcome blend reward at 0.40/0.40/0.10/0.10; (4) this document is the Opus handover.
+**Prior art:** `docs/grpo_diagnosis_gemma4_26b.md` (4 killed runs; bqbxnqxw grad-norm 50k-class `scale_rewards` blowup; df4dot2d grad-norm 1126/KL 40), `docs/grpo_viability_investigation.md` (single-turn GRPO verdict: inadmissible; multi-turn = escalation path #5).
+
+---
+
+## 1. Objective &amp; acceptance criteria
+
+### Objective
+Replace the per-turn single-completion GRPO rollout with a **whole-conversation replay rollout**: the model free-runs its own assistant turns against the gold conversation's scripted user turns and tool results, truncating when it leaves the gold path, and receives **one scalar trajectory reward** = 0.40·coverage + 0.40·graded tool-F1 + 0.10·terminal + 0.10·legality. Aggregating over a median-13-turn gold path turns the single-turn discrete lattice ({0, 0.3, 0.5, 1.0} per turn) into a ~near-continuous distribution (coverage alone has T+1 rungs, T = gold length), manufacturing the within-group reward variance GRPO's advantage needs.
+
+### Acceptance criteria (measurable, in order of gating)
+1. **Unit tests green** (pure CPU, no GPU): alignment walk, reward math, mask assembly with mocked `generate` — commands in §6.
+2. **Micro-probe GO** (§4) on ~50 validation conversations × N=8 at T=0.8, run BEFORE any trainer step:
+   - primary: **median within-group `reward_std` ≥ 0.05** and **`frac_collapsed_groups` (std &lt; 0.01) &lt; 0.50** — the exact GRPO admissibility bar from `docs/grpo_viability_investigation.md` §1 that every single-turn measurement failed (~0.77 collapsed at bqbxnqxw geometry);
+   - anti-truncation: **mean model turns before stop ≥ 3.0** and mean coverage in (0.05, 0.95);
+   - environment: probe asserts `trl.__version__ == "1.0.0"` and that the `env_mask` pathway exists in the *patched* trainer source (see §2.3).
+3. **Mask audit passes** at rollout time: for every sample, `len(env_mask) == len(completion_ids)`; decoding the mask==1 positions reproduces exactly the concatenated model-turn texts (modulo special tokens); decoding mask==0 positions contains only injected gold user/tool text + turn scaffolding. Logged once at probe time and at trainer step 0.
+4. **50-step diagnostic run** (inheriting all stabilizers from `configs/training/grpo_cat_a_diagnostic.yaml`): completes without kill-criteria breach (grad_norm &lt; 50 sustained, KL &lt; 10), `frac_reward_zero_std &lt; 0.30` (vs 0.70–1.0 historically), `train/reward_std` materially above 0.02, and the trajectory held-out composite non-degrading.
+5. Done = criteria 1–4 met and the 1000-step config is a one-line change (`training_steps`).
+
+---
+
+## 2. Architecture
+
+### 2.1 Data flow
+
+```
+train.jsonl (1 row = 1 conversation)
+   └─ _load_grpo_trajectory_jsonl ──► HF Dataset rows: {prompt, ground_truth}   (TRL-visible)
+                                  └─► script_index: {prompt_key → GoldScript}   (closure-held, TRL-invisible)
+GRPOTrainer._generate (trl 1.0.0, grpo_trainer.py:1596)
+   └─ rollout_func(prompts, trainer)          ← prompts = generation batch, each unique prompt
+        │                                        repeated num_generations× (RepeatSampler)
+        │  per prompt: look up GoldScript by prompt_key; batched turn loop:
+        │    sample assistant turn (mask=1) → parse [STATE:] → align vs gold →
+        │    stop OR inject gold tool/user segment tokens + next gen header (mask=0) → repeat
+        └─ returns {prompt_ids, completion_ids, logprobs=None,
+                    env_mask, trajectory, rollout_meta}
+   env_mask popped at :1649 → tool_mask ──► loss mask product (:2265) → only model tokens trained
+   trajectory/rollout_meta merged into reward inputs (:1949-1956)
+_calculate_rewards (:1961, contract :1196-1198)
+   └─ _make_trajectory_reward_adapter → reward_business_logic_trajectory → one scalar/trajectory
+advantage math (:1962-2007) — turn-count-agnostic, unchanged
+_compute_loss (:2258-2454) — per-token loss × (completion_mask · tool_mask); dr_grpo normalizer :2396
+```
+
+### 2.2 The token-masking crux — RESOLVED
+
+**Mechanism chosen: `rollout_func` + the `env_mask` extra field.** Verified line-by-line against `.venv/lib/python3.12/site-packages/trl/trainer/grpo_trainer.py` (TRL 1.0.0, 2549 lines):
+
+- `rollout_func` contract (`:114-117`, `:1596-1613`): receives `(prompts, trainer)` with structured (conversational) prompts, must return `prompt_ids`, `completion_ids`, `logprobs`; **all other returned keys become per-completion extra fields**.
+- **`env_mask` is a first-class supported channel**: at `:1646-1649`, when `self.tools` is falsy (ours is), `tool_mask = extra_fields.pop("env_mask", None)` — the comment reads *"Support custom env_mask from rollout_func (e.g., for environment feedback masking). Internally treated as tool_mask - marks model tokens (1) vs external tokens (0)."* This is exactly our need.
+- Downstream, `tool_mask` is padded with 1 (`:1788-1794`), and:
+  - **loss**: `_compute_loss:2265` → `mask = completion_mask * inputs["tool_mask"]`; every loss type multiplies by `mask` (`grpo`/`bnpo`/`dr_grpo`/`dapo` at `:2389-2407`), so injected tokens contribute **zero** policy-gradient and zero KL (KL enters `per_token_loss` before the mask product, `:2384-2385` then `:2389+`);
+  - **attention**: `completion_mask` stays all-ones over injected tokens (`:1768`), so the model attends to gold user/tool context during logp computation — correct;
+  - **metrics**: entropy/KL logging uses `masked_batch_mean` over the same product mask (`:2412-2425`); `num_items_in_batch` counts only mask==1 tokens (`:1653-1656`) — DAPO-style normalizers stay honest;
+  - **liger path** honors it too (`:2148-2149`) — though we run the non-liger path.
+- `logprobs: None` is safe: only consumed for vLLM importance-sampling correction (`:1885`, `:2381`) and OPSM (`:2303`), all gated off under `use_vllm=False` / default `off_policy_mask_threshold=None`; `None` skips padding at `:1778-1787`. Old-policy logps for the PPO ratio are **recomputed by the trainer itself** via a no-grad forward over our returned ids (`:1860-1882`, triggered because `gradient_accumulation_steps(1) % generate_every(4) != 0`) — valid for interleaved sequences since it operates on token ids.
+- `env_mask` is **popped** from extra fields, so it does not leak into reward kwargs; our other extra fields (`trajectory`, `rollout_meta`) are merged per-completion into reward inputs at `:1949-1956` and forwarded to the reward at `:1156-1157` + `:1196-1198`. `GRPOConfig.remove_unused_columns` defaults to `False` (grpo_config.py:375-377), so the `ground_truth` dataset column also reaches the reward.
+
+**Mechanisms considered and rejected:**
+- `tools` + `_tool_call_loop` (`:1410-1587`): executes real Python tools and regenerates keyed on parsed structured `tool_calls`; it cannot inject **user** turns, and structured tool-call parsing depends on `parse_response`/`response_schema` the Gemma-4 tokenizer may not ship. Rejected.
+- `environment_factory` (`:1712-1717`, `:446-474`): `reset()` only mutates the last prompt message before generation — no per-turn hook. Rejected.
+- `GRPOTrainer` subclass overriding `_generate`: viable **fallback** if the Unsloth patch layer on the training box breaks the rollout_func path (§5 R2), but unnecessary otherwise.
+
+**Two verified hazards with mandated mitigations:**
+1. `mask_truncated_completions` (default `False`, grpo_config.py:744): if ever enabled, `:1796-1804` zeroes the *entire* completion whose last token isn't EOS/pad — i.e., precisely our divergence-truncated trajectories. Mitigation: wiring asserts it is False **and** the rollout guarantees every trajectory's final token is `tokenizer.eos_token_id` (force-appended with mask=0 when a turn hits its token budget; trainer's `self.eos_token_id = tokenizer.eos_token_id`, `:327`). This also keeps the `completions/clipped_ratio` metric meaningful.
+2. `dr_grpo` normalizes by `max_completion_length` (`:2396-2397`). Raising it 512→4096 shrinks per-token loss ~8×, partially offset by ~6× more unmasked tokens per sequence. Keep `lr: 1.0e-6` for the first run and monitor `grad_norm`; raising to 2e-6 if updates are vanishing is **[IMPLEMENTER DECIDES]** after inspecting the 50-step diagnostic.
+
+### 2.3 Environment/version gate (pin drift is real)
+
+Verified on this box: `.venv` has **TRL 1.0.0** (`trl-1.0.0.dist-info`), while `pyproject.toml:64` and `requirements-train.txt:22` pin `trl==0.24.0`, and grpo.py comments cite 0.23.1. Moreover **`.venv-train` — the venv `scripts/run_phase2_grpo.sh:82` actually sources — does not exist here**, and unsloth is not importable in `.venv`; the training box's env is unauditable from this session. Unsloth also monkey-patches TRL trainers at import. Therefore:
+
+- Fix the pins to `trl==1.0.0` (§3e).
+- Add a **runtime feature assertion**, executed after `import unsloth` (so it sees the patched class), in both the micro-probe and the `grpo.py` trajectory path:
+
+```python
+def assert_trajectory_rollout_support() -&gt; None:
+    import inspect, trl
+    from trl.trainer.grpo_trainer import GRPOTrainer
+    src = inspect.getsource(GRPOTrainer._generate)
+    if "rollout_func" not in src or "env_mask" not in src:
+        raise RuntimeError(
+            f"TRL {trl.__version__}: GRPOTrainer._generate lacks the rollout_func/env_mask "
+            "pathway (required by trajectory GRPO; present in trl==1.0.0). "
+            "Check .venv-train's trl pin and whether Unsloth's RL patch replaced _generate."
+        )
+```
+
+---
+
+## 3. Component specs
+
+All new run-time code lives in `src/llm_workflow_agents/training/trajectory_rollout.py` (new module) plus surgical additions to `grpo.py` and `rewards/reward_business_logic.py`. Everything below the model call is pure and unit-testable.
+
+### 3a. Trajectory loader — one row per conversation
+
+**File:** `src/llm_workflow_agents/training/grpo.py` (beside `_load_grpo_jsonl`, :161-302) with the pure pieces in `trajectory_rollout.py`.
+
+```python
+# trajectory_rollout.py
+@dataclass(frozen=True)
+class GoldScript:
+    conversation_id: str
+    prompt_messages: list[dict]           # [enriched system (+ first user)] — up to first assistant
+    segments: list[list[dict]]            # segments[t] = gold NON-assistant messages between gold
+                                          #   assistant turn t and t+1, stripped to {role, content};
+                                          #   len == n_gold_assistant_turns (last entry may be [])
+    gold_transitions: list[tuple[str, str]]  # ground_truth.state_sequence as tuples, order-preserving
+    gold_tool_calls: list[dict]           # flat ground_truth.tool_calls (whole conversation)
+    terminal_state: str
+    terminal_reached: bool
+    valid_transitions: list[list[str]]    # workflow_graph.transitions → [[from, to], ...]
+
+def build_gold_script(raw_row: dict, enriched_system: str) -&gt; GoldScript
+def prompt_key(prompt_messages: list[dict]) -&gt; str
+    # sha256(json.dumps(prompt_messages, sort_keys=True, ensure_ascii=False))
+```
+
+```python
+# grpo.py
+def _load_grpo_trajectory_jsonl(
+    data_dir: Path, split: str = "train"
+) -&gt; tuple["Dataset", dict[str, GoldScript]]:
+```
+
+**Algorithm** (mirrors `_load_grpo_jsonl`'s enrichment, drops its flattening):
+1. Per JSONL line: re-enrich `messages[0]` via `build_enriched_system_prompt(raw, raw_msgs[0]["content"], force_rebuild=True)` (`data/system_prompt.py:60`), exactly as :211-224 does today.
+2. `prompt_messages` = messages up to (excluding) the **first** assistant turn, `_slim_content`-stripped. Verified shapes: 495/501 sampled rows have first assistant at index 2 (`[system, user]` prompt), 6/501 at index 1 (opener rows → `[system]` prompt — precedent: the single-turn loader already emits system-terminated prompts, :248-251).
+3. Segmentation: for gold assistant turn index `t` (0-based over assistant turns), `segments[t]` = the gold messages strictly between assistant turn `t` and assistant turn `t+1`, roles ∈ {tool, user} (verified adjacency: only `(assistant→tool→user)` and `(assistant→user)` occur). `segments[-1]` = trailing non-assistant messages (usually `[]` — conversations end on assistant).
+4. `gold_transitions` from `ground_truth.state_sequence` (`[{from,to}]` → tuples). **Invariant to assert per row:** `len(gold_transitions) == n_gold_assistant_turns` (verified on data: every assistant turn carries exactly one `annotations.state_transition`; L4 sample: 20 == 20). Rows violating it: log + skip.
+5. Emit dataset row `{"prompt": prompt_messages, "ground_truth": json.dumps({...})}` where the GT dict carries: `state_sequence` (full, ordered), `tool_calls` (flat), `terminal_state`, `terminal_reached`, `valid_transitions` — same JSON-string-column trick as :287-290 (pyarrow schema bypass).
+6. Build `script_index[prompt_key(prompt_messages)] = GoldScript(...)`. **Collision check:** if a key repeats with a different `conversation_id`, drop the later row and log `trajectory_prompt_key_collision` (system prompts embed per-conversation graphs; collisions should be ~zero, but silence here would mis-script rollouts).
+7. Overlong guard: rows whose templated prompt exceeds `max_prompt_length` tokens are dropped with a counter (TRL does not truncate prompts on the rollout_func path; a silent overrun would blow the 8192 budget).
+
+Yields ~2,502 train / 290 validation rows (verified counts).
+
+### 3b. In-process replay rollout
+
+**File:** `src/llm_workflow_agents/training/trajectory_rollout.py`
+
+```python
+@dataclass(frozen=True)
+class TrajectoryRolloutConfig:
+    max_turns: int = 24                  # p90 gold length is 21
+    per_turn_max_new_tokens: int = 256
+    max_completion_tokens: int = 4096    # must equal GRPOConfig.max_completion_length
+    stall_turn_limit: int = 2            # consecutive no-transition turns before stop
+    temperature: float = 0.8
+    top_p: float = 0.95
+    do_sample: bool = True
+
+@dataclass
+class RolloutSample:
+    prompt_ids: list[int]
+    completion_ids: list[int]
+    env_mask: list[int]                  # len == len(completion_ids); 1=model, 0=injected/forced
+    turn_texts: list[str]                # decoded model turns, in order
+    meta: dict                           # {"cursor": int, "stop_reason": str, "n_model_turns": int,
+                                         #  "n_stall_turns": int, "gold_len": int, "conversation_id": str}
+
+def run_replay_rollout(
+    model, tokenizer,
+    scripts: list[GoldScript],           # one per requested completion (duplicates for a group)
+    cfg: TrajectoryRolloutConfig,
+) -&gt; list[RolloutSample]
+
+def make_replay_rollout_func(
+    script_index: dict[str, GoldScript],
+    cfg: TrajectoryRolloutConfig,
+) -&gt; "RolloutFunc"                       # closure: (prompts, trainer) -&gt; dict
+```
+
+**`make_replay_rollout_func` returned callable** (the TRL-facing adapter):
+1. `assert_trajectory_rollout_support()` on first call.
+2. For each prompt in `prompts` (order-preserving — group advantage at `:1967` depends on it): `scripts.append(script_index[prompt_key(prompt)])`; a missing key is a hard error (never silently degrade to single-turn).
+3. `samples = run_replay_rollout(trainer.model, trainer.processing_class, scripts, cfg)` — temperature/top_p read from `trainer.args`.
+4. Return:
+```python
+{
+  "prompt_ids":     [s.prompt_ids for s in samples],
+  "completion_ids": [s.completion_ids for s in samples],
+  "logprobs":       None,
+  "env_mask":       [s.env_mask for s in samples],
+  "trajectory":     [json.dumps(s.turn_texts) for s in samples],   # per-completion extra field
+  "rollout_meta":   [json.dumps(s.meta) for s in samples],
+}
+```
+
+**`run_replay_rollout` turn loop** (batched, active-set):
+1. `prompt_ids` = `tokenizer.apply_chat_template(script.prompt_messages, add_generation_prompt=True, tokenize=True)`. Derive the assistant **turn-end token id(s)** once via a dummy render (`[user:"dummy", assistant:"dummy"]`, take trailing special token(s)); assert it includes `tokenizer.eos_token_id` — for Gemma chat tokenizers eos is `&lt;end_of_turn&gt;`; if they differ, generation must stop on the turn-end id and the force-append token must be `tokenizer.eos_token_id`-compatible (**[IMPLEMENTER DECIDES]** the exact reconciliation after inspecting the actual Gemma-4 SFT tokenizer; unit-test locks the invariant "trajectory ends on `tokenizer.eos_token_id`").
+2. While any sample active: left-pad the batch of `prompt_ids + completion_ids`, call `model.generate(..., max_new_tokens=cfg.per_turn_max_new_tokens, do_sample=cfg.do_sample, temperature, top_p, eos_token_id=turn_end_ids)` under `torch.no_grad()` with `model.eval()` (restore mode after — mirror `_HeldOutEvalCallback._evaluate`, grpo.py:732-779). Per sequence, take generated ids up to and **including** the first turn-end token → append to `completion_ids` with `env_mask += [1]*len`. If no turn-end within budget: append the sampled ids, then **force-append the turn-end id with mask 0** (not sampled → not trained).
+3. Decode the turn (`skip_special_tokens=True`) → `turn_texts.append`; parse transitions via `extract_state_annotations` (reward_utils.py:17-22 → `parse_state_transitions`, eval/state_accuracy.py:64-79).
+4. **Alignment &amp; truncation predicate** — `classify_turn(pred_transitions, cursor, gold_transitions)` (pure, shared with the reward):
+   - `effective = [t for t in pred_transitions if t[0] != t[1]]` (self-loops `(X,X)` are "stay" markers, legal per `transition_legality_score` semantics — neutral for alignment).
+   - `effective == []` → `("stall", cursor)`.
+   - `effective == gold_transitions[cursor : cursor+len(effective)]` (exact, order-sensitive, consecutive; ≥1 element) → `("advance", cursor+len(effective))`. Multi-step compression is allowed **only** as an exact consecutive gold run.
+   - anything else → `("diverged", cursor)` — this *is* the "leaves the gold-reachable set" rule, keyed off gold `state_sequence` order, never a re-simulated transition function (the serialized graph has no trigger semantics — verified: `transitions[].condition` is an opaque label).
+5. **Stop conditions**, checked after the turn (the turn's tokens always stay in the trajectory and are scored):
+   - `diverged` → stop, `stop_reason="diverged"`;
+   - `cursor == len(gold_transitions)` → stop, `"gold_complete"`;
+   - consecutive stalls ≥ `stall_turn_limit` → stop, `"stall"`;
+   - turn index `t+1 &gt;= min(len(segments), cfg.max_turns)` → stop, `"script_exhausted"` / `"turn_cap"`;
+   - `len(completion_ids) + per_turn_max_new_tokens + len(next_segment_ids) + 8 &gt; cfg.max_completion_tokens` → stop, `"budget"`.
+6. **Gold injection** (if continuing): compute segment ids with the **dummy-conversation diff** — the exact in-library technique of `_get_tool_suffix_ids` (grpo_trainer.py:1381-1408): render `[{user:"dummy"},{assistant:"dummy"}]` without generation prompt, render the same + `segments[t]` with `add_generation_prompt=True`, trim the prefix at its last eos, assert prefix property, take the suffix. Append suffix ids with `env_mask += [0]*len` (covers tool text, user text, and the next `&lt;start_of_turn&gt;model` header — mirroring `_tool_call_loop`'s mask update at :1551-1559). Tool results are injected **unconditionally** from gold, whether or not the model emitted the matching call (replay-scripted; same semantics as `_replay_conversation`'s "GT tool responses kept as-is", agent_benchmark.py:441-445). Cache segment-id computation per (script, t).
+7. **Final-token guarantee:** if the loop ends with a mask-0 injected suffix pending or a non-eos tail, force-append `tokenizer.eos_token_id` with mask 0 (keeps `is_truncated` at :1674 False and immunizes against `mask_truncated_completions`).
+8. **Mask invariants** (assert per sample, cheap): `len(env_mask)==len(completion_ids)`; `sum(env_mask) &gt; 0`; first token has mask 1.
+
+Cost model: 32-sample generation batch × median ~8–13 rounds × ≤256 tokens ≈ 3–6× the single-turn ~31 s/step HF-rollout cost → ~2–4 min/generation cycle; 50-step diagnostic ≈ 2–3 H100-h. Trajectory v1 is **HF-generate only**: if the YAML requests `generation_backend: vllm` with trajectory mode, force HF with a warning (Gemma-4 can't use Unsloth vLLM anyway — Risk R9, grpo.py:526-543).
+
+### 3c. Trajectory reward
+
+**File:** `src/llm_workflow_agents/training/rewards/reward_business_logic.py` (append; register in `grpo.py:_REWARD_REGISTRY` as `"reward_business_logic_trajectory"`).
+
+```python
+def reward_business_logic_trajectory(
+    prompts: list[Any],
+    trajectories: list[list[str]],       # per-completion model turn texts
+    metas: list[dict[str, Any]],         # rollout_meta (trusted: produced by our rollout, not the model)
+    ground_truths: list[dict[str, Any]], # decoded ground_truth column
+) -&gt; list[float]:
+```
+
+Per completion, with `gold = [(f,t)...]` from `gt["state_sequence"]`, `T = len(gold)` (≥1 by loader invariant):
+
+1. **Recompute alignment** by replaying `classify_turn` over `extract_state_annotations(turn)` for each turn (same pure function the rollout used — single source of truth; warn-log if the recomputed cursor ≠ `meta["cursor"]`). Yields `cursor`, `n_stall_turns`, `pred_transitions_all` (flat, ordered), `pred_tools_all` (flat, ordered, via `extract_tool_calls` per turn).
+2. Components:
+   - `r_coverage = cursor / T` — **order-sensitive by construction** (cursor only advances on the exact next gold transition or an exact consecutive gold run) and **capped at 1.0 structurally** (cursor ≤ T).
+   - `r_tool = graded_tool_call_f1(pred_tools_all, _strip_placeholder_args(gt["tool_calls"]))` (reward_utils.py:50-60 → `compute_argument_graded_f1`, eval/tool_call_f1.py:258; placeholder-stub handling :116-131). Gold side = the **whole conversation's** tool calls (locked decision 3): recall scales with progress, precision punishes spam.
+   - `r_terminal = 1.0` iff `meta["stop_reason"] == "gold_complete"` **and** `pred_transitions_all` is non-empty **and** `pred_transitions_all[-1][1] == gt["terminal_state"]`; component **active only when** `gt["terminal_reached"]` (else dropped + weights renormalized — existing pattern, reward_business_logic.py:181-184).
+   - `r_legality = transition_legality_score(pred_transitions_all, gt["valid_transitions"]) * stall_factor`, where `stall_factor = 1 - n_stall_turns / max(n_model_turns, 1)`; component active only when `valid_transitions` non-empty (:173-176 pattern).
+3. `score = Σ wᵢsᵢ / Σ wᵢ` over active components with `W = (0.40, 0.40, 0.10, 0.10)`; clip to [0,1].
+
+**Anti-hacking guards** (locked decision 3, made concrete): order-sensitivity + coverage cap via the cursor; stall farming punished twice (stall_factor + the rollout's consecutive-stall stop); transition spam ends the rollout (divergence) *and* depresses legality; tool spam depresses F1 precision; and the independent strict held-out composite (§3d) + `_is_reward_hacking` auto-stop (grpo.py:451-468) remains the backstop.
+
+**Adapter** — `grpo.py::_make_trajectory_reward_adapter(reward_fn)`: same keyword contract as `_make_reward_adapter` (:334-340) but reads `kwargs["trajectory"]` and `kwargs["rollout_meta"]` (per-completion extra fields, JSON-decoded) **instead of collapsing `completions` to the last message** (:363-370 — that collapse would hand the reward TRL's `batch_decode` of the whole interleaved stream, :1629-1630, which must not be scored). Missing `trajectory` key → hard error. Keep the `_LATEST_INSTRUMENTATION` unique-completions stash (:376-387), keyed on prompt, using `"\n".join(turn_texts)` as the completion identity.
+
+### 3d. Trajectory held-out eval callback
+
+**File:** `grpo.py` — new `_TrajectoryHeldOutEvalCallback` replacing `_HeldOutEvalCallback` (:712-814) when trajectory mode is on. Same `on_log`/`on_step_end`/auto-stop skeleton and `_is_reward_hacking` wiring; `_evaluate` changes to:
+- run `run_replay_rollout(model, tokenizer, heldout_scripts, cfg_greedy)` with `do_sample=False` on `eval_held_out_num_prompts` **validation conversations** (scripts built by `_load_grpo_trajectory_jsonl(..., split="validation")`);
+- score with a **strict** composite, numerically independent of the graded training reward (same design rationale as `_heldout_composite_score`, :394-448): `0.4 · state_sequence_match(pred_transitions_all, gold)` (strict positional accuracy over the FULL gold sequence — punishes truncation differently than prefix-fraction coverage; reward_utils.py:32-40) `+ 0.4 · tool_call_f1(pred_tools_all, gt_tools)` (strict AST, :43-47) `+ 0.2 · terminal` (strict, `reached_terminal` on the last turn);
+- log as `eval/held_out_composite` (same key, comparable across runs).
+Budget: 12 conversations × ~13 greedy turns ≈ 2–4 min per eval at `eval_held_out_every: 10`.
+
+### 3e. Config + pin fix
+
+**New file `configs/training/grpo_cat_a_trajectory.yaml`** — copy of `grpo_cat_a_diagnostic.yaml` (keep ALL stabilizers: `scale_rewards: "none"`, `loss_type: "dr_grpo"`, `max_grad_norm: 0.2`, `learning_rate: 1.0e-6`, `beta: 0.05`, `num_generations: 16`, `generation_batch_size: 32`, `per_device_train_batch_size: 8`, `temperature: 0.8`) with:
+
+```yaml
+grpo:
+  max_completion_length: 4096      # whole interleaved trajectory (p90 gold content ≈1.7K tok + scaffolding)
+  max_prompt_length: 4096          # enriched system + first user only (no longer the whole conversation)
+  training_steps: 50               # diagnostic first; 1000 after gate
+  rollout:
+    mode: "trajectory"             # anything else → legacy single-turn path, fully preserved
+    max_turns: 24
+    per_turn_max_new_tokens: 256
+    stall_turn_limit: 2
+reward:
+  function: "reward_business_logic_trajectory"
+monitoring:
+  eval_held_out_every: 10
+  eval_held_out_num_prompts: 12
+logging:
+  wandb_project: "llm-workflow-agents-grpo-trajectory"
+```
+
+**Wiring in `train_grpo`** (grpo.py:471-844): when `grpo.rollout.mode == "trajectory"` → call `assert_trajectory_rollout_support()`; use `_load_grpo_trajectory_jsonl`; build `rollout_func=make_replay_rollout_func(script_index, cfg)` and pass it to `GRPOTrainer(...)` (param verified at grpo_trainer.py:277; expect the one-time experimental warning, :421-429); use `_make_trajectory_reward_adapter`; swap in the trajectory callback; force `use_vllm=False` for trajectory mode; assert `mask_truncated_completions` unset/False. Also add a `rollout_trajectory_stats` metric hook: stash mean turns / diverged-frac / coverage from `rollout_meta` into `_LATEST_INSTRUMENTATION` and surface via `_UniqueCompletionsCallback` (:690-707).
+
+**Pin fix:** `pyproject.toml:64` and `requirements-train.txt:22`: `trl==0.24.0` → `trl==1.0.0`. Opportunistically correct the stale "TRL 0.23.1" comments in `grpo.py` (:165, :316-321, :661-664) — non-load-bearing but misleading. Note in the PR that **`.venv-train` on the training box must be re-synced** and the runtime assertion is the enforcement.
+
+---
+
+## 4. Cheap-first micro-probe (BUILD AND RUN FIRST)
+
+**File:** `scripts/trajectory_variance_probe.py` — mirrors `scripts/rft_headroom_probe.py`'s structure (pure `summarize`/`classify_gate` + Unsloth checkpoint loader from `preflight_entropy_diag.py::_generate_for_checkpoint`'s loading idiom). No TRL trainer involved — it drives `run_replay_rollout` + `reward_business_logic_trajectory` directly, which is precisely why it derisks the design before any training step.
+
+Per conversation (default 50, from `validation.jsonl`, seeded sample): duplicate the script N=8×, run the batched replay rollout at T=0.8/top_p 0.95 (matching the training config so numbers transfer), score, then report:
+- `median_reward_std`, `mean_reward_std`, `frac_collapsed_groups` (std &lt; 0.01) —直 comparison against the single-turn preflight numbers;
+- coverage stats: mean/p10/p90 coverage, mean within-group coverage spread (max−min);
+- `mean_model_turns`, stop-reason histogram (`diverged`/`gold_complete`/`stall`/`turn_cap`/`budget`/`script_exhausted`);
+- reward-rung histogram (distinct rewards per group, mirroring `rung_histogram`);
+- mask audit result (§1 criterion 3) on the first batch;
+- env assertions: `trl.__version__`, env_mask pathway present.
+
+**Gate (pure `classify_gate`, unit-tested):**
+- `GO_TRAJECTORY`: `median_reward_std ≥ 0.05` AND `frac_collapsed_groups &lt; 0.50` AND `mean_model_turns ≥ 3.0` AND `0.05 &lt; mean_coverage &lt; 0.95`.
+- `NO_GO_VARIANCE`: `median_reward_std &lt; 0.02` — the trajectory lattice still collapses; abandon (§7).
+- `NO_GO_TRUNCATION`: `mean_model_turns &lt; 2.0` — over-truncation re-collapses variance; either relax the predicate (**[IMPLEMENTER DECIDES]**: first knob is `stall_turn_limit` 2→3; second is tolerating one non-gold-but-legal edge before stopping) and re-probe, or abandon.
+- `MARGINAL`: otherwise → inspect histograms, re-probe with 150 conversations.
+
+Runtime estimate: 400 trajectories, batch 32, ~6–13 turns → **~30–60 min on the H100**. Command in §6.
+
+## 5. Risk register
+
+| # | Failure mode | Detection signal | Mitigation |
+|---|---|---|---|
+| R1 | **Token mask wrong → silent garbage gradients** (injected gold tokens trained, or model tokens masked) | Step-0 mask audit (decode mask-1 vs mask-0 spans, log to W&amp;B); per-sample invariants in rollout; `train/env_mask_frac` (expect ~0.35–0.7, drift = bug); unit test with mocked `generate` | The audit is a hard assert at probe time; `env_mask` semantics pinned by tests against grpo_trainer.py:1649/:2265 |
+| R2 | **TRL/Unsloth pin drift** — training box `.venv-train` has trl≠1.0.0, or Unsloth's RL patcher replaces `_generate` and drops rollout_func/env_mask | `assert_trajectory_rollout_support()` hard-fails at startup and in the probe (source-inspection of the *patched* class) | Pin fix (§3e); fallback: minimal `GRPOTrainer` subclass overriding `_generate` (§2.2) |
+| R3 | **Truncation too aggressive** → 1–2-turn trajectories → coverage ∈ {0, 1/T} → variance re-collapse | Probe: `mean_model_turns`, stop-reason histogram (`diverged` ≫ others at turn 1); in-run `train/rollout_mean_turns`, `train/rollout_diverged_frac` | Stall tolerance (limit 2), self-loops neutral, exact-consecutive compression allowed; relaxation knobs gated on re-probe (§4) |
+| R4 | **Reward hacking**: stall/self-loop farming, transition spam to inflate legality, tool spam, or coverage-seeking degenerate prose incoherent with injected gold user turns | Strict trajectory held-out composite diverging from training reward (`_is_reward_hacking` auto-stop); `unique_completions_per_group`; manual transcript audit of 20 probe trajectories | stall_factor × legality, divergence-stop on spam, F1 precision term; held-out metric numerically independent (§3d) |
+| R5 | **Off-policy/incoherence confound**: model stays state-aligned but semantically diverges, so scripted gold user replies become incoherent context — training on plausible-looking but mismatched conversations | Probe-stage human read of `gold_complete` transcripts; held-out composite flat-or-down while reward rises; `completions/mean_length` drift | Accepted for v1 (locked decision 1/2 — no user simulator available); divergence predicate keys on state only; document as known ceiling |
+| R6 | **dr_grpo loss-scale shift** (`max_completion_length` 512→4096 denominator, :2396) → vanishing updates masquerading as "stable but flat" | `grad_norm` persistently ≪ historical stable range; reward_std healthy but reward mean immobile | LR bump 1e-6→2e-6 [IMPLEMENTER DECIDES] only after 50-step evidence; never together with other changes |
+
+## 6. Implementation plan (handover to Opus)
+
+**Target model:** claude-opus-4-8 — multi-file, correctness-critical token accounting; the spec resolves all design questions except the three explicitly marked [IMPLEMENTER DECIDES].
+**Context the implementer lacks:** everything above; assume zero shared memory. Repo: `/workspaces/ai-agent-llms`. Use `uv`/activated `.venv` per project convention; GPU steps run on the H100 box via `.venv-train`. Branch first (main is protected but bypassable — verify `git branch --show-current`); ship via auto-merged squash PR per project convention.
+
+Ordered, independently verifiable steps:
+
+1. **Pins + env gate** — edit `pyproject.toml:64`, `requirements-train.txt:22` → `trl==1.0.0`; add `assert_trajectory_rollout_support()` to `trajectory_rollout.py` (new file).
+   *Verify:* `grep -n "trl==" pyproject.toml requirements-train.txt`; `source .venv/bin/activate &amp;&amp; python -c "from llm_workflow_agents.training.trajectory_rollout import assert_trajectory_rollout_support"` (assertion itself needs the train box).
+2. **Pure core** — `trajectory_rollout.py`: `GoldScript`, `build_gold_script`, `prompt_key`, `classify_turn`, `walk_trajectory_alignment`; tests `tests/unit/test_trajectory_rollout.py` (segmentation on a synthetic conversation; advance/stall/diverge/compression/self-loop/cursor-cap cases; key stability; loader invariant `len(gold)==n_asst`).
+   *Verify:* `source .venv/bin/activate &amp;&amp; pytest tests/unit/test_trajectory_rollout.py -q`
+3. **Reward** — `reward_business_logic_trajectory` + registry entry + `_make_trajectory_reward_adapter`; tests `tests/unit/test_reward_trajectory.py` (known-answer trajectories with hand-computed scores; renormalization when terminal/legality inactive; stall_factor; coverage cap; order sensitivity — permuted gold path scores lower).
+   *Verify:* `pytest tests/unit/test_reward_trajectory.py -q`
+4. **Rollout loop** — `run_replay_rollout` + `make_replay_rollout_func` + dummy-diff segment tokenizer + mask assembly. Tests: monkeypatch `model.generate` with canned token scripts and a small real tokenizer fixture (**[IMPLEMENTER DECIDES]** fixture: a cached tiny ChatML tokenizer or a minimal jinja stub — must exercise the prefix-diff assertion) → assert env_mask zeros exactly over injected segments/forced eos, ones over sampled spans, final token == eos.
+   *Verify:* `pytest tests/unit/test_trajectory_rollout.py -q -k mask`
+5. **Micro-probe** — `scripts/trajectory_variance_probe.py` (§4; pure `summarize_trajectory_probe`/`classify_gate` unit-tested in `tests/unit/test_trajectory_probe.py`). **Run it on the H100 before writing any trainer wiring beyond what the probe needs:**
+   `.venv-train/bin/python scripts/trajectory_variance_probe.py --checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000 --data-dir data/output/grpo/task_a --split validation --n-conversations 50 --n-completions 8 --temperature 0.8 --top-p 0.95 --output runs/preflight/trajectory_variance_probe.json`
+   (ckpt-1000 per the viability memo's loss-elbow seeding; ckpt-500 fallback.) **STOP at NO_GO** (§7).
+6. **Trainer wiring** — `_load_grpo_trajectory_jsonl`, trajectory branch in `train_grpo`, `_TrajectoryHeldOutEvalCallback`, rollout-stats instrumentation; `configs/training/grpo_cat_a_trajectory.yaml`. Legacy single-turn path must remain byte-identical in behavior (existing tests `test_grpo_outbound.py`, `test_reward_functions.py` stay green).
+   *Verify:* `pytest tests/unit -q` (full unit suite).
+7. **50-step diagnostic** —
+   `./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_a_trajectory.yaml --sft-checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000`
+   Watch W&amp;B (`llm-workflow-agents-grpo-trajectory`): kill criteria grad_norm &gt; 50 ×3 steps or KL &gt; 10 (inherited); success per §1.4. Only then flip `training_steps: 1000`.
+
+**Constraints &amp; non-goals:** do not modify the single-turn reward, loader, or adapter behavior; no user simulator or tool executor (locked); no vLLM rollouts in trajectory v1; no TRL fork; keep the 0.40/0.40/0.10/0.10 weights; don't touch `scale_rewards`/`loss_type`/`max_grad_norm`/`beta` stabilizers.
+
+## 7. What would falsify this design (abandon → RFT/SFT-only)
+
+1. **Variance doesn't materialize:** probe `median_reward_std &lt; 0.02` while `mean_model_turns ≥ 3` — trajectories are long but groups still land on one rung (e.g., the SFT policy walks the gold path near-deterministically at T=0.8, coverage ≈ 1.0 everywhere). The premise "aggregation manufactures variance" is wrong for this policy/data; the task is trajectory-saturated → ship SFT-only or RFT.
+2. **Over-truncation floor is structural:** `mean_model_turns &lt; 2` even after stall-limit 3 and one-legal-edge tolerance — the policy exits the gold-reachable set immediately, so on-policy multi-turn conditioning has no support. Free-run + gold-script replay (locked decision 2) cannot work; fall back to RFT on gold-context turns.
+3. **Stable but flat, again:** 50-step diagnostic with healthy `reward_std` (&gt; 0.05) and sane optimization (grad_norm, KL nominal) yet reward mean and held-out composite immobile after the LR check (R6) — variance was necessary but not sufficient; step economics at lr ~1e-6 can't move a 26B policy on this signal. Kill per the same step-economics argument that killed single-turn (`docs/grpo_viability_investigation.md` §1).
+4. **Reward-quality divergence:** training reward climbs while the strict trajectory held-out composite falls across ≥2 consecutive evals (auto-stop fires) and transcript audit confirms degenerate coverage-farming — the blend is hackable in practice despite the guards; retire the online optimizer for good.
+5. **Mechanism unsound on the real stack:** the chat-template prefix-diff assertion (`_get_tool_suffix_ids`-style) cannot be satisfied for the Gemma-4 tokenizer (template not prefix-stable), or the training box's Unsloth-patched trainer loses `env_mask` with no subclass workaround — the masking correctness guarantee is gone; do not train with an unverifiable mask.
+
+---
+**Verification provenance (all checked this session, 2026-07-09):** TRL 1.0.0 at `.venv/lib/python3.12/site-packages/trl` (dist-info) — line anchors: RolloutFunc :114-117, init param :277, dispatch :1596-1613, env_mask :1646-1649, extra-field merge :1949-1956, reward contract :1156-1157/:1196-1198, advantage :1962-2007, loss-mask :2265/:2389-2407, `_get_tool_suffix_ids` :1381-1408, `mask_truncated_completions` :1796-1804 (default False, grpo_config.py:744), eos :327. Repo: `grpo.py` :161-302/:315-391/:363-370/:394-448/:526-543/:649-669/:712-814; `reward_utils.py` :17-135; `reward_business_logic.py` :82-113/:134-194; `agent_benchmark.py` :433-597; `configs/training/grpo_cat_a_diagnostic.yaml`; `scripts/rft_headroom_probe.py`. Data: 2,502/290 conversations; per-turn annotation invariant and adjacency patterns verified on live samples; `.venv-train` absent on this box (pin-drift risk R2 is live, not hypothetical).</result>
+<usage><subagent_tokens>171144</subagent_tokens><tool_uses>39</tool_uses><duration_ms>955930</duration_ms></usage>
+</task-notification>
