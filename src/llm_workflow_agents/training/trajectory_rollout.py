@@ -22,10 +22,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from llm_workflow_agents.training.reward_utils import (
-    extract_state_annotations,
-    extract_tool_calls,
-)
+from llm_workflow_agents.training.reward_utils import extract_state_annotations
 
 _SUPPORT_CHECKED = False
 
