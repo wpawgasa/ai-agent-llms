@@ -348,6 +348,12 @@ def run_replay_rollout(
     eos_id = int(tokenizer.eos_token_id)
     turn_end_ids = {_derive_turn_end_id(tokenizer), eos_id}
 
+    # ``_left_pad`` builds CPU tensors; ``model.generate`` needs them on the
+    # model's device (embedding index_select fails otherwise). Resolve once.
+    gen_device = getattr(model, "device", None)
+    if gen_device is None:
+        gen_device = next(model.parameters()).device
+
     states = [
         _RolloutState(
             script=sc,
@@ -371,6 +377,8 @@ def run_replay_rollout(
                 break
             seqs = [s.prompt_ids + s.completion_ids for s in active]
             input_ids, attn = _left_pad(seqs, pad_id)
+            input_ids = input_ids.to(gen_device)
+            attn = attn.to(gen_device)
             gen_kwargs: dict[str, Any] = {
                 "max_new_tokens": cfg.per_turn_max_new_tokens,
                 "do_sample": cfg.do_sample,

@@ -216,13 +216,25 @@ def _build_scripts(conversations: list[dict[str, Any]]) -> list[Any]:
 
 
 def _load_model_and_tokenizer(checkpoint: str, max_seq_length: int):  # noqa: ANN201
-    """Load the SFT checkpoint for inference (mirrors grpo.py's Unsloth load)."""
-    from llm_workflow_agents.training.grpo import (
-        _unwrap_unsloth_gemma4_kv_zero_proxy,
-    )
+    """Load the SFT checkpoint for inference (mirrors preflight_entropy_diag).
 
-    _unwrap_unsloth_gemma4_kv_zero_proxy()
+    Uses the *same* proven Gemma-4 workaround as the headroom probe rather than
+    grpo.py's ``_unwrap_unsloth_gemma4_kv_zero_proxy``. The unwrap strips the
+    KV-zero proxy off ``get_text_config`` returns, but Gemma-4 26B-A4B load
+    trips a different surface: ``Gemma4Config.__post_init__`` constructs a
+    ``Gemma4TextConfig`` whose transformers 5.x ``validate_token_ids`` iterates
+    the config and raw-``getattr``s ``num_kv_shared_layers`` on the proxy,
+    hitting its raise. The proxy must stay alive (cache ``__init__`` relies on
+    ``hasattr(...) == False``), so we filter that name out of the proxy's
+    ``__iter__`` instead — the fix that lets the headroom probe load this same
+    checkpoint. Order matters: import unsloth first (it installs the proxy),
+    patch after.
+    """
     from unsloth import FastLanguageModel
+
+    from preflight_entropy_diag import _patch_unsloth_gemma4_proxy_iter
+
+    _patch_unsloth_gemma4_proxy_iter()
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=checkpoint,
@@ -231,7 +243,16 @@ def _load_model_and_tokenizer(checkpoint: str, max_seq_length: int):  # noqa: AN
         load_in_4bit=True,
     )
     FastLanguageModel.for_inference(model)
-    return model, tokenizer
+
+    # Gemma-4 loads as a multimodal ``Gemma4Processor``, not a bare tokenizer.
+    # Its ``apply_chat_template(..., tokenize=True)`` returns a *batched* (nested)
+    # id list, so ``run_replay_rollout``'s ``_derive_turn_end_id`` /
+    # ``_segment_suffix_ids`` (which expect a flat ``list[int]``) break with
+    # "int() argument must be ... not 'list'". The inner ``.tokenizer`` is the
+    # correct object for text tokenization (the processor wrapper only adds the
+    # image path) and returns flat ids — same resolution the headroom probe uses.
+    inner_tok = getattr(tokenizer, "tokenizer", tokenizer)
+    return model, inner_tok
 
 
 def main() -> int:
