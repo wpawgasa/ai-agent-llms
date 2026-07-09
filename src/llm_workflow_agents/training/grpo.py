@@ -21,6 +21,7 @@ logger = structlog.get_logger(__name__)
 
 _REWARD_REGISTRY: dict[str, str] = {
     "reward_business_logic": "llm_workflow_agents.training.rewards.reward_business_logic",
+    "reward_business_logic_trajectory": "llm_workflow_agents.training.rewards.reward_business_logic_trajectory",
     "reward_subagent": "llm_workflow_agents.training.rewards.reward_subagent",
     "reward_graph_extraction": "llm_workflow_agents.training.rewards.reward_graph_extraction",
 }
@@ -387,6 +388,70 @@ def _make_reward_adapter(reward_fn: Callable) -> Callable:
                 _LATEST_INSTRUMENTATION["group_size"] = sum(sizes) / len(sizes)
 
         return reward_fn(prompts or [], flat_completions, gts)
+
+    return adapter
+
+
+def _make_trajectory_reward_adapter(reward_fn: Callable) -> Callable:
+    """Bridge TRL's keyword call to a trajectory reward's 4-arg signature.
+
+    A trajectory rollout (``trajectory_rollout.make_replay_rollout_func``) returns
+    per-completion ``trajectory`` (JSON list of model turn texts) and
+    ``rollout_meta`` (JSON dict) extra fields, which TRL 1.0.0 forwards into the
+    reward kwargs alongside the ``ground_truth`` dataset column. Unlike
+    :func:`_make_reward_adapter`, this adapter does **not** collapse
+    ``completions`` — TRL decodes the whole interleaved (model + injected gold)
+    stream into ``completions``, which must not be scored. It reads the turn
+    texts from the ``trajectory`` field instead and calls
+    ``reward_fn(prompts, trajectories, metas, ground_truths)``.
+    """
+
+    def adapter(  # noqa: ANN001
+        *,
+        prompts: Any = None,
+        completions: Any = None,
+        completion_ids: Any = None,
+        **kwargs: Any,
+    ) -> list[float]:
+        traj_raw = kwargs.get("trajectory")
+        if traj_raw is None:
+            raise ValueError(
+                "trajectory reward adapter requires a 'trajectory' extra field "
+                "from the rollout_func, but none was passed. Is rollout.mode "
+                "'trajectory' wired to make_replay_rollout_func?"
+            )
+        trajectories: list[list[str]] = [
+            json.loads(t) if isinstance(t, str) else (list(t) if t else [])
+            for t in traj_raw
+        ]
+
+        meta_raw = kwargs.get("rollout_meta") or [None] * len(trajectories)
+        metas: list[dict[str, Any]] = [
+            json.loads(m) if isinstance(m, str) else (m or {}) for m in meta_raw
+        ]
+
+        gt_raw = kwargs.get("ground_truth") or []
+        gts: list[dict[str, Any]] = []
+        for g in gt_raw:
+            d = json.loads(g) if isinstance(g, str) else (g or {})
+            gts.append(d if isinstance(d, dict) else {})
+
+        # Stash unique-trajectories-per-group (variance signal) for the next
+        # on_log, keyed by prompt — mirrors _make_reward_adapter's instrumentation
+        # but uses the joined turn texts as the completion identity.
+        if trajectories and prompts is not None:
+            groups: dict[str, list[str]] = {}
+            for p, t in zip(prompts, trajectories):
+                groups.setdefault(str(p)[:512], []).append("\n".join(t))
+            if groups:
+                uniques = [len(set(cs)) for cs in groups.values()]
+                sizes = [len(cs) for cs in groups.values()]
+                _LATEST_INSTRUMENTATION["unique_completions_per_group"] = sum(
+                    uniques
+                ) / len(uniques)
+                _LATEST_INSTRUMENTATION["group_size"] = sum(sizes) / len(sizes)
+
+        return reward_fn(prompts or [], trajectories, metas, gts)
 
     return adapter
 
