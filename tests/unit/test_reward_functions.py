@@ -663,8 +663,15 @@ class TestPilotResult:
 
 class TestHeldOutCompositeScore:
     """Locks _heldout_composite_score: strict, deployment-aligned held-out
-    quality (0.4 state + 0.4 strict-tool-F1 + 0.2 task), deliberately
-    independent of the graded training reward so reward hacking is detectable.
+    quality, deliberately independent of the graded training reward so reward
+    hacking is detectable.
+
+    Scored **per-turn-fair**: a term is counted only when applicable to the
+    single held-out turn, then renormalized over the included weights (tool
+    always; state only when GT expects a transition; task only on the terminal
+    turn). ``GT`` below is a terminal turn *with* a transition, so all three
+    terms apply and the fair score equals the whole-conv 0.4/0.4/0.2 formula —
+    the divergent (abstention / intermediate) cases are locked separately below.
     """
 
     GT = {
@@ -672,6 +679,37 @@ class TestHeldOutCompositeScore:
         "tool_calls": [],
         "terminal_state": "B",
     }
+
+    def test_abstention_turn_excludes_state_term(self) -> None:
+        # GT expects no transition and no tool this turn -> only the tool term
+        # applies (empty/empty = 1.0). The model annotating a transition must
+        # NOT be punished, so the score is 1.0, not dragged by a state=0.
+        gt = {"state_sequence": [], "tool_calls": [], "terminal_state": ""}
+        comp = "[STATE: X → Y]\njust chatting"
+        assert _heldout_composite_score([comp], [gt]) == pytest.approx(1.0)
+
+    def test_intermediate_turn_excludes_task_term(self) -> None:
+        # Transition present but NOT the terminal turn -> state+tool only,
+        # renormalized over 0.8. Perfect state + empty/empty tool -> 1.0
+        # (task=0 is excluded, not averaged in).
+        gt = {
+            "state_sequence": [{"from": "A", "to": "B"}],
+            "tool_calls": [],
+            "terminal_state": "TERMINAL",  # != "B", so this is not the terminal turn
+        }
+        comp = "[STATE: A → B]\nnext step"
+        assert _heldout_composite_score([comp], [gt]) == pytest.approx(1.0)
+
+    def test_intermediate_turn_tool_miss_scores_half(self) -> None:
+        # Intermediate turn: perfect state but a missed expected tool -> the
+        # renormalized (state, tool) average is 0.5, never diluted by task.
+        gt = {
+            "state_sequence": [{"from": "A", "to": "B"}],
+            "tool_calls": [{"name": "foo", "arguments": {}}],
+            "terminal_state": "TERMINAL",
+        }
+        comp = "[STATE: A → B]\nI'll handle that."  # no <tool_call>
+        assert _heldout_composite_score([comp], [gt]) == pytest.approx(0.5)
 
     def test_perfect_completion_scores_one(self) -> None:
         comp = "[STATE: A → B]\ndone"

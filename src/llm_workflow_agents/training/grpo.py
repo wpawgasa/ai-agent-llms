@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -159,6 +160,79 @@ def _slim_content(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+# GT sanitization: drop tool calls whose REQUIRED args carry a fabricated
+# placeholder (null-sentinel) or an out-of-range score. The synthetic corpus's
+# invalid_tool_inputs behavior (~15% of turns) produced GT tool calls that fire
+# an action with a required identifier the conversation never established
+# (e.g. apply_for_loan(customer_id="UNKNOWN"), dispute_bill(account_id="000000"),
+# collect_nps(score=11)). Rewarding those trains the policy to fabricate-and-fire
+# instead of asking for the missing value. Sourced from the ckpt-1000 audit
+# (runs/preflight/gt_overeager_review_ckpt1000.csv). Flip to False to restore the
+# raw GT (e.g. to reproduce a pre-sanitization run).
+_SANITIZE_INVALID_TOOL_GT = True
+
+_NULL_SENTINEL_RE = re.compile(
+    r"^(unknown|n/?a|none|null|tbd|placeholder|pending|0{3,}|0000+)$", re.IGNORECASE
+)
+_SCORE_ARG_KEYS = frozenset({"score", "rating", "nps", "satisfaction", "csat"})
+
+
+def _required_args_by_tool(tool_schemas: Any) -> dict[str, set[str]]:
+    """Map tool name -> set of required parameter names from a conversation's schemas."""
+    out: dict[str, set[str]] = {}
+    for ts in tool_schemas or []:
+        fn = ts.get("function", ts) if isinstance(ts, dict) else {}
+        name = fn.get("name") if isinstance(fn, dict) else None
+        if name:
+            params = fn.get("parameters", {}) or {}
+            out[name] = set(params.get("required", []) or [])
+    return out
+
+
+def _gt_tool_call_is_invalid(tool_call: dict, required: set[str]) -> bool:
+    """True iff a REQUIRED arg holds a null-sentinel string or an out-of-range score.
+
+    Only REQUIRED args count: a placeholder on an OPTIONAL field (e.g.
+    ``log_complaint_trend(region="unknown")``) is a harmless default, not a
+    fabricated identifier, so it is left intact. Pure/unit-tested.
+    """
+    args = tool_call.get("arguments") if isinstance(tool_call, dict) else None
+    if not isinstance(args, dict):
+        return False
+    for key, val in args.items():
+        if (
+            key.lower() in _SCORE_ARG_KEYS
+            and isinstance(val, (int, float))
+            and not isinstance(val, bool)
+            and not (0 <= val <= 10)
+        ):
+            return True
+        if (
+            key in required
+            and isinstance(val, str)
+            and _NULL_SENTINEL_RE.match(val.strip())
+        ):
+            return True
+    return False
+
+
+def _sanitize_gt_tool_calls(
+    tool_calls: list, required_by_tool: dict[str, set[str]]
+) -> tuple[list, int]:
+    """Drop invalid (fabricated-required-arg) tool calls from a turn's GT.
+
+    Returns ``(kept_tool_calls, n_removed)``. Pure/unit-tested.
+    """
+    if not _SANITIZE_INVALID_TOOL_GT or not tool_calls:
+        return tool_calls, 0
+    kept = [
+        tc
+        for tc in tool_calls
+        if not _gt_tool_call_is_invalid(tc, required_by_tool.get(tc.get("name"), set()))
+    ]
+    return kept, len(tool_calls) - len(kept)
+
+
 def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
     """Load a GRPO split as one (prompt, ground_truth) row per user→assistant turn.
 
@@ -202,6 +276,7 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
     rows: list[dict[str, Any]] = []
     n_convs = 0
     n_skipped_tool_preceded = 0
+    n_sanitized_tool_calls = 0
     with open(path) as fh:
         for line in fh:
             if not line.strip():
@@ -243,6 +318,8 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
                 if isinstance(t, dict)
             ]
 
+            required_by_tool = _required_args_by_tool(raw.get("tool_schemas"))
+
             asst_indices = [
                 i for i, m in enumerate(raw_msgs) if m.get("role") == "assistant"
             ]
@@ -265,6 +342,10 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
                 state_trans = ann.get("state_transition") or {}
                 state_seq = [state_trans] if state_trans else []
                 tool_calls = ann.get("tool_calls") or []
+                tool_calls, n_removed = _sanitize_gt_tool_calls(
+                    tool_calls, required_by_tool
+                )
+                n_sanitized_tool_calls += n_removed
 
                 is_terminal_row = (
                     j == len(valid_pairs) - 1 and terminal_reached_overall
@@ -299,6 +380,7 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
         conversations=n_convs,
         rows=len(rows),
         skipped_tool_preceded_turns=n_skipped_tool_preceded,
+        sanitized_invalid_tool_calls=n_sanitized_tool_calls,
     )
     return Dataset.from_list(rows)
 
@@ -462,9 +544,17 @@ def _heldout_composite_score(
 ) -> float:
     """Deployment-aligned held-out quality score, computed with STRICT metrics.
 
-    Mirrors ``eval.composite_score.compute_weighted_workflow_score``:
-    ``0.4 * state_transition_acc + 0.4 * strict_tool_f1 + 0.2 * task_completion``,
-    averaged over the held-out rows.
+    Mirrors ``eval.composite_score.compute_weighted_workflow_score``
+    (``0.4 * state_transition_acc + 0.4 * strict_tool_f1 + 0.2 * task_completion``),
+    but scored **per-turn-fair**: GRPO held-out rows are single user->assistant
+    turns, so each term is included only when it is applicable to the turn and
+    the score is renormalized over the included weights — the tool term always
+    applies, the state term only when GT expects a transition, the task
+    (reached-terminal) term only on the terminal turn. Averaged over held-out
+    rows. This avoids charging the policy on terms it cannot satisfy on an
+    intermediate/abstention turn; see the ckpt-1000 audit
+    (runs/preflight/heldout_composite_audit_*) and
+    scripts/perturn_fair_composite.py.
 
     Deliberately uses the *strict* scorers (``state_sequence_match``,
     ``tool_call_f1`` = ``compute_ast_f1``, ``reached_terminal``) rather than the
@@ -497,18 +587,29 @@ def _heldout_composite_score(
             else ("", "")
             for s in gt_seq
         ]
-        pred_trans = extract_state_annotations(comp)
-        if gt_trans:
-            state_acc = state_sequence_match(pred_trans, gt_trans)
-        else:
-            state_acc = 1.0 if not pred_trans else 0.0
-
         tool_f1 = tool_call_f1(extract_tool_calls(comp), gt.get("tool_calls") or [])
 
         terminal = gt.get("terminal_state") or ""
         task = 1.0 if terminal and reached_terminal(comp, terminal) else 0.0
 
-        scores.append(0.4 * state_acc + 0.4 * tool_f1 + 0.2 * task)
+        # Per-turn-fair: GRPO rows are SINGLE user->assistant turns, so only
+        # charge the terms applicable to THIS turn, then renormalize over the
+        # included weights (whole-conv weights 0.4/0.4/0.2 preserved). See the
+        # ckpt-1000 audit (runs/preflight/heldout_composite_audit_*): applying
+        # all three terms per-turn punished the policy on terms it cannot
+        # satisfy on an intermediate/abstention turn (task=0 off the terminal
+        # turn; state=0 when the trained always-annotate habit meets an empty
+        # GT transition), depressing the metric ~0.19 below its honest level.
+        num, den = 0.4 * tool_f1, 0.4  # tool term always applies
+        if gt_trans:  # state only when a transition is expected this turn
+            state_acc = state_sequence_match(extract_state_annotations(comp), gt_trans)
+            num += 0.4 * state_acc
+            den += 0.4
+        _to = gt_trans[-1][1] if gt_trans else ""
+        if terminal and _to == terminal:  # task only on the terminal turn
+            num += 0.2 * task
+            den += 0.2
+        scores.append(num / den if den else 0.0)
 
     return sum(scores) / len(scores)
 
