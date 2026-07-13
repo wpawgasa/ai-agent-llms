@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "e258f84074a2",
+  "strategy": "manual-commit",
+  "branch": "feature/heldout-composite-check",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/heldout_composite_check.py",
+    "tests/unit/test_heldout_composite_check.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e2/58f84074a2/0/metadata.json",
+      "transcript": "/e2/58f84074a2/0/full.jsonl",
+      "content_hash": "/e2/58f84074a2/0/content_hash.txt",
+      "prompt": "/e2/58f84074a2/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 36219,
+    "cache_creation_tokens": 508269,
+    "cache_read_tokens": 8737068,
+    "output_tokens": 51406,
+    "api_call_count": 56
+  }
+}

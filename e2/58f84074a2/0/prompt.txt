@@ -1,0 +1,45 @@
+/model-routing read results from headroom probe
+  @docs/grpo_viability_investigation.md and trajectory probe
+  @docs/superpowers/specs/2026-07-09-multiturn-trajectory-rew
+  ard-design.md Determine the next move
+───────────────────────────────────────
+
+---
+
+got the n=150 probe result
+
+---
+
+got the n=150 probe result in @docs/superpowers/specs/2026-07-09-multiturn-trajectory-reward-design.md
+
+---
+
+Do we code for single-turn RFT yet
+
+---
+
+Have you documented the last result at n=150 and the next step yet
+
+---
+
+What if probes still MARGINAL for both RFT and trajectory. What should be the next move? Should we stay with SFT for workflow and tool calling data?
+
+---
+
+What are Cat A, B, and C?
+
+---
+
+Should Cat A also include tool-calling capability?
+
+---
+
+So answer these questions again. What if probes still MARGINAL for both RFT and trajectory. What should be the next move? Should we stay with SFT for workflow and tool calling data?
+
+---
+
+How to Check the greedy held-out composite against the Phase 2 target
+
+---
+
+yes

@@ -1,0 +1,35 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "e258f84074a2",
+  "session_id": "ccc0f4f5-0975-479e-aec1-860bac2bb5f5",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-13T04:29:10.406548394Z",
+  "branch": "feature/heldout-composite-check",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/heldout_composite_check.py",
+    "tests/unit/test_heldout_composite_check.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "73546d82d6f0",
+  "token_usage": {
+    "input_tokens": 36219,
+    "cache_creation_tokens": 508269,
+    "cache_read_tokens": 8737068,
+    "output_tokens": 51406,
+    "api_call_count": 56
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-13T04:29:09.456337162Z",
+    "agent_lines": 265,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 265,
+    "agent_percentage": 100
+  }
+}
