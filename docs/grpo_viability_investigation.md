@@ -76,9 +76,20 @@ Explicitly rejected: (c) semantic-similarity reward (predicted reward-hack, prec
   - **KILL:** Δcomposite < +0.01, or any decline in tool-emission rate on tool-GT rows.
 - **Budget cap:** Stage 0 + 1 ≤ 1 H100-day. No stage extended past its gate.
 
+**Update (2026-07-13) — SFT-only ceiling check ran; fork resolved to "neither branch."** See
+[`grpo_heldout_metric_and_gt_audit.md`](grpo_heldout_metric_and_gt_audit.md). The greedy held-out
+composite FAILed at 0.479, but a row-level audit showed this is mostly a scoring-granularity
+artifact (whole-conversation metric applied to per-turn rows); the honest **per-turn-fair** baseline
+is **0.674** (still < 0.75). Two fixes landed in `training/grpo.py`: (1) `_heldout_composite_score`
+is now per-turn-fair, and (2) a schema-aware GT sanitizer drops 32 fabricated-required-arg tool
+calls from the reward target (confirms and partially closes item 3 below). Residual gap is one
+genuine weakness — "announce-but-don't-call" tool under-emission. **Re-run Stage 0 (headroom) and
+the Stage-1 gate baseline on the clean inputs before any RL commit** — the MARGINAL reads above were
+partly artifact-driven.
+
 ## 5. What would change this recommendation
 1. **Preflight surprises high** (`frac_collapsed_groups < 0.50` + median `reward_std ≥ 0.05` at diagnostic settings) → §1 condition met, GRPO's death certificate withdrawn; the merged 50-step diagnostic becomes the correct next run (online RL then plausibly beats RFT by also learning from negatives).
 2. **No headroom anywhere** (`frontier_frac < 10%` and greedy composite already ≥ target) → SFT policy is at the single-turn ceiling; ship SFT-only for Phase 2 Cat A, or fund the multi-turn env (#5) if Phase 4 E2E demands more.
-3. **RFT pilot fails its gate despite real headroom** → winners aren't transferring → GT/reward misspecification (e.g. the ~17% placeholder-args stubs, `_strip_placeholder_args` in `reward_business_logic.py`); audit reward vs human judgment on 50 winner/loser pairs before further training.
+3. **RFT pilot fails its gate despite real headroom** → winners aren't transferring → GT/reward misspecification (e.g. the ~17% placeholder-args stubs, `_strip_placeholder_args` in `reward_business_logic.py`); audit reward vs human judgment on 50 winner/loser pairs before further training. **(2026-07-13: confirmed & partially closed — see [`grpo_heldout_metric_and_gt_audit.md`](grpo_heldout_metric_and_gt_audit.md). 69 GT tool calls fired an action with a fabricated required arg; 32 row-eligible ones now sanitized at load in `_load_grpo_jsonl`. The hypothetical-intent over-eager pattern remains for manual review.)**
 4. **Provenance check fails** (on-disk splits ≠ W&B artifacts) → re-measure all structural stats before trusting these conditions.
 5. **Generator-side data revision** (#4) shifts the lattice (`frac_collapsed_groups` down ≥20 pts) → re-run Stage 0 on the new corpus; both the GRPO condition and RFT headroom could flip.
