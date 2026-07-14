@@ -1,0 +1,28 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c80b72917ceb",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 8,
+  "files_touched": [
+    "CLAUDE.md",
+    "docs/grpo_heldout_metric_and_gt_audit.md",
+    "docs/grpo_tool_emission_gap_review.md",
+    "scripts/run_phase2_sft.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c8/0b72917ceb/0/metadata.json",
+      "transcript": "/c8/0b72917ceb/0/full.jsonl",
+      "content_hash": "/c8/0b72917ceb/0/content_hash.txt",
+      "prompt": "/c8/0b72917ceb/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 218,
+    "cache_creation_tokens": 591089,
+    "cache_read_tokens": 20699087,
+    "output_tokens": 127690,
+    "api_call_count": 109
+  }
+}
