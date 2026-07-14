@@ -1,0 +1,53 @@
+Based on last commited results, what is our current situation?
+
+---
+
+What should be the next move as Cat A (15B-30B model) SFT does not yet perform well in tool calling?
+
+---
+
+Use Fable to review the suggestions
+
+---
+
+document this somewhere
+
+---
+
+Follow the revised action plan and conduct the forensics first
+
+---
+
+What data did you inspect?
+
+---
+
+Shouldn't you inspect @data/output/sft/task_a_splits ? I'm not how the @data/output/sft/task_a_cleaned/splits was created
+
+---
+
+That means my SFT checkpoint was trained on wrong dataset
+
+---
+
+fix sft config to point to @data/output/sft/task_a_splits/ instead
+
+---
+
+yes
+
+---
+
+where the splits run at the runtime be saved
+
+---
+
+commit and push
+
+---
+
+Should I redo forensics
+
+---
+
+fix R12
