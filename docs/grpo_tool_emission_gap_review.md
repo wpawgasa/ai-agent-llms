@@ -249,3 +249,33 @@ supporting context for the original loss-dilution hypothesis (§2 rec 1).
 3. Checks 2 and the headroom/pass@k re-probes (§4 step 2) still require the actual GPU host —
    carry them over as-is.
 
+### 5.6 Fix applied + data regenerated (2026-07-14)
+
+`clean_task_a_sft.py::clean_record` patched (TDD, 4 new tests, 12/12 pass) to drop any message
+with a role outside `{system, user, assistant, tool}`. Regenerating surfaced a **third, separate
+bug**: the current raw `data/output/sft/task_a` (5 consolidated "merged" files, unrelated to this
+investigation — it looks like it was replaced/de-garbled by someone at some point) already carries
+**zero** instances of the role corruption, but `task_a_cleaned`/`task_a_splits`/`grpo/task_a` had
+never been regenerated from it — confirmed by a `dvc.lock` hash mismatch between what `task_a_sft`
+recorded as `task_a_cleaned`'s output vs. what `task_a_sft_splits` recorded as its dependency on
+the same path. So the corruption wasn't just unpatched — it was baked into stale downstream
+directories that had drifted from an already-fixed upstream.
+
+Regenerated all three stages (`clean_task_a_sft.py` → `split_task_a_sft.py --force` →
+`filter_grpo_data.py`) from current raw data. Verified 0% malformed-role conversations in all
+three post-regen. **New split sizes: train 4,716 / validation 554 / test 279** (up from
+4,414/519/261 — the corpus grew since the old directories were last built; GRPO/held-out
+validation is now 290 rows, L3-L5 filtered). Old directories preserved as
+`*.pre_r12fix_backup_20260714T104107Z` (not deleted) for rollback/comparison.
+
+**Consequence for the 0.674 baseline:** it no longer applies as a live number. The held-out
+validation set it was measured against has been fully replaced — different conversations, a
+different corpus scale — not just cleaned in place. **Re-measure `heldout_composite_check.py`
+against the new data before treating 0.674 as current.**
+
+**Still outstanding:**
+- `dvc.lock` needs `dvc commit`/`dvc push` on a machine with DVC configured (unavailable in this
+  session) so the lock file and GCS remote reflect this regeneration.
+- Checks 2 and the headroom/pass@k re-probes (§4 step 2) still require the actual GPU host, and
+  should now run against **this new data**, not the old sampled artifacts.
+

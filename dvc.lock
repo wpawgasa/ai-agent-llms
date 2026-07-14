@@ -67,8 +67,8 @@ stages:
       size: 757
     - path: scripts/clean_task_a_sft.py
       hash: md5
-      md5: 3dd338df6d35eb9129bbcd2124f1bb9f
-      size: 6445
+      md5: 27f2c8e55d785e1f6e56ec0121104a4e
+      size: 7212
     - path: scripts/generate_sft_data.sh
       hash: md5
       md5: 47c0102aacda10ae78e3965e5134b72f
@@ -86,9 +86,9 @@ stages:
       nfiles: 11
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 3491ca8bdc4b884239f12833f21517d4.dir
-      size: 113979270
-      nfiles: 128
+      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
+      size: 109983413
+      nfiles: 5
   task_a_sft_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_sft.sh --model-config 
       configs/models_exp_a/gemma4_26b_a4b.yaml --sft-config 
@@ -132,8 +132,8 @@ stages:
     deps:
     - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 9107615d23d6fbddb26914db88eccad1.dir
-      size: 113979270
+      md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
+      size: 109983413
       nfiles: 3
     - path: scripts/filter_grpo_data.py
       hash: md5
@@ -143,8 +143,8 @@ stages:
     outs:
     - path: data/output/grpo/task_a
       hash: md5
-      md5: 60831c6695e943fd354b86d816b799d3.dir
-      size: 83869766
+      md5: 9a961d65540830849d7d2241ad1c367b.dir
+      size: 73590933
       nfiles: 2
   task_a_grpo_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_grpo.sh --model-config 
@@ -207,9 +207,9 @@ stages:
     deps:
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 1cd63b31be6d6d9300a68816b65adaea.dir
-      size: 337941953
-      nfiles: 136
+      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
+      size: 109983413
+      nfiles: 5
     - path: scripts/split_task_a_sft.py
       hash: md5
       md5: ffc86e6669759a6db26a240011c851d9
@@ -218,6 +218,6 @@ stages:
     outs:
     - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 0e97723f0fc35b4d9ca2a2ac70c9e66c.dir
-      size: 223962683
+      md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
+      size: 109983413
       nfiles: 3
