@@ -134,6 +134,11 @@ divergent-case tests).
 
 ## 6. Next move — (2) re-run the headroom/trajectory probes clean
 
+**Update (2026-07-14):** the tool-emission gap named in §2 (below) got its own recommendation set
+and a Fable review — see [`grpo_tool_emission_gap_review.md`](grpo_tool_emission_gap_review.md).
+Net effect on this section: the headroom re-probe below is promoted to run *immediately*,
+alongside forensics on the "announce-but-don't-call" rows, rather than after any SFT retrain.
+
 The earlier Stage-0 headroom (`frontier_frac 0.130`) and trajectory-variance probes read
 **MARGINAL** while scoring on the artifact-laden metric **and** the un-sanitized reward target.
 Both inputs are now fixed, so re-measure before any RFT/GRPO commit:

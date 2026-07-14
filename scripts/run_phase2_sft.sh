@@ -85,9 +85,15 @@ python3 scripts/split_task_a_sft.py
 # The SFT config's data.source already points at the splits dir
 # (data/output/sft/task_a_splits/). The only patch here is wiring the model
 # config path through so sft.py can resolve the base model.
+#
+# RUN_TS makes the patched config run-specific: a fixed filename here would be
+# silently overwritten by the next invocation (even --dry-run), leaving no
+# reliable record of what config actually produced a given checkpoint. See
+# CLAUDE.md R13.
+RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 PATCHED_DIR="$PROJECT_ROOT/.runs/sft_cat_a"
 mkdir -p "$PATCHED_DIR"
-PATCHED_CFG="$PATCHED_DIR/sft_cat_a.yaml"
+PATCHED_CFG="$PATCHED_DIR/sft_cat_a_${RUN_TS}.yaml"
 
 python3 -c "
 from pathlib import Path
@@ -140,6 +146,11 @@ CKPT_DIR="$PROJECT_ROOT/checkpoints/sft_cat_a/$MODEL_BASENAME"
 mkdir -p "$CKPT_DIR"
 LOG_FILE="$CKPT_DIR/train.log"
 echo "Logs: $LOG_FILE"
+
+# Co-locate a copy of the exact resolved config with the checkpoint dir itself
+# (alongside train.log), so provenance for this run doesn't require knowing
+# about .runs/ at all. Timestamped for the same reason as PATCHED_CFG above.
+cp "$PATCHED_CFG" "$CKPT_DIR/frozen_sft_config_${RUN_TS}.yaml"
 
 RESUME_FROM="$RESUME_FROM" RESUME="$RESUME" python3 -c "
 import os
