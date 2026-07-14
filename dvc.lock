@@ -86,9 +86,9 @@ stages:
       nfiles: 11
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 8ef8681808e348f82eac36edbbd6c2ae.dir
-      size: 227958540
-      nfiles: 131
+      md5: 3491ca8bdc4b884239f12833f21517d4.dir
+      size: 113979270
+      nfiles: 128
   task_a_sft_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_sft.sh --model-config 
       configs/models_exp_a/gemma4_26b_a4b.yaml --sft-config 
