@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Clean Task A SFT JSONL data before fine-tuning.
 
-Three fixes applied in a single pass:
+Four fixes applied in a single pass:
   1. Drop truncated rows (no non-system turns).
   2. Drop role-confused tool messages (role:"tool" with <tool_call> content).
-  3. Flag empty terminal_state as ground_truth.terminal_reached=false so the
+  3. Drop messages with a malformed `role` field (anything outside
+     {system, user, assistant, tool}) — leaked tool-routing/channel syntax
+     (e.g. "assistant to=tool") from a teacher-model completion that failed
+     to parse into a proper <tool_call> block, carrying no usable content.
+  4. Flag empty terminal_state as ground_truth.terminal_reached=false so the
      GRPO reward function can skip the completion sub-reward on those rows
      rather than silently scoring them 0.
 
@@ -28,6 +32,9 @@ import sys
 from pathlib import Path
 
 
+_VALID_ROLES = {"system", "user", "assistant", "tool"}
+
+
 def clean_record(record: dict) -> tuple[dict | None, str | None]:
     """Return (cleaned_record, drop_reason).
 
@@ -46,14 +53,22 @@ def clean_record(record: dict) -> tuple[dict | None, str | None]:
         content = m.get("content")
         return isinstance(content, str) and content.strip().startswith("<tool_call>")
 
-    cleaned_msgs = [m for m in msgs if not _is_role_confused(m)]
+    # 3. Strip messages with a malformed role field. These carry no usable
+    # content (leaked tool-routing syntax the generator failed to parse into
+    # a <tool_call> block) — there's nothing to repair, only drop.
+    def _is_malformed_role(m: dict) -> bool:
+        return m.get("role") not in _VALID_ROLES
+
+    cleaned_msgs = [
+        m for m in msgs if not _is_role_confused(m) and not _is_malformed_role(m)
+    ]
     record["messages"] = cleaned_msgs
 
     # Re-check: if stripping left only a system message, drop the row
     if not any(m.get("role") != "system" for m in cleaned_msgs):
-        return None, "truncated_after_role_confusion_filter"
+        return None, "truncated_after_message_filtering"
 
-    # 3. Flag empty terminal_state
+    # 4. Flag empty terminal_state
     gt = record.setdefault("ground_truth", {})
     ts = gt.get("terminal_state")
     gt["terminal_reached"] = bool(ts)
@@ -68,10 +83,10 @@ def _clean_file(
 ) -> tuple[int, int, int, int, int]:
     """Clean a single JSONL file.
 
-    Returns (total, dropped_truncated, dropped_role_confused_convs,
-             stripped_rc_messages, flagged_terminal).
+    Returns (total, dropped_truncated, dropped_conversations,
+             stripped_messages, flagged_terminal).
     """
-    total = dropped_truncated = dropped_rc_convs = stripped_rc_msgs = flagged_terminal = 0
+    total = dropped_truncated = dropped_convs = stripped_msgs = flagged_terminal = 0
     out_lines: list[str] = []
 
     with open(src) as fh:
@@ -92,11 +107,11 @@ def _clean_file(
                 if reason == "truncated_no_non_system_turns":
                     dropped_truncated += 1
                 else:
-                    dropped_rc_convs += 1
+                    dropped_convs += 1
                 continue
 
             after_len = len(cleaned.get("messages", []))
-            stripped_rc_msgs += before_len - after_len
+            stripped_msgs += before_len - after_len
 
             if not cleaned.get("ground_truth", {}).get("terminal_reached", True):
                 flagged_terminal += 1
@@ -110,7 +125,7 @@ def _clean_file(
             if out_lines:
                 fh.write("\n")
 
-    return total, dropped_truncated, dropped_rc_convs, stripped_rc_msgs, flagged_terminal
+    return total, dropped_truncated, dropped_convs, stripped_msgs, flagged_terminal
 
 
 def main() -> None:
@@ -154,27 +169,27 @@ def main() -> None:
     if args.dry_run:
         print("[dry-run] No files will be written.")
 
-    grand_total = grand_kept = grand_trunc = grand_rc = grand_rc_msgs = grand_flag = 0
+    grand_total = grand_kept = grand_trunc = grand_dropped = grand_stripped = grand_flag = 0
 
     for src in src_files:
         dst = output_dir / src.name
-        total, trunc, rc, rc_msgs, flag = _clean_file(src, dst, dry_run=args.dry_run)
-        kept = total - trunc - rc
+        total, trunc, dropped, stripped, flag = _clean_file(src, dst, dry_run=args.dry_run)
+        kept = total - trunc - dropped
         grand_total += total
         grand_kept += kept
         grand_trunc += trunc
-        grand_rc += rc
-        grand_rc_msgs += rc_msgs
+        grand_dropped += dropped
+        grand_stripped += stripped
         grand_flag += flag
 
         if not args.quiet:
             parts = [f"{src.name}: {total} in → {kept} kept"]
             if trunc:
                 parts.append(f"{trunc} truncated dropped")
-            if rc:
-                parts.append(f"{rc} role-confused-conv dropped")
-            if rc_msgs:
-                parts.append(f"{rc_msgs} role-confused msgs stripped")
+            if dropped:
+                parts.append(f"{dropped} all-bad-messages conv dropped")
+            if stripped:
+                parts.append(f"{stripped} role-confused/malformed msgs stripped")
             if flag:
                 parts.append(f"{flag} terminal_reached=False flagged")
             print("  " + ", ".join(parts))
@@ -184,10 +199,10 @@ def main() -> None:
     print(f"Input files    : {len(src_files)}")
     print(f"Total records  : {grand_total}")
     print(f"Kept           : {grand_kept}")
-    print(f"  Dropped (truncated)                : {grand_trunc}")
-    print(f"  Dropped (role-conf conv, all-bad)  : {grand_rc}")
-    print(f"  Stripped role-confused tool msgs   : {grand_rc_msgs}")
-    print(f"  Flagged terminal_reached=False     : {grand_flag}")
+    print(f"  Dropped (truncated)                      : {grand_trunc}")
+    print(f"  Dropped (all messages bad, all-bad conv)  : {grand_dropped}")
+    print(f"  Stripped role-confused/malformed msgs     : {grand_stripped}")
+    print(f"  Flagged terminal_reached=False            : {grand_flag}")
 
     if args.dry_run:
         print("\n[dry-run] No files written.")

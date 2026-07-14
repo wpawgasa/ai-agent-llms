@@ -72,7 +72,7 @@ class TestCleanRecord:
         record = _base_record(messages=msgs)
         cleaned, reason = clean_record(record)
         assert cleaned is None
-        assert reason == "truncated_after_role_confusion_filter"
+        assert reason == "truncated_after_message_filtering"
 
     def test_empty_terminal_state_flagged_false(self):
         record = _base_record()
@@ -107,3 +107,54 @@ class TestCleanRecord:
         assert reason is None
         # The well-formed tool message should be preserved
         assert any(m["role"] == "tool" for m in cleaned["messages"])
+
+    def test_malformed_role_message_stripped_conversation_kept(self):
+        # Leaked tool-routing syntax (e.g. Harmony-style "to=" channel
+        # routing) failing to parse leaves a role field like this, with no
+        # content key at all.
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "book me a flight"},
+            {"role": "assistant", "content": "[STATE: S1 → S2] On it."},
+            {"role": "tool", "content": '{"status": "ok"}'},
+            {"role": "assistant to=tool"},
+            {"role": "assistant to=tool"},
+            {"role": "assistant", "content": "[STATE: S2 → S3] Booked."},
+        ]
+        record = _base_record(messages=msgs)
+        cleaned, reason = clean_record(record)
+        assert reason is None
+        assert cleaned is not None
+        roles = [m["role"] for m in cleaned["messages"]]
+        assert "assistant to=tool" not in roles
+        assert len(cleaned["messages"]) == 5
+
+    def test_malformed_role_garbled_variant_stripped(self):
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant to=book_reservation  garbled token soup"},
+            {"role": "assistant", "content": "[STATE: S1 → S2] Done."},
+        ]
+        record = _base_record(messages=msgs)
+        cleaned, reason = clean_record(record)
+        assert reason is None
+        assert len(cleaned["messages"]) == 3
+
+    def test_malformed_role_is_only_non_system_drops_conversation(self):
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "assistant to=tool"},
+        ]
+        record = _base_record(messages=msgs)
+        cleaned, reason = clean_record(record)
+        assert cleaned is None
+        assert reason == "truncated_after_message_filtering"
+
+    def test_standard_roles_never_stripped_by_malformed_role_filter(self):
+        # Regression guard: the four canonical roles must never be treated
+        # as malformed, even when content is missing/empty.
+        record = _base_record()
+        cleaned, reason = clean_record(record)
+        assert reason is None
+        assert len(cleaned["messages"]) == len(record["messages"])
