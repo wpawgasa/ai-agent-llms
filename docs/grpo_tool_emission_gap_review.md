@@ -279,3 +279,70 @@ against the new data before treating 0.674 as current.**
 - Checks 2 and the headroom/pass@k re-probes (§4 step 2) still require the actual GPU host, and
   should now run against **this new data**, not the old sampled artifacts.
 
+## 6. Re-measurement on the regenerated data (2026-07-16, GPU host)
+
+Run on the actual GPU host (H200 143GB; ckpt-1000 is a LoRA adapter loaded via the HF-generate
+path per R9 — Gemma-4 is vLLM-incompatible under Unsloth). Both probes below draw from the
+**regenerated** `data/output/grpo/task_a` (validation = 290 conversations, the post-r12fix corpus),
+not the old sampled artifacts.
+
+### 6.1 Held-out composite check — the §5.6 re-measurement
+
+Ran `scripts/heldout_composite_check.py` (`--split validation --n-prompts 150 --seed 42`) against
+the new data. This closes the §5.6 action item ("re-measure before treating 0.674 as current").
+
+| Metric | Value |
+|---|---|
+| **verdict** | **FAIL** (`mean_composite < 0.75`) |
+| mean_composite | **0.7167** |
+| median_composite | 1.0000 |
+| min / max | 0.0000 / 1.0000 |
+| frac_below_target | 0.373 (56/150 rows) |
+| n_rows | 150 (of 290-row validation) |
+| wall_time_s | 699 |
+
+Artifact: `runs/preflight/heldout_composite_ckpt1000.json` (gitignored).
+
+**Read:** the old **0.674** baseline is superseded — on the regenerated held-out set the SFT-only
+greedy composite is **0.7167**, up ~4pp from the stale number but **still short of the 0.75 target**
+(gate FAILs). The distribution is strongly bimodal (median 1.0, a hard 0.0 floor, 37% of rows below
+target), consistent with the "announce-but-don't-call" tail dragging an otherwise-saturated mean
+under the bar. **Caveat carried forward from §3:** 0.75 was calibrated against the old
+whole-conversation composite; this is the renormalized per-turn-fair metric, so "0.033 short of 0.75"
+is not a clean pass/fail until the bar is re-derived for this metric. The clean conclusion is that
+SFT-only did **not** clear the target as-stated, so the reward/GT audit and the headroom/pass@k
+re-probes stay on the table rather than shipping SFT-only.
+
+### 6.2 RFT headroom re-probe — MARGINAL (unchanged)
+
+Per §4 step 2, re-ran `scripts/rft_headroom_probe.py` on the regenerated data with the **same config
+as the original 2026-07-09 MARGINAL run** (`--split train --n-prompts 500 --n-completions 8
+--temperature 0.8 --seed 42`, ~4.8 h wall on the HF path) so `frontier_frac` / `mean_headroom` are
+directly comparable. Artifact: `runs/preflight/rft_headroom_ckpt1000_regen.json` (gitignored).
+
+| Metric | Prior (07-09) | New (07-16, regen) | Gate |
+|---|---|---|---|
+| **verdict** | MARGINAL | **MARGINAL** | — |
+| frontier_frac | 0.130 | **0.122** | GO_RFT ≥ 0.15 (miss); NO_GO < 0.10 (clear) |
+| mean_headroom | 0.0448 | **0.0414** | GO_RFT ≥ 0.03 (pass) |
+| frac_collapsed_groups | 0.716 | **0.764** | GRPO_REVIVAL < 0.50 (fail) |
+| median_reward_std | 0.000 | **0.000** | GRPO_REVIVAL ≥ 0.05 (fail) |
+| mean_reward_std | 0.0432 | 0.0345 | — |
+| rung_histogram | {1:357, 2:118, 3:19, 4:5, 5:1} | {1:382, 2:98, 3:18, 4:2} | — |
+
+**Read:** regenerating the corpus did **not** move the RFT calculus. Verdict is still **MARGINAL** —
+`frontier_frac` actually ticked *down* 0.130 → 0.122 (still 3pp under the 0.15 GO bar, still well
+clear of the 0.10 NO_GO floor), `mean_headroom` still passes at 0.0414. The GRPO-revival branch stays
+firmly dead: 76.4% of prompt-groups collapse all 8 samples to a single reward rung (up from 71.6%),
+median `reward_std = 0.000`. The rung histogram is if anything slightly *more* concentrated on rung 1
+than before. So the data-corruption fix (§5.6) removed a real contaminant but did not unlock
+single-turn RL headroom — best-of-8 still beats greedy on only ~12% of prompts, and that headroom is
+too concentrated to clear the RFT GO gate.
+
+**Net standing after §6:** SFT-only greedy composite = 0.7167 (FAIL vs 0.75, §6.1) with no measurable
+RL headroom to close the gap (MARGINAL RFT, dead GRPO). This is exactly the fork the gate warns
+about — below target *and* no cheap RL lever — so the next move per §4/§5.5 is the **reward/GT audit
+on ~50 rows** (announce-but-don't-call tail) and the target-bar re-derivation for the per-turn metric,
+not a blind RFT pilot or SFT retrain. The pass@k (T≈1.0) probe on the tool-expected rows remains the
+other outstanding GPU-host item.
+

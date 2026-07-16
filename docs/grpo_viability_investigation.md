@@ -67,6 +67,8 @@ Explicitly rejected: (c) semantic-similarity reward (predicted reward-hack, prec
 
 **Result (2026-07-09, ckpt-1000, 500 prompts, N=8, T=0.8 / top_p 0.95, ~5.6 h wall):** verdict **MARGINAL**. `frontier_frac = 0.130` (GO needs ≥ 0.15 — miss by 2 pts, but well clear of the 0.10 NO-GO floor), `mean_headroom = 0.0448` (GO ≥ 0.03 — pass). GRPO-revival branch firmly ruled out: `frac_collapsed_groups = 0.716`, median `reward_std = 0.000`. Rung-occupancy histogram `{1: 357, 2: 118, 3: 19, 4: 5, 5: 1}` — 71% of prompts collapse all 8 samples to one reward rung; `frac_positive_headroom = 0.132`, so best-of-8 beats greedy on essentially only the same 13% of prompts. Headroom is real and above threshold *where it exists*, but too concentrated. The GRPO death certificate stands (matched-settings collapse confirms §1). Next move per the gate: re-probe a later checkpoint (1500/2000) or raise T→1.0 to widen sampling diversity before committing to the Stage-1 pilot. Artifact: `runs/preflight/rft_headroom_ckpt1000.json` (gitignored).
 
+**Re-probe (2026-07-16, ckpt-1000, same config, on the post-r12fix regenerated corpus, ~4.8 h wall):** verdict **MARGINAL — unchanged**. This is the item #5 / §5.6 re-probe (see [`grpo_tool_emission_gap_review.md`](grpo_tool_emission_gap_review.md) §6.2) triggered by the corpus regeneration that removed the malformed-role contamination (R12). Regenerating the data did **not** shift the lattice the way condition #5 anticipated: `frontier_frac = 0.122` (down from 0.130 — *still* below the 0.15 GO bar, still clear of the 0.10 NO-GO floor), `mean_headroom = 0.0414` (≥ 0.03 — still pass). GRPO-revival branch stays dead and slightly worse: `frac_collapsed_groups = 0.764` (up from 0.716), median `reward_std = 0.000`, rung histogram `{1: 382, 2: 98, 3: 18, 4: 2}` (more concentrated on rung 1 than before). So the clean-data hypothesis is falsified for the RFT/GRPO question — the corruption fix was correct on its own merits but did not unlock single-turn RL headroom. Paired with the SFT-only greedy composite re-measurement on the same regenerated data (**0.7167, still FAIL** vs 0.75 — `grpo_tool_emission_gap_review.md` §6.1), this lands squarely in condition #2's neighborhood (below target, no cheap RL lever): next move is the reward/GT audit on ~50 announce-but-don't-call rows + re-deriving the target bar for the per-turn-fair metric + the outstanding pass@k (T≈1.0) probe on tool-expected rows — **not** a blind RFT pilot. Artifact: `runs/preflight/rft_headroom_ckpt1000_regen.json` (gitignored).
+
 ### Stage 1 — RFT pilot (~6–10 H100-h, only on Stage-0 GO)
 - **Sampling:** N=8, T=0.8 over a 4,000-prompt stratified subset (bias to tool-bearing + terminal). Serve the *merged* checkpoint via `merge_adapter.py` + `serving/launch_vllm.sh` (R9: plain vLLM, no Unsloth fast_inference for gemma4). Prefix caching on.
 - **Filter:** keep top-1/prompt where `max(reward) ≥ max(0.8, r_greedy + 0.05)`; drop saturated (headroom < 0.05) and collapsed. Expected yield ~600–1,500 rows. Write as chatml `train.jsonl` for `sft.py`.
@@ -86,6 +88,13 @@ calls from the reward target (confirms and partially closes item 3 below). Resid
 genuine weakness — "announce-but-don't-call" tool under-emission. **Re-run Stage 0 (headroom) and
 the Stage-1 gate baseline on the clean inputs before any RL commit** — the MARGINAL reads above were
 partly artifact-driven.
+
+**Resolved (2026-07-16):** the "re-run Stage 0 on clean inputs" instruction is done (see the
+re-probe paragraph under Stage 0 above and `grpo_tool_emission_gap_review.md` §6). Outcome: the
+MARGINAL read was **not** artifact-driven — on the fully regenerated, corruption-free corpus the
+verdict holds MARGINAL (`frontier_frac 0.122`, `mean_headroom 0.0414`) and the SFT-only greedy
+composite is still a FAIL at 0.7167. Do **not** commit to an RL/RFT run on this evidence; proceed to
+the reward/GT audit + per-turn target-bar re-derivation first.
 
 ## 5. What would change this recommendation
 1. **Preflight surprises high** (`frac_collapsed_groups < 0.50` + median `reward_std ≥ 0.05` at diagnostic settings) → §1 condition met, GRPO's death certificate withdrawn; the merged 50-step diagnostic becomes the correct next run (online RL then plausibly beats RFT by also learning from negatives).
