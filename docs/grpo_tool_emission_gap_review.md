@@ -787,3 +787,109 @@ from the one §2–§9 have been converging on.
 **Recommended action:** adopt **0.80** as the Cat A per-turn-fair bar, mark 0.75 as retired for this
 metric wherever it is quoted, and re-measure the component breakdown before setting the factorial
 run's success criteria.
+
+---
+
+## 11. Component re-measurement (2026-07-21, GPU host) — the diagnosis was wrong; state, not tools
+
+Ran `scripts/heldout_composite_audit.py` on the regenerated corpus at **n=290 requested / 284 rows,
+106 tool-expected** (greedy, seed 42, 23 min). This closes §10.6's action item *and* §4 step 3's
+power item — the tool-expected slice is now n=106, up from the n=52 the Fable review flagged as
+±13pp. Artifact: `runs/preflight/heldout_composite_audit_ckpt1000_regen.json`.
+
+### 11.1 In plain terms
+
+We went looking for confirmation and found the opposite. The thing we've spent this entire
+investigation blaming — the model not calling tools — is **five times better than the number in
+this doc's own summary** (0.46, not 0.087). What's actually broken is something nobody was looking
+at: the model gets the **workflow step wrong** about a third of the time. It always writes down a
+step transition, and it always gets the *starting* step right — it just picks the wrong
+*destination*, either advancing when it should stay put or staying when it should advance. That is
+now the single biggest thing standing between this checkpoint and the bar.
+
+### 11.2 Measured components — two large corrections
+
+| component | measured now | previously believed | target |
+|---|---|---|---|
+| state accuracy (where a transition is expected) | **0.6866** | 0.817 (§2 audit) | 0.85 |
+| **tool-F1 (tool-expected rows)** | **0.4623** | **0.087** (§1 headline) | 0.85 |
+| abstention (zero-tool rows) | **0.9494** | 0.796 (§2 audit) | — (0.95 assumed in §10) |
+| task completion (genuine terminal rows) | **1.0000** | 0.093 (§2, artifact) | 0.70 |
+
+**Correction 1 — the tool gap is 5.3× smaller than this doc has claimed.** §8.4 suspected 0.087
+wouldn't reproduce; it doesn't. On the full tool-expected population it is **0.4623**. The §1/TL;DR
+framing — "one concentrated, genuine weakness... under-emits the tool tag 47/52 times" — is
+**obsolete**, an artifact of the pre-regeneration n=52 slice. 53.8% of tool-expected rows still
+score zero tool-F1, so the weakness is real, but it is not *the* story.
+
+**Correction 2 — state accuracy is now the dominant deficit** at 0.6866 against a 0.85 target, and
+*lower* than previously believed rather than higher.
+
+Two confirmations worth noting: abstention measured **0.9494** against the **0.95** §10 assumed for
+the recommended bar, so **0.80 stands empirically**; and the per-turn-fair composite here is
+**0.7271** (n=284) against §6.1's 0.7167 (n=150) — consistent, still **FAIL** vs 0.80 (shortfall
+0.073).
+
+**§10's model of the metric is validated:** `expected_perturn_score` predicts **0.7284** at these
+measured components against an actual **0.7271** — a 0.0013 error. The derivation machinery in §10
+is empirically sound, which is what licenses the lever analysis below.
+
+### 11.3 Lever analysis — this supersedes §10.5
+
+§10.5 concluded "the fix is not single-lever" from the *stale* component values. With measured
+values that is **wrong**. Either component, taken to its target, clears the bar on its own:
+
+| scenario | per-turn composite | |
+|---|---|---|
+| measured now | 0.7284 | fail |
+| **state → 0.85**, tool unchanged (0.4623) | **0.8085** | **PASS** |
+| **tool → 0.85**, state unchanged (0.6866) | **0.8026** | **PASS** |
+| state → 0.80, tool unchanged | 0.7840 | fail |
+| both → target | 0.8827 | PASS |
+
+**State is much the cheaper lever: +0.146 to close, versus +0.388 on tools.** Required-to-clear-0.80
+is state 0.833 at current tool-F1, or tool-F1 0.837 at current state accuracy.
+
+### 11.4 What the state failure actually is
+
+`state_acc` is strictly binary (89 zeros, 195 ones — no partial credit). Of the 89 failures:
+
+- **0/89 omit the annotation** — the model always emits `[STATE: X → Y]`.
+- **87/89 get the `from` state right and only the `to` state wrong.** 2/89 have the reverse.
+
+It fails in both directions — gold says stay and it advances (`SEARCH_OPTIONS → SEARCH_OPTIONS`
+predicted as `→ CHECK_VISA_REQUIREMENTS`), and gold says advance and it stays (`PROCESS_PAYOUT →
+CONFIRM_SETTLEMENT` predicted as `→ PROCESS_PAYOUT`). This is a **destination-selection** problem —
+the model tracks where it *is* and mis-chooses where to *go* — not a formatting or annotation-habit
+problem.
+
+**The two failures are correlated but not the same event.** State accuracy is **0.349 on
+tool-expected rows** versus **0.888 on zero-tool rows**, and on tool-expected rows:
+
+| | tool fired ok | tool missed |
+|---|---|---|
+| **state correct** | 24 | 13 |
+| **state wrong** | 25 | 44 |
+
+φ = **0.274**; 41.5% fail both, 35.8% are discordant. So a shared population fails both — the gold
+turn is "advance the state *and* fire the tool", and the model instead stays put and asks the user —
+but the coupling is loose enough that the two are partly independent levers rather than one relabelled.
+
+### 11.5 Open question before the retrain
+
+**Why did state accuracy fall 0.817 → 0.687?** The 0.817 came from the pre-regeneration n=150 audit;
+this is the regenerated corpus at n=284. Both cannot be dismissed as sampling noise at these sizes.
+Either the R12 regeneration changed the state-transition distribution, or the earlier figure was
+computed on an easier slice. Since state accuracy is now the primary lever, **this should be resolved
+before the factorial run** — otherwise the run may be tuned against a moving target. Cheap check: run
+the same audit against the `*.pre_r12fix_backup_20260714T104107Z` directories preserved in §5.6.
+
+### 11.6 Revised plan
+
+1. **Resolve §11.5** (cheap, no new generation for the data-side comparison).
+2. **Re-scope the factorial run around state-transition accuracy**, not tool emission. The
+   `response_only` + tool-turn-upsampling design in §4 step 4 was built for a diagnosis that no
+   longer holds; tool-turn upsampling may still help the 53.8% of tool-expected rows scoring zero,
+   but it does not obviously address destination selection.
+3. **Retire the 0.087 figure and the §1/TL;DR framing** wherever quoted — superseded by 0.4623.
+4. Bar remains **0.80** (§10), now empirically corroborated by the measured 0.9494 abstention.
