@@ -346,3 +346,68 @@ on ~50 rows** (announce-but-don't-call tail) and the target-bar re-derivation fo
 not a blind RFT pilot or SFT retrain. The pass@k (T≈1.0) probe on the tool-expected rows remains the
 other outstanding GPU-host item.
 
+## 7. §4 step 1 forensics (2026-07-21, no-GPU session) — 2 of 3 checks run, one reframes the diagnosis
+
+Ran the three cheap, no-training checks §4 step 1 called for, against the canonical
+post-R12-fix `data/output/grpo/task_a` (290-conv validation), using the actual production
+slicer (`_load_grpo_jsonl`, `training/grpo.py:236`) and ckpt-1000's real `chat_template.jinja`
+— not reconstructions. 2/3 completed; the third needs the GPU host.
+
+### 7.1 Row-slicing exposure bias — CONFIRMED, reframes the "genuine weakness" claim
+
+Sliced validation into 2,943 single-turn rows; 1,126 are tool-expected (GT carries
+`tool_calls`). Classified each target turn's shape:
+
+| Target shape | Count | % of tool-expected |
+|---|---|---|
+| Bare call (tool_call only, no narration in that turn) | 794 | **70.5%** |
+| Fused (narration + tool_call in the same turn) | 332 | 29.5% |
+
+Of the 794 bare-call targets, **100%** are immediately preceded (across a user turn) by an
+assistant turn that narrates intent *without* calling. So the teacher corpus itself encodes
+narrate-then-call as **two separate assistant turns** the majority of the time — pattern:
+`assistant narrates & asks a clarifying/confirming question → user replies → assistant fires
+a bare tool call`.
+
+**This confirms the row-slicing hypothesis from §3.** The gold corpus trains *both*
+"narrate without calling" (the announce turn — a legitimately zero-tool gold target on its
+own row) and "call without narrating" (the bare-call turn) as equally correct, turn-local
+behaviors. Combined with the 61.1% zero-tool row imbalance (§2 of the companion doc), the
+policy has strong incentive to reproduce the announce-style turn, and on a single-turn
+teacher-forced held-out eval it sometimes does so exactly where GT expects the bare call
+instead. **A material share of the measured "announce-but-don't-call" gap is therefore a
+data-structure + single-turn-eval-granularity artifact, not a pure policy defect** — this is
+the exact confound the Fable review (§3) warned would make an uncontrolled retrain
+unattributable. It does not mean the weakness is fake; it means the *single-turn* tool-F1
+number likely understates true tool-emission competence, and a free-running multi-turn probe
+is needed before sizing any fix.
+
+### 7.2 Chat-template system-prompt folding — CLEAN, no bug found
+
+Rendered a real sliced GRPO validation prompt (17-message multi-turn history, enriched
+system prompt with workflow script + tool descriptions) through ckpt-1000's actual
+`chat_template.jinja` via a minimal sandboxed Jinja environment (mirrors HF's
+`apply_chat_template` semantics: `trim_blocks`/`lstrip_blocks`, `raise_exception`,
+`strftime_now` globals). Renders cleanly: the system message folds into a single
+`<|turn>system … <turn|>` block, no `TemplateError`, no dropped content, and
+`add_generation_prompt` opens a clean `<|turn>model` slot for the completion. Rules out
+silent schema/system-prompt loss as a contributor. Note: `03-training.md`'s "Gemma rejects
+bare `system` role" caveat does not apply to this checkpoint's template — Task A carries tool
+info as system-prompt text (not the `tools=` kwarg), and this template explicitly special-cases
+`messages[0]['role'] in ['system', 'developer']` (`chat_template.jinja:179-195`).
+
+### 7.3 finish_reason / truncation — BLOCKED, needs the GPU host
+
+Requires either live generation metadata for the 15 announce-but-don't-call held-out rows,
+or the artifact `runs/preflight/heldout_composite_audit_ckpt1000.json`. Neither exists in a
+no-CUDA session — `runs/preflight/` here holds only a provenance txt, no completions.
+**Unresolved**, carries forward as the one remaining §4-step-1 item.
+
+**Revised next step:** given §7.1, don't read the single-turn tool-F1 gap as a clean policy
+ceiling. On the next GPU-host session, pair the blocked §7.3 finish_reason check with a
+**free-running multi-turn probe**: let the model continue past an announce-style turn and
+check whether it fires the bare call on its own next turn once a user reply arrives. If it
+does so reliably, the true deployed-eval tool-emission rate is materially higher than 0.087
+tool-F1 and the priority shifts from "fix the policy" to "fix the single-turn eval + re-derive
+the 0.75 bar" (§6.1's outstanding item) rather than an SFT retrain or RFT pilot.
+
