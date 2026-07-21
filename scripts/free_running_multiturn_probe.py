@@ -400,9 +400,21 @@ def _generate(
     max_seq_length: int,
     batch_size: int,
     label: str,
+    do_sample: bool = False,
+    temperature: float = 1.0,
+    top_p: float = 0.95,
+    seed: int | None = None,
 ) -> list[str]:
-    """Greedy-decode one continuation per message list."""
+    """Decode one continuation per message list.
+
+    Greedy by default (what this probe's own conditions use). ``do_sample=True``
+    switches to temperature sampling — used by ``passk_tool_emission_probe.py``,
+    which reuses this loader/generator rather than duplicating it.
+    """
     import torch
+
+    if seed is not None:
+        torch.manual_seed(seed)
 
     rendered = [
         inner_tok.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
@@ -419,13 +431,16 @@ def _generate(
             truncation=True,
             max_length=max_seq_length - max_new_tokens,
         ).to(model.device)
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "pad_token_id": inner_tok.pad_token_id or inner_tok.eos_token_id,
+        }
+        if do_sample:
+            gen_kwargs.update(do_sample=True, temperature=temperature, top_p=top_p)
+        else:
+            gen_kwargs.update(do_sample=False)
         with torch.inference_mode():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=inner_tok.pad_token_id or inner_tok.eos_token_id,
-            )
+            out = model.generate(**inputs, **gen_kwargs)
         for j, seq in enumerate(out):
             prompt_len = inputs["input_ids"][j].shape[0]
             out_texts.append(inner_tok.decode(seq[prompt_len:], skip_special_tokens=True))

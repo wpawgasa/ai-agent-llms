@@ -566,3 +566,105 @@ behaviour. **Next move per §4 step 4:** the combined factorial run (`response_o
 tool-turn upsampling) on sanitized data, with the target bar re-derived for the per-turn-fair
 metric first — plus the still-outstanding pass@k probe, which is now the cheapest remaining way
 to learn whether the call exists in the sampling distribution at all before committing to a retrain.
+
+---
+
+## 9. pass@k tool-emission probe (2026-07-21, GPU host) — WEAK_SIGNAL, and it explains §6.2
+
+Ran the pass@k probe §4 step 2 called for (overdue since 2026-07-09) and that §8 left as the
+open question: greedy says the model doesn't emit the call, but is the behaviour in the policy's
+distribution *at all*? Harness: `scripts/passk_tool_emission_probe.py` (pure functions unit-tested
+in `tests/unit/test_passk_tool_emission_probe.py`, 20 tests). Artifact:
+`runs/preflight/passk_tool_emission_ckpt1000.json` (gitignored).
+
+Config: 120 anchors × 8 samples, T=1.0, top_p=0.95, seed 42, ~72 min wall. Anchors are drawn by
+§8's `_select_anchors` at the same seed, so they are a **strict subset** of §8's 200; the greedy
+baseline is read back from §8's artifact (paired, n=120 matched, zero extra GPU cost) rather than
+re-measured. Reported with the unbiased Chen et al. (2021) pass@k estimator.
+
+### 9.1 In plain terms
+
+Greedy decoding is the model's "default answer." Sampling at T=1.0 eight times asks: *if it rolls
+the dice, does the right tool call ever come up?* That distinguishes "the model knows this but
+usually doesn't say it" (fixable cheaply by nudging how we sample, or by RL) from "the model
+doesn't know this" (needs retraining on better data). The answer: **for about half the cases it
+never comes up, not once in eight tries.** Those cases can't be fixed by rolling the dice
+differently.
+
+### 9.2 Results
+
+| k | pass@k emission | pass@k name-match |
+|---|---|---|
+| 1 | 0.297 | 0.287 |
+| 2 | 0.363 | 0.350 |
+| 4 | 0.428 | 0.412 |
+| 8 | **0.483** | **0.467** |
+
+Paired greedy baseline (n=120): emission 0.317, name-match 0.300.
+**recovery = pass@8 − greedy = +0.167** against a +0.20 material bar → **VERDICT: WEAK_SIGNAL.**
+
+The curve is still climbing at k=8 (no saturation), so more samples would keep finding a little
+more — but the endpoint is not the interesting part.
+
+### 9.3 The decisive finding — the population is tri-modal, and the majority is a hard zero
+
+Distribution of `c_name_match` (how many of 8 samples hit the correct tool):
+
+| c | anchors | share |
+|---|---|---|
+| **0** | **64** | **53.3%** |
+| 1–7 | 36 | 30.0% |
+| **8** | **20** | **16.7%** |
+
+**53.3% of anchors never produce the correct call in any of 8 samples at T=1.0.** (All 64 are also
+greedy failures — 0/64 had a greedy name-match, as expected.) A further 16.7% get it every time.
+Only the 30% middle band is stochastic.
+
+**This explains §6.2's MARGINAL RFT verdict from an independent measurement.** GRPO/RFT learns from
+*within-group* reward variance: a prompt whose k samples all score the same rung produces zero
+advantage and zero gradient. Here **70.0%** of prompt-groups would collapse that way (53.3% all-wrong
++ 16.7% all-right). §6.2 measured `frac_collapsed_groups = 0.764` and `median_reward_std = 0.000` on
+the composite reward — a different metric, on a different split, landing on the same number. The
+two probes corroborate each other: **RL has no signal here because the failing majority fails
+deterministically.** An RFT/GRPO pilot cannot reinforce a behaviour the policy never emits.
+
+### 9.4 An anomaly worth chasing: the difficulty gradient is inverted
+
+| Level | n | never name-matched | always name-matched |
+|---|---|---|---|
+| L3 | 45 | **75.6%** | 11.1% |
+| L4 | 42 | 50.0% | 14.3% |
+| L5 | 33 | **27.3%** | 27.3% |
+
+The *simplest* complexity level fails most and the hardest fails least — the opposite of the
+expected ordering, and consistent with §8's per-level emission (L5 0.526 vs L3 0.253). This is not
+explained by anything in this doc. Untested hypotheses: L5 conversations are tool-dense enough to
+prime emission, whereas L3's tools (`qualify_lead`, lookups) are the ones most naturally satisfied
+by *asking the user* — exactly the substitution §8.3 observed. Worth a targeted look before the
+factorial run, since it may mean the fix should be weighted by level rather than applied uniformly.
+
+### 9.5 Caveats
+
+- n=120 anchors (subset of §8's 200); single temperature (T=1.0); k=8. A higher temperature or
+  larger k would raise pass@k somewhat — but cannot rescue the 53.3% hard-zero band, which is the
+  load-bearing number.
+- **Name-match, not full correctness.** pass@8 name-match 0.467 only asks whether the right tool
+  was named; mean best-of-8 strict F1 is **0.383**, so argument correctness is a further loss on
+  top. The hard-zero population is if anything under-counted.
+- Still restricted to §8's sliceable-anchor scope (381 of 795); the 414 tool-tailed anchors are
+  unmeasured by both probes.
+
+### 9.6 Net standing — the lever is now determined
+
+§4 step 1 and step 2 are both closed. The picture is consistent across four independent probes:
+SFT-only composite 0.7167 (FAIL, §6.1); RFT headroom MARGINAL with 76.4% collapsed groups (§6.2);
+the eval-granularity artifact hypothesis falsified (§8); and now the missing behaviour shown to be
+**deterministically absent** on the majority of failing anchors (§9), which is *why* the RL signal
+was dead all along.
+
+**This is a data/SFT problem, not an RL problem.** Next move is §4 step 4's combined factorial run
+(`response_only` masking + tool-turn upsampling) on sanitized data — with two amendments this
+section adds: (1) re-derive the target bar first, now doubly warranted given §8.4's finding that the
+0.087 headline doesn't reproduce; (2) consider weighting the fix by complexity level per §9.4. The
+RFT/GRPO track should be considered closed until a retrained checkpoint shows a non-collapsed
+group distribution.
