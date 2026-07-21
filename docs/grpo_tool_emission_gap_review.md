@@ -411,3 +411,158 @@ does so reliably, the true deployed-eval tool-emission rate is materially higher
 tool-F1 and the priority shifts from "fix the policy" to "fix the single-turn eval + re-derive
 the 0.75 bar" (§6.1's outstanding item) rather than an SFT retrain or RFT pilot.
 
+> **Resolved 2026-07-21 — see §8.** The probe was run and the hypothesis **failed**: free-running
+> emission (0.320) does not beat teacher-forced single-turn (0.335), 68% of anchors never fire even
+> given a second turn, and the paired difference is noise (McNemar p = 0.743). The "fix the eval,
+> not the policy" off-ramp is closed. §7.3's own finish_reason/truncation check is still unrun.
+
+
+---
+
+## 8. Free-running multi-turn probe (2026-07-21, GPU host) — the artifact hypothesis is FALSIFIED
+
+Ran the probe §7.3 called for, on the H100 host against ckpt-1000 and the canonical
+post-R12-fix `data/output/grpo/task_a` validation split (290 conversations, freshly
+`dvc pull`ed). New harness: `scripts/free_running_multiturn_probe.py`
+(pure functions unit-tested in `tests/unit/test_free_running_multiturn_probe.py`, 28 tests).
+Artifact: `runs/preflight/free_running_probe_ckpt1000.json` (gitignored).
+
+**Data-freshness note:** the on-disk `data/output/grpo/task_a` at session start was dated
+Jul 9 — i.e. **pre**-R12-regeneration — and an initial anchor census against it produced
+1,609 rows / 615 tool-expected, matching nothing in §7.1. After the `dvc pull` the census
+reproduces §7.1 exactly (see below). Anyone re-running these probes should verify the split's
+mtime before trusting a number.
+
+### 8.0 In plain terms (non-specialist summary)
+
+**The problem.** The model talks about using a tool but never actually uses it — like a waiter who
+says "I'll go put your order in!" and then just stands there.
+
+**The hopeful theory.** Maybe the model isn't broken — maybe the *test* was unfair. We only ever
+gave it one turn to speak. In the conversations it learned from, the pattern is often two turns:
+the waiter says "I'll put that in," the customer says "great, thanks," and *then* the waiter goes.
+So maybe the model was waiting for its natural turn and our one-turn test cut it off before it
+could act. If true, the model would be mostly fine and we'd only need to fix the test — cheap.
+
+**What we did.** Ran the same 200 situations two ways. **Way A** is the old test: one turn, act
+now. **Way B** is the fair version: let the model say its "I'll go do that" line, hand it a real
+customer reply, then give it *another* turn to act. Way B was deliberately generous — it counted
+as a win if the model used the tool at *any* point across those two turns.
+
+**What happened.** No difference. 33.5% success the old way, 32.0% the generous way — slightly
+*worse*, and the small wobble was coin-flip randomness (some cases got better, about the same
+number got worse). The clearest detail: of the 136 cases where it never used the tool, **all 136**
+still correctly wrote down which step of the process it was on. It isn't confused about what should
+happen. It knows. It just asks the customer for the information by hand instead of calling the tool
+that fetches it.
+
+**So.** The hopeful theory is dead. The model genuinely has this habit — it's not the test's fault.
+We can't fix this cheaply by changing how we measure; it needs retraining.
+
+**One extra thing.** The number this whole investigation was built around — **0.087**, the score
+that made this look catastrophic — didn't hold up. Measuring the same thing on current data gives
+about **0.26**. Still a real problem, just noticeably less dire than we'd been assuming. The old
+number came from a smaller sample on data we've since cleaned up, so stop quoting it until someone
+re-measures properly (§8.4).
+
+### 8.1 Design — two paired conditions over the same anchors
+
+An **anchor** is a gold assistant turn that is a valid `_load_grpo_jsonl` row, whose GT carries
+tool calls, whose shape is *bare call*, and whose `messages[i-2]` is an assistant turn that
+narrates without calling. Both conditions are greedy (`do_sample=False`, `max_new_tokens=512`).
+
+| | Prompt | Measures |
+|---|---|---|
+| **A — teacher-forced** | gold history through the user turn preceding the gold bare call (the model sees the *gold* announce) | the deployed single-turn metric |
+| **B — free-running** | starts at the announce position: model writes **its own** announce turn (T1) → **gold** user reply appended verbatim → model generates again (T2) | does it fire on its own next turn once a user reply lands? |
+
+B differs from A in exactly one respect: who authored the announce turn, and whether the model
+gets a second turn to act on it. **B's success criterion is strictly more generous than A's** —
+a call anywhere in the two-turn window counts, versus A's single turn at one exact position.
+
+**Anchor census** (reproduces §7.1: 795 bare-call anchors vs the doc's 794, 100% announce-preceded):
+
+| | Count |
+|---|---|
+| bare-call anchors, total | 795 |
+| … whose announce turn is itself a sliceable row (probed population) | 381 |
+| … whose announce follows a `tool` response (**excluded**) | 414 |
+| conversations contributing ≥1 sliceable anchor | 228 |
+| anchors sampled (≤1 per conversation, seed 42) | **200** |
+
+### 8.2 Results — free-running does not recover the call
+
+| Metric | A (teacher-forced) | B (free-running) |
+|---|---|---|
+| **tool-emission rate** | **0.335** (95% CI 0.273–0.403) | **0.320** (95% CI 0.259–0.388) |
+| name-match rate | 0.325 | 0.295 |
+| mean strict tool-F1 | 0.258 | 0.175 |
+| mean graded tool-F1 | 0.306 | 0.259 |
+
+**delta = −0.015** (material bar: ≥ +0.20) → **VERDICT: POLICY_DEFECT.**
+
+Free-running B outcomes: `fired_at_t1` 11.0% (22) — the model fused the call into its own
+announce turn, *earlier* than gold; `fired_at_t2` 21.0% (42); **`never_fired` 68.0% (136)**.
+
+The paired churn is **noise, not a wash of two real effects**: 17 anchors recovered by
+free-running, 20 lost, exact two-sided McNemar on the 37 discordant pairs **p = 0.743**. Only
+12.8% of A's failures are recovered by B, and B loses about as many. Per level, the delta never
+points consistently one way (L3 +0.072, L4 −0.067, L5 −0.087).
+
+### 8.3 The failure is behavioral, and it is specific
+
+Among the 136 `never_fired` anchors, **136/136 (100%) still emit a `[STATE: X → Y]` marker** and
+only 4/136 name the expected tool in prose. The model reliably performs the state-annotation half
+of the turn and substitutes a **clarifying question to the user** for the tool call. In free-running
+T1 the model reproduced the announce style — narration, no call — on **178/200 (89%)** of anchors.
+
+Representative `never_fired` anchor (`L3_059_8`, gold tool `qualify_lead`); T2 transitions correctly,
+then asks the user for exactly the fields the tool takes:
+
+> `[STATE: GREETING → QUALIFY_PROSPECT]`
+> …เพื่อที่จะแนะนำแพ็กเกจที่เหมาะสมกับคุณที่สุด ขออนุญาตสอบถามข้อมูลเบื้องต้น… ไม่ทราบว่าคุณชื่ออะไร
+> และติดต่อจากบริษัทไหนคะ รวมถึงงบประมาณที่วางไว้และกรอบเวลาที่อยากเริ่มใช้งาน…
+
+### 8.4 What this does and does not overturn
+
+**Falsified:** §7.3's hypothesis that the model "fires the call on its own next turn once a user
+reply arrives, and the single-turn eval just can't see it." It does not — not even under a
+two-turn window and a more generous success criterion. §7.1's row-slicing finding remains factually
+correct about the *corpus* (the teacher does split narrate-then-call across two turns), but that
+structure does **not** rescue the *policy*: the model has internalized the announce half and
+under-emits the call half regardless of turn granularity. The priority does **not** shift to
+"fix the single-turn eval" on the strength of this probe.
+
+**Not reproduced, and worth flagging:** the §1 headline **0.087** tool-F1 does not appear on this
+slice — condition A, the single-turn metric, scores **0.258** mean strict tool-F1 and a 0.335
+emission rate on 200 bare-call anchors. The gap is real but **materially smaller than the headline
+number implies**. Candidate explanations, none yet tested: the §1 figure came from n=52 rows on the
+*pre*-regeneration corpus and mixed bare-call with fused targets, whereas this is n=200 bare-call-only
+anchors on the regenerated corpus. **The 0.087 figure should not be quoted again until re-measured
+on current data.**
+
+### 8.5 Caveats
+
+- **Scope:** only the 381 sliceable anchors were probed; the 414 whose announce follows a `tool`
+  response were excluded to keep A and B on matching prompt shapes. The result generalizes to
+  roughly half the bare-call anchor population.
+- **Counterfactual continuation:** B's round-2 user message is the gold reply to the *gold*
+  announce. For the 178/200 anchors where the model's T1 was its own announce, that reply is
+  approximately-valid rather than exact. Removing this needs a user simulator. Note the caveat
+  cuts *toward* B — a better-matched reply could only help B, and B still lost.
+- **Greedy only.** No pass@k. A sampled probe could still find the call in the distribution's
+  tail; that is the outstanding pass@k item from §4 step 2, not addressed here.
+- **§7.3's finish_reason/truncation check remains unrun.** It was not needed to reach this
+  verdict — 100% of never-fired completions terminate with coherent prose well inside the
+  512-token budget, which is not the signature of truncation — but it is still formally open.
+
+### 8.6 Net standing
+
+§4 step 1's forensics are now complete enough to act on. The gap survives the eval-granularity
+confound, so the §7.3 off-ramp ("fix the eval, not the policy") is closed. Standing position is
+unchanged from §6's fork and now better-evidenced: SFT-only composite 0.7167 (FAIL vs 0.75),
+RFT headroom MARGINAL, GRPO revival dead, and the tool-emission weakness confirmed as policy
+behaviour. **Next move per §4 step 4:** the combined factorial run (`response_only` masking +
+tool-turn upsampling) on sanitized data, with the target bar re-derived for the per-turn-fair
+metric first — plus the still-outstanding pass@k probe, which is now the cheapest remaining way
+to learn whether the call exists in the sampling distribution at all before committing to a retrain.
