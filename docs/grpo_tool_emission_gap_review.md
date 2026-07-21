@@ -668,3 +668,122 @@ section adds: (1) re-derive the target bar first, now doubly warranted given §8
 0.087 headline doesn't reproduce; (2) consider weighting the fix by complexity level per §9.4. The
 RFT/GRPO track should be considered closed until a retrained checkpoint shows a non-collapsed
 group distribution.
+
+---
+
+## 10. Target-bar re-derivation (2026-07-21) — the honest bar is 0.80, not 0.75
+
+Closes the item §3 raised and §6.1 carried forward: "0.75 was calibrated against the old
+whole-conversation composite; this is the renormalized per-turn-fair metric, so '0.033 short of
+0.75' is not a clean pass/fail until the bar is re-derived." Harness:
+`scripts/rederive_target_bar.py` (pure, CPU-only, no GPU; 21 unit tests in
+`tests/unit/test_rederive_target_bar.py`). Artifact: `runs/preflight/target_bar_rederivation.json`.
+
+### 10.1 In plain terms
+
+We've been grading against a passing mark of 0.75 that was written for a **different test**. The
+old test scored a whole conversation at once. The current test scores one turn at a time — and it
+hands out **free full marks** every time the model correctly does nothing, which is 62% of turns.
+Easier test, so the passing mark has to be **higher**, not the same. Re-deriving it properly moves
+the mark from 0.75 to **0.80** — which means the model is failing by *more* than we thought, not
+less. This was not the answer anyone was hoping for.
+
+### 10.2 Why the two metrics are not the same quantity
+
+In `compute_weighted_workflow_score` (whole-conversation), `tool_call_f1` is a single AST-F1 over
+all calls in the conversation, so a turn where the model correctly makes **no** call is *invisible*
+— it appears in neither the predicted nor the gold list. In `_heldout_composite_score` (per-turn)
+each row is scored on its own and **`compute_ast_f1([], []) == 1.0`**, so every correct abstention
+earns full marks on the 0.4-weight tool term.
+
+Row population from the production slicer (`_load_grpo_jsonl`, validation, 2,943 rows):
+
+| | share |
+|---|---|
+| tool-expected rows | 38.3% |
+| **zero-tool rows (free 1.0 on the tool term if the model abstains)** | **61.7%** |
+| state term applies | **100.0%** |
+| task term applies | 9.8% |
+
+So for ~90% of rows the per-turn metric reduces to **0.5·tool + 0.5·state**, with the tool half
+gifted on the zero-tool majority. It is a **materially easier** metric, and an equivalent bar on it
+must sit **above** 0.75.
+
+### 10.3 Method
+
+Rather than guess a translation, evaluate what `_heldout_composite_score` scores on the *real* row
+population for a reference policy that exactly meets the component targets `.claude/rules/05-eval.md`
+already commits to (state ≥ 0.85, tool-F1 ≥ 0.85, task completion ≥ 0.70), replicating the scorer's
+term-applicability and renormalization rules exactly. Those component targets imply a
+whole-conversation composite of **0.82**, while the stated bar was **0.75** — a deliberate
+relaxation of ×0.9146. The same relaxation is carried across.
+
+The per-turn tool term depends on how a policy handles *abstention* rows, which the old component
+targets never specified — so the bar is reported across a sensitivity sweep rather than as a single
+fake-precise number.
+
+| assumed abstention accuracy | component-equivalent bar | relaxation-matched bar |
+|---|---|---|
+| 1.00 | 0.8919 | 0.8158 |
+| **0.95** | **0.8770** | **0.8021** |
+| 0.90 | 0.8620 | 0.7884 |
+| 0.85 | 0.8471 | 0.7748 |
+
+### 10.4 Recommended bar: 0.80
+
+Take **0.80** (relaxation-matched at 0.95 abstention, rounded). It sits mid-range across the
+sweep — the full plausible band is 0.775–0.816, so 0.80 is not sensitive to the one judgement call
+in the derivation.
+
+**Consequence — the gap gets bigger, not smaller:**
+
+| | vs old bar 0.75 | vs re-derived bar 0.80 |
+|---|---|---|
+| measured (§6.1) | 0.7167 | 0.7167 |
+| shortfall | −0.033 | **−0.085** |
+
+The re-derivation **2.6×'s the shortfall**. Every "only 0.033 short" framing in §6.1 and earlier is
+superseded. This cuts against the direction everyone was hoping the re-derivation would go, which is
+precisely why it needed doing before the factorial run rather than after.
+
+### 10.5 The fix is not single-lever — a new finding
+
+Inverting the derivation gives the tool-F1 a policy needs on tool-expected rows to clear 0.80:
+
+| state acc | abstention | required tool-F1 | |
+|---|---|---|---|
+| 0.850 | 0.950 | 0.448 | both components at target |
+| 0.900 | 0.950 | 0.320 | strong state |
+| 0.850 | 0.900 | 0.526 | target state, weaker abstention |
+| 0.800 | 0.900 | 0.654 | both slightly under target |
+| **0.817** | **0.796** | **0.773** | **ckpt-1000's measured components** |
+
+An internal consistency check confirms the model is below target on the *other* two components, not
+just tools: the measured composite 0.7167 is only reachable with a plausible tool-F1 if state and
+abstention are around their audited values (0.817 / 0.796 → implied tool-F1 0.337, consistent with
+§8's 0.258 on the hardest bare-call slice). Assuming the *targets* (0.85 / 0.95) instead would imply
+a tool-F1 of 0.012, far below anything measured.
+
+**So raising tool-F1 alone to ~0.45 would not clear the bar** — with state and abstention where they
+are, it would take ~0.77, which is close to the component target itself and far beyond what §9
+suggests is reachable. §4 step 4's factorial run should therefore target **state accuracy and
+abstention alongside tool emission**, not tool emission alone. That is a materially different plan
+from the one §2–§9 have been converging on.
+
+### 10.6 Caveats and the next cheap step
+
+- The relaxation ratio (×0.9146) assumes the original 0.75 was a deliberate softening of the
+  component targets rather than an unrelated round number. If it was arbitrary, the
+  component-equivalent bar (**0.877**) is the defensible one and the shortfall is larger still.
+- The abstention assumption is a judgement call; the ±0.02 band it induces does not change any
+  verdict here.
+- **ckpt-1000's component values are stale** — 0.817 / 0.796 come from the pre-regeneration n=150
+  audit (`grpo_heldout_metric_and_gt_audit.md` §2). §10.5's bottom row, and the "not single-lever"
+  conclusion, should be re-confirmed by re-running `scripts/heldout_composite_audit.py` on the
+  regenerated corpus (~15 min GPU). That is the cheapest remaining step and it directly sizes the
+  factorial run's targets.
+- Bars apply to `_heldout_composite_score` on Task A Cat A rows only; Cat B/C keep their own targets.
+
+**Recommended action:** adopt **0.80** as the Cat A per-turn-fair bar, mark 0.75 as retired for this
+metric wherever it is quoted, and re-measure the component breakdown before setting the factorial
+run's success criteria.
