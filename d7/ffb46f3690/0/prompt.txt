@@ -1,0 +1,9 @@
+Based on the latest commit, what are our situation?
+
+---
+
+What "A reward/GT audit on the ~50 announce-but-don't-call rows" actually do?
+
+---
+
+/using-superpowers and /model-routing yes, go ahead and run these checks
