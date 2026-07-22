@@ -165,8 +165,9 @@ stages:
       size: 486840964
       nfiles: 35
   task_a_sft_splits:
-    cmd: "python scripts/split_task_a_sft.py\n  --input-dir data/output/sft/task_a_cleaned\n\
-      \  --output-dir data/output/sft/task_a_splits\n  --force"
+    cmd: python scripts/split_task_a_sft.py --input-dir 
+      data/output/sft/task_a_cleaned --output-dir data/output/sft/task_a_splits 
+      --force
     deps:
     - path: data/output/sft/task_a_cleaned
       hash: md5
@@ -211,9 +212,10 @@ stages:
       size: 220921413
       nfiles: 11
   task_a_sft_clean:
-    cmd: "python scripts/clean_task_a_sft.py\n  --input-dir data/output/sft/task_a\n\
-      \  --output-dir data/output/sft/task_a_cleaned\n  --quiet &&\npython scripts/clean_corrupted_conversations.py\n\
-      \  data/output/sft/task_a_cleaned/*.jsonl\n  --no-backup\n  --quiet"
+    cmd: python scripts/clean_task_a_sft.py --input-dir data/output/sft/task_a 
+      --output-dir data/output/sft/task_a_cleaned --quiet && python 
+      scripts/clean_corrupted_conversations.py 
+      data/output/sft/task_a_cleaned/*.jsonl --no-backup --quiet
     deps:
     - path: data/output/sft/task_a
       hash: md5

@@ -46,13 +46,13 @@ stages:
       (clean_corrupted_conversations.py). No API keys required.
     cmd: >-
       python scripts/clean_task_a_sft.py
-        --input-dir data/output/sft/task_a
-        --output-dir data/output/sft/task_a_cleaned
-        --quiet &&
+      --input-dir data/output/sft/task_a
+      --output-dir data/output/sft/task_a_cleaned
+      --quiet &&
       python scripts/clean_corrupted_conversations.py
-        data/output/sft/task_a_cleaned/*.jsonl
-        --no-backup
-        --quiet
+      data/output/sft/task_a_cleaned/*.jsonl
+      --no-backup
+      --quiet
     deps:
       - data/output/sft/task_a
       - scripts/clean_task_a_sft.py
@@ -75,9 +75,9 @@ stages:
       held-out evaluation.
     cmd: >-
       python scripts/split_task_a_sft.py
-        --input-dir data/output/sft/task_a_cleaned
-        --output-dir data/output/sft/task_a_splits
-        --force
+      --input-dir data/output/sft/task_a_cleaned
+      --output-dir data/output/sft/task_a_splits
+      --force
     deps:
       - scripts/split_task_a_sft.py
       - data/output/sft/task_a_cleaned
