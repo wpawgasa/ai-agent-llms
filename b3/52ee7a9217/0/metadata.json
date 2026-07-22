@@ -1,0 +1,35 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b352ee7a9217",
+  "session_id": "998002e4-bf1f-4ba6-a1ed-15f9279b94ef",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-22T04:23:10.333440466Z",
+  "branch": "main",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "docs/grpo_tool_emission_gap_review.md",
+    "docs/superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "2f459095a048",
+  "token_usage": {
+    "input_tokens": 347,
+    "cache_creation_tokens": 706610,
+    "cache_read_tokens": 46261285,
+    "output_tokens": 173183,
+    "api_call_count": 174
+  },
+  "session_metrics": {
+    "turn_count": 20
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-22T04:23:08.949365956Z",
+    "agent_lines": 381,
+    "human_added": 51,
+    "human_modified": 1,
+    "human_removed": 0,
+    "total_committed": 433,
+    "agent_percentage": 87.99076212471132
+  }
+}

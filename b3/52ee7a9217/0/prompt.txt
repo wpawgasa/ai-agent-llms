@@ -1,0 +1,422 @@
+Based on the latest commit, what are our situation? what are we going to do next? In plain and simple terms.
+
+---
+
+/superpowers:using-superpowers and /model-training-eval and /model-routing perform sanity-check, and redesign the training experiment, then clean up te docs.
+
+---
+
+<task-notification>
+<task-id>a99f0593ad8a7e477</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/998002e4-bf1f-4ba6-a1ed-15f9279b94ef/tasks/a99f0593ad8a7e477.output</output-file>
+<status>completed</status>
+<summary>Agent "Map doc sections to clean up" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything I need. Here is the precise cleanup map. This is a report only; I made no edits.
+
+---
+
+# Documentation Cleanup Map: `docs/grpo_tool_emission_gap_review.md` (896 lines)
+
+## 1. Every occurrence of "0.087"
+
+`grep` found 11 hits. One (line 510) is a **false positive** — it's a per-level delta, not the headline metric. The other 10 are the real targets, split between the obsolete claim and the sections that already flag/retire it.
+
+| Line | Section | Snippet | Status |
+|---|---|---|---|
+| **12** | TL;DR | `tag 47/52 times ("announce-but-don't-call"; tool-F1 0.087 on these rows vs 0.796 on correct` | **STALE — the core obsolete claim.** This is the primary source assertion. |
+| 410 | §7 (revised next step) | `does so reliably, the true deployed-eval tool-emission rate is materially higher than 0.087` | Stale-in-passing; references 0.087 as the baseline to beat. Section already superseded by the §7/§8 resolution banner. |
+| 462 | §8.0 | `**One extra thing.** The number this whole investigation was built around — **0.087**, the score` | Already-corrective (says it "didn't hold up," gives ~0.26). Historically accurate as narrative but quotes the number. |
+| 464 | §8.0 | (continuation) `that made this look catastrophic — didn't hold up. Measuring the same thing on current data gives about **0.26**` | Corrective context. |
+| 466 | §8.0 | `...number came from a smaller sample... so stop quoting it until someone re-measures properly (§8.4).` | Corrective. |
+| ~~510~~ | §8.2 | `points consistently one way (L3 +0.072, L4 −0.067, L5 −0.087).` | **NOT a target — per-level delta coincidence. Do not touch.** |
+| 536 | §8.4 | `the §1 headline **0.087** tool-F1 does not appear on this` | Corrective (flags non-reproduction). |
+| 541-542 | §8.4 | `anchors on the regenerated corpus. **The 0.087 figure should not be quoted again until re-measured / on current data.**` | Corrective. |
+| 668 | §9.6 | `0.087 headline doesn't reproduce; (2) consider weighting the fix...` | Corrective. |
+| 804 | §11.1 | `this doc's own summary** (0.46, not 0.087). What's actually broken is something nobody was looking` | Corrective (the overturning finding). |
+| 815 | §11.2 table | `| **tool-F1 (tool-expected rows)** | **0.4623** | **0.087** (§1 headline) | 0.85 |` | Corrective (side-by-side correction table). |
+| 819 | §11.2 | `**Correction 1...** §8.4 suspected 0.087 wouldn't reproduce; it doesn't.` | Corrective. |
+| 894 | §11.6 | `3. **Retire the 0.087 figure and the §1/TL;DR framing** wherever quoted — superseded by 0.4623.` | The explicit instruction to do this cleanup. |
+
+The one location asserting 0.087 as **truth** is **line 12** (TL;DR). Every other real hit (410 aside) already frames it as wrong/retired.
+
+## 2. The §1 / TL;DR / abstract framing at the top (explicitly called "obsolete")
+
+Two top blocks carry the old diagnosis:
+
+**TL;DR — lines 7-16:**
+- Line 9-10: `Cat A tool-calling is under the 0.75 target (honest per-turn-fair baseline: 0.674) because of one / concentrated, genuine weakness:` — **obsolete on two counts:** the 0.75 bar (now 0.80, §10) and the 0.674 baseline (now 0.7271, §11.2), and the single-weakness framing.
+- Line 10-13: `on the 52/150 held-out rows where a tool call is expected, the / model narrates the correct state transition and intent but under-emits the actual &lt;tool_call&gt; / tag 47/52 times ("announce-but-don't-call"; tool-F1 0.087 on these rows vs 0.796 on correct / abstentions).` — **the obsolete core claim** (n=52 slice, 0.087, tool-emission-as-the-problem).
+- Lines 13-16: describe the Fable review / "do not retrain SFT yet" plan — superseded by §11.6.
+
+**§1 "The gap, restated" — lines 18-25:**
+- Line 20-25: restates the 52 tool-expected rows / 47 score-0 / "announce-but-don't-call" as "a real RL/data target, not an artifact." This is the section the §11.2 correction explicitly names as obsolete (line 819-822: `The §1/TL;DR framing... is obsolete`).
+
+The doc itself labels this framing "obsolete" at **line 821-822** and orders it retired at **line 894**.
+
+## 3. Headers / summary lines asserting tool-emission is THE problem / "one concentrated genuine weakness"
+
+- **Line 9-10** (TL;DR): `because of one / concentrated, genuine weakness` — the canonical phrasing.
+- **Line 821** (§11.2, quoting the obsolete framing back): `"one concentrated, genuine weakness... under-emits the tool tag 47/52 times"` — this is the correction quoting the stale line to retire it (keep, it's corrective).
+- **Line 24-25** (§1): `This is flagged in that doc as "a real RL/data target, not an artifact."`
+- **Document title, line 1**: `# Tool-Emission Gap ("Announce-but-Don't-Call") — Recommendations + Fable Review` — the whole title frames the doc around tool emission. Consider a title note or amendment given §11 overturns it.
+- **Subtitle/companion, line 5**: describes the doc as acting on the "announce-but-don't-call" finding.
+
+Counter-current headers (state, not tools): **line 793** (§11 header) `the diagnosis was wrong; state, not tools`; **line 825** `state accuracy is now the dominant deficit`.
+
+## 4. §11.6 "Revised plan" — full quote with line numbers
+
+Lines 887-895:
+
+```
+887  ### 11.6 Revised plan
+888  
+889  1. **Resolve §11.5** (cheap, no new generation for the data-side comparison).
+890  2. **Re-scope the factorial run around state-transition accuracy**, not tool emission. The
+891     `response_only` + tool-turn-upsampling design in §4 step 4 was built for a diagnosis that no
+892     longer holds; tool-turn upsampling may still help the 53.8% of tool-expected rows scoring zero,
+893     but it does not obviously address destination selection.
+894  3. **Retire the 0.087 figure and the §1/TL;DR framing** wherever quoted — superseded by 0.4623.
+895  4. Bar remains **0.80** (§10), now empirically corroborated by the measured 0.9494 abstention.
+```
+
+This is the current authoritative plan and the instruction set for the cleanup itself (item 3 = your task).
+
+## 5. Section structure §1–§11 (one line each; stale vs current)
+
+- **Title + header block (1-16):** Framed entirely around tool-emission; TL;DR asserts old diagnosis. **STALE.**
+- **§1 The gap, restated (18-25):** Restates 52-row / 0.087 / announce-but-don't-call as a genuine target. **STALE (explicitly obsolete per §11.2).**
+- **§2 Initial recommendation set (27-44):** Pre-review recs (loss-mask A/B, upsampling, RFT re-probe, RFT). Superseded by §4 ordering; core lever (tool-turn) partly stale per §11.6.2. **MOSTLY STALE.**
+- **§3 Fable 5 review (46-90):** Adversarial review — diagnosis "plausible but unproven," confounds, promote headroom probe, re-derive the 0.75 bar. **METHODOLOGICALLY STILL VALID** (its skepticism was vindicated); the specific 0.674-vs-0.75 discussion is superseded by §10.
+- **§4 Revised action plan (92-115):** Forensics-first ordering, factorial run, re-derive bar. **PARTLY CURRENT** — still the referenced plan spine, but step 4's factorial design is re-scoped by §11.6.
+- **§5 Forensics results (117-280):** Found + fixed role-corruption data bug, provenance bug; regenerated corpus (new splits 4,716/554/279); declared 0.674 baseline dead. **CURRENT as history; its data-fix is load-bearing for everything after.**
+- **§6 Re-measurement on regenerated data (282-347):** SFT-only composite 0.7167 (FAIL vs 0.75); RFT headroom still MARGINAL. **PARTLY STALE** — 0.7167 refined to 0.7271 in §11.2, and 0.75 bar retired for 0.80 in §10.
+- **§7 §4-step-1 forensics (349-417):** Row-slicing CONFIRMED, template clean, finish_reason BLOCKED; floated the "fix the eval, not the policy" off-ramp. **SUPERSEDED** — the off-ramp is explicitly closed (banner lines 414-417 point to §8).
+- **§8 Free-running multi-turn probe (419-568):** Off-ramp FALSIFIED — policy defect, not eval artifact; first flags 0.087 won't reproduce (~0.26). **CURRENT.**
+- **§9 pass@k probe (570-670):** WEAK_SIGNAL; 53.3% hard-zero → "data/SFT problem, not RL"; explains dead RFT. **CURRENT.**
+- **§10 Target-bar re-derivation (672-789):** Bar moves 0.75 → **0.80**; shortfall 2.6×'s. §10.5 concluded "not single-lever" (later corrected in §11.3). **CURRENT except §10.5** (superseded by §11.3, line 838).
+- **§11 Component re-measurement (791-896):** THE OVERTURNING SECTION. tool-F1 = **0.4623** (not 0.087); state accuracy **0.6866** is the dominant deficit; state is the cheaper lever; §11.6 revised plan. **CURRENT / AUTHORITATIVE.**
+
+Net: the document is chronological/append-only. Everything above §11 that quotes 0.087, 0.674, 0.75, or "one concentrated weakness / tool-emission is THE problem" is stale. §8-§11 are the current truth; §11 governs.
+
+## 6. Top-level "Status / Current standing / TL;DR" block that a reader hits first
+
+**Yes — and it still reflects the old diagnosis.** The first thing a reader sees is the **TL;DR at lines 7-16** (immediately after the title/metadata block at lines 1-5). There is **no** separate "Status" or "Current standing" banner at the top. The TL;DR still:
+- asserts tool-emission is the "one concentrated, genuine weakness" (line 9-10),
+- quotes tool-F1 **0.087** (line 12),
+- uses the retired **0.75** bar and the dead **0.674** baseline (line 9),
+- points to a "do not retrain SFT yet" plan (line 15-16) that §11.6 has replaced.
+
+The corrective/current standing is buried at the very bottom (§11, lines 791-896). A reader hitting the top gets the fully obsolete diagnosis with no forward-pointer. The nearest thing to an inline status marker is the resolution **blockquote banners** at lines 414-417 (§7→§8) and the running "Net standing" subsections (§6 line 342, §8.6 line 559, §9.6 line 657) — but none of these are at the top.
+
+---
+
+### Suggested edit targets (for your planning — not executed)
+- **Line 12** — the only place stating 0.087 as fact; must change or annotate.
+- **Lines 7-16 (TL;DR)** and **lines 18-25 (§1)** — the "obsolete" framing; needs a supersession note or rewrite pointing to §11.
+- **Line 9** — retire 0.75 → 0.80 and 0.674 → 0.7271 here too.
+- **Title (line 1)** — optionally annotate, since the doc's central diagnosis flipped from tools to state.
+- **Consider adding a top-of-doc status banner** pointing readers to §11 as current, since none exists.
+- **Do NOT touch line 510** (`L5 −0.087` is an unrelated per-level delta).
+- Lines 462-466, 536-542, 668, 804, 815, 819, 894 already treat 0.087 as retired — leave as corrective history or lightly reconcile for consistency.</result>
+<usage><subagent_tokens>36162</subagent_tokens><tool_uses>3</tool_uses><duration_ms>76344</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ac5ed5dc2917d2c1e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/998002e4-bf1f-4ba6-a1ed-15f9279b94ef/tasks/ac5ed5dc2917d2c1e.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore training experiment design" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have thorough coverage. Here is my report.
+
+---
+
+# Fine-Tuning Experiment Re-Scoping — Codebase Findings
+
+All paths are absolute. Note one important discrepancy up front: the Cat A reward has **4 components, not 5**, and `state_transition` is weighted **0.40, not 0.30**. Details in section 2.
+
+---
+
+## 1. SFT entry point + loss masking
+
+**File:** `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/sft.py`
+
+**`loss_mask` accepted values** (lines 21-23):
+- `"all_tokens"` (`_LOSS_MASK_ALL_TOKENS`) — default; loss on every non-pad token.
+- `"response_only"` (`_LOSS_MASK_RESPONSE_ONLY`) — assistant-turn tokens only; system/user/tool spans set to `-100`.
+- Validated at lines 247-254 (`train_sft` returns an error on unknown values). A warning is logged for `response_only` (lines 255-266) noting `eval_loss` is not comparable across recipes.
+
+**`render_response_only_sample(messages, tokenizer, max_seq_length)`** — lines 26-92. Walks messages incrementally, tokenizing `apply_chat_template(prefix)` vs `apply_chat_template(prefix + turn)` and taking the delta. Non-assistant turn tokens get label `-100` (line 79); assistant tokens carry through (line 77). Left-truncates to preserve the final assistant turn (lines 82-86). Returns `{"input_ids", "attention_mask", "labels"}`.
+
+**Where the mask is applied** (mask flows into the dataset, not a custom loss):
+- `_render_chat_response_only` (lines 656-674) calls `render_response_only_sample` per row and emits a `labels` column. The default TRL collator preserves pre-existing `labels` and pads with `-100`.
+- Render function selected at lines 676-680 based on `loss_mask`.
+- Packing (lines 692-769) carries the `labels` channel when `has_labels` (i.e. response_only), masking the inserted EOS separators to `-100` (lines 730, 734). Note: `configs/training/sft_cat_a.yaml` has `packing: false`.
+
+Framework selector (`unsloth` default vs `trl`) at lines 293-302. LoRA target resolution at 128-146.
+
+---
+
+## 2. GRPO reward — component structure (DISCREPANCY)
+
+**File:** `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/rewards/reward_business_logic.py`
+
+The live reward has **4 components** (constants lines 42-45), not 5, and there is **no component named `state_transition_correctness`**:
+
+| Component | Constant | Weight | Line |
+|---|---|---|---|
+| `state_transition` (graded) | `W_STATE_TRANSITION` | **0.40** | 42 |
+| `tool_call_f1` (arg-graded) | `W_TOOL_CALL_F1` | 0.40 | 43 |
+| `task_completion` | `W_TASK_COMPLETION` | 0.10 | 44 |
+| `transition_legality` | `W_TRANSITION_LEGALITY` | 0.10 | 45 |
+
+The `0.30` weight you cited exists only in a **different** reward: `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/rewards/reward_subagent.py` line 27 (`W_SLOT_EXTRACTION = 0.30`, Cat B/C sub-agent reward). The module docstring (lines 1-23) explicitly documents that a former 5th-style `length_band` component was *removed* and replaced by `transition_legality` because length_band was the only source of within-group variance and GRPO was optimizing completion length. So the "5 components / 0.30 state-transition" framing appears to describe a superseded design — worth reconciling before re-scoping.
+
+**How state correctness is scored** — `_graded_state_match(predicted, ground_truth)` lines 83-114. Per (pred, gt) transition pair, order-sensitive by index:
+- exact `(from, to)` match → 1.0 (line 109)
+- `from`-only OR `to`-only match → 0.5 (line 110)
+- reverse direction → 0.3 (line 112)
+- no overlap → 0.0
+
+Averaged over `len(ground_truth)`. Empty GT returns 1.0 if pred also empty else 0.0 (lines 101-102). A stricter, benchmark-only variant `_partial_state_match` (0/0.5/1.0, no reverse credit) is at lines 55-80.
+
+**Entry points:**
+- `reward_business_logic(prompts, completions, ground_truths)` lines 135-195 — per-turn (single-turn) reward. Reads `gt["state_annotations"]` (aliased from `state_sequence`, see §5). Components conditionally active: `transition_legality` only when `valid_transitions` present (lines 174-177); `task_completion` only when `terminal_reached` (lines 182-185). Weights renormalized over active components (lines 187-192).
+- `reward_business_logic_trajectory(prompts, trajectories, metas, ground_truths)` lines 198-288 — whole-conversation variant. Replaces state score with **coverage** = `cursor / n_gold` computed via `classify_turn` (line 249, 254), and applies a stall penalty to legality (lines 269-270).
+
+**GRPO entry point:** `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/grpo.py`, `train_grpo(config_path)` lines 637-1033. Reward registry lines 23-28; `_resolve_reward_fn` lines 144-153. Reward is bridged to TRL via `_make_reward_adapter` (lines 398-474) — this JSON-decodes the `ground_truth` column and **aliases `state_sequence` → `state_annotations`** as tuples (lines 433-444).
+
+Independent held-out metric (STRICT, distinct from training reward) `_heldout_composite_score` lines 541-614: `0.4*state + 0.4*strict_tool_f1 + 0.2*task`, per-turn-fair renormalized. Reward-hacking auto-stop `_is_reward_hacking` lines 617-634.
+
+---
+
+## 3. Training configs
+
+**`/workspaces/ai-agent-llms/configs/training/sft_cat_a.yaml`:**
+- `loss_mask: "all_tokens"` (line 47) ← currently NOT response_only
+- `packing: false` (line 43)
+- `learning_rate: 5.0e-5` (22), `num_epochs: 3` (29), `max_seq_length: 4096` (35), `effective_batch_size: 8` (26), `per_device_train_batch_size: 1` (25)
+- LoRA `rank: 16 / alpha: 16 / dropout: 0`, `freeze_router: true` (12-16)
+- Data source: `data/output/sft/task_a_splits` (line 53) — pre-split train/val/test
+- No upsampling / row-weight knobs present.
+
+**`/workspaces/ai-agent-llms/configs/training/grpo_cat_a.yaml`:**
+- Top banner (lines 1-15) warns it is UNSTABILIZED — run `grpo_cat_a_diagnostic.yaml` first.
+- `num_generations: 8` (30), `beta: 0.1` (33), `learning_rate: 5.0e-6` (35), `training_steps: 1000` (36), `loss_type: "grpo"` (42), `max_completion_length: 512` (45), `max_prompt_length: 7680` (50), `generation_backend: "vllm"` (69, auto-falls back to HF for Gemma-4)
+- `reward.function: "reward_business_logic"` (74). The `reward.weights` block (84-88) is **informational only** — a code comment at lines 82-83 states grpo.py reads `reward.function` but NOT `reward.weights`; live weights are the constants in `reward_business_logic.py`. **Changing component weights requires editing the Python constants, not the YAML.**
+- Data source: `data/output/task_a` (91)
+- A stabilized sibling exists: `/workspaces/ai-agent-llms/configs/training/grpo_cat_a_diagnostic.yaml` (50-step; `scale_rewards=none`, `loss_type=dr_grpo`, `max_grad_norm=0.2`, `num_generations=16`, `lr=1e-6`, `beta=0.05`, `temp=0.8`).
+
+---
+
+## 4. Existing upsampling / row-weighting — NONE
+
+There is **no data-upsampling or per-turn row-weighting mechanism anywhere** in `scripts/` or `training/`. Confirmed:
+- The only hits for "upsampl"/"tool-turn" are prose in `/workspaces/ai-agent-llms/scripts/passk_tool_emission_probe.py` (lines 19, 199), describing the *planned* factorial (`response_only` + tool-turn upsampling) as a future lever — it was never implemented.
+- The SFT split builder `/workspaces/ai-agent-llms/scripts/split_task_a_sft.py` only **shuffles** rows (line 134, `random.Random(seed).shuffle`) and writes `_write_split`. No weighting, no oversampling, no turn-type filtering.
+- No `WeightedRandomSampler`, `sample_weight`, `repeat_factor`, or `oversample` logic in the training code.
+- SFT operates at whole-conversation granularity (`_load_split`, sft.py lines 589-619) — it does not split turns, so there is no per-turn hook to weight in the SFT path today.
+
+Implication for re-scoping: upsampling "state-advancing turns" would be **net-new** code. The natural insertion points are (a) `_load_grpo_jsonl` (grpo.py, emits per-turn rows — you could duplicate/weight advancing rows there), or (b) a new SFT slicer if you move SFT to per-turn rows.
+
+---
+
+## 5. GRPO data slicing — `_load_grpo_jsonl`
+
+**File:** `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/grpo.py`, `_load_grpo_jsonl(data_dir, split)` lines 236-385.
+
+Multi-turn → single-turn conversion (this is the "announce-only rows" source):
+- Iterates conversations (~33-49 messages each). For each, finds assistant indices (line 323-325), then keeps only assistant turns **preceded by `user` or `system`** (lines 326-329). **Assistant turns preceded by a `tool` response are dropped** (`n_skipped_tool_preceded`, line 330) — TRL rejects `tool` as the last prompt role.
+- Per emitted row (lines 332-373): `prompt` = messages up to the user turn; `ground_truth` (JSON string column) carries `state_sequence` = the **single** `{from,to}` from *this* assistant turn's `annotations.state_transition` (lines 342-343), plus this turn's `tool_calls` (line 344), `terminal_state`, and `terminal_reached` (True only on the final emitted row of a terminal conversation, lines 350-351).
+- `valid_transitions` sourced from `workflow_graph.transitions` (lines 309-319).
+- GT tool-call sanitization drops fabricated-required-arg calls (`_sanitize_gt_tool_calls` lines 219-233, `_gt_tool_call_is_invalid` 192-216).
+
+**Why "announce-only" rows arise:** slicing at `user→assistant` boundaries means every emitted training row is a *first-after-user* assistant turn. In the data (see §6), those first-after-user turns are exactly the **state-advancing** turns (`from != to`) that emit `[STATE: X → Y]` with **no tool call**. The tool-carrying turns are the self-loop follow-ups preceded by `tool` responses — which slicing **drops**. So the single-turn GRPO row distribution is skewed toward announce-only (destination-selection) turns, which is directly aligned with re-scoping around state-transition accuracy.
+
+---
+
+## 6. State annotations `[STATE: X -&gt; Y]` and per-turn labeling
+
+**Regex / parser:** `/workspaces/ai-agent-llms/src/llm_workflow_agents/eval/state_accuracy.py`
+- `_STATE_PATTERN` line 19-21: `\[STATE:\s*([A-Za-z_]\w*)\s*(?:→|-&gt;)\s*([A-Za-z_]\w*)\s*\]` — accepts both `→` and `-&gt;`.
+- `parse_state_transitions(messages)` line 64; wrapped by `extract_state_annotations(text)` in `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/reward_utils.py` lines 17-22.
+
+**In training data** (`data/output/grpo/task_a/train.jsonl`, `data/output/sft/task_a_splits/*.jsonl`): each assistant message carries `annotations.state_transition = {"from": X, "to": Y}` and the `[STATE: X → Y]` text appears inline as the first line of `content`. Conversation-level GT lives at `ground_truth.state_sequence` (list of `{from,to}`), plus `tool_calls`, `tool_chain_dependencies`, `terminal_state`, `terminal_reached`. The workflow graph is at `workflow_graph.{states, transitions, initial, terminal}`.
+
+**Per-turn "state-advancing" vs "self-loop" labeling:** There is **no explicit label field** in the data. A self-loop is derivable as `from == to`. However, `classify_turn` provides the canonical derivation logic:
+
+- `classify_turn(pred_transitions, cursor, gold_transitions)` — `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/trajectory_rollout.py` lines 170-193. **Self-loops `(X,X)` are dropped before matching** (line 187, `t[0] != t[1]`). Returns `("stall", cursor)` if no effective transition, `("advance", cursor+n)` if the emitted transitions equal the next n gold transitions, else `("diverged", cursor)`. This is the single source of truth used by the trajectory reward (reward_business_logic.py line 249) and `_transitions_to_sequence` (state_accuracy.py lines 129-135) which collapses consecutive dupes.
+
+**Empirically confirmed** on `data/output/grpo/task_a/train.jsonl` (first conversation, 16 assistant turns): the two turn types are cleanly complementary —
+- **State-advancing turns (`from != to`)**: emit `[STATE]` transition, **carry no tool_calls** → these are the "announce-only" rows.
+- **Self-loop turns (`from == to`)**: **carry the tool_calls** (all 5 self-loops in the sample had `tool_calls=True`; all 11 advancing turns had `tool_calls=False`).
+
+This is the crux for your re-scope: to weight/upsample "state-advancing" (destination-selection) turns you can select on `annotations.state_transition["from"] != ["to"]`, and the reusable classifier is `classify_turn` in `trajectory_rollout.py`. There is no `turn_type` field to key on today — it must be derived.
+
+---
+
+## Reusable mechanisms summary
+
+- **State scoring:** `_graded_state_match` / `_partial_state_match` (reward_business_logic.py 55-114); `state_sequence_match`, `compute_transition_accuracy` (reward_utils.py 32-40 → eval/state_accuracy.py).
+- **Turn classification (advance/stall/diverged, self-loop aware):** `classify_turn` (trajectory_rollout.py 170-193).
+- **Legality:** `transition_legality_score` (reward_utils.py 112-135).
+- **Loss masking:** `render_response_only_sample` + `_render_chat_response_only` (sft.py 26-92, 656-674).
+- **Per-turn row generation:** `_load_grpo_jsonl` (grpo.py 236-385) — the place to add advancing-turn upsampling/weighting.
+- **Reward weights are Python constants** (reward_business_logic.py 42-45), NOT config-driven — re-scoping the reward toward state-transition means editing these constants.
+- **No upsampling infrastructure exists** — it would be net-new.
+
+One thing to reconcile before proceeding: your brief describes a 5-component reward with `state_transition_correctness=0.30`, but the live Cat A reward is 4-component with `state_transition=0.40`. Confirm which baseline the redesign is measured against.</result>
+<usage><subagent_tokens>76774</subagent_tokens><tool_uses>20</tool_uses><duration_ms>168990</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aee4537afb131a285</task-id>
+<tool-use-id>toolu_016zY7HLBBgkdnL3Fbo7VUw7</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/998002e4-bf1f-4ba6-a1ed-15f9279b94ef/tasks/aee4537afb131a285.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore audit/eval tooling" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything needed for a comprehensive report. Here are my findings.
+
+---
+
+# Findings: state-transition accuracy drop (0.817 → 0.687) — data-side vs model-side
+
+## 1. The audit script
+
+**Primary:** `/workspaces/ai-agent-llms/scripts/heldout_composite_audit.py` (the row-level audit that produced both the n=150 0.817 and the n=284 0.687 figures).
+**Companion:** `/workspaces/ai-agent-llms/scripts/heldout_composite_check.py` (aggregate-only gate; same generation path).
+
+**What it reads.** Both call helpers from `/workspaces/ai-agent-llms/scripts/preflight_entropy_diag.py`:
+- `_sample_prompts(data_dir, split, n_prompts, seed)` — `preflight_entropy_diag.py:37`. Default `--data-dir data/output/grpo/task_a`, `--split validation`, so it reads `{data_dir}/{split}.jsonl` = `data/output/grpo/task_a/validation.jsonl`. It slices conversations with the production slicer `_load_grpo_jsonl` (one row per user→assistant turn) and **dedupes by first-user-message** (`preflight_entropy_diag.py:60-77`). That dedupe is why `--n-prompts 290` yields **284 unique rows** (per doc §11); the earlier run used `--n-prompts 150`.
+- `_decode_gt(gt_str)` — `preflight_entropy_diag.py:88` — decodes the per-row gold JSON (`state_sequence`, `tool_calls`, `terminal_state`).
+
+**How state accuracy is computed.** `heldout_composite_audit.py::_components` (`heldout_composite_audit.py:43-92`):
+- `pred_trans = extract_state_annotations(comp)` (parses `[STATE: X → Y]` from the completion),
+- `gt_trans` built from `gt["state_sequence"]` `{from,to}` pairs,
+- `state_acc = state_sequence_match(pred_trans, gt_trans)` when GT has a transition, else `1.0 if not pred_trans else 0.0` (`heldout_composite_audit.py:64-68`).
+- Composite = `0.4*state_acc + 0.4*tool_f1 + 0.2*task` (`heldout_composite_audit.py:77`).
+
+**GPU requirement — this is the crux for your comparison.** The audit has two separable phases:
+- **Generation (needs GPU):** `_generate_for_checkpoint` (`preflight_entropy_diag.py:142`) imports `unsloth.FastLanguageModel`, loads the checkpoint `load_in_4bit=True`, and greedily decodes (`heldout_composite_audit.py:118-130`). This is the only GPU-bound part.
+- **Scoring (pure CPU):** `_components` and the whole reduction (`heldout_composite_audit.py:132-158`) are pure Python. `_heldout_composite_score` in `grpo.py:541` is explicitly documented "Pure/CPU-only and unit-tested."
+
+So: **if per-row completions were cached, re-scoring / re-slicing state accuracy needs no GPU.** They are not cached (see §4). Regenerating completions on a checkpoint requires a GPU.
+
+## 2. State-accuracy eval logic — `/workspaces/ai-agent-llms/src/llm_workflow_agents/eval/state_accuracy.py`
+
+- Regex `_STATE_PATTERN` (`state_accuracy.py:19-21`): matches `[STATE: X → Y]` or `[STATE: X -&gt; Y]`.
+- `parse_state_transitions(messages)` (`state_accuracy.py:64`): pulls `(from,to)` tuples from assistant messages in order.
+- `compute_transition_accuracy(predicted, ground_truth)` (`state_accuracy.py:103`): **positional per-turn** scoring — `correct` when `predicted[i] == ground_truth[i]`; `accuracy = correct/len(ground_truth)`; empty GT → `1.0 if not predicted else 0.0`. This is what the audit uses (via `reward_utils.state_sequence_match`, `reward_utils.py:32-40`).
+- `compute_sequence_accuracy` (`state_accuracy.py:143`): alternative conversation-level LCS-recall metric (not the one driving the 0.817/0.687 numbers).
+- The extraction wrappers used by the audit live in `/workspaces/ai-agent-llms/src/llm_workflow_agents/training/reward_utils.py:17` (`extract_state_annotations`), `:32` (`state_sequence_match`), `:43` (`tool_call_f1`), `:104` (`reached_terminal`).
+
+Per doc §11.4 (`grpo_tool_emission_gap_review.md:855-864`): `state_acc` is strictly binary (89 zeros / 195 ones at n=284); 87/89 failures get `from` right and `to` wrong — a destination-selection problem, not a formatting one.
+
+## 3. Backup directories and current canonical data
+
+**Three `*.pre_r12fix_backup_20260714T104107Z` dirs** (all snapshot Jul 7, pre-regeneration):
+- `/workspaces/ai-agent-llms/data/output/grpo/task_a.pre_r12fix_backup_20260714T104107Z/` — `train.jsonl` (75MB), `validation.jsonl` (8.6MB)
+- `/workspaces/ai-agent-llms/data/output/sft/task_a_splits.pre_r12fix_backup_20260714T104107Z/` — `train/validation/test.jsonl` (190MB / 22.9MB / 10.8MB)
+- `/workspaces/ai-agent-llms/data/output/sft/task_a_cleaned.pre_r12fix_backup_20260714T104107Z/`
+
+**Current canonical (regenerated Jul 14):**
+- `/workspaces/ai-agent-llms/data/output/grpo/task_a/` — `train.jsonl` (66MB), `validation.jsonl` (7.6MB)
+- `/workspaces/ai-agent-llms/data/output/sft/task_a_splits/` — `train/validation/test.jsonl` (93MB / 11.1MB / 5.5MB)
+
+Note the regenerated splits are markedly smaller (e.g. splits validation 11.1MB vs 22.9MB; grpo validation 7.6MB vs 8.6MB) — consistent with the R12 malformed-role strip (commit `6114866 fix(data): strip malformed-role messages`). Both `grpo/task_a` and `sft/task_a` are DVC stage outputs and git-ignored via `/workspaces/ai-agent-llms/data/output/.gitignore`.
+
+## 4. Cached generation output from the n=284 run — NONE present
+
+The audit was configured to write `runs/preflight/heldout_composite_audit_ckpt1000_regen.json` (doc §11, `grpo_tool_emission_gap_review.md:798`), which would contain per-row `completion`, gold labels, and the three components. **That file, and every `runs/preflight/*.json` audit artifact, is gitignored and absent on disk.** `/workspaces/ai-agent-llms/runs/preflight/` contains only `provenance_20260707_040507.txt`. Searches for cached per-row completions/scores (`"completion"`, `"pred_trans"`, `mean_state_acc`) across all JSON returned nothing outside `.venv`. The checkpoints dir holds only weights/`trainer_state.json`; `data/output/benchmark/` holds teacher-generated conversations and corruption reports, not model-completion audit rows.
+
+**Conclusion:** a model-side comparison (re-scoring the n=284 completions, or scoring the same checkpoint on the backup corpus) **cannot be done without re-generating on a GPU** — no completions are saved.
+
+## 5. Gold-distribution comparison between two data dirs — no dedicated script, but a pure-data primitive exists
+
+There is **no existing script that diffs gold state-transition distributions between two directories.** The closest reusable, GPU-free primitive is in `/workspaces/ai-agent-llms/scripts/rederive_target_bar.py`:
+- `build_profile(data_dir, split)` (`rederive_target_bar.py:186`) loads a dir via the CPU-only `_load_grpo_jsonl` and extracts, per row, `(has_tool_calls, has_transition, is_terminal)` from the gold `state_sequence`/`terminal_state`.
+- `summarize_profile` (`rederive_target_bar.py:212`) reports `frac_tool_expected`, `frac_state_term_applies`, etc.
+- CLI takes `--data-dir`/`--split` (`rederive_target_bar.py:228`), no model load.
+
+Running it against `data/output/grpo/task_a` and against `.../task_a.pre_r12fix_backup_...` and diffing the summaries gives a pure data-side comparison of **term applicability** — but it profiles booleans, not the full `(from,to)` transition distribution. For a true transition-distribution diff you would read `gt["state_sequence"]` directly (the loader is CPU-only: `grpo.py::_load_grpo_jsonl`, `grpo.py:236`); no such script currently exists.
+
+Caveat on the loader: `_load_grpo_jsonl` applies the GT sanitizer `_SANITIZE_INVALID_TOOL_GT` (doc §4), which drops invalid **tool_calls** on load — it does **not** touch `state_sequence`, so state-transition profiling is unaffected.
+
+## Directly relevant doc context
+
+The exact data-vs-model question is already posed in `/workspaces/ai-agent-llms/docs/grpo_tool_emission_gap_review.md`:
+- §11.5 "Open question before the retrain — Why did state accuracy fall 0.817 → 0.687?" (`:878-885`): states 0.817 is the pre-regeneration n=150 audit and 0.687 is the regenerated n=284; hypothesizes "either the R12 regeneration changed the state-transition distribution, or the earlier figure was computed on an easier slice," and recommends the cheap check: **run the same audit against the `*.pre_r12fix_backup_20260714T104107Z` directories.**
+- §11.6 item 1 (`:889`): "Resolve §11.5 (cheap, **no new generation for the data-side comparison**)."
+- The n=150 0.817 origin: `/workspaces/ai-agent-llms/docs/grpo_heldout_metric_and_gt_audit.md:44` (state_acc 0.817 on the 109 transition-expecting rows).
+
+**Bottom line for your sanity-check design:** the data-side half (compare gold state-transition distributions / term applicability between `grpo/task_a` and its `pre_r12fix_backup`) is fully runnable **without a GPU** today using `rederive_target_bar.py::build_profile` as a starting point (or a direct read of `state_sequence`). The model-side half (does the checkpoint behave differently on the two corpora) **requires GPU regeneration** because no per-row completions from the n=284 run were persisted.</result>
+<usage><subagent_tokens>63256</subagent_tokens><tool_uses>26</tool_uses><duration_ms>198388</duration_ms></usage>
+</task-notification>
+
+---
+
+Two corpus were generated independently. Nothing is related. The current corpus (9,131 training conversations) is recent and cleaned one.
+
+---
+
+Is R12 fix happen before or after checkpoint-1000
+
+---
+
+How is data/output/sft/task_a_splits is generated?
+
+---
+
+Is @scripts/clean_corrupted_conversations.py in R12
+
+---
+
+should we wire up in dvc `task_a_sft` stage?
+
+---
+
+Did you wire it in?
+
+---
+
+yes
+
+---
+
+Should we separate cleaning to another stage?
+
+---
+
+yes
+
+---
+
+Should `task_a_sft_gemma4_26b_a4b` depend on @data/output/sft/task_a_splits instead of @data/output/sft/task_a_cleaned
+
+---
+
+yes
+
+---
+
+Let's tag current corpus, then regenerate cleaned and splits corpus and tag as another version.
+
+---
+
+look like we are re-generating the data
+
+---
+
+what commands would recover specific version of corpus
+
+---
+
+Since checkpoint-1000 was trained on non-existent and corrupted corpus, should we re-train SFT?
