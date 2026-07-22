@@ -293,3 +293,115 @@ Total GPU budget: **~7–8 h if C0 clears**, **~11–12 h through C1**, **~15–
 7. **Skepticism to preserve.** `response_only`'s benefit for *destination-selection* (as opposed to the retired tool-emission story) is unproven and mechanically weaker (§5.1). C1 is worth running because it is cheap, not because it is likely to win. Do not pre-commit to it.
 
 **Implementation is gated on approval of this spec.** Net-new code required if the ladder reaches C2: a decision-balance reweighting path in `sft.py::_load_split` (B-conv), plus the 0.75→0.80 constant updates in the two gate scripts (§9). No training is launched, and no reward/data code is edited, until this spec is approved.
+
+---
+
+## 12. Round 1 results — C0 (2026-07-22)
+
+**Status: C0 FAILS the gate at both audited checkpoints. Ladder is at the C1 decision point, but see §12.4 before launching it.**
+
+### 12.1 What was run
+
+C0 trained per §6: `loss_mask: all_tokens`, no reweight, current corpus
+(`task_a_splits` 4,716/554/279, tagged `task_a-corpus-v2-2026-07-22`), all other knobs
+at the spec's held values. 1,770 optimizer steps = 3 epochs, wandb `qu6mwcts`.
+Registered as DVC out `d5438dced5a25f54af0d73e8569c6483.dir`, tagged `sft-gemma4-v3`.
+
+Eval loss fell monotonically — 0.2114 → 0.1863 → 0.1802 → **0.1798** (epochs 0.85/1.70/2.54/3.00),
+token accuracy 0.9404 → 0.9471. No overfitting signal *in the loss curve*.
+
+Two gate runs, identical protocol (`--data-dir data/output/grpo/task_a --split validation
+--n-prompts 290 --seed 42`, greedy):
+
+| | ckpt-500 (ep 0.85) | ckpt-1770 (ep 3.0) | baseline ckpt-1000 (ep 0.88) | bar |
+|---|---|---|---|---|
+| mean_composite | **0.6720** | 0.6475 | 0.7271 | 0.80 |
+| median | 0.5000 | 0.5000 | — | — |
+| frac_below_target | 0.509 | 0.540 | — | — |
+| shortfall vs bar | **−0.128** | −0.153 | −0.073 | — |
+| n_rows | 289 | 289 | 284 | — |
+
+Artifacts: `runs/preflight/heldout_composite_C0.json`, `runs/preflight/heldout_composite_C0_ckpt500.json`.
+
+### 12.2 The epoch confound — checked, real, but small
+
+ckpt-1770 was audited first (selected by eval loss per §9). That put an epoch-3.0 checkpoint
+against a baseline at epoch 0.88 — §7.3 fixes the checkpoint *across cells* but nothing fixed
+it against the *historical* baseline. C0's own ckpt-500 sits at epoch 0.8482, near-exactly
+matched to ckpt-1000's 0.876, so it was audited as the apples-to-apples run.
+
+Paired comparison (same 289 rows, same seed, greedy → deterministic, so this one is a real test):
+
+- rows differing at all: **35 / 289 (12.1%)** — 22 favor ckpt-500, 13 favor ckpt-1770
+- mean paired delta **+0.0245**, `t = +1.69` (p ≈ 0.09); two-sided sign test **p = 0.18**
+
+**Directionally consistent with mild over-training, not statistically significant.** Selecting by
+eval-loss minimum cost ~2.5pp — worth correcting in later cells, but it is not the story.
+Note the pattern anyway: eval loss improved 0.2114 → 0.1798 across those 2.15 epochs while the
+task metric moved the *other* way. **Token-level CE is a poor selector for this gate**; later
+cells should select checkpoints by the gate metric or at a fixed matched epoch, not by eval loss.
+
+### 12.3 What is and is not established
+
+1. **ESTABLISHED — C0 fails, decisively.** 0.6720 against a 0.80 bar is a −12.8pp shortfall,
+   far outside any noise floor in play. §6's premise that the corpus fix alone might clear the
+   bar ("it may clear the bar on its own — in which case the ladder ends here") is **refuted**.
+2. **NOT ESTABLISHED — "the corpus change cost quality."** Epoch-matched, C0 is 5.5pp below the
+   0.7271 baseline, but that comparison is **unpaired**: `heldout_composite_audit_ckpt1000_regen.json`
+   is not on disk, and ckpt-1000's weights were removed from the workspace by `dvc repro` (recoverable
+   at `6802c93:dvc.lock`, hash `f89238076f…`). §8's unpaired MDE is **±10.9pp**, so a 5.5pp gap sits
+   inside the noise floor. Do not let this harden into a finding. To settle it, restore ckpt-1000
+   and re-score it on the identical 289 rows — that comparison would be paired and decisive.
+3. **ESTABLISHED — the failure is structural, not marginal.** Both checkpoints collapse to the same
+   trimodal distribution: ~49% at 1.0, ~35% at exactly 0.5, ~15% at 0.0, with 5 rows anywhere else.
+   88% of rows score *identically* across a 2.15-epoch gap. The 0.5 spike is the signature of one
+   composite term passing while another fails wholesale on a stable third of the eval set — not of
+   graded partial credit, and not of a model that is nearly right.
+
+### 12.4 Next steps — component audit BEFORE C1
+
+§6's decision rule licenses C1 now. **Recommend not launching it yet.** §11.7's own caution
+("C1 is worth running because it is cheap, not because it is likely to win") reads differently
+against −12.8pp than against the −0.073 this spec was designed around: C1 would have to roughly
+double the largest effect anyone has hypothesized for masking.
+
+Ordered next steps:
+
+1. **Component audit on ckpt-500** (~30 min GPU, `scripts/heldout_composite_audit.py`, same args).
+   Not yet run. Identifies which term produces the 0.5 spike — `mean_state_acc` vs tool-F1 vs
+   completion. **If the failing term is tool-F1 rather than state accuracy, this factorial is
+   aimed at the wrong component and C1/C2 are both mis-targeted.** A 30-minute question whose
+   answer can save a 3–4 hour training cell.
+2. **Restore ckpt-1000 and re-score on the identical rows** (~35 min GPU + a DVC checkout) to
+   convert §12.3-item-2 from "inside the noise floor" to a paired verdict. Decides whether the
+   R12 corpus cleanup traded away signal — which governs whether to fold the ~4,643 clean
+   conversations from the retired legacy batch back in (see §12.5).
+3. **Then, and only then**, the C1 decision — informed by which component is actually broken.
+
+### 12.5 Corpus side-finding (2026-07-22)
+
+Content-hash comparison of the old splits (recovered from DVC cache) against the current corpus:
+the old corpus was `fresh_merged (5,549) + legacy_batch (5,194)`; the current corpus is exactly
+the fresh batch. **All** of the R12 role corruption lived in the legacy batch — 551/10,743 = 5.1%
+of the old corpus, matching R12's recorded figure exactly, with **0%** in the fresh batch. This
+confirms §4.2's verdict (deliberate cleanup, not accidental loss) by an independent route.
+
+Open: the legacy batch also held **4,643 clean conversations (89.4% of it)** that ckpt-1000 saw
+and C0 did not. Whether to recover them depends on whether the batch was retired *only* for
+corruption (now fixed by the patched cleaner → recoverable, ID remapping required since the
+namespaces overlap) or superseded on template/schema grounds (→ leave retired). Gated on step 2 above.
+
+### 12.6 Tooling fixed this round
+
+- **`sft.py` output_dir coupling** (commit `2ba5a70`). R13's timestamped patched config fed
+  `Path(config_path).stem`, so C0 wrote all its weights outside the DVC-tracked path and
+  `dvc repro` recorded a weightless 208 KB directory as the stage output. Fixed via
+  `_resolve_output_dir()` (explicit `output_dir` wins; else stem with trailing run stamp stripped),
+  with `run_phase2_sft.sh` writing and reading back one source of truth. 6 regression tests.
+  **The explicit `output_dir` key is how C1/C2 should get their own checkpoint directories** —
+  without it, C1 overwrites C0 and the C1−C0 contrast is unrecoverable.
+- **Gate threshold 0.75 → 0.80** (§9's required pre-run touch) applied in
+  `scripts/heldout_composite_check.py` + both docstrings. Two unit tests hardcoded 0.75 and were
+  rewritten to derive from `TARGET_COMPOSITE`.
+- **Still outstanding:** `scripts/run_phase2_grpo.sh` retains the fixed-path patched-config bug
+  R13 flagged for `run_phase2_sft.sh` (`PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}.yaml"`).
