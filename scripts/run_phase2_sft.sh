@@ -102,6 +102,11 @@ import yaml
 cfg = yaml.safe_load(open('${SFT_CONFIG}'))
 cfg.setdefault('model', {})['config_path'] = str(Path('${MODEL_CONFIG}').resolve())
 cfg['data']['source'] = str(Path(cfg['data']['source']).resolve())
+# Pin the checkpoint directory to the *base* config stem, not the timestamped
+# patched-config stem. sft.py would otherwise derive it from the patched
+# filename and write outside the DVC-tracked path. Set output_dir in the base
+# config to give a run its own directory (e.g. one per factorial cell).
+cfg.setdefault('output_dir', Path('${SFT_CONFIG}').stem)
 if ${NO_WANDB}:
     cfg.setdefault('logging', {}).pop('wandb_project', None)
 
@@ -116,12 +121,19 @@ import yaml, pathlib
 print(pathlib.PurePosixPath(yaml.safe_load(open('${MODEL_CONFIG}'))['model']['name']).name)
 ")
 
+# Read back the resolved run name from the patched config so CKPT_DIR below is
+# exactly what sft.py will use — these two drifted apart once already.
+RUN_NAME=$(python3 -c "
+import yaml
+print(yaml.safe_load(open('${PATCHED_CFG}'))['output_dir'])
+")
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo "=== Task A SFT — Phase 2 ==="
 echo "  Model config : $MODEL_CONFIG"
 echo "  SFT config   : $SFT_CONFIG"
 echo "  Patched cfg  : $PATCHED_CFG"
-echo "  Checkpoint   : $PROJECT_ROOT/checkpoints/sft_cat_a/$MODEL_BASENAME/"
+echo "  Checkpoint   : $PROJECT_ROOT/checkpoints/$RUN_NAME/$MODEL_BASENAME/"
 echo "  W&B          : $([ "$NO_WANDB" -eq 1 ] && echo disabled || echo enabled)"
 if [[ -n "$RESUME_FROM" ]]; then
   echo "  Resume       : $RESUME_FROM"
@@ -142,7 +154,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 # ── Train ─────────────────────────────────────────────────────────────────────
-CKPT_DIR="$PROJECT_ROOT/checkpoints/sft_cat_a/$MODEL_BASENAME"
+CKPT_DIR="$PROJECT_ROOT/checkpoints/$RUN_NAME/$MODEL_BASENAME"
 mkdir -p "$CKPT_DIR"
 LOG_FILE="$CKPT_DIR/train.log"
 echo "Logs: $LOG_FILE"

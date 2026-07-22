@@ -2,7 +2,7 @@
 """Row-level audit companion to scripts/heldout_composite_check.py.
 
 The ceiling check reports only the aggregate composite + per-row scalar. When
-it FAILs (mean < 0.75) the action is to audit reward/GT on the low rows before
+it FAILs (mean < 0.80) the action is to audit reward/GT on the low rows before
 assuming a hard policy ceiling. This script re-runs the identical greedy pass
 (same sampler, seed, checkpoint -> identical completions) but persists, per row:
 

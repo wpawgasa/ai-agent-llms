@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,33 @@ def _load_sft_config(config_path: Path) -> dict[str, Any]:
     if config.get("stage") != "sft":
         raise ValueError(f"Expected stage='sft', got '{config.get('stage')}'")
     return config
+
+
+#: Trailing run stamp appended by scripts/run_phase2_sft.sh to the patched
+#: config filename (see CLAUDE.md R13), e.g. "sft_cat_a_20260722T051246Z".
+_RUN_STAMP_RE = re.compile(r"_\d{8}T\d{6}Z$")
+
+
+def _resolve_output_dir(
+    config: dict[str, Any], config_path: Path, model_name: str
+) -> Path:
+    """Resolve the checkpoint output directory for a run.
+
+    Precedence:
+      1. Explicit ``output_dir`` in the config — the only way to give a run a
+         distinct directory (e.g. one per factorial cell).
+      2. The config filename stem, with any trailing run stamp removed.
+
+    The stamp strip matters: R13 made the patched config run-specific
+    (``sft_cat_a_20260722T051246Z.yaml``), and deriving the output directory
+    straight from that stem silently moved checkpoints to a per-run path that
+    the DVC stage does not track, leaving the declared output weightless.
+    Provenance belongs in the config filename; the checkpoint path must stay
+    stable unless asked to change.
+    """
+    explicit = config.get("output_dir")
+    run_name = str(explicit) if explicit else _RUN_STAMP_RE.sub("", config_path.stem)
+    return Path("checkpoints") / run_name / Path(model_name).name
 
 
 def _lora_spec_for(config: dict[str, Any], model_name: str) -> Any:
@@ -775,7 +803,7 @@ def train_sft(
     # gradient_accumulation_steps when per_device is fixed at 1.
     from trl import SFTConfig, SFTTrainer
 
-    output_dir = Path("checkpoints") / Path(config_path).stem / Path(model_name).name
+    output_dir = _resolve_output_dir(config, Path(config_path), model_name)
     effective_bs = training_cfg.get("effective_batch_size", 8)
     per_device_bs = training_cfg.get("per_device_train_batch_size", 1)
     grad_accum = max(1, effective_bs // max(1, per_device_bs))

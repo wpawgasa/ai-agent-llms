@@ -14,12 +14,13 @@ Unlike the RFT/trajectory probes this does one greedy pass only (no
 sampling, no headroom) and scores with the *strict* composite
 (``_heldout_composite_score`` — the same metric ``_HeldOutEvalCallback``
 logs as ``eval/held_out_composite`` during live GRPO training), not the
-graded training reward. Target: >= 0.75 (eval/composite_score.py,
-``compute_weighted_workflow_score``).
+graded training reward. Target: >= 0.80, re-derived for the per-turn-fair
+metric (see the 2026-07-22 Cat A factorial spec §9); this supersedes the
+0.75 whole-conversation target in eval/composite_score.py.
 
 Gate:
-  PASS : mean_composite >= 0.75  -> ship SFT-only.
-  FAIL : mean_composite <  0.75  -> audit reward/GT before assuming a ceiling.
+  PASS : mean_composite >= 0.80  -> ship SFT-only.
+  FAIL : mean_composite <  0.80  -> audit reward/GT before assuming a ceiling.
 
 The reduction (summarize_heldout_check) and the gate (classify_gate) are
 pure and unit-tested in tests/unit/test_heldout_composite_check.py.
@@ -48,8 +49,10 @@ if str(SRC) not in sys.path:
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Gate threshold (eval/composite_score.py: compute_weighted_workflow_score target)
-TARGET_COMPOSITE = 0.75
+# Gate threshold. Re-derived 2026-07-22 for the per-turn-fair metric: 0.80,
+# not the 0.75 of eval/composite_score.py's original whole-conversation target
+# (docs/superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md §9).
+TARGET_COMPOSITE = 0.80
 
 
 def summarize_heldout_check(row_scores: list[float]) -> dict[str, Any]:

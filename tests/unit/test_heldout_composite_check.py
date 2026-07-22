@@ -41,7 +41,11 @@ class TestSummarizeHeldoutCheck:
         ]
 
     def test_all_above_target(self) -> None:
-        s = summarize_heldout_check([0.9, 0.85, 0.76])
+        # Derived from the constant, not a literal — the threshold moved
+        # 0.75 -> 0.80 on 2026-07-22 and these assertions silently broke.
+        s = summarize_heldout_check(
+            [TARGET_COMPOSITE + 0.10, TARGET_COMPOSITE + 0.05, TARGET_COMPOSITE + 0.01]
+        )
         assert s["frac_below_target"] == 0.0
 
     def test_empty(self) -> None:
@@ -60,7 +64,7 @@ class TestClassifyGate:
         return {"mean_composite": mean_composite}
 
     def test_pass_above_target(self) -> None:
-        v, detail = classify_gate(self._summary(0.80))
+        v, detail = classify_gate(self._summary(TARGET_COMPOSITE + 0.05))
         assert v == "PASS"
         assert detail["checks"][f"mean_composite >= {TARGET_COMPOSITE}"] is True
 
@@ -71,7 +75,7 @@ class TestClassifyGate:
 
     def test_pass_at_exact_boundary(self) -> None:
         # >= is inclusive: exactly the target counts as clearing it.
-        v, _ = classify_gate(self._summary(0.75))
+        v, _ = classify_gate(self._summary(TARGET_COMPOSITE))
         assert v == "PASS"
 
     def test_fail_on_empty_summary(self) -> None:
