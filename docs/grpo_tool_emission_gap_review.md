@@ -1,10 +1,62 @@
 # Tool-Emission Gap ("Announce-but-Don't-Call") — Recommendations + Fable Review
 
-**Date:** 2026-07-14
+**Date:** 2026-07-14 (original) — **diagnosis superseded 2026-07-22, see §11**
 **Base:** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1000` (Gemma-4 26B-A4B-it, HF-generate path per R9)
 **Companion to:** [`grpo_heldout_metric_and_gt_audit.md`](grpo_heldout_metric_and_gt_audit.md) (source of the "announce-but-don't-call" finding this doc acts on) and [`grpo_viability_investigation.md`](grpo_viability_investigation.md) (RFT headroom probe this doc reprioritizes).
 
-## TL;DR
+> **STATUS (2026-07-22): the title's diagnosis is retired — read §11 first.** This doc started as
+> an investigation into "announce-but-don't-call" tool emission (tool-F1 **0.087**, §1). §§7–11
+> (dated 2026-07-21/22) progressively overturned that: on the full regenerated sample tool-F1 is
+> actually **0.4623** (5.3× higher than the 0.087 headline), and the **dominant deficit is
+> state-transition accuracy** (0.6866 vs a 0.85 target) — specifically destination selection
+> (right `from`, wrong `to`), not tool emission. The per-turn-fair pass bar is **0.80** (§10), not
+> the 0.75 used throughout §§1–6.
+>
+> **§11.5's open question is resolved** (2026-07-22): the earlier "state accuracy fell 0.817 →
+> 0.687" comparison is not a model regression — it compares two largely disjoint, non-comparable
+> eval samples (only 4.1%/8.9% conversation overlap; the "GT expects no transition" exclusion
+> bucket that made 0.817 a restricted sub-population figure has since vanished from the corpus).
+> See the resolution note appended to §11.5 and `scripts/sanity_check_state_acc_drop.py`. **0.6866
+> is the trustworthy current baseline.**
+>
+> The re-scoped retrain design is
+> [`docs/superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md`](superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md)
+> — an SFT-recipe factorial targeting destination-selection accuracy, not tool emission or GRPO
+> (RL headroom is dead per §9). That spec also surfaced a new, load-bearing finding, since
+> **confirmed via W&B + git/DVC provenance** (2026-07-22): ckpt-1000's actual training run
+> (`wandb.ai/wpawgasa/huggingface/runs/uklfswk5`, started 2026-07-02T04:58:27Z, git commit
+> `ef837079`) consumed a `data/output/sft/task_a_cleaned` snapshot DVC-pinned at that commit to
+> hash `8ef8681808e348f82eac36edbbd6c2ae.dir` (131 files, ~228MB). The **current** `task_a_cleaned`
+> is a different DVC hash, `3d6a4d3eed110546eccb46a94c5d68cd.dir` (5 files, ~110MB — 48% the size,
+> restructured from many loose files into 5 consolidated merged files). **A DVC hash mismatch is
+> not circumstantial — it means the file contents differ.** The corpus ckpt-1000 trained on has
+> been replaced (via an intervening consolidation + the R12 fix) and is not recoverable in this
+> environment (no GCS credentials to `dvc pull` the old blob). This is a confirmed corpus-version
+> discontinuity, not a naming/definition artifact — blocking for the factorial spec's control cell
+> (§4.2 there).
+>
+> **Blocker resolved, decision made (2026-07-22): retrain SFT, starting with the spec's C0 control
+> cell.** ckpt-1000's now-gone corpus is confirmed to have carried real corruption (R12's own
+> contamination analysis of this same corpus lineage: ~5.1%/5.7%/4.6% train/val/test malformed-role
+> messages) — the current corpus's replacement of it was a deliberate fix, not accidental loss.
+> The current corpus was further re-verified this session by *actually running* the DVC pipeline
+> (`dvc repro -s -f` on `task_a_sft_clean` + `task_a_sft_splits`, not just a hash-commit): output
+> byte-identical, 0 rows altered by either cleaning pass. This run also surfaced and fixed two real
+> DVC bugs — `task_a_sft_gemma4_26b_a4b` was tracking `task_a_cleaned` instead of the
+> `task_a_splits` it actually reads (`sft.py::_load_split`), and `task_a_sft_clean`/
+> `task_a_sft_splits` had over-indented `cmd:` continuation lines that YAML folds into literal
+> newlines — a shell then treats those as command separators, so these stages likely never
+> successfully ran via `dvc repro` before this session, only via manual script runs + `dvc commit`.
+> Both fixed; `task_a_grpo` has the same cmd bug, flagged but not fixed (out of scope). The corpus
+> is tagged `task_a-corpus-v1-2026-07-22` / `task_a-corpus-v2-2026-07-22` (git tags pinning the
+> exact `dvc.lock` state — see "Recovering a tagged corpus version" below). See the factorial
+> spec's §4.2/§11 item 1 for the full resolution writeup.
+>
+> Everything below this banner is preserved as the dated investigation trail. §§1–6's numbers and
+> framing (0.087, 0.75 target, 0.674 baseline, "one concentrated weakness") are **historical, not
+> current** — read them for the reasoning path, not as present fact.
+
+## TL;DR (original, 2026-07-14 — superseded, see status banner above and §11)
 
 Cat A tool-calling is under the 0.75 target (honest per-turn-fair baseline: 0.674) because of one
 concentrated, genuine weakness: on the 52/150 held-out rows where a tool call is expected, the
@@ -15,7 +67,7 @@ Fable 5 adversarial review found the diagnosis plausible but unproven, surfaced 
 (ckpt-1000 predates the GT sanitizer), and reordered the plan. **Net effect: do not retrain SFT
 yet** — run cheap forensics and the already-overdue RFT headroom re-probe first.
 
-## 1. The gap, restated
+## 1. The gap, restated (original framing — superseded, see §11)
 
 From the held-out audit (`grpo_heldout_metric_and_gt_audit.md` §2): of 52 tool-expected rows, 47
 score 0 tool-F1. Of the ~30 that emit no tool call at all, ~15 are "announce-but-don't-call" —
@@ -884,12 +936,90 @@ computed on an easier slice. Since state accuracy is now the primary lever, **th
 before the factorial run** — otherwise the run may be tuned against a moving target. Cheap check: run
 the same audit against the `*.pre_r12fix_backup_20260714T104107Z` directories preserved in §5.6.
 
+> **RESOLVED (2026-07-22, no-GPU session).** Ran `scripts/sanity_check_state_acc_drop.py` — a
+> pure-CPU comparison using the real production slicer (`_load_grpo_jsonl`) against the current
+> canonical `data/output/grpo/task_a` and the preserved `*.pre_r12fix_backup_20260714T104107Z`
+> snapshot, both `validation` split. Verdict: **`DIFFERENT_VALIDATION_SETS_NOT_MODEL_REGRESSION`**.
+>
+> - **Dominant factor:** the two validation sets are almost entirely disjoint conversation sets —
+>   only 12/290 current conversations (4.1%) also appear among the backup's 135 *unique*
+>   conversation IDs (8.9% of backup). `split_task_a_sft.py --force` (per CLAUDE.md R12)
+>   regenerated the train/validation/test partition from scratch on a grown raw corpus, so
+>   validation-set *membership* changed independently of any per-row cleaning. 0.817 (n=150) and
+>   0.6866 (n=284) are not two measurements of the same held-out sample.
+> - **Compounding factor:** the original 0.817 was explicitly restricted (by
+>   `grpo_heldout_metric_and_gt_audit.md` §2) to the 109/150 rows with a non-empty GT
+>   `state_sequence`, excluding 41/150 "empty GT transition" rows scored separately as an artifact.
+>   In the *current* corpus, **0% of rows have an empty GT transition** (vs 25.1% in the backup) —
+>   that exclusion bucket has essentially vanished, so even setting aside the conversation-set
+>   mismatch, "0.817" and "0.6866" were never computed over comparable denominators.
+> - **Tertiary observation:** corpus composition also differs sharply — backup rows are 94.8%
+>   "advancing" (`from≠to`) vs current rows 62.5% advancing (37.5% self-loop), and total sliced
+>   row count differs 1.83× (1,609 → 2,943) on unrelated conversation sets.
+> - A tangential, unchased finding: the backup's `validation.jsonl` has 290 lines but only 135
+>   unique `conversation_id`s (155 duplicate rows) — a pre-R12 data-quality artifact in a file
+>   nothing trains or evaluates against today, noted in case it resurfaces elsewhere.
+>
+> **Conclusion: the drop is not evidence ckpt-1000 regressed. 0.6866 (n=284, current canonical
+> corpus) is the trustworthy baseline to design the factorial run against — no moving-target risk
+> from this comparison.** The GPU-side confirmatory reproduction (re-run the audit *against the
+> backup corpus* with ckpt-1000 to see whether it recovers ~0.817 there) remains a nice-to-have for
+> a future GPU-host session but is not blocking, since the data-side evidence above is already
+> dispositive that the two samples are structurally incomparable regardless of what the model
+> scores on either. Artifact: `runs/preflight/sanity_check_state_acc_drop.json`.
+
 ### 11.6 Revised plan
 
-1. **Resolve §11.5** (cheap, no new generation for the data-side comparison).
-2. **Re-scope the factorial run around state-transition accuracy**, not tool emission. The
-   `response_only` + tool-turn-upsampling design in §4 step 4 was built for a diagnosis that no
-   longer holds; tool-turn upsampling may still help the 53.8% of tool-expected rows scoring zero,
-   but it does not obviously address destination selection.
+1. ~~**Resolve §11.5**~~ **Done — see the resolution above (2026-07-22).**
+2. ~~**Re-scope the factorial run around state-transition accuracy**~~ **Done — see
+   [`docs/superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md`](superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md)
+   (2026-07-22).** A cost-disciplined SFT-recipe ladder (control → `response_only` masking →
+   gated stay/advance decision-balance reweighting), explicitly not a GRPO/reward factorial since
+   §9 already shows RL headroom is dead. Tool-turn upsampling is demoted to a guardrail + explicit
+   next-round target (data regeneration), not folded into this round — it doesn't obviously address
+   destination selection and would confound the state-accuracy result. That spec also surfaced a
+   new **blocking** finding, since **confirmed via W&B + git/DVC provenance** (2026-07-22, prompted
+   by the user pointing at the actual training run log): ckpt-1000's training run
+   (`wandb.ai/wpawgasa/huggingface/runs/uklfswk5`, started 2026-07-02T04:58:27Z, git commit
+   `ef837079`) consumed `data/output/sft/task_a_cleaned` DVC-pinned at that commit to hash
+   `8ef8681808e348f82eac36edbbd6c2ae.dir` (131 files, ~228MB; `train.log` confirms `Map: 9131`
+   train / `1074` eval rows downstream of it). The **current** `task_a_cleaned` is a *different*
+   DVC hash, `3d6a4d3eed110546eccb46a94c5d68cd.dir` (5 files, ~110MB, feeding the current
+   4,716/554/279 `task_a_splits`) — 48% the byte-size and restructured from 131 loose files into 5
+   consolidated merged files. This is a **hash-verified**, not inferred, corpus-version
+   discontinuity: R12's "the corpus grew (4,414→4,716)" narrative compared against a different,
+   stale, now-absent directory and never accounted for this. The July-2 blob is not recoverable in
+   this environment (no GCS credentials to `dvc pull` it). Corpus provenance must be confirmed
+   before any GPU spend on the factorial run; see the spec's §4.2 and §11 item 1.
 3. **Retire the 0.087 figure and the §1/TL;DR framing** wherever quoted — superseded by 0.4623.
+   Done at the document level via the top-of-doc status banner (2026-07-22); §§1–6 are left
+   textually unchanged as the dated historical record rather than silently rewritten.
 4. Bar remains **0.80** (§10), now empirically corroborated by the measured 0.9494 abstention.
+
+### 11.7 Recovering a tagged corpus version
+
+The current, execution-verified `task_a_cleaned`/`task_a_splits` state is pinned by two git tags
+(same data, `v2` additionally confirmed by actually running the pipeline rather than a hash-commit
+— see §11.6 item 1's resolution note above): `task_a-corpus-v1-2026-07-22`,
+`task_a-corpus-v2-2026-07-22`.
+
+**In place** (restores `dvc.lock` on the current branch, then syncs data to match):
+```
+git checkout <tag> -- dvc.lock
+dvc checkout data/output/sft/task_a_cleaned data/output/sft/task_a_splits
+```
+Leaves `dvc.lock` modified in the working tree — commit it to roll forward permanently, or
+`git checkout HEAD -- dvc.lock` to undo.
+
+**Isolated** (doesn't touch the current branch — safer for just inspecting an old version):
+```
+git worktree add /tmp/task_a-<tag> <tag>
+cd /tmp/task_a-<tag>
+dvc checkout
+```
+
+Both need the data blocks in the **local** DVC cache (`.dvc/cache`) by hash. That's satisfied here
+since this session created and ran both tags. On a fresh clone or a different machine, `dvc pull`
+first — which needs the `looloo-ocr` GCS service-account credentials this environment doesn't have
+(the same limitation that made the July-2/ckpt-1000 corpus unrecoverable, §4.2 of the factorial
+spec).
