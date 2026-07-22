@@ -21,29 +21,52 @@ stages:
       - data/output/benchmark/task_a
     # Levels L1–L5, 200 samples/level, seed=100, lang=mixed, behavior=default
 
-  task_a_sft:
+  task_a_sft_generate:
     desc: >-
-      4 450 raw conversations generated for SFT, then cleaned to 4 445.
-      Requires OPENAI_API_KEY and GEMINI_API_KEY.
-    cmd: >-
-      ./scripts/generate_sft_data.sh &&
-      python scripts/clean_task_a_sft.py
-        --input-dir data/output/sft/task_a
-        --output-dir data/output/sft/task_a_cleaned
-        --quiet
+      Raw Task A SFT conversations from the teacher models (4 450 at last
+      generation). Requires OPENAI_API_KEY and GEMINI_API_KEY. Split out from
+      cleaning (2026-07-22) so a cleaning-script change doesn't force this
+      expensive, non-deterministic teacher-API regen too.
+    cmd: ./scripts/generate_sft_data.sh
     deps:
       - scripts/generate_sft_data.sh
-      - scripts/clean_task_a_sft.py
       - src/llm_workflow_agents/data/generate_workflows.py
       - data/templates/workflow_prompt_template.txt
       - data/templates/tool_schemas_L1_to_L5.json
     outs:
       - data/output/sft/task_a
-      - data/output/sft/task_a_cleaned
     # Levels L1–L5, seed=42, behavior=adversarial (87.5%) + cooperative_only (12.5%)
     # Legs: en/gpt-5.4-mini, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
+
+  task_a_sft_clean:
+    desc: >-
+      Deterministic cleaning pass over the raw Task A corpus (4 450 raw ->
+      4 445 at last run, predates the corruption pass below): structural
+      fixes (clean_task_a_sft.py), then garbled-Thai removal
+      (clean_corrupted_conversations.py). No API keys required.
+    cmd: >-
+      python scripts/clean_task_a_sft.py
+        --input-dir data/output/sft/task_a
+        --output-dir data/output/sft/task_a_cleaned
+        --quiet &&
+      python scripts/clean_corrupted_conversations.py
+        data/output/sft/task_a_cleaned/*.jsonl
+        --no-backup
+        --quiet
+    deps:
+      - data/output/sft/task_a
+      - scripts/clean_task_a_sft.py
+      - scripts/clean_corrupted_conversations.py
+      - src/llm_workflow_agents/data/data_validator.py
+    outs:
+      - data/output/sft/task_a_cleaned
     # Cleanup: drops 5 truncated rows, strips 264 role-confused tool messages,
     #          flags 476 empty-terminal convs with terminal_reached=false
+    # Corruption pass (added 2026-07-22): scripts/clean_corrupted_conversations.py
+    #          drops teacher-transcription-corrupted (garbled Thai) rows in place,
+    #          --no-backup so task_a_cleaned stays exactly the DVC-tracked *.jsonl
+    #          set. Was a standalone/unwired tool before this; counts above predate
+    #          it and need re-verifying after the next `dvc repro`.
 
   task_a_sft_splits:
     desc: >-
@@ -119,7 +142,7 @@ stages:
       - src/llm_workflow_agents/training/lora_targets.py
       - configs/models_exp_a/gemma4_26b_a4b.yaml
       - configs/training/sft_cat_a.yaml
-      - data/output/sft/task_a_cleaned
+      - data/output/sft/task_a_splits
     outs:
       - checkpoints/sft_cat_a/gemma-4-26B-A4B-it
 

@@ -52,43 +52,6 @@ stages:
       md5: 2a0d3203e1d4f0b0cb4b3780deff8fba.dir
       size: 4874485
       nfiles: 11
-  task_a_sft:
-    cmd: "./scripts/generate_sft_data.sh && python scripts/clean_task_a_sft.py\n \
-      \ --input-dir data/output/sft/task_a\n  --output-dir data/output/sft/task_a_cleaned\n\
-      \  --quiet"
-    deps:
-    - path: data/templates/tool_schemas_L1_to_L5.json
-      hash: md5
-      md5: 7e2c332fee106031da5a5262858ed1c1
-      size: 10197
-    - path: data/templates/workflow_prompt_template.txt
-      hash: md5
-      md5: a04ee8e972e0bdcfde570216f2f85010
-      size: 757
-    - path: scripts/clean_task_a_sft.py
-      hash: md5
-      md5: 27f2c8e55d785e1f6e56ec0121104a4e
-      size: 7212
-    - path: scripts/generate_sft_data.sh
-      hash: md5
-      md5: 47c0102aacda10ae78e3965e5134b72f
-      size: 7704
-      isexec: true
-    - path: src/llm_workflow_agents/data/generate_workflows.py
-      hash: md5
-      md5: 74ad560b819135ce9f16d7c8cb9558ad
-      size: 83914
-    outs:
-    - path: data/output/sft/task_a
-      hash: md5
-      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
-      size: 220921413
-      nfiles: 11
-    - path: data/output/sft/task_a_cleaned
-      hash: md5
-      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
-      size: 109983413
-      nfiles: 5
   task_a_sft_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_sft.sh --model-config 
       configs/models_exp_a/gemma4_26b_a4b.yaml --sft-config 
@@ -102,15 +65,15 @@ stages:
       hash: md5
       md5: 20fdd78e013a93ce74eb84bf160b9cd8
       size: 2254
-    - path: data/output/sft/task_a_cleaned
+    - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 1cd63b31be6d6d9300a68816b65adaea.dir
-      size: 337941953
-      nfiles: 136
+      md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
+      size: 109983413
+      nfiles: 3
     - path: scripts/run_phase2_sft.sh
       hash: md5
-      md5: c96377e88e5b0e1d07fda5fcb4a9b599
-      size: 7426
+      md5: 0be6bd13cc0cd4832f25f6234e6d8ba4
+      size: 8016
       isexec: true
     - path: src/llm_workflow_agents/training/lora_targets.py
       hash: md5
@@ -221,3 +184,57 @@ stages:
       md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
       size: 109983413
       nfiles: 3
+  task_a_sft_generate:
+    cmd: ./scripts/generate_sft_data.sh
+    deps:
+    - path: data/templates/tool_schemas_L1_to_L5.json
+      hash: md5
+      md5: 7e2c332fee106031da5a5262858ed1c1
+      size: 10197
+    - path: data/templates/workflow_prompt_template.txt
+      hash: md5
+      md5: a04ee8e972e0bdcfde570216f2f85010
+      size: 757
+    - path: scripts/generate_sft_data.sh
+      hash: md5
+      md5: 47c0102aacda10ae78e3965e5134b72f
+      size: 7704
+      isexec: true
+    - path: src/llm_workflow_agents/data/generate_workflows.py
+      hash: md5
+      md5: 74ad560b819135ce9f16d7c8cb9558ad
+      size: 83914
+    outs:
+    - path: data/output/sft/task_a
+      hash: md5
+      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
+      size: 220921413
+      nfiles: 11
+  task_a_sft_clean:
+    cmd: "python scripts/clean_task_a_sft.py\n  --input-dir data/output/sft/task_a\n\
+      \  --output-dir data/output/sft/task_a_cleaned\n  --quiet &&\npython scripts/clean_corrupted_conversations.py\n\
+      \  data/output/sft/task_a_cleaned/*.jsonl\n  --no-backup\n  --quiet"
+    deps:
+    - path: data/output/sft/task_a
+      hash: md5
+      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
+      size: 220921413
+      nfiles: 11
+    - path: scripts/clean_corrupted_conversations.py
+      hash: md5
+      md5: ee78878bfdadd1e6a1d8e3d713cb00d2
+      size: 12556
+    - path: scripts/clean_task_a_sft.py
+      hash: md5
+      md5: 27f2c8e55d785e1f6e56ec0121104a4e
+      size: 7212
+    - path: src/llm_workflow_agents/data/data_validator.py
+      hash: md5
+      md5: 755f7073bcca31c6991fd39549ac66aa
+      size: 14647
+    outs:
+    - path: data/output/sft/task_a_cleaned
+      hash: md5
+      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
+      size: 109983413
+      nfiles: 5
