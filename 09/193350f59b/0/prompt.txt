@@ -404,3 +404,7 @@ Should `task_a_sft_gemma4_26b_a4b` depend on @data/output/sft/task_a_splits inst
 ---
 
 yes
+
+---
+
+Let's tag current corpus, then regenerate cleaned and splits corpus and tag as another version.
