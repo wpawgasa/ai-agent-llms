@@ -72,8 +72,8 @@ stages:
       nfiles: 3
     - path: scripts/run_phase2_sft.sh
       hash: md5
-      md5: 0be6bd13cc0cd4832f25f6234e6d8ba4
-      size: 8016
+      md5: aa2c402b6ccb8498fb2cb7d7ce78b37f
+      size: 8626
       isexec: true
     - path: src/llm_workflow_agents/training/lora_targets.py
       hash: md5
@@ -81,14 +81,14 @@ stages:
       size: 9466
     - path: src/llm_workflow_agents/training/sft.py
       hash: md5
-      md5: a0e31d2c1dcc2980b46fff937cf40eb4
-      size: 40119
+      md5: 4320e02a6b52d6790ac9807e63310306
+      size: 41316
     outs:
     - path: checkpoints/sft_cat_a/gemma-4-26B-A4B-it
       hash: md5
-      md5: f89238076f5b09ca0d76e5b9ab98e4ec.dir
-      size: 980680259
-      nfiles: 79
+      md5: d5438dced5a25f54af0d73e8569c6483.dir
+      size: 560269322
+      nfiles: 47
   task_a_grpo:
     cmd: "python scripts/filter_grpo_data.py\n  --input-dir data/output/sft/task_a_splits\n\
       \  --output-dir data/output/grpo/task_a"
