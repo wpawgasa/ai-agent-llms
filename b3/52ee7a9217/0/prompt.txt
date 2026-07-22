@@ -420,3 +420,7 @@ what commands would recover specific version of corpus
 ---
 
 Since checkpoint-1000 was trained on non-existent and corrupted corpus, should we re-train SFT?
+
+---
+
+document this, then commit and push including the tags we created before.
