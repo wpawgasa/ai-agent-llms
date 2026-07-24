@@ -1,0 +1,13 @@
+/brainstorming from the last commit, what are our situation and what are the next steps? Tell me in plain and simple english.
+
+---
+
+/superpowers:using-superpowers and /model-training-eval and /model-routing investigate how the chat template is formed and sent to the model for both benchmarking and training. Our goal for Cat A fine-tuning is to achieve a model that can follow workflow and instruction as well as generate tool call precisely. Therefore, model should know system prompt with instruction+workflow script+tool schema, current state, history context, etc. If the model misses some of these contexts, it may generate wrong response such as incorrect state transition and missed tool call.
+
+---
+
+yes, but should SFT and GRPO be trained with history and current state context? Do they only see system prompt and current user turn?
+
+---
+
+Does that mean the current probe exclude history context
