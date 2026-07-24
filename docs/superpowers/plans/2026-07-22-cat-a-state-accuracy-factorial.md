@@ -371,7 +371,10 @@ Ordered next steps:
    Not yet run. Identifies which term produces the 0.5 spike — `mean_state_acc` vs tool-F1 vs
    completion. **If the failing term is tool-F1 rather than state accuracy, this factorial is
    aimed at the wrong component and C1/C2 are both mis-targeted.** A 30-minute question whose
-   answer can save a 3–4 hour training cell.
+   answer can save a 3–4 hour training cell. **Sharpened by §12.7:** the score formula makes 0.5
+   the exact signature of a 1/0 split between `tool_f1` and `state_acc` on transition-expected
+   turns — break the 0.5-scored rows out by which of the two terms is 0, don't just tally
+   composite averages.
 2. **Restore ckpt-1000 and re-score on the identical rows** (~35 min GPU + a DVC checkout) to
    convert §12.3-item-2 from "inside the noise floor" to a paired verdict. Decides whether the
    R12 corpus cleanup traded away signal — which governs whether to fold the ~4,643 clean
@@ -405,3 +408,72 @@ namespaces overlap) or superseded on template/schema grounds (→ leave retired)
   rewritten to derive from `TARGET_COMPOSITE`.
 - **Still outstanding:** `scripts/run_phase2_grpo.sh` retains the fixed-path patched-config bug
   R13 flagged for `run_phase2_sft.sh` (`PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}.yaml"`).
+
+### 12.7 Chat-template / context audit (2026-07-24)
+
+Prompted by a review of whether the model has full context at train and eval time, traced how
+the prompt is assembled in all four places it matters: `training/sft.py`, `training/grpo.py`,
+`eval/agent_benchmark.py::_replay_conversation`, and the heldout-composite gate that produced
+§12's numbers. No GPU in this session — code-only audit.
+
+**System prompt: consistent everywhere.** All four paths build the system message through the
+one shared `data/system_prompt.py::build_enriched_system_prompt()`. SFT and GRPO force a rebuild
+at load time (`force_rebuild=True`); `eval/agent_benchmark.py` doesn't force it, but the on-disk
+corpora currently carry no baked-in enrichment, so today the two resolve identically. Latent risk,
+not a live bug: if a future data refresh ever bakes enrichment into `data/output/benchmark/task_a`,
+the benchmark harness would silently serve a stale prompt while SFT/GRPO keep rebuilding fresh —
+worth adding `force_rebuild=True` there too, low priority.
+
+**History: both SFT and GRPO see the full accumulated conversation, not just system + current
+turn.** SFT renders the whole conversation (every message) per training example via
+`apply_chat_template`; `response_only` masking changes which tokens get gradient, not what the
+model reads. GRPO's `_load_grpo_jsonl` prompt for row *i* is `raw_msgs[:asst_idx]` — every
+preceding message (system/user/assistant/tool), sliced from the ground-truth conversation.
+"Single-turn" describes the *target completion* (one assistant turn is scored per row), not the
+prompt, which is cumulative.
+
+**Current state is never an explicit field, in any path.** No `current_state: X` is injected
+anywhere — the model must infer it by re-reading its own (or the ground truth's) prior
+`[STATE: X → Y]` lines in the transcript. Identical in training and eval, so not a mismatch, but
+it means state-tracking accuracy depends entirely on the model correctly parsing its own past
+output — a harder task than reading a structured field. Relevant if the component audit below
+implicates the state term rather than tool calls.
+
+**The gate's history is oracle-prefix (teacher-forced), not the model's own — this bounds what it
+can tell you.** History being present in the prompt (previous paragraph) is not the same question
+as *whose* history it is. Every `_load_grpo_jsonl` row splices in the **ground-truth** trajectory
+up to that turn, generates exactly one completion, and scores it in isolation — it never feeds the
+model's own prior output back in as context for its next turn. That makes it a teacher-forced,
+single-turn-skill probe: "given a flawless conversation so far, can you get the next turn right?"
+It structurally **cannot** detect exposure bias / error compounding (a model going off-track on
+turn 3 and spiralling by turn 8), because the model's own mistakes never get a chance to feed
+forward — each row restarts from a perfect prefix. `eval/agent_benchmark.py::_replay_conversation`
+is the path that would show that failure mode, since it accumulates the model's *own* generations
+turn over turn (substituting only ground-truth tool results). Consequence for §12's numbers: C0's
+67% failure is not attributable to compounding drift either way — that mechanism isn't exercised by
+this gate at all — and a model that clears this gate could still degrade in a real free-running
+session in a way this probe would never surface.
+
+**Real gap found: GRPO's reward signal never touches tool-continuation turns.**
+`_load_grpo_jsonl`'s `valid_pairs` filter only allows a turn to become a *target* row when the
+immediately-preceding message is `user` or `system` — turns right after a `tool` response are
+skipped as targets. They still appear as fixed, correct context inside later rows' prompts (the
+prompt slice itself is unfiltered), so the model still reads them, but GRPO's gradient only flows
+through completion tokens, never prompt tokens — so **GRPO never directly reinforces the model's
+own behavior on tool-continuation turns.** SFT is unaffected (whole-conversation loss covers every
+assistant turn regardless of what precedes it). This is the same turn type flagged in
+`docs/grpo_tool_emission_gap_review.md` §7 as the historical "announce-but-don't-call" weak
+point — GRPO structurally can't move it even when everything else is working.
+
+**Sharpened hypothesis for the 0.5 spike — informs §12.4 step 1.** `_heldout_composite_score`
+computes, per row, `0.4×tool_f1 + 0.4×state_acc` (state term counted only when GT expects a
+transition), renormalized over included weights. `tool_f1` (`compute_ast_f1`) and `state_acc`
+(`compute_transition_accuracy`) are both effectively binary at single-turn granularity. On a
+non-terminal, transition-expected row, a 1/0 split between the two terms lands at exactly
+`0.4/0.8 = 0.5` — matching the observed spike precisely. **Working hypothesis: on state-transition
+turns the model reliably gets exactly one of {tool call, state label} right and reliably misses
+the other**, not "sometimes both, sometimes neither." The already-planned component audit should
+specifically check, on the 0.5-scored rows, which of tool_f1/state_acc is the one consistently at
+0 — that identifies not just which composite term is failing but whether it's a context/parsing
+problem (state, given the implicit-state finding above) or a formatting/schema problem (tool
+calls).
