@@ -1,0 +1,21 @@
+Should we stay with the current plan?
+
+---
+
+source /workspaces/ai-agent-llms/.venv/bin/activate
+
+---
+
+What is current situation and What to do next?
+
+---
+
+Check dvc tags for model version history
+
+---
+
+Should we restore that ckpt-1000 and tag it as sft-gemma4-v2 then push before working on another machine?
+
+---
+
+how can i restore sft v2 and v3 respectively
