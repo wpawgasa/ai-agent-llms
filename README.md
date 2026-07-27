@@ -353,11 +353,16 @@ Data outputs are versioned with [DVC](https://dvc.org) and stored on GCS. Use `d
 
 ### Authentication
 
-The remote uses a GCP service account key. Place the JSON key one level above the project root:
+The remote uses a GCP service account key. `.dvc/config` sets `credentialpath` relative to the
+`.dvc/` directory, so the default resolves to the **project root**:
 
 ```
-/workspaces/looloo-ocr-9e0b69945c03.json   ← expected default path
+<project-root>/looloo-ocr-9e0b69945c03.json   ← expected default path
 ```
+
+Confirm what your checkout resolves it to with `dvc config remote.gcs.credentialpath`. The key
+is gitignored (`*.json`), so it never travels with a clone — copy it out-of-band when setting up
+a new machine.
 
 Or override at runtime:
 
@@ -404,6 +409,16 @@ Check pipeline status without running anything:
 dvc status     # compares local cache vs remote + dep hashes
 dvc dag        # print the dependency graph
 ```
+
+### Versioning corpora and checkpoints
+
+`dvc.lock` records only the **most recent** hash per stage output — it is a lock file, not a
+history. Keeping an older corpus or checkpoint lineage recoverable requires a git tag plus a
+`dvc push`, and `dvc gc` will delete any lineage no tag points at.
+
+See **[Data & Model Versioning Procedure](docs/data_and_model_versioning.md)** for the
+registration steps, naming convention, recovery recipes, and the path-collision hazard between
+SFT lineages that share one checkpoint directory.
 
 ---
 
