@@ -477,3 +477,47 @@ specifically check, on the 0.5-scored rows, which of tool_f1/state_acc is the on
 0 — that identifies not just which composite term is failing but whether it's a context/parsing
 problem (state, given the implicit-state finding above) or a formatting/schema problem (tool
 calls).
+
+### 12.8 Round 2 — §12.4 steps 1–2 executed (2026-07-29). **Ladder is suspended.**
+
+Full writeup: **`docs/cat_a_state_annotation_convention_review.md`**. Summary of what changed:
+
+**Provenance first.** The workspace was found holding the pre-R12 lineage throughout — data *and*
+checkpoints — with no lock-file signal. `task_a_splits` on disk was 9,131/1,074/538 (an exact match
+for `sft-gemma4-v2`'s `train.log`, i.e. ckpt-1000's corpus) and the derived `data/output/grpo/task_a`
+carried 22.4% val / 17.2% train malformed roles, matching R12's *pre-fix* figures exactly. Both SFT
+directories were rebuilt from raw; the rebuild reproduced the recorded hashes exactly (`dvc.lock`
+unchanged) and is tagged **`task-a-sft-v1`** (`6a50272`). **Every §12.1 number predates this and was
+measured on stale data.**
+
+**Eval source corrected.** `data/output/grpo/task_a` is not separate data — `filter_grpo_data.py`
+derives it from `task_a_splits` (L3–L5 filter), and `_load_grpo_jsonl` accepts any conversation-format
+directory. The audit now reads `task_a_splits/validation` directly: no stale GRPO dependency, all
+levels, and 548 unique conversations instead of 289 — which supplies the power §8.2 wanted and §8.3
+prescribed unreachably (`_sample_prompts` dedupes by conversation, so `--n-prompts 2943` silently caps).
+
+**Step 1 answered — state is the failing term** (n=548, composite 0.6527). Of 179 rows at exactly 0.5,
+135 (75.4%) are state=0/tool=1. Counterfactual confirms it: perfect tools → 0.7807 (fail), perfect
+state → 0.8688 (pass).
+
+**But §1's mechanism is wrong.** It is not destination selection. The model is correct on `from`
+199/200 times on failing rows, and scores **0.8781 when gold advances** — already above the 0.85
+component target. It scores **0.1228 when gold expects a self-loop**, emitting one on 4.8% of turns
+where gold expects 41.6% (training text contains 37.1%). The deficit concentrates in one bucket:
+**stay + tool-expected, 164 rows, state acc 0.055**.
+
+**Root cause.** Gold uses a two-turn cycle — call the tool while staying, advance on the next turn
+after the result. The model collapses it into one turn, calling the tool *and* announcing the advance.
+The system prompt instructs exactly that (`- on success: proceed to [X]`), and across 150 prompts /
+1,920 state blocks **0.00%** document a self-loop. The transitions it emits are legal; the stay-rule
+was never stated.
+
+**Consequence for the ladder.** C1 cannot teach a rule absent from the input; C2 would fix the base
+rate without supplying the per-instance signal. Simulating a *perfect* "tool ⇒ stay" rule reaches only
+**0.7609** — still short of 0.80 — because 21% of gold tool-turns advance anyway, an irreducible
+ceiling from corpus ambiguity. **C1/C2 are suspended** pending: (a) a prompt experiment stating the
+stay-condition (cheap, no retraining, measures whether an SFT'd policy still obeys prompt instruction),
+and (b) a corpus revision making `tool ⇒ stay` deterministic → `task-a-sft-v2`.
+
+**Also invalidates a §7.3 assumption:** greedy decoding is **not** bit-reproducible here — two
+identical runs differ on 14/289 rows (~5%). §12.2's paired result is partly noise.

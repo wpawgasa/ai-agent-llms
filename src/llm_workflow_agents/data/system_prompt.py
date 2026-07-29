@@ -7,9 +7,31 @@ both the data-generation pipeline and the benchmark harness.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from llm_workflow_agents.data._workflow_script import build_workflow_script
+
+# Experimental, opt-in via TASK_A_STAY_RULE=1. FORMAT_RULES rule 1 gives the
+# SYNTAX for a self-loop but never the POLICY — it never says when the state
+# does not change. Meanwhile the workflow script says only "on success: proceed
+# to [Y]", which the policy follows literally: it advances on the same turn it
+# issues the tool call, before the result exists. Measured on ckpt-500 /
+# task-a-sft-v1: gold expects a self-loop on 41.6% of turns, the policy emits
+# one on 4.8%, and state accuracy on stay+tool-expected turns is 0.055.
+# See docs/cat_a_state_annotation_convention_review.md §5.
+# Gated so the default prompt — the one every existing checkpoint was trained
+# against — is byte-identical unless the flag is set.
+STAY_RULE = """\
+10. Tool-execution turns do NOT advance. When your turn issues a <tool_call>, you have not
+    yet seen the result, so you MUST remain in the current state and write the same name on
+    both sides:
+        [STATE: SEARCH_OPTIONS → SEARCH_OPTIONS]
+        <tool_call>{"name": "search_flights", "arguments": {...}}</tool_call>
+    Advance only on a LATER turn, after the tool result has come back and you have used it.
+    The workflow script's "- on success: proceed to [Y]" describes where to go once the
+    result confirms success — it does NOT mean advance on the turn that issues the call.
+    Never announce a state you do not yet have the evidence to be in."""
 
 FORMAT_RULES = """\
 Rules:
@@ -137,4 +159,6 @@ def build_enriched_system_prompt(
         parts.append("\n".join(ref_parts))
 
     parts.append(f"\n{FORMAT_RULES}")
+    if os.environ.get("TASK_A_STAY_RULE") == "1":
+        parts.append(f"\n{STAY_RULE}")
     return "\n".join(parts)
