@@ -262,6 +262,63 @@ rule-following policy.
    already read as a hand-off (in which case annotation and text would disagree after a blanket
    relabel).
 
+### 6.4 The 47 exceptions, read (2026-07-29)
+
+They are **not** a semantically distinct class. They are the same two-turn move with the advance
+annotated on the other turn:
+
+```
+canonical :  X → X  + tool   →  [tool result]  →  X → Y
+exception :  X → Y  + tool   →  [tool result]  →  Y → Y
+```
+
+Row 229 (`L2_067_9`) is exactly this: `VERIFY_IDENTITY → AUTHENTICATE` + `verify_identity`, then
+the OTP result, then `AUTHENTICATE → AUTHENTICATE`. Same states, same tool, same two turns.
+
+But this shift accounts for only **59.6%** of them. Corpus-wide, for tool-calling turns:
+
+| Tool turn | Following assistant turn | Count | Share |
+|---|---|---|---|
+| stay | advances | 1,248 | 74.4% |
+| stay | stays | 429 | 25.6% |
+| ADVANCE | stays | 239 | 59.6% |
+| ADVANCE | advances | 162 | 40.4% |
+
+**Consequence for the relabel:** the 162 turns that advance *again* on the next turn cannot be
+blanket-relabelled to `X → X` — the following turn begins at `Y`, a state the conversation would
+then never have entered, breaking the chain. So `task-a-sft-v2` is **not** a find-and-replace over
+annotations; the trajectory must be re-derived per conversation with a consistent rule, which
+points at `generate_workflows.py` rather than a cleanup pass.
+
+### 6.5 Prompt experiment result — NULL. A prompt-only fix is not viable.
+
+`STAY_RULE` (opt-in via `TASK_A_STAY_RULE=1`) was added stating the policy and explicitly
+reinterpreting the workflow script's `- on success: proceed to [Y]` line. Re-audited ckpt-500 on
+identical corpus / split / seed / n — the rule is the only variable (guarded by
+`tests/unit/test_stay_rule_flag.py`, which asserts the enabled prompt is a strict prefix + rule).
+
+| | baseline | STAY_RULE ON |
+|---|---|---|
+| gate composite | 0.6527 | **0.6496** |
+| state accuracy | 0.5639 | 0.5584 |
+| self-loop emission (gold: 41.6%) | 4.84% | **7.87%** |
+| stay+tool bucket (n=164) accuracy | 0.0549 | 0.0610 |
+| tool-F1 (tool-expected) | 0.4550 | 0.4550 |
+
+Paired over the same 548 rows: delta **−0.0031**, 65 rows differ (30 favour the rule, 35 favour
+baseline), **Wilcoxon p = 0.917**, paired-t p = 0.697, state McNemar p = 0.755. Against the ~5%
+per-row decoding noise floor (§8), this is indistinguishable from noise.
+
+Self-loop emission moved 4.84% → 7.87% — directionally correct, but it needs ~41.6%, so the
+instruction closed roughly **8% of the gap**. On the bucket the rule targets directly
+(stay + tool-expected) accuracy moved 0.055 → 0.061.
+
+**Conclusion: the SFT'd policy does not respond to an explicit prompt instruction that
+contradicts its trained behaviour.** This rules out the cheap path. §6.1 showed a *perfectly
+applied* rule would cap at 0.7609 anyway; §6.5 now shows the rule cannot even be applied by
+prompting. Both the corpus fix **and** retraining are required — the corpus revision alone is
+insufficient if the policy is not retrained on it, and the prompt alone does nothing.
+
 ---
 
 ## 7. Reconciliation with contrary evidence
