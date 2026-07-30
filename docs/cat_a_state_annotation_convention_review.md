@@ -369,7 +369,24 @@ routes that avoid regenerating the corpus have now been measured and all three f
 *Provenance:* audited from `/tmp/sft_v3` (47 files / 560,269,322 B = `dvc.lock`
 `d5438dced5a25f54af0d73e8569c6483.dir`), **not** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it`, which had
 silently reverted to the v2 lineage again (ckpt-500 adapter `2f172cb6…`) while `dvc.lock` still names
-the v3 hash. The ckpt-500 column above is the stored §6.5 baseline; a same-session re-measure of v3
+the v3 hash. **Resolved 2026-07-30, after the audit:** the local cache was also incomplete — 35 of
+v3's 47 objects and its `.dir` object were missing — so the only complete *local* copy was the
+staging tree in `/tmp/sft_v3`. The tree was verified by recomputing the DVC directory hash to
+`d5438dced5a25f54af0d73e8569c6483`, all 47 objects + the `.dir` were written into `.dvc/cache`, and
+the working directory was swapped to v3. `dvc status` now reports the SFT stage up to date and the
+live path hashes to the `dvc.lock` out. v2 remains fully recoverable — 79/79 objects + `.dir` in
+cache under `f89238076f5b09ca0d76e5b9ab98e4ec`.
+
+*Scope of that risk, corrected:* v3 was **never** in danger of permanent loss. `dvc status -c` and
+`dvc push` both report the checkpoint already fully present on the `gcs` remote, so the
+`sft-gemma4-v3` tag's "pushed to gcs" was accurate and a `dvc fetch` would have restored it. The real
+exposure was narrower but still live: the **working directory silently served v2 under a path
+`dvc.lock` declared to be v3**, so an audit run against the canonical path would have measured the
+wrong lineage and labelled it C0 — which is exactly what §1 caught the first time and what recurred
+here. Note also the DVC CLI *is* available in this container at `.venv-train/bin/dvc` (3.67.1); an
+earlier note in this section claiming otherwise was wrong.
+
+The ckpt-500 column above is the stored §6.5 baseline; a same-session re-measure of v3
 ckpt-500 was attempted as a provenance control but **failed — the container lost GPU access** in the
 ~3 s between the two arms (`cudaGetDeviceCount` err=100, "no CUDA-capable device is detected"; device
 nodes and kernel module still present). Note this is *distinct* from the `Failed to initialize NVML`
