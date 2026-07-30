@@ -1,10 +1,16 @@
 # Cat A State-Annotation Convention Review
 
-**Date:** 2026-07-29
+**Date:** 2026-07-29, updated 2026-07-30 (§6.6)
 **Scope:** `docs/superpowers/plans/2026-07-22-cat-a-state-accuracy-factorial.md` §12.4 steps 1–2
 **Artifacts:** `runs/preflight/heldout_audit_C0_ckpt500_goldenval.json`,
 `runs/preflight/composite_decomposition_goldenval.json`,
-`scripts/analyze_composite_decomposition.py`
+`runs/preflight/heldout_audit_C0_ckpt1770_goldenval.json`,
+`runs/preflight/composite_decomposition_ckpt1770.json`,
+`runs/preflight/selfloop_habit_ckpt1770_vs_ckpt500.json`,
+`scripts/analyze_composite_decomposition.py`, `scripts/analyze_selfloop_habit.py`
+**Checkpoints:** all measurements on the `sft-gemma4-v3` lineage
+(`dvc.lock` `d5438dced5a25f54af0d73e8569c6483.dir`, 47 files / 560,269,322 B), staged at
+`/tmp/sft_v3`. **Not** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it`, which holds v2 — see §6.6.
 
 ---
 
@@ -31,6 +37,12 @@ turn's block literally reads `- on success: proceed to [CHECK_VISA_REQUIREMENTS]
 
 Neither C1 (loss masking) nor C2 (decision-balance reweighting) addresses a rule that was never
 stated. See §6 for what does.
+
+**All three cheap paths are now measured, and all three fail.** A perfectly applied rule caps at
+0.7609 (§6.1); prompting the rule is null (§6.5); and training 3.5× longer is null — ckpt-1770
+(epoch 3.0) emits self-loops on **6.4%** of turns vs the 41.6% gold expects, gate composite 0.6579
+against the 0.80 bar (§6.6). The habit is not an under-training artifact. **Corpus regeneration via
+`generate_workflows.py` plus a retrain is the remaining path.**
 
 ---
 
@@ -318,6 +330,57 @@ contradicts its trained behaviour.** This rules out the cheap path. §6.1 showed
 applied* rule would cap at 0.7609 anyway; §6.5 now shows the rule cannot even be applied by
 prompting. Both the corpus fix **and** retraining are required — the corpus revision alone is
 insufficient if the policy is not retrained on it, and the prompt alone does nothing.
+
+### 6.6 Epoch-3.0 checkpoint audited — the habit does not train out. Corpus regeneration confirmed required.
+
+§6.5 left one cheap falsifier open: every measurement to that point was on ckpt-500 (**epoch 0.85**),
+so "the model simply had not trained long enough to absorb the convention" was still live. It is now
+closed. `checkpoint-1770` (**epoch 3.0**, 3.5× the training) audited on identical corpus / split /
+seed / n (`task-a-sft-v1` validation, n=548, `TASK_A_STAY_RULE=0`) — checkpoint step the only variable.
+
+| | ckpt-500 (ep 0.85) | **ckpt-1770 (ep 3.0)** | gold / bar |
+|---|---|---|---|
+| gate composite | 0.6527 | **0.6579** | 0.80 |
+| state accuracy | 0.5639 | 0.5894 | 0.833 |
+| **self-loop emission** | 4.84% | **6.39%** (43/673) | **41.6%** |
+| stay+tool bucket (n=164) | 0.0549 | 0.0915 | — |
+| tool-F1 (tool-expected, n=211) | 0.4550 | 0.4431 | 0.85 |
+| abstention (zero-tool, n=337) | 0.9228 | 0.9050 | ~0.95 |
+
+Paired over the same 548 rows: delta **+0.0052**, 95 rows differ (50 favour ckpt-1770, 45 favour
+ckpt-500), **Wilcoxon p = 0.513**, paired-t p = 0.573. The state term alone moves +0.0255 at McNemar
+exact **p = 0.054** — borderline, and it does not carry the composite anywhere near the bar. Note the
+95/548 (17.3%) row-level disagreement is well above §8's ~5% same-checkpoint decoding-noise floor:
+the two checkpoints genuinely behave differently, they just do not differ in aggregate *quality*.
+
+**The decisive number is self-loop emission: 4.84% → 6.39% against the 41.6% gold expects.** Training
+2.15 additional epochs closed **4.2%** of that gap — *less* than the §6.5 prompt instruction managed
+(8.2%), and both are null. On the bucket that carries the whole deficit (stay + tool) accuracy is
+still 0.0915. Meanwhile the model got slightly *better* at advancing (0.8781 → 0.9000) — it is
+sharpening the behaviour the corpus rewards, not discovering the unstated one. The `from` state stays
+correct on 98.96% of failed stay-rows (191/193), so this remains a convention defect, not confusion.
+
+**Conclusion: the third cheap path is closed.** The self-loop habit is not an
+under-training artifact — it does not train out with 3.5× the epochs on this corpus, exactly as it
+did not prompt away in §6.5. §6.1 already showed a *perfectly applied* rule caps at 0.7609. All three
+routes that avoid regenerating the corpus have now been measured and all three fail.
+`task-a-sft-v2` via `generate_workflows.py` (per §6.4) plus a retrain is the remaining path.
+
+*Provenance:* audited from `/tmp/sft_v3` (47 files / 560,269,322 B = `dvc.lock`
+`d5438dced5a25f54af0d73e8569c6483.dir`), **not** `checkpoints/sft_cat_a/gemma-4-26B-A4B-it`, which had
+silently reverted to the v2 lineage again (ckpt-500 adapter `2f172cb6…`) while `dvc.lock` still names
+the v3 hash. The ckpt-500 column above is the stored §6.5 baseline; a same-session re-measure of v3
+ckpt-500 was attempted as a provenance control but **failed — the container lost GPU access** in the
+~3 s between the two arms (`cudaGetDeviceCount` err=100, "no CUDA-capable device is detected"; device
+nodes and kernel module still present). Note this is *distinct* from the `Failed to initialize NVML`
+that nvidia-smi reports in this dev container, which is cosmetic — it was already failing while the
+ckpt-1770 arm ran to completion. It is not required for the conclusion,
+which rests on the ckpt-1770 arm alone (6.39% vs 41.6% gold, composite 0.658 vs 0.80 bar), but it
+remains the one unclosed control. Artifacts (gitignored):
+`runs/preflight/heldout_audit_C0_ckpt1770_goldenval.json`,
+`runs/preflight/composite_decomposition_ckpt1770.json`,
+`runs/preflight/selfloop_habit_ckpt1770_vs_ckpt500.json`; new reproducible decomposition in
+`scripts/analyze_selfloop_habit.py` (validated: it reproduces every §4 figure from the stored artifact).
 
 ---
 
