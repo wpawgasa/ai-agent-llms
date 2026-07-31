@@ -8,11 +8,22 @@ consumes a RepairPlan and returns a new record.
 
 from __future__ import annotations
 
+import copy
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from llm_workflow_agents.data.state_convention import parse_assistant_turns
+from llm_workflow_agents.data._workflow_script import (
+    _STATE_RE,
+    find_continuity_violations,
+    find_shape_violations,
+    find_tool_placement_violations,
+    infer_state_tools_from_messages,
+)
+from llm_workflow_agents.data.state_convention import (
+    find_tool_stay_violations,
+    parse_assistant_turns,
+)
 
 Move = Literal[
     "none",
@@ -195,3 +206,136 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
 
     return RepairPlan(conversation_id=conversation_id, move="relabel", turns=turns,
                       drift_turns=drift_turns)
+
+
+def _replace_marker(content: str, new_marker: str) -> str:
+    """Replace the first ``[STATE: X -> Y]`` marker in ``content`` verbatim.
+
+    The lambda replacement is deliberate: ``re.sub`` would otherwise interpret
+    backslash escapes in ``new_marker`` as group references.
+    """
+    return _STATE_RE.sub(lambda _m: new_marker, content, count=1)
+
+
+def apply_plan(
+    record: dict[str, Any],
+    plan: RepairPlan,
+    ledger_entries: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Return a NEW record with ``plan`` applied, or None if required ledger
+    entries are missing (or the plan's move is ``drop``). Never mutates
+    ``record``.
+    """
+    if plan.move == "none":
+        return copy.deepcopy(record)
+    if plan.move == "drop":
+        return None
+
+    record = copy.deepcopy(record)
+    messages = record["messages"]
+
+    if plan.move == "relabel":
+        for tp in plan.turns:
+            if tp.content_op == "verbatim":
+                continue
+            # source_turn_index is a MESSAGE index (TurnLabel.msg_index), not
+            # an assistant-only ordinal -- see plan_repair's docstring.
+            msg_index = tp.source_turn_index
+            new_marker = _marker(tp.from_state, tp.to_state, tp.arrow)
+            messages[msg_index]["content"] = _replace_marker(
+                messages[msg_index]["content"], new_marker
+            )
+            messages[msg_index]["annotations"] = {
+                **(messages[msg_index].get("annotations") or {}),
+                "state_transition": {"from": tp.from_state, "to": tp.to_state},
+            }
+
+    if plan.move in ("insert_handoff_turn", "append_closing_pair"):
+        if ledger_entries is None:
+            return None
+        # inserts are applied back-to-front to keep earlier positions valid
+        for req in sorted(plan.inserts, key=lambda r: -r.position_after_msg_index):
+            entry = ledger_entries.get(req.insert_id)
+            if entry is None:
+                return None
+            messages.insert(req.position_after_msg_index + 1, {
+                "role": req.role, "content": entry["content"], "annotations": None,
+            })
+
+    record["ground_truth"] = rederive_ground_truth(record)
+    return record
+
+
+def rederive_ground_truth(record: dict[str, Any]) -> dict[str, Any]:
+    """Re-derive ground_truth from (possibly repaired) messages, merging into
+    the existing dict so fields like ``terminal_reached`` survive. A no-op on
+    the ground_truth of an already-conformant record.
+
+    Side effect: normalises ``record["messages"]`` annotations in place via
+    ``_backfill_annotations`` (the same normalisation the generator applies),
+    so on a corpus row whose messages carry no ``annotations`` key this DOES
+    add one. ``apply_plan`` calls this on its own deep copy, so callers going
+    through ``apply_plan`` never see their input touched.
+    """
+    from llm_workflow_agents.data.generate_workflows import (
+        WorkflowGraph, WorkflowState, WorkflowTransition,
+        _backfill_annotations, _extract_ground_truth,
+    )
+
+    messages = record["messages"]
+    _backfill_annotations(messages)
+    wg = record["workflow_graph"]
+    states = [WorkflowState(id=name, name=name) for name in wg["states"]]
+    transitions = [
+        WorkflowTransition(from_state=t["from"], to_state=t["to"],
+                           condition=t.get("condition", ""), priority=t.get("priority", 0))
+        for t in wg["transitions"]
+    ]
+    workflow = WorkflowGraph(
+        states=states, transitions=transitions,
+        initial_state=wg["initial"], terminal_states=list(wg["terminal"]),
+    )
+    fresh = _extract_ground_truth(messages, workflow)
+    gt = dict(record.get("ground_truth") or {})
+    gt.update(fresh)
+    return gt
+
+
+def verify_repaired(record: dict[str, Any]) -> list[str]:
+    """The post-repair gate. Empty list == accept.
+
+    ``allowed_by_state`` is inferred from the *post-repair* messages
+    themselves, so ``find_tool_placement_violations`` can never fire from a
+    state/tool mismatch here (a tool is by construction "allowed" in the state
+    the repair attributed it to); its job in this function is structural, and
+    the schema_names arm still catches a tool absent from ``tool_schemas``.
+    The real invariant -- "the repair did not change which state any tool is
+    called from" -- needs both the before and after messages, so it lives in
+    Task 4's CLI as an equality check on
+    ``infer_state_tools_from_messages``, not here.
+    """
+    messages = record["messages"]
+    wg = record["workflow_graph"]
+    violations: list[str] = []
+    violations += find_tool_stay_violations(messages)
+    violations += find_continuity_violations(messages, wg["initial"], set(wg["terminal"]))
+    violations += find_shape_violations(messages, record.get("conversation_initiator", "user"))
+
+    schema_names = {t["function"]["name"] for t in record.get("tool_schemas", [])} or None
+    allowed_by_state = infer_state_tools_from_messages(messages)
+    violations += find_tool_placement_violations(allowed_by_state, messages, schema_names)
+
+    declared = {(t["from"], t["to"]) for t in wg["transitions"]}
+    labels = [label for label in parse_assistant_turns(messages) if label is not None]
+    for label in labels:
+        if label.from_state != label.to_state and (label.from_state, label.to_state) not in declared:
+            violations.append(f"undeclared transition [{label.from_state} -> {label.to_state}]")
+
+    expected_seq = [{"from": label.from_state, "to": label.to_state} for label in labels]
+    actual_seq = (record.get("ground_truth") or {}).get("state_sequence")
+    if actual_seq != expected_seq:
+        violations.append(
+            f"ground_truth.state_sequence {actual_seq} does not match message "
+            f"markers {expected_seq}"
+        )
+    return violations

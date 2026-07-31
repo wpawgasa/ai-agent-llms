@@ -152,3 +152,118 @@ def test_arrow_glyph_preserved():
     ]
     plan = plan_repair(_record(msgs, [("A", "B")], terminal=("B",)))
     assert all(t.arrow == "->" for t in plan.turns)
+
+
+# --- Task 3: apply_plan / verify_repaired / rederive_ground_truth ---------
+#
+# NOTE on fixtures below: every record passed to verify_repaired() opens with a
+# user turn. find_shape_violations() requires the first non-system message to
+# match conversation_initiator (defaulting to "user"), so the assistant-first
+# fixtures used by the Task 2 plan_repair tests above -- which never call
+# verify_repaired() -- would report a spurious shape violation here. Message
+# indices in the assertions account for that leading turn.
+
+from llm_workflow_agents.data.state_convention_repair import (  # noqa: E402
+    apply_plan, verify_repaired, rederive_ground_truth,
+)
+
+
+def test_rederive_ground_truth_is_noop_on_conformant_record():
+    msgs = [
+        _amsg('[STATE: A → A]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: A → TERMINAL]\nDone!"),
+    ]
+    rec = _record(msgs, [("A", "TERMINAL")])
+    rec["ground_truth"] = {
+        "state_sequence": [{"from": "A", "to": "A"}, {"from": "A", "to": "TERMINAL"}],
+        "tool_calls": [{"name": "t", "arguments": {}}],
+        "tool_chain_dependencies": [[{"name": "t", "arguments": {}}]],
+        "terminal_state": "TERMINAL",
+        "terminal_reached": True,
+    }
+    before = copy.deepcopy(rec["ground_truth"])
+    after = rederive_ground_truth(rec)
+    assert after == before
+
+
+def test_apply_plan_relabel_updates_marker_annotations_and_ground_truth():
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → B]\nAll set."),
+    ]
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
+    plan = plan_repair(rec)
+    repaired = apply_plan(rec, plan)
+    assert repaired is not rec  # never mutates input
+    assert "[STATE: A → A]" in repaired["messages"][1]["content"]
+    assert repaired["messages"][1]["annotations"]["state_transition"] == {"from": "A", "to": "A"}
+    assert "[STATE: A → B]" in repaired["messages"][3]["content"]
+    assert repaired["ground_truth"]["state_sequence"] == [
+        {"from": "A", "to": "A"}, {"from": "A", "to": "B"},
+    ]
+    assert verify_repaired(repaired) == []
+
+
+def test_apply_plan_does_not_mutate_input():
+    msgs = [
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → B]\nAll set."),
+    ]
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
+    original = copy.deepcopy(rec)
+    plan = plan_repair(rec)
+    apply_plan(rec, plan)
+    assert rec == original
+
+
+def test_apply_plan_relabels_fused_turn_without_splitting_or_reattributing_tool():
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg(
+            '[STATE: A → B]\nChecking that now.\n'
+            '<tool_call>{"name": "t1", "arguments": {}}</tool_call>'
+        ),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → B]\nAll set."),
+    ]
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
+    plan = plan_repair(rec)
+    repaired = apply_plan(rec, plan)
+    assert verify_repaired(repaired) == []
+    assistant_msgs = [m for m in repaired["messages"] if m["role"] == "assistant"]
+    assert len(assistant_msgs) == 2  # unchanged from input -- no split, no inserted turn
+    assert assistant_msgs[0]["content"].startswith("[STATE: A → A]")
+    assert "Checking that now." in assistant_msgs[0]["content"]
+    assert "<tool_call>" in assistant_msgs[0]["content"]
+    assert assistant_msgs[1]["content"].startswith("[STATE: A → B]")
+    from llm_workflow_agents.data._workflow_script import infer_state_tools_from_messages
+    assert infer_state_tools_from_messages(msgs) == infer_state_tools_from_messages(repaired["messages"])
+
+
+def test_apply_plan_returns_none_without_required_ledger_entry():
+    msgs = [
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → TERMINAL]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "TERMINAL")])
+    plan = plan_repair(rec)
+    assert plan.move == "insert_handoff_turn"
+    assert apply_plan(rec, plan, ledger_entries=None) is None
+
+
+def test_verify_repaired_catches_state_sequence_mismatch():
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg("[STATE: A → TERMINAL]\nDone."),
+    ]
+    rec = _record(msgs, [("A", "TERMINAL")])
+    rec["ground_truth"] = {"state_sequence": [{"from": "A", "to": "WRONG"}],
+                            "tool_calls": [], "tool_chain_dependencies": [],
+                            "terminal_state": "TERMINAL", "terminal_reached": True}
+    violations = verify_repaired(rec)
+    assert any("state_sequence" in v for v in violations)
