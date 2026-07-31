@@ -1,0 +1,73 @@
+<task-notification>
+<task-id>a7d39ce3e087cd0ac</task-id>
+<tool-use-id>toolu_01VbKJF3thNjVSVed6dAuwau</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/a7991fc5-bb0e-46a5-a8a2-79c243bdffcf/tasks/a7d39ce3e087cd0ac.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix round 2: multi-infeasibility handling in plan_repair" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The coordinator asked me to stop guessing and show one real conversation exhibiting the shape violation, plus answer directly whether the `position_after_msg_index = label.msg_index - 1` formula is at fault. Here it is — and the answer is **no, the formula is not the cause**, with one caveat covering 4% of cases.
+
+## 1. The real example — `L1_009_2` (`data/output/sft/task_a/l1_merged_20260629.jsonl:101`)
+
+Original messages, indices 4–9 (`move = insert_handoff_turn`, 17 messages total):
+
+```
+[  4] assistant  [STATE: VERIFY_IDENTITY → VERIFY_IDENTITY] ...security question...
+[  5] user       อ๋อ สัตว์เลี้ยงตัวแรกชื่อ Bobo ครับ
+[  6] assistant  [STATE: VERIFY_IDENTITY → AUTHENTICATE] &lt;tool_call&gt;{"name": "verify_identity", ...}&lt;/tool_call&gt;
+[  7] tool       {"error": "Service temporarily unavailable"}          &lt;-- the PRECEDING message
+[  8] assistant  [STATE: AUTHENTICATE → AUTHENTICATE] ขออภัยด้วยนะคะ พอดีระบบ verify ขัดข้อง...
+                 &lt;tool_call&gt;{"name": "verify_identity", ...}&lt;/tool_call&gt;   &lt;-- THE STACKED TOOL TURN
+[  9] tool       {"status": "success", "message": "Identity verified via security question."}
+```
+
+The message immediately before the stacked tool turn is a **`tool`-role result**, not another assistant turn. The stacked turn at index 8 is **fused** — apology prose *then* `&lt;tool_call&gt;`. This is the tool-error-retry shape.
+
+## 2. The `InsertRequest`
+
+```
+[0] position_after_msg_index=7  role='assistant'  required_marker='[STATE: VERIFY_IDENTITY → AUTHENTICATE]'
+```
+
+## 3. After `apply_plan` with a stub
+
+```
+[  7] tool       {"error": "Service temporarily unavailable"}
+[  8] assistant  [STATE: VERIFY_IDENTITY → AUTHENTICATE] Ok.        &lt;-- THE INSERTED BRIDGE (prose)
+[  9] assistant  [STATE: AUTHENTICATE → AUTHENTICATE] ขออภัยด้วยนะคะ ... &lt;tool_call&gt;{...}&lt;/tool_call&gt;
+```
+
+`verify_repaired` and `find_shape_violations` both return exactly one message:
+`consecutive assistant prose turns (no user or tool message in between)`
+
+## Direct answer to your question
+
+**It is not "two tool-call turns back-to-back with no `tool` result between them."** Breakdown of all 1,074 violation messages by what sits at `msgs[position_after_msg_index]`:
+
+| preceding message role | count |
+|---|---|
+| `tool` result | 684 |
+| `user` | 375 |
+| another `assistant` turn | 15 |
+
+And **0 of the 1,465 insert-bearing conversations have any shape violation before repair** — I checked. So there is no pre-existing back-to-back-assistant oddity being exposed. The adjacency is created entirely by the insert.
+
+The actual mechanism is about what **follows**, not what precedes: `find_shape_violations` permits consecutive assistants only when the *later* one is a **pure** tool-call turn (content after the marker starts with `&lt;tool_call&gt;`). The bridge is a new assistant prose turn, and in 1,059 cases the turn after it is a **fused** tool turn. Nothing about the relabeling creates it either — relabels only rewrite markers in place, never move or add messages.
+
+**Would a different placement formula help? Almost never.** The bridge cannot cross an assistant turn (that would break the marker chain), so its legal window is the non-assistant messages between the previous assistant turn and the stacked tool turn. Window sizes across the 1,059 violating bridges:
+
+| window | messages in it | count | placement fix possible? |
+|---|---|---|---|
+| 1 | `(tool,)` | 684 | no — `msg_index - 1` is the only spot |
+| 1 | `(user,)` | 333 | no — same |
+| 2 | `(tool, user)` | 42 | **yes** — insert after the `tool` result instead |
+
+So moving to "immediately after the last `tool`-role message" fixes **42 of 1,059 (4%)** and is a no-op for the other 1,017, because there is exactly one slot. Your formula is correct; it is exposing a hard structural constraint, not creating one.
+
+The real levers are therefore (a) relax the shape rule to accept a *fused* tool turn as the later of two consecutive assistants, or (b) emit the bridge as a **user-ack + assistant pair** — the same shape `append_closing_pair` already uses — which removes the adjacency entirely and works for all 1,059 regardless of window size, at the cost of one extra authored user turn per bridge. I have not implemented either.
+
+One thing I noticed while reading the example that bears on your decision: the bridge here announces `VERIFY_IDENTITY → AUTHENTICATE` immediately after a tool result that **failed**, which the very next turn then retries. The remediator would be asked to author prose claiming an advance the tool result contradicts. That affects **104 of the 684** `tool`-preceded cases (the other 580 follow a success result).
+
+result: Shape violations are caused by the inserted prose bridge preceding a *fused* tool turn (1,059 of 1,074), not by back-to-back tool turns — the preceding message is a `tool` result (684) or `user` (375), never assistant in the dominant cases; `position_after_msg_index = label.msg_index - 1` is the only legal slot in 1,017 of 1,059 cases, so changing the placement formula fixes at most 4% and the real fix is either relaxing the shape rule for fused turns or emitting a user-ack+assistant pair.</result>
+<usage><subagent_tokens>149524</subagent_tokens><tool_uses>4</tool_uses><duration_ms>162431</duration_ms></usage>
+</task-notification>
