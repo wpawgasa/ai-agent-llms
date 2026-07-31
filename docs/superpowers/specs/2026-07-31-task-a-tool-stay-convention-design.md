@@ -77,7 +77,7 @@ require last emitted .to in terminals
 | # | Move | Authored text |
 |---|---|---|
 | 1 | `relabel` — queue drains cleanly (covers both bare and fused tool turns) | none |
-| 2 | `pullback_fuse` — move `<tool_call>` onto the preceding `X→X` prose turn (measured negligible yield: 11 candidates, 1.6% of the insert bucket — implemented ladder skips it) | none |
+| 2 | `pullback_fuse` — move `<tool_call>` onto the preceding `X→X` prose turn (measured negligible yield: 14 candidates, 1.2% of the 1,150-conversation insert bucket — implemented ladder skips it) | none |
 | 3 | `insert_handoff_turn` — stacked tool turns (bare-after-bare, or bare-after-relabelled-fused); insert one assistant message | 1 msg |
 | 4 | `append_closing_pair` — tail deficit; append `user` ack + terminal `assistant` | 2 msgs |
 | 5 | `drop` — post-gate failure or agent refusal | — |
