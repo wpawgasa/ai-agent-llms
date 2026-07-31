@@ -811,9 +811,7 @@ def apply_plan(
             msg_index = label.msg_index
             if tp.content_op == "relabel":
                 new_marker = _new_marker(tp.from_state, tp.to_state, tp.arrow)
-                content = messages[msg_index]["content"]
-                content = content[: label.msg_index and 0 or 0]  # no-op, kept for symmetry
-                content = _STATE_RE_SUB(content, new_marker)
+                content = _STATE_RE_SUB(messages[msg_index]["content"], new_marker)
                 messages[msg_index]["content"] = content
                 messages[msg_index]["annotations"] = {
                     **(messages[msg_index].get("annotations") or {}),
