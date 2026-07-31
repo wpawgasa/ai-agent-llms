@@ -1,0 +1,5 @@
+/using-superpowers and /model-training-eval and /model-routing Read the latest commit and design spec and plan to remedy tool calling turns in existing corpus @data/output/sft/task_a (task_a_sft_v1) The tool calling behavior is to stay->wait for tool result->change state if tool success, otherwise stay for N iterations then go to fallback state. This remediation could be a script trigger Claude Code agent (`claude -p` authenticated with Claude subscription) running remediation playbook on each conversation in the corpus. Then, redesign @scripts/generate_sft_data.sh and @scripts/generate_sft_until_target.py that instruct teacher model to generate tool calling behavior as described above.
+
+---
+
+subagent-driven
