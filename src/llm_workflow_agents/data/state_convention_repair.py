@@ -92,6 +92,15 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     measurement showed it re-attributed ~66% of its tool calls to the
     destination state.
 
+    The walk is single-pass but **not** single-fix: every stacked-tool
+    infeasibility it meets contributes its own bridge ``InsertRequest`` and the
+    walk continues, so one plan repairs a whole conversation. A conversation
+    that needs mid-conversation bridges *and* a tail close carries all of them
+    in ``inserts`` under the ``append_closing_pair`` label. Callers that gate on
+    ``move in ("insert_handoff_turn", "append_closing_pair")`` and treat
+    ``inserts`` as a flat list of independent authoring requests need no change
+    to handle N inserts instead of 1.
+
     Index conventions (two different spaces, deliberately):
       * ``TurnPlan.source_turn_index`` is a **message** index — an index into
         ``parse_assistant_turns(messages)``'s output, which Task 1 returns
@@ -116,6 +125,8 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     cur = labels[0].from_state
     pending: deque[str] = deque()
     turns: list[TurnPlan] = []
+    inserts: list[InsertRequest] = []
+    bridge_edges: list[tuple[str, str]] = []
     drift_turns: list[int] = []
     any_relabelled = False
 
@@ -127,18 +138,45 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
                 # bridge cur -> from_state. Covers bare-after-bare and
                 # bare-after-relabelled-fused alike (a fused turn's
                 # relabel-in-place does not advance cur).
-                # ``turns`` carries the relabels already decided for EARLIER
-                # turns of this same conversation; it must ride along or those
-                # turns silently keep their wrong markers after apply_plan.
-                return RepairPlan(
-                    conversation_id=conversation_id, move="insert_handoff_turn",
-                    turns=turns, drift_turns=drift_turns,
-                    inserts=[InsertRequest(
-                        insert_id="", position_after_msg_index=label.msg_index - 1,
-                        role="assistant",
-                        required_marker=_marker(cur, label.from_state, label.arrow),
-                    )],
-                )
+                #
+                # The walk then CONTINUES as if the bridge had already been
+                # emitted (``cur = label.from_state``) instead of returning
+                # here, so a conversation with several stacked-tool
+                # infeasibilities gets every bridge planned in one pass. An
+                # earlier version returned at the first one, which left the
+                # rest of the conversation unplanned: verify_repaired caught
+                # the leftovers, but ~half of a 1,150-conversation bucket then
+                # had to be discarded as "unrepairable" despite being
+                # repairable.
+                #
+                # position_after_msg_index is a PRE-insert message index for
+                # every bridge, including the second and later ones;
+                # apply_plan inserts back-to-front, so earlier positions stay
+                # valid as it goes.
+                inserts.append(InsertRequest(
+                    insert_id="", position_after_msg_index=label.msg_index - 1,
+                    role="assistant",
+                    required_marker=_marker(cur, label.from_state, label.arrow),
+                ))
+                bridge_edges.append((cur, label.from_state))
+                any_relabelled = True
+                # The bridge turn CARRIES the displaced advance, exactly like
+                # the prose-turn branch below, so it must consume the queue
+                # head -- otherwise the same advance is emitted twice: once by
+                # the bridge and again by the next prose turn, which then
+                # cascades into a phantom tail deficit. Measured on the real
+                # corpus: all 1,630 bridge events have pending[0] ==
+                # label.from_state, and NOT draining here turns 426 otherwise
+                # repairable conversations into drops.
+                #
+                # The == guard is deliberate. If the head does not match, the
+                # source conversation is discontinuous in a way this walk
+                # cannot model; leaving the entry queued lets the existing
+                # "deficit of N states at end" / declared-edge gates below
+                # reject it, rather than silently consuming the wrong advance.
+                if pending and pending[0] == label.from_state:
+                    pending.popleft()
+                cur = label.from_state
             if label.to_state != label.from_state:
                 # Relabel the WHOLE message -- prose and <tool_call>, if fused,
                 # stay together unchanged -- to a self-loop at its ORIGINAL
@@ -170,11 +208,12 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
         return RepairPlan(conversation_id=conversation_id, move="drop",
                           infeasible_reason=f"deficit of {len(pending)} states at end (only 1 supported)")
 
-    for tp in turns:
-        if tp.from_state != tp.to_state and (tp.from_state, tp.to_state) not in declared_edges:
+    emitted_edges = [(tp.from_state, tp.to_state) for tp in turns] + bridge_edges
+    for src, dst in emitted_edges:
+        if src != dst and (src, dst) not in declared_edges:
             return RepairPlan(
                 conversation_id=conversation_id, move="drop",
-                infeasible_reason=f"undeclared transition [{tp.from_state} -> {tp.to_state}]",
+                infeasible_reason=f"undeclared transition [{src} -> {dst}]",
             )
 
     if pending:
@@ -192,11 +231,17 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
                               infeasible_reason=f"final state '{deficit}' is not a terminal")
         # The loop has finished, so ``turns`` is the COMPLETE relabel set for
         # the conversation; the appended pair is on top of it, not instead of
-        # it.
+        # it. Likewise the closing pair is APPENDED to any mid-conversation
+        # bridges already planned above rather than replacing them: a
+        # conversation that needs both ships both, under the single
+        # ``append_closing_pair`` label. Task 4/11/12 gate on
+        # ``move in ("insert_handoff_turn", "append_closing_pair")`` and treat
+        # ``inserts`` as a flat list of independent authoring requests, so a
+        # combined plan needs no special handling there.
         return RepairPlan(
             conversation_id=conversation_id, move="append_closing_pair",
             turns=turns, drift_turns=drift_turns,
-            inserts=[
+            inserts=inserts + [
                 InsertRequest(insert_id="", position_after_msg_index=len(messages) - 1,
                               role="user", required_marker=""),
                 InsertRequest(insert_id="", position_after_msg_index=len(messages),
@@ -208,6 +253,15 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     if cur not in terminals:
         return RepairPlan(conversation_id=conversation_id, move="drop",
                           infeasible_reason=f"final state '{cur}' is not a terminal")
+
+    if inserts:
+        # Bridges only, no tail deficit. Reached only after the terminal and
+        # declared-edge gates above, which the pre-accumulation version
+        # skipped entirely by returning from inside the loop.
+        return RepairPlan(
+            conversation_id=conversation_id, move="insert_handoff_turn",
+            turns=turns, drift_turns=drift_turns, inserts=inserts,
+        )
 
     if not any_relabelled:
         return RepairPlan(conversation_id=conversation_id, move="none")

@@ -112,16 +112,30 @@ def test_tail_deficit_requires_append_closing_pair():
 
 
 def test_bare_stacked_tool_turns_need_insert_handoff():
+    # Two bare tool turns back to back, the second of which is also the LAST
+    # turn. It needs a bridge (A->B, because turn 1's advance was displaced)
+    # AND a tail close (turn 2's own B->TERMINAL advance has nothing left to
+    # land on), so the plan carries both under the append_closing_pair label.
+    #
+    # Fix round 2 changed this expectation from a 1-insert
+    # insert_handoff_turn: plan_repair used to return at the first stacked
+    # infeasibility and never saw the tail deficit at all, so the plan it
+    # produced left msg 2 still marked [B -> TERMINAL] on a tool turn.
     msgs = [
         _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
         {"role": "tool", "content": "{}", "annotations": None},
         _amsg('[STATE: B → TERMINAL]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
     ]
-    plan = plan_repair(_record(msgs, [("A", "B"), ("B", "TERMINAL")]))
-    assert plan.move == "insert_handoff_turn"
-    assert len(plan.inserts) == 1
-    assert plan.inserts[0].role == "assistant"
-    assert "B" in plan.inserts[0].required_marker
+    rec = _record(msgs, [("A", "B"), ("B", "TERMINAL")])
+    plan = plan_repair(rec)
+    assert plan.move == "append_closing_pair"
+    assert [(i.role, i.required_marker) for i in plan.inserts] == [
+        ("assistant", "[STATE: A → B]"),   # the mid-conversation bridge
+        ("user", ""),                       # the appended ack
+        ("assistant", "[STATE: B → TERMINAL]"),
+    ]
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert find_tool_stay_violations(repaired["messages"]) == []
 
 
 def test_undeclared_edge_makes_plan_infeasible_and_drops():
@@ -252,7 +266,9 @@ def test_apply_plan_returns_none_without_required_ledger_entry():
     ]
     rec = _record(msgs, [("A", "B"), ("B", "TERMINAL")])
     plan = plan_repair(rec)
-    assert plan.move == "insert_handoff_turn"
+    # An insert-bearing move (this shape needs a bridge + a tail close; see
+    # test_bare_stacked_tool_turns_need_insert_handoff) with no ledger.
+    assert plan.move == "append_closing_pair" and plan.inserts
     assert apply_plan(rec, plan, ledger_entries=None) is None
 
 
@@ -341,3 +357,139 @@ def test_append_closing_pair_plan_keeps_and_applies_earlier_relabels():
     assert [m["role"] for m in repaired["messages"]] == ["assistant", "user", "assistant"]
     assert repaired["messages"][2]["content"].startswith("[STATE: A → TERMINAL]")
     assert find_tool_stay_violations(repaired["messages"]) == []
+
+
+# --- Fix round 2: several stacked-tool infeasibilities in ONE plan ---------
+#
+# plan_repair used to return at the FIRST stacked-tool infeasibility, so a
+# conversation with a second one later was only half planned. It now continues
+# the walk as if each bridge had already been emitted, accumulating every
+# InsertRequest into one plan.
+
+
+def _markers(messages):
+    """The [STATE: ...] marker of every assistant message, in order."""
+    return [m["content"].split("]")[0] + "]"
+            for m in messages if m["role"] == "assistant"]
+
+
+def test_three_stacked_tool_turns_yield_two_bridges_in_one_plan():
+    # Three tool turns back to back with NO prose turn between any of them,
+    # each claiming a forward advance, closed by a trailing prose turn.
+    #
+    # Hand trace: cur=A. t1 relabels A->A and queues B. t2 claims from=B but
+    # cur is still A -> bridge #1 (A->B), which CONSUMES the queued B; t2 then
+    # relabels B->B and queues C. t3 claims from=C but cur is B -> bridge #2
+    # (B->C), consuming C; t3 relabels C->C and queues D. The trailing prose
+    # turn drains D. Net: 2 bridges, empty queue, ends at terminal D.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → C]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: C → D]\n<tool_call>{"name": "t3", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: D → D]\nAll done."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C"), ("C", "D")], terminal=("D",))
+    plan = plan_repair(rec)
+
+    assert plan.move == "insert_handoff_turn"
+    assert len(plan.inserts) == 2
+    # Both positions are indices into the ORIGINAL, pre-insert message list.
+    assert [(i.position_after_msg_index, i.role, i.required_marker)
+            for i in plan.inserts] == [
+        (2, "assistant", "[STATE: A → B]"),
+        (4, "assistant", "[STATE: B → C]"),
+    ]
+    # All three tool turns relabel to self-loops at their ORIGINAL from_state.
+    assert [(t.source_turn_index, t.from_state, t.to_state) for t in plan.turns] == [
+        (1, "A", "A"), (3, "B", "B"), (5, "C", "C"), (7, "C", "D"),
+    ]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert repaired is not None
+    # apply_plan's back-to-front insertion put both bridges at the right spot.
+    assert _markers(repaired["messages"]) == [
+        "[STATE: A → A]", "[STATE: A → B]",
+        "[STATE: B → B]", "[STATE: B → C]",
+        "[STATE: C → C]", "[STATE: C → D]",
+    ]
+    assert find_tool_stay_violations(repaired["messages"]) == []
+    assert verify_repaired(repaired) == []
+    # A tool's from-state is never re-attributed by the repair.
+    from llm_workflow_agents.data._workflow_script import infer_state_tools_from_messages
+    assert infer_state_tools_from_messages(msgs) == infer_state_tools_from_messages(
+        repaired["messages"])
+
+
+def test_mid_conversation_bridge_and_tail_deficit_ship_in_one_plan():
+    # A stacked infeasibility (needing a bridge) followed by an unresolved tail
+    # deficit: the conversation ends on the second tool turn, so its C advance
+    # has no later turn to land on. The bridge must NOT be discarded in favour
+    # of the closing pair -- all three inserts ride in one plan.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → C]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C")], terminal=("C",))
+    plan = plan_repair(rec)
+
+    assert plan.move == "append_closing_pair"
+    assert [(i.position_after_msg_index, i.role, i.required_marker)
+            for i in plan.inserts] == [
+        (2, "assistant", "[STATE: A → B]"),   # mid-conversation bridge, kept
+        (3, "user", ""),                       # appended ack
+        (4, "assistant", "[STATE: B → C]"),    # appended closing turn
+    ]
+    assert [(t.source_turn_index, t.from_state, t.to_state) for t in plan.turns] == [
+        (1, "A", "A"), (3, "B", "B"),
+    ]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert repaired is not None
+    assert [m["role"] for m in repaired["messages"]] == [
+        "user", "assistant", "tool", "assistant", "assistant", "user", "assistant",
+    ]
+    assert _markers(repaired["messages"]) == [
+        "[STATE: A → A]", "[STATE: A → B]", "[STATE: B → B]", "[STATE: B → C]",
+    ]
+    assert find_tool_stay_violations(repaired["messages"]) == []
+    assert verify_repaired(repaired) == []
+
+
+def test_bridge_consumes_the_queued_advance_instead_of_duplicating_it():
+    # Regression guard for the subtle half of the fix. The bridge turn carries
+    # the SAME displaced advance the queue is holding, so it must drain the
+    # queue head -- otherwise that advance is emitted twice (once by the
+    # bridge, once by the next prose turn) and the conversation ends with a
+    # phantom deficit. Measured on the real corpus, not draining turns 426
+    # otherwise-repairable conversations into drops.
+    #
+    # Here the trailing prose turn already sits at the correct D->D self-loop.
+    # With a correct drain the queue holds exactly [D] when it is reached; a
+    # duplicating implementation would hold [C, D] and end with a leftover.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → C]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: C → C]\nAll done."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C")], terminal=("C",))
+    plan = plan_repair(rec)
+
+    # One bridge and NO tail close: the single trailing prose turn is enough.
+    assert plan.move == "insert_handoff_turn"
+    assert len(plan.inserts) == 1
+    assert plan.infeasible_reason is None
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert _markers(repaired["messages"]) == [
+        "[STATE: A → A]", "[STATE: A → B]", "[STATE: B → B]", "[STATE: B → C]",
+    ]
+    assert verify_repaired(repaired) == []
