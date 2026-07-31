@@ -1,7 +1,9 @@
 import copy
 import json
 
-from llm_workflow_agents.data.state_convention_repair import InsertRequest, plan_repair
+from llm_workflow_agents.data.state_convention_repair import (
+    InsertRequest, RepairPlan, plan_repair,
+)
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
 
 
@@ -493,3 +495,169 @@ def test_bridge_consumes_the_queued_advance_instead_of_duplicating_it():
         "[STATE: A → A]", "[STATE: A → B]", "[STATE: B → B]", "[STATE: B → C]",
     ]
     assert verify_repaired(repaired) == []
+
+
+# --- Fix round 3: the bridge must not create consecutive assistant prose -----
+#
+# A bridge is an assistant PROSE message spliced between two existing messages.
+# find_shape_violations rejects two assistant messages in a row unless the
+# LATER one is a *pure* tool-call turn, so the splice can break the shape on
+# either side:
+#
+#   leading  edge -- (message before the bridge, bridge): illegal when that
+#                    message is itself an assistant turn, because the bridge is
+#                    prose.
+#   trailing edge -- (bridge, stacked tool turn): illegal when the stacked turn
+#                    is FUSED (prose then <tool_call>) rather than bare.
+#
+# Both are repaired the same way: a short user acknowledgement on the offending
+# side, which makes the adjacency assistant->user / user->assistant (always
+# legal). find_shape_violations itself is deliberately NOT relaxed -- it is
+# shared with the teacher-facing generator, where relaxing it would widen what
+# the teacher may emit.
+
+
+def _shape(messages, initiator="user"):
+    from llm_workflow_agents.data._workflow_script import find_shape_violations
+    return find_shape_violations(messages, initiator)
+
+
+def test_bridge_before_a_FUSED_stacked_turn_is_paired_with_a_user_ack():
+    # t2 is FUSED (prose then <tool_call>), so a lone assistant bridge in front
+    # of it would read as two assistant prose turns in a row. The plan must emit
+    # the bridge and a user ack, in that order, immediately before t2.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → C]\nNow booking that for you.\n'
+              '<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: C → C]\nAll done."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C")], terminal=("C",))
+    plan = plan_repair(rec)
+
+    assert plan.move == "insert_handoff_turn"
+    # Two inserts at the SAME pre-insert position; list order is output order.
+    assert [(i.position_after_msg_index, i.role, i.required_marker)
+            for i in plan.inserts] == [
+        (2, "assistant", "[STATE: A → B]"),
+        (2, "user", ""),
+    ]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert repaired is not None
+    # The ack lands BETWEEN the bridge and the fused turn, not before the bridge.
+    assert [m["role"] for m in repaired["messages"]] == [
+        "user", "assistant", "tool", "assistant", "user", "assistant", "tool", "assistant",
+    ]
+    assert repaired["messages"][3]["content"].startswith("[STATE: A → B]")   # bridge
+    assert repaired["messages"][4]["content"] == "Sure, thanks."             # ack
+    assert repaired["messages"][5]["content"].startswith("[STATE: B → B]")   # fused t2
+    assert "<tool_call>" in repaired["messages"][5]["content"]
+
+    assert _shape(repaired["messages"]) == []
+    assert find_tool_stay_violations(repaired["messages"]) == []
+    assert verify_repaired(repaired) == []
+
+
+def test_bridge_before_a_BARE_stacked_turn_stays_a_single_insert():
+    # Byte-for-byte the fixture above with the fused turn's prose removed. A
+    # bare (pure) tool turn is explicitly allowed to follow an assistant turn,
+    # so no ack is needed and the bridge stays a single insert.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → C]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: C → C]\nAll done."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C")], terminal=("C",))
+    plan = plan_repair(rec)
+
+    assert plan.move == "insert_handoff_turn"
+    assert [(i.position_after_msg_index, i.role, i.required_marker)
+            for i in plan.inserts] == [(2, "assistant", "[STATE: A → B]")]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert [m["role"] for m in repaired["messages"]] == [
+        "user", "assistant", "tool", "assistant", "assistant", "tool", "assistant",
+    ]
+    assert _shape(repaired["messages"]) == []
+    assert verify_repaired(repaired) == []
+
+
+def test_bridge_landing_after_an_assistant_turn_is_preceded_by_a_user_ack():
+    # The mirror case, found by auditing the 15 corpus violations that were NOT
+    # fused-successor. Here the stacked turn t2 is BARE -- legal after an
+    # assistant turn -- but the message the bridge lands after (msg 3) is an
+    # assistant prose turn, so (msg3, bridge) is the illegal pair. The ack must
+    # go in FRONT of the bridge.
+    #
+    # Trace: cur=A. t1 relabels A->A, queues B. The msg-3 prose turn drains B
+    # (relabelling A->B) and requeues its own C. t2 claims from=C while cur=B
+    # -> bridge B->C, landing directly after that prose turn.
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → C]\nGreat, that checks out."),
+        _amsg('[STATE: C → C]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: C → TERMINAL]\nAll done."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "C"), ("C", "TERMINAL")])
+    # The source conversation is already shape-legal: msg 4 is a PURE tool turn,
+    # which is the one thing allowed to follow an assistant turn. The bridge is
+    # what would break it.
+    assert _shape(msgs) == []
+
+    plan = plan_repair(rec)
+    assert plan.move == "insert_handoff_turn"
+    assert [(i.position_after_msg_index, i.role, i.required_marker)
+            for i in plan.inserts] == [
+        (3, "user", ""),
+        (3, "assistant", "[STATE: B → C]"),
+    ]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert [m["role"] for m in repaired["messages"]] == [
+        "user", "assistant", "tool", "assistant", "user", "assistant",
+        "assistant", "tool", "assistant",
+    ]
+    assert repaired["messages"][4]["content"] == "Sure, thanks."            # ack first
+    assert repaired["messages"][5]["content"].startswith("[STATE: B → C]")  # then bridge
+    assert _shape(repaired["messages"]) == []
+    assert verify_repaired(repaired) == []
+
+
+def test_apply_plan_inserts_at_the_same_position_keep_their_list_order():
+    # The ordering contract the two tests above depend on, asserted directly.
+    # apply_plan applies inserts back-to-front by position; for a POSITION TIE
+    # it must apply them in reverse list order so that the surviving output
+    # order equals the list order. A plain stable sort on -position does the
+    # opposite (each same-position insert shoves the previous one right).
+    msgs = [
+        {"role": "user", "content": "hi", "annotations": None},
+        _amsg("[STATE: A → TERMINAL]\nDone."),
+    ]
+    rec = _record(msgs, [("A", "TERMINAL")])
+    plan = RepairPlan(
+        conversation_id="T_001", move="insert_handoff_turn",
+        inserts=[
+            InsertRequest(insert_id="x0", position_after_msg_index=0,
+                          role="assistant", required_marker="[STATE: A → A]"),
+            InsertRequest(insert_id="x1", position_after_msg_index=0,
+                          role="user", required_marker=""),
+            InsertRequest(insert_id="x2", position_after_msg_index=0,
+                          role="assistant", required_marker="[STATE: A → A]"),
+        ],
+    )
+    ledger = {"x0": {"content": "first"}, "x1": {"content": "second"},
+              "x2": {"content": "third"}}
+    repaired = apply_plan(rec, plan, ledger_entries=ledger)
+    assert [m["content"] for m in repaired["messages"][1:4]] == [
+        "first", "second", "third",
+    ]

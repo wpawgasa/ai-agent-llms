@@ -101,6 +101,15 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     ``inserts`` as a flat list of independent authoring requests need no change
     to handle N inserts instead of 1.
 
+    A bridge is an assistant *prose* message spliced between two existing
+    messages, so it can create an illegal consecutive-assistant-prose pair on
+    either side (see ``find_shape_violations``). Each side that would break is
+    padded with a short user-role acknowledgement, so one stacked-tool
+    infeasibility contributes one, two, or three ``InsertRequest``s. Inserts
+    that share a ``position_after_msg_index`` appear in the repaired
+    conversation in the order they were appended here -- ``apply_plan`` breaks
+    position ties by reverse list index to guarantee that.
+
     Index conventions (two different spaces, deliberately):
       * ``TurnPlan.source_turn_index`` is a **message** index — an index into
         ``parse_assistant_turns(messages)``'s output, which Task 1 returns
@@ -152,12 +161,52 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
                 # position_after_msg_index is a PRE-insert message index for
                 # every bridge, including the second and later ones;
                 # apply_plan inserts back-to-front, so earlier positions stay
-                # valid as it goes.
+                # valid as it goes. Inserts sharing one position come out in
+                # list order (apply_plan breaks position ties by reverse list
+                # index), so the order they are appended here is the order they
+                # appear in the repaired conversation.
+                bridge_pos = label.msg_index - 1
+                # A bridge is an assistant PROSE message spliced between two
+                # existing ones, and find_shape_violations rejects two
+                # assistant messages in a row unless the LATER one is a *pure*
+                # tool-call turn. So the splice can break the shape on either
+                # side, and each side is repaired by a short user
+                # acknowledgement that makes the adjacency assistant->user /
+                # user->assistant (both always legal).
+                #
+                # Leading edge: the message the bridge lands after is itself an
+                # assistant turn, so (that turn, bridge) would be two prose
+                # turns in a row. 15 such violations on the real corpus, all
+                # with a BARE successor -- i.e. not reachable via the
+                # prose_prefix test below, which is why both checks exist.
+                if bridge_pos >= 0 and messages[bridge_pos].get("role") == "assistant":
+                    inserts.append(InsertRequest(
+                        insert_id="", position_after_msg_index=bridge_pos,
+                        role="user", required_marker="",
+                    ))
                 inserts.append(InsertRequest(
-                    insert_id="", position_after_msg_index=label.msg_index - 1,
+                    insert_id="", position_after_msg_index=bridge_pos,
                     role="assistant",
                     required_marker=_marker(cur, label.from_state, label.arrow),
                 ))
+                # Trailing edge: the stacked turn is FUSED (prose before its
+                # <tool_call>), so (bridge, stacked turn) would be two prose
+                # turns in a row. A BARE stacked turn is a pure tool-call turn,
+                # explicitly allowed after an assistant message, so it needs no
+                # ack. ``prose_prefix`` is exactly find_shape_violations'
+                # predicate: it is "" iff the content after the marker lstrips
+                # to a leading "<tool_call>".
+                #
+                # The alternative -- relaxing find_shape_violations for a
+                # bridge followed by a fused turn -- was rejected deliberately:
+                # that function is shared with the teacher-facing generator, so
+                # loosening it would widen what the TEACHER may emit, a much
+                # bigger decision than a corpus-remediation bug fix.
+                if label.prose_prefix:
+                    inserts.append(InsertRequest(
+                        insert_id="", position_after_msg_index=bridge_pos,
+                        role="user", required_marker="",
+                    ))
                 bridge_edges.append((cur, label.from_state))
                 any_relabelled = True
                 # The bridge turn CARRIES the displaced advance, exactly like
@@ -320,8 +369,21 @@ def apply_plan(
     if plan.move in ("insert_handoff_turn", "append_closing_pair"):
         if ledger_entries is None:
             return None
-        # inserts are applied back-to-front to keep earlier positions valid
-        for req in sorted(plan.inserts, key=lambda r: -r.position_after_msg_index):
+        # Inserts are applied back-to-front so earlier positions stay valid.
+        #
+        # The ``-i`` tie-break is load-bearing, not cosmetic. Several inserts
+        # can share one ``position_after_msg_index`` (a bridge plus its user
+        # ack), and each insert at a given slot shoves the previously inserted
+        # one to the right. Applying same-position inserts in REVERSE list
+        # order therefore leaves them in LIST order in the output, which is the
+        # contract plan_repair is written against. A plain stable sort on
+        # ``-position`` alone silently reverses each such group -- measured:
+        # ["first", "second", "third"] comes out ["third", "second", "first"]
+        # (tests/unit/test_state_convention_repair.py::
+        # test_apply_plan_inserts_at_the_same_position_keep_their_list_order).
+        for _i, req in sorted(
+            enumerate(plan.inserts), key=lambda p: (-p[1].position_after_msg_index, -p[0])
+        ):
             entry = ledger_entries.get(req.insert_id)
             if entry is None:
                 return None
