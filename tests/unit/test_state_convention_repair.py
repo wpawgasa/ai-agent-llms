@@ -50,10 +50,39 @@ def test_case_a_two_turn_relabel():
     assert by_index[2].from_state == "A" and by_index[2].to_state == "B"
 
 
-def test_stacked_tool_turns_split_fused_head():
-    # first tool turn is fused (has prose before the <tool_call>) and wrongly
-    # advances A->B; splitting its prose off as a separate A->B turn lets the
-    # tail become a clean B->B tool turn, which absorbs the second tool call.
+def test_fused_tool_turn_relabels_in_place_keeping_prose_and_tool_together():
+    # A fused turn (prose + <tool_call> in one message) that wrongly advances
+    # A->B relabels to a SINGLE self-loop A->A, keeping the prose and the
+    # tool call together in the same message -- exactly like a bare tool
+    # turn. This is deliberate: physically splitting the tool call into its
+    # own message at the destination state would change which state the
+    # tool is attributed to (infer_state_tools_from_messages), breaking the
+    # "a tool's from-state never changes" invariant. See
+    # docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md.
+    msgs = [
+        _amsg(
+            '[STATE: A → B]\nChecking that now.\n'
+            '<tool_call>{"name": "t1", "arguments": {}}</tool_call>'
+        ),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → B]\nAll set."),
+    ]
+    # Same shape as test_case_a_two_turn_relabel, just with a fused (prose +
+    # tool_call) first turn instead of a bare one -- proving plan_repair
+    # treats them identically.
+    plan = plan_repair(_record(msgs, [("A", "B")], terminal=("B",)))
+    assert plan.move == "relabel"
+    tp = plan.turns[0]
+    assert tp.from_state == "A" and tp.to_state == "A"
+    assert tp.content_op == "relabel"
+
+
+def test_stacked_tool_turn_after_a_fused_turn_needs_insert_handoff():
+    # Because the fused turn above relabels WITHOUT advancing cur, a second,
+    # already-bare tool turn immediately following it (originally marked
+    # B->B, i.e. looking self-consistent on its own) cannot fire -- cur is
+    # still A, not B -- so this is a stacked-tool infeasibility needing a
+    # hand-off, exactly as if the fused turn had carried no prose at all.
     msgs = [
         _amsg(
             '[STATE: A → B]\nChecking that now.\n'
@@ -65,9 +94,9 @@ def test_stacked_tool_turns_split_fused_head():
         _amsg("[STATE: B → TERMINAL]\nDone."),
     ]
     plan = plan_repair(_record(msgs, [("A", "B"), ("B", "TERMINAL")]))
-    assert plan.move == "split_fused_tool_turn"
-    assert any(t.content_op == "split_head" for t in plan.turns)
-    assert any(t.content_op == "split_tail" for t in plan.turns)
+    assert plan.move == "insert_handoff_turn"
+    assert plan.inserts[0].role == "assistant"
+    assert "B" in plan.inserts[0].required_marker
 
 
 def test_tail_deficit_requires_append_closing_pair():
