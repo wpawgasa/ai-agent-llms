@@ -1,0 +1,20 @@
+<task-notification>
+<task-id>ae6ce521ca7238fe5</task-id>
+<tool-use-id>toolu_01FKY9AZDtaTFGbhjdLHFFok</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/a7991fc5-bb0e-46a5-a8a2-79c243bdffcf/tasks/ae6ce521ca7238fe5.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 2 implementation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The 5 findings, in the severity order I filed them:
+
+1. **`tests/unit/test_state_convention_repair.py:99`** (test-coverage) — No test guards the `[STATE: ` prefix or the arrow glyph in `required_marker`: the three assertions are substring checks only (`"B" in ...`, `"TERMINAL" in ...`), so reverting `_marker()` to the brief's original `f"[{cur} -&gt; {cur}]"` would leave all 9 tests green; bug fixes #3 and #4 are unprotected, and the regression would only surface at Task 12's `content.startswith(required_marker)` ledger gate. (Also applies to lines 111 and 124.)
+
+2. **`src/llm_workflow_agents/data/state_convention_repair.py:30`** (documentation) — `TurnPlan.source_turn_index`'s inline comment ("index into `parse_assistant_turns()`'s output") and its class docstring ("mapped back to its source (if any)") still carry the exact ambiguous wording the controller replaced in the plan (`# the message's index in messages[] (label.msg_index)`) — the phrasing that caused deviation #1 in the first place. A Task 3 implementer reading only the dataclass could reintroduce the filtered-assistant-only-list indexing bug.
+
+3. **`src/llm_workflow_agents/data/state_convention_repair.py:143`** (correctness / signal quality, inherited from the plan's reference implementation) — The drift condition `nxt != label.to_state or label.from_state != cur` is true *by construction* on the queue-draining turn of every canonical relabel, so `drift_turns` is non-empty on **608/608** relabel plans; as a human-review prioritisation pointer (its documented purpose) it carries zero signal for Task 4/11/12.
+
+4. **`src/llm_workflow_agents/data/state_convention_repair.py:170`** (spec-wording deviation, zero impact) — The shipped closing-pair guard is `if cur != deficit and (cur, deficit) not in declared_edges`, whereas the plan states the declared-edge requirement unconditionally; the self-loop exemption is consistent with the turns-loop check at line 159 and never fires (`cur == deficit` occurs 0 times in 5,549 conversations), so reconcile the plan text rather than the code.
+
+5. **`docs/superpowers/plans/2026-07-31-task-a-tool-stay-convention-plan.md:677`** (documentation) — Both controller doc commits still quote the pre-fix-round `pullback_fuse` figure "11 candidates (1.6%)"; the shipped code measures **14 candidates (1.2%** of the 1,150-conversation insert bucket). Same stale figure appears in `docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md` (move-ladder table, row 2). Decision to skip `pullback_fuse` is unaffected.</result>
+<usage><subagent_tokens>136644</subagent_tokens><tool_uses>0</tool_uses><duration_ms>14026</duration_ms></usage>
+</task-notification>
