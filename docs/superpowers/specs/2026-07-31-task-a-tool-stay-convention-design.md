@@ -33,6 +33,8 @@ Cat A fine-tuning is stalled on state-transition accuracy, not tool emission. `d
 
 Per conversation: 3,476 (62.6%) already conformant, 1,143 (20.6%) deterministically repairable with zero authored text, 930 (16.8%) need 1–2 short authored messages to stay legal.
 
+**Note (code-verified during implementation, Task 1):** the 4,333 turn-level figure above was measured by an earlier exploratory script; `find_tool_stay_violations`'s code-verified count on the same corpus is **4,322** — the 11-turn gap is exactly accounted for by turns whose structured `annotations.tool_calls` field claims a tool call but whose `content` has no literal `<tool_call>` tag (the separate, pre-existing "announce-but-don't-call" defect in `docs/grpo_tool_emission_gap_review.md`), which this module deliberately does not count (content is authoritative, per `_backfill_annotations`'s own rule). Treat 4,322 as the corrected reference figure; the per-conversation bucket percentages above are unaffected (they were never turn-count-derived).
+
 Error/retry reality: 18.8% of tool results are errors; retry streaks are `{1 attempt: 3,784, 2: 26}`; only 10 of 5,549 conversations escalate after an error. **There is no retry-exhaustion arc anywhere in the corpus** — requirement 5 of the convention has zero corpus support and cannot be repaired into existing rows, only generated fresh.
 
 Domain registry constraints (`domain_registry.py`, 18 domains): every domain has exactly one terminal, literally `"TERMINAL"`; 8/18 domains have no escalation-like state; 10/18 have no `tool_error` edge; `validate_domain()` enforces exactly one spine successor per non-terminal state and full reachability to a terminal.
@@ -46,14 +48,14 @@ Domain registry constraints (`domain_registry.py`, 18 domains): every domain has
 
 ## Core algorithm: whole-trajectory requeue
 
-Per-turn relabelling is unsafe — defects come in runs (957 defective tool turns are themselves followed by another tool turn). The repair unit is the whole assistant-turn trajectory. Preserve every tool call's `from`-state exactly (making tool-placement legality invariant *by construction*, not merely re-checked), force tool turns to `X→X`, and push each displaced advance onto a FIFO queue drained by the next prose turn:
+Per-turn relabelling is unsafe — defects come in runs (957 defective tool turns are themselves followed by another tool turn). The repair unit is the whole assistant-turn trajectory. Preserve every tool call's `from`-state exactly (making tool-placement legality invariant *by construction*, not merely re-checked), force tool turns to `X→X` — **fused or bare, always as a single message, never split** — and push each displaced advance onto a FIFO queue drained by the next prose turn:
 
 ```
 cur = labels[0].from
 for each assistant turn in order:
     if turn has <tool_call>:
-        require cur == turn.from          # else: stacked tool -> split or insert
-        emit (cur, cur)
+        require cur == turn.from          # else: stacked tool -> needs an inserted hand-off
+        emit (cur, cur)                   # prose + <tool_call>, if fused, stay in ONE message
         if turn.to != turn.from: pending.append(turn.to)
     else:
         if pending: emit (cur, pending.popleft()); cur = emitted.to
@@ -66,20 +68,23 @@ require last emitted .to in terminals
 
 `[STATE:]` marker text, `annotations.state_transition`, and `ground_truth.state_sequence` are all written from the same `emit` list, in lockstep — this is what keeps `quality_profiler`'s exact list-equality check (defect #7) satisfied.
 
-### Move ladder (ranked by cost; measured yield)
+**Why a fused turn is never split.** An earlier version of this algorithm classified a fused turn (`[STATE: X→Y]\nprose\n<tool_call>`) as a distinct `split_fused_tool_turn` move: keep the prose at the (wrong) advancing label `X→Y` and move only the `<tool_call>` into a new self-loop turn at the *destination* state `Y→Y`. Implementation-time measurement (Task 2 of the implementation plan) found this re-attributes the tool call from `X` to `Y` in `infer_state_tools_from_messages`'s accounting on ~66% of the sites where it applies (777 of 1,227 shipped split sites; 360 conversations, 6.5% of the corpus) — directly violating this section's own "preserve every tool call's `from`-state exactly" rule and the "GT-inferred tool→state map unchanged" acceptance gate. The fix: **a fused turn relabels exactly like a bare one** — the whole message (prose and `<tool_call>` together, content otherwise unchanged) becomes a single self-loop at its original `from`-state, and the displaced advance is queued exactly as for a bare tool turn. If this leaves an *already-bare* tool turn immediately following unable to fire (its own `from` no longer matches `cur`, since the fused turn's relabel didn't advance `cur`), that is a stacked-tool infeasibility resolved by `insert_handoff_turn` below — the same move that already handles two consecutive bare tool turns.
 
-| # | Move | Convs | Authored text |
-|---|---|---|---|
-| 1 | `relabel` — queue drains cleanly | 608 | none |
-| 2 | `split_fused_tool_turn` — `[STATE: X→Y]\nprose\n<tool_call>` → two turns | +535 | none |
-| 3 | `pullback_fuse` — move `<tool_call>` onto the preceding `X→X` prose turn | measure first | none |
-| 4 | `insert_handoff_turn` — stacked bare tool turns; insert one assistant message | 443 | 1 msg |
-| 5 | `append_closing_pair` — tail deficit; append `user` ack + terminal `assistant` | 599 | 2 msgs |
-| 6 | `drop` — post-gate failure or agent refusal | residual | — |
+### Move ladder (ranked by cost)
 
-Move 2 is legal because `find_shape_violations` (`_workflow_script.py:262-270`, verified by direct read) permits consecutive assistant turns when the second, after marker-stripping, starts with `<tool_call>`. Move 5 must prepend a `user` turn — 574 of 599 deficits end on an assistant turn, so appending an assistant alone trips the consecutive-prose rule.
+| # | Move | Authored text |
+|---|---|---|
+| 1 | `relabel` — queue drains cleanly (covers both bare and fused tool turns) | none |
+| 2 | `pullback_fuse` — move `<tool_call>` onto the preceding `X→X` prose turn (measured negligible yield: 11 candidates, 1.6% of the insert bucket — implemented ladder skips it) | none |
+| 3 | `insert_handoff_turn` — stacked tool turns (bare-after-bare, or bare-after-relabelled-fused); insert one assistant message | 1 msg |
+| 4 | `append_closing_pair` — tail deficit; append `user` ack + terminal `assistant` | 2 msgs |
+| 5 | `drop` — post-gate failure or agent refusal | — |
 
-**Rejected moves:** marker-only inserted turns (0 of 64,964 corpus turns are marker-only — would teach empty-content turns); blanket 2-turn relabel for every defect (unsafe on the 650+307 turns whose successor also calls a tool); skip-edges (0 of the tail deficits have a declared shortcut); terminating one state short (adds ~600 non-terminal rows, trips continuity).
+Move 3 must bridge `cur` to the stacked turn's own `from`-state (not a bare self-loop at `cur`) — a self-loop at `cur` would leave the trajectory exactly as stuck as before. Move 4 must prepend a `user` turn before the closing `assistant` turn — most tail deficits end on an assistant turn, so appending an assistant turn alone would trip the "no two consecutive assistant prose turns" shape rule.
+
+**Rejected moves:** splitting a fused turn to preserve its prose's claimed destination (see above — breaks tool-placement attribution at scale); marker-only inserted turns (0 of 64,964 corpus turns are marker-only — would teach empty-content turns); blanket 2-turn relabel for every defect (unsafe when the successor turn also calls a tool); skip-edges (tail deficits rarely have a declared shortcut); terminating one state short (adds non-terminal rows, trips continuity).
+
+Exploratory bucket counts cited in earlier drafts of this design (608 `relabel` / 535 `split_fused_tool_turn` / 443 `insert_handoff_turn` / 599 `append_closing_pair`) predate this simplification and are superseded by the code-verified triage run (implementation plan, Task 4 Step 5) — that run is the authoritative source for current bucket sizes.
 
 ## Invariants any repair must preserve (all independently re-checked post-repair)
 

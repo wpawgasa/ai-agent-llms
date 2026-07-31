@@ -4,7 +4,7 @@
 
 **Goal:** Remediate the Task A SFT corpus (`data/output/sft/task_a`, `task-a-sft-v1`) so every tool-calling assistant turn annotates a self-loop `[STATE: X → X]` and the advance happens on a later turn, and redesign the teacher-driven generator so new data is born conforming — producing `task-a-sft-v2`.
 
-**Architecture:** A pure, dependency-free library (`state_convention.py` + `state_convention_repair.py`) implements a whole-trajectory requeue algorithm that relabels/splits tool turns deterministically wherever safe, and classifies the remainder as needing 1–2 short authored messages. A `claude -p` agent (`corpus-remediator`) authors only that missing text into a reviewable, replayable decision ledger — it never edits corpus JSONL directly. Three deterministic gate layers validate every agent output before it can enter the corpus. In parallel, the teacher-facing prompts, the generator's repair loop, the workflow-script renderer, and the quality profiler are updated so newly generated conversations conform by construction and the defect cannot recur.
+**Architecture:** A pure, dependency-free library (`state_convention.py` + `state_convention_repair.py`) implements a whole-trajectory requeue algorithm that relabels tool turns deterministically wherever safe — a tool call's state attribution never changes, even for a fused prose+tool_call turn — and classifies the remainder as needing 1–2 short authored messages. A `claude -p` agent (`corpus-remediator`) authors only that missing text into a reviewable, replayable decision ledger — it never edits corpus JSONL directly. Three deterministic gate layers validate every agent output before it can enter the corpus. In parallel, the teacher-facing prompts, the generator's repair loop, the workflow-script renderer, and the quality profiler are updated so newly generated conversations conform by construction and the defect cannot recur.
 
 **Tech Stack:** Python 3, pytest, existing `llm_workflow_agents.data` package, DVC, the `claude` CLI (already used once in this repo at `scripts/generate_sft_until_target.py::verify_batch_with_agent`).
 
@@ -276,7 +276,7 @@ git commit -m "feat(data): add tool-call stay-convention parser and violation ga
 
 **Interfaces:**
 - Consumes: `state_convention.parse_assistant_turns`, `state_convention.TurnLabel` (Task 1).
-- Produces: `TurnPlan`, `InsertRequest`, `RepairPlan` dataclasses; `plan_repair(record: dict) -> RepairPlan`. `RepairPlan.move` is one of `"none" | "relabel" | "split_fused_tool_turn" | "insert_handoff_turn" | "append_closing_pair" | "drop"`. Task 3 consumes `RepairPlan` to implement `apply_plan`/`verify_repaired`; Task 4's CLI consumes `plan_repair` for `triage`.
+- Produces: `TurnPlan`, `InsertRequest`, `RepairPlan` dataclasses; `plan_repair(record: dict) -> RepairPlan`. `RepairPlan.move` is one of `"none" | "relabel" | "insert_handoff_turn" | "append_closing_pair" | "drop"`. Task 3 consumes `RepairPlan` to implement `apply_plan`/`verify_repaired`; Task 4's CLI consumes `plan_repair` for `triage`.
 
 ### Algorithm being implemented
 
@@ -307,11 +307,10 @@ if pending:
 
 `move` is decided from what happened during the walk:
 - `"none"` — every `label.to_state == label.from_state` already (no tool turn ever needed a requeue) AND every prose turn's original `(from, to)` matches its `emitted` pair unchanged.
-- `"relabel"` — the walk completed with `pending` empty at the end and no infeasibility, and every displaced tool turn had no fused prose (bare tool turn) requiring only the `[STATE:]` text and GT to change, never message *content* structure.
-- `"split_fused_tool_turn"` — same as `relabel`, but at least one displaced tool turn had `prose_prefix` non-empty, so its message must be split into two.
-- `"insert_handoff_turn"` — a stacked-tool infeasibility occurred (`cur != label.from_state` for a tool turn with no preceding prose turn to carry the requeued advance).
-- `"append_closing_pair"` — `pending` non-empty at the end (`len(pending) == 1`).
-- `"drop"` — `len(pending) > 1` at any point, or an emitted non-self pair `(a, b)` with `a != b` is not a declared edge in `record["workflow_graph"]["transitions"]`, or the final emitted `to` is not in `record["workflow_graph"]["terminal"]`.
+- `"relabel"` — the walk completed with `pending` empty at the end and no infeasibility. This covers **every** displaced tool turn, fused or bare: a fused turn's prose and `<tool_call>` stay together in the same message, relabelled as a single self-loop at its *original* `from_state`. This is deliberate, not a simplification: the only way to guarantee a repair never changes which state a tool call is attributed to (`infer_state_tools_from_messages`) is to never move the `<tool_call>` to a different message at a different state. An earlier version of this design proposed a distinct `split_fused_tool_turn` move that physically separated the prose (kept at the wrong advancing label) from the tool call (moved to a new self-loop turn at the *destination* state) — that move was removed after implementation measurement showed it re-attributes the tool call to the destination state on ~66% of its sites, breaking the tool-placement invariant on 6.5% of the real corpus. See `docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md`'s "Core algorithm" section for the full account.
+- `"insert_handoff_turn"` — a stacked-tool infeasibility occurred (`cur != label.from_state` for a tool turn with no preceding prose turn to carry the requeued advance). This now also covers the case where a fused turn's relabel-in-place doesn't advance `cur`, so an *already-bare* tool turn immediately following it is stacked exactly as if the fused turn had no prose at all.
+- `"append_closing_pair"` — `pending` non-empty at the end (`len(pending) == 1`), AND the closing transition `(cur, deficit)` is a declared edge, AND `deficit` is a terminal (otherwise `"drop"`).
+- `"drop"` — `len(pending) > 1` at any point, or an emitted non-self pair `(a, b)` with `a != b` is not a declared edge in `record["workflow_graph"]["transitions"]`, or the final emitted `to` is not in `record["workflow_graph"]["terminal"]`, or the closing-pair transition described above is undeclared/non-terminal.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -369,10 +368,39 @@ def test_case_a_two_turn_relabel():
     assert by_index[2].from_state == "A" and by_index[2].to_state == "B"
 
 
-def test_stacked_tool_turns_split_fused_head():
-    # first tool turn is fused (has prose before the <tool_call>) and wrongly
-    # advances A->B; splitting its prose off as a separate A->B turn lets the
-    # tail become a clean B->B tool turn, which absorbs the second tool call.
+def test_fused_tool_turn_relabels_in_place_keeping_prose_and_tool_together():
+    # A fused turn (prose + <tool_call> in one message) that wrongly advances
+    # A->B relabels to a SINGLE self-loop A->A, keeping the prose and the
+    # tool call together in the same message -- exactly like a bare tool
+    # turn. This is deliberate: physically splitting the tool call into its
+    # own message at the destination state would change which state the
+    # tool is attributed to (infer_state_tools_from_messages), breaking the
+    # "a tool's from-state never changes" invariant. See
+    # docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md.
+    msgs = [
+        _amsg(
+            '[STATE: A → B]\nChecking that now.\n'
+            '<tool_call>{"name": "t1", "arguments": {}}</tool_call>'
+        ),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → B]\nAll set."),
+    ]
+    # Same shape as test_case_a_two_turn_relabel, just with a fused (prose +
+    # tool_call) first turn instead of a bare one -- proving plan_repair
+    # treats them identically.
+    plan = plan_repair(_record(msgs, [("A", "B")], terminal=("B",)))
+    assert plan.move == "relabel"
+    tp = plan.turns[0]
+    assert tp.from_state == "A" and tp.to_state == "A"
+    assert tp.content_op == "relabel"
+
+
+def test_stacked_tool_turn_after_a_fused_turn_needs_insert_handoff():
+    # Because the fused turn above relabels WITHOUT advancing cur, a second,
+    # already-bare tool turn immediately following it (originally marked
+    # B->B, i.e. looking self-consistent on its own) cannot fire -- cur is
+    # still A, not B -- so this is a stacked-tool infeasibility needing a
+    # hand-off, exactly as if the fused turn had carried no prose at all.
     msgs = [
         _amsg(
             '[STATE: A → B]\nChecking that now.\n'
@@ -384,9 +412,9 @@ def test_stacked_tool_turns_split_fused_head():
         _amsg("[STATE: B → TERMINAL]\nDone."),
     ]
     plan = plan_repair(_record(msgs, [("A", "B"), ("B", "TERMINAL")]))
-    assert plan.move == "split_fused_tool_turn"
-    assert any(t.content_op == "split_head" for t in plan.turns)
-    assert any(t.content_op == "split_tail" for t in plan.turns)
+    assert plan.move == "insert_handoff_turn"
+    assert plan.inserts[0].role == "assistant"
+    assert "B" in plan.inserts[0].required_marker
 
 
 def test_tail_deficit_requires_append_closing_pair():
@@ -472,7 +500,6 @@ from llm_workflow_agents.data.state_convention import parse_assistant_turns
 Move = Literal[
     "none",
     "relabel",
-    "split_fused_tool_turn",
     "insert_handoff_turn",
     "append_closing_pair",
     "drop",
@@ -481,13 +508,13 @@ Move = Literal[
 
 @dataclass(frozen=True)
 class TurnPlan:
-    """One post-repair assistant turn, mapped back to its source (if any)."""
+    """One post-repair assistant turn, mapped back to its source message."""
 
-    source_turn_index: int | None   # index into parse_assistant_turns()'s output; None if inserted
+    source_turn_index: int | None   # the message's index in messages[] (label.msg_index); None if inserted
     from_state: str
     to_state: str
     arrow: str
-    content_op: Literal["relabel", "split_head", "split_tail", "insert", "verbatim"]
+    content_op: Literal["relabel", "insert", "verbatim"]
 
 
 @dataclass(frozen=True)
@@ -511,6 +538,10 @@ class RepairPlan:
     infeasible_reason: str | None = None
 
 
+def _marker(from_state: str, to_state: str, arrow: str) -> str:
+    return f"[STATE: {from_state} {arrow} {to_state}]"
+
+
 def plan_repair(record: dict[str, Any]) -> RepairPlan:
     messages = record["messages"]
     wg = record["workflow_graph"]
@@ -528,7 +559,6 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     turns: list[TurnPlan] = []
     drift_turns: list[int] = []
     any_relabelled = False
-    any_split = False
 
     for label in labels:
         if label.has_tool_call:
@@ -537,31 +567,35 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
                     conversation_id=conversation_id, move="insert_handoff_turn",
                     inserts=[InsertRequest(
                         insert_id="", position_after_msg_index=label.msg_index - 1,
-                        role="assistant", required_marker=f"[{cur} -> {cur}]",
+                        role="assistant", required_marker=_marker(cur, label.from_state, label.arrow),
                     )],
                 )
             if label.to_state != label.from_state:
+                # Relabel the WHOLE message -- prose and <tool_call>, if
+                # fused, stay together unchanged -- to a self-loop at its
+                # ORIGINAL from_state. Never split a fused turn: moving the
+                # tool call to a different message at the destination state
+                # would change infer_state_tools_from_messages' attribution
+                # for that tool, breaking the "tool from-state never
+                # changes" invariant. The displaced advance is pushed onto
+                # `pending` and drained by a later non-tool turn, exactly
+                # like a bare tool turn.
                 pending.append(label.to_state)
                 any_relabelled = True
-                if label.prose_prefix:
-                    any_split = True
-                    turns.append(TurnPlan(label.turn_index - 1, cur, cur, label.arrow, "split_head"))
-                    turns.append(TurnPlan(label.turn_index - 1, cur, cur, label.arrow, "split_tail"))
-                else:
-                    turns.append(TurnPlan(label.turn_index - 1, cur, cur, label.arrow, "relabel"))
+                turns.append(TurnPlan(label.msg_index, cur, cur, label.arrow, "relabel"))
             else:
-                turns.append(TurnPlan(label.turn_index - 1, cur, cur, label.arrow, "verbatim"))
+                turns.append(TurnPlan(label.msg_index, cur, cur, label.arrow, "verbatim"))
         else:
             if pending:
                 nxt = pending.popleft()
                 if nxt != label.to_state or label.from_state != cur:
                     drift_turns.append(label.turn_index)
-                turns.append(TurnPlan(label.turn_index - 1, cur, nxt, label.arrow, "relabel"))
+                turns.append(TurnPlan(label.msg_index, cur, nxt, label.arrow, "relabel"))
                 cur = nxt
                 if label.to_state != label.from_state and label.to_state != nxt:
                     pending.append(label.to_state)
             else:
-                turns.append(TurnPlan(label.turn_index - 1, cur, label.to_state, label.arrow, "verbatim"))
+                turns.append(TurnPlan(label.msg_index, cur, label.to_state, label.arrow, "verbatim"))
                 cur = label.to_state
 
     if len(pending) > 1:
@@ -577,13 +611,19 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
 
     if pending:
         deficit = pending[0]
+        if (cur, deficit) not in declared_edges:
+            return RepairPlan(conversation_id=conversation_id, move="drop",
+                               infeasible_reason=f"undeclared closing transition [{cur} -> {deficit}]")
+        if deficit not in terminals:
+            return RepairPlan(conversation_id=conversation_id, move="drop",
+                               infeasible_reason=f"deficit target '{deficit}' is not a terminal")
         return RepairPlan(
             conversation_id=conversation_id, move="append_closing_pair",
             inserts=[
                 InsertRequest(insert_id="", position_after_msg_index=len(messages) - 1,
                               role="user", required_marker=""),
                 InsertRequest(insert_id="", position_after_msg_index=len(messages),
-                              role="assistant", required_marker=f"[{cur} -> {deficit}]"),
+                              role="assistant", required_marker=_marker(cur, deficit, labels[-1].arrow)),
             ],
         )
 
@@ -594,16 +634,15 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
     if not any_relabelled:
         return RepairPlan(conversation_id=conversation_id, move="none")
 
-    move: Move = "split_fused_tool_turn" if any_split else "relabel"
-    return RepairPlan(conversation_id=conversation_id, move=move, turns=turns, drift_turns=drift_turns)
+    return RepairPlan(conversation_id=conversation_id, move="relabel", turns=turns, drift_turns=drift_turns)
 ```
 
-Note: `TurnPlan.source_turn_index` is 0-based (turn_index - 1) to match `parse_assistant_turns`' zero-based `labels` list, which `apply_plan` (Task 3) will index into directly.
+Note: `TurnPlan.source_turn_index` is the assistant message's actual index in `messages[]` (`label.msg_index`) — not an index into an assistant-only list. This matters because Task 1's `parse_assistant_turns` returns one entry per *input* message (`None` for non-assistant messages), so `messages[source_turn_index]` is always the correct message to rewrite directly; `apply_plan` (Task 3) must index `messages` with it, never a filtered assistant-only list.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `source .venv/bin/activate && pytest tests/unit/test_state_convention_repair.py -v`
-Expected: PASS (9 tests). If `test_stacked_tool_turns_split_fused_head` fails on turn ordering, check that `turns` accumulates in message order — the test only asserts *some* turn has `split_head`/`split_tail`, so a bug here would show as a missing op, not an order mismatch.
+Expected: PASS (9 tests: the original 7 plus `test_fused_tool_turn_relabels_in_place_keeping_prose_and_tool_together` and `test_stacked_tool_turn_after_a_fused_turn_needs_insert_handoff`, which together replace the removed `test_stacked_tool_turns_split_fused_head`).
 
 - [ ] **Step 5: Measure `pullback_fuse` yield against the real corpus (decides whether Task 3 needs a 3rd move)**
 
@@ -635,7 +674,7 @@ print("pullback_fuse candidates:", pullback_candidates)
 PY
 ```
 
-Compare `counts` against the design spec's bucket table (3,476 `"none"`, 608 `"relabel"`, 535 `"split_fused_tool_turn"`, 443 `"insert_handoff_turn"`, 599 `"append_closing_pair"`, remainder `"drop"`). Small deviations (±5%) are expected since the spec's numbers came from a similar but not byte-identical exploratory script — **large deviations (>20% on any bucket) mean a bug; do not proceed to Task 3 until the shape matches.** If `pullback_fuse candidates` is a meaningful fraction (>15%) of the `insert_handoff_turn` bucket, add a `pullback_fuse` move to `plan_repair` before Task 3 (move the tool call onto the preceding self-loop turn, zero authored text); otherwise skip it — the ladder is complete as implemented and the measured count goes into the playbook (Task 12).
+There is no fixed target bucket table to compare against here: the design spec's original exploratory estimate (535 `split_fused_tool_turn` / 443 `insert_handoff_turn` / 599 `append_closing_pair`) was measured against a different, since-removed move ladder that classified fused and bare tool turns differently, and its own authored-text buckets were shown (by Task 2's implementer) to double-count conversations needing more than one kind of fix — they are not a partition (443 + 599 = 1,042 against a 930-conversation headline, a 112 overlap). The only numbers worth checking now: (1) every one of the 5,549 conversations lands in exactly one bucket (`sum(counts.values()) == 5549`, `drop` count included) — if not, there's a real bug; (2) `none` should land at or very near 3,476 (the fraction with zero forward-annotated tool turns is a corpus-content fact this refactor cannot change); (3) `relabel` should be noticeably larger than the old spec's 608-alone figure, since it now absorbs what used to be the `split_fused_tool_turn` bucket too. Record the actual measured counts in the playbook (Task 11) as the new authoritative baseline — do not chase the old numbers. If `pullback_fuse candidates` is a meaningful fraction (>15%) of the `insert_handoff_turn` bucket, add a `pullback_fuse` move to `plan_repair` before Task 3 (move the tool call onto the preceding self-loop turn, zero authored text, and — like `relabel` — it must never change which state the tool call is attributed to); otherwise skip it and note the measured count in the playbook.
 
 - [ ] **Step 6: Commit**
 
@@ -716,24 +755,27 @@ def test_apply_plan_does_not_mutate_input():
     assert rec == original
 
 
-def test_apply_plan_split_keeps_second_turn_pure_tool_call():
+def test_apply_plan_relabels_fused_turn_without_splitting_or_reattributing_tool():
     msgs = [
         _amsg(
             '[STATE: A → B]\nChecking that now.\n'
             '<tool_call>{"name": "t1", "arguments": {}}</tool_call>'
         ),
         {"role": "tool", "content": "{}", "annotations": None},
-        _amsg("[STATE: B → TERMINAL]\nAll done."),
+        _amsg("[STATE: B → B]\nAll set."),
     ]
-    rec = _record(msgs, [("A", "B"), ("B", "TERMINAL")])
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
     plan = plan_repair(rec)
     repaired = apply_plan(rec, plan)
     assert verify_repaired(repaired) == []
     assistant_msgs = [m for m in repaired["messages"] if m["role"] == "assistant"]
-    assert len(assistant_msgs) == 3  # one more than before -- the split added a turn
-    assert assistant_msgs[0]["content"].startswith("[STATE: A → B]")
-    assert assistant_msgs[1]["content"].startswith("[STATE: B → B]")
-    assert "<tool_call>" in assistant_msgs[1]["content"]
+    assert len(assistant_msgs) == 2  # unchanged from input -- no split, no inserted turn
+    assert assistant_msgs[0]["content"].startswith("[STATE: A → A]")
+    assert "Checking that now." in assistant_msgs[0]["content"]
+    assert "<tool_call>" in assistant_msgs[0]["content"]
+    assert assistant_msgs[1]["content"].startswith("[STATE: A → B]")
+    from llm_workflow_agents.data._workflow_script import infer_state_tools_from_messages
+    assert infer_state_tools_from_messages(msgs) == infer_state_tools_from_messages(repaired["messages"])
 
 
 def test_apply_plan_returns_none_without_required_ledger_entry():
@@ -778,10 +820,8 @@ from llm_workflow_agents.data._workflow_script import (
     find_tool_placement_violations,
     infer_state_tools_from_messages,
 )
-
-
-def _new_marker(from_state: str, to_state: str, arrow: str) -> str:
-    return f"[STATE: {from_state} {arrow} {to_state}]"
+# _marker() is already defined earlier in this same module (Task 2's Step 3) --
+# apply_plan() below is appended to the same file, not a new module.
 
 
 def apply_plan(
@@ -798,54 +838,19 @@ def apply_plan(
 
     record = copy.deepcopy(record)
     messages = record["messages"]
-    labels = [l for l in parse_assistant_turns(messages) if l is not None]
 
-    if plan.move in ("relabel", "split_fused_tool_turn"):
-        # Walk turns in reverse so inserted messages (from splits) don't
-        # shift the indices of turns not yet processed.
-        for tp_idx in range(len(plan.turns) - 1, -1, -1):
-            tp = plan.turns[tp_idx]
+    if plan.move == "relabel":
+        for tp in plan.turns:
             if tp.content_op == "verbatim":
                 continue
-            label = labels[tp.source_turn_index]
-            msg_index = label.msg_index
-            if tp.content_op == "relabel":
-                new_marker = _new_marker(tp.from_state, tp.to_state, tp.arrow)
-                content = _STATE_RE_SUB(messages[msg_index]["content"], new_marker)
-                messages[msg_index]["content"] = content
-                messages[msg_index]["annotations"] = {
-                    **(messages[msg_index].get("annotations") or {}),
-                    "state_transition": {"from": tp.from_state, "to": tp.to_state},
-                }
-            elif tp.content_op == "split_head":
-                head_marker = _new_marker(label.from_state, label.to_state, label.arrow)
-                head_content = f"{head_marker}\n{label.prose_prefix}"
-                messages[msg_index]["content"] = head_content
-                messages[msg_index]["annotations"] = {
-                    "state_transition": {"from": label.from_state, "to": label.to_state},
-                }
-            elif tp.content_op == "split_tail":
-                # emitted on the paired split_head iteration below; see note
-                pass
-
-    if plan.move == "split_fused_tool_turn":
-        # Second pass, forward order: insert the tail message right after
-        # each split head. Collect (msg_index, tail_content) pairs first so
-        # earlier inserts don't shift later msg_index values.
-        inserts: list[tuple[int, dict]] = []
-        head_positions = {
-            tp.source_turn_index: tp for tp in plan.turns if tp.content_op == "split_head"
-        }
-        for turn_idx, tp in head_positions.items():
-            label = labels[turn_idx]
-            tail_marker = _new_marker(label.to_state, label.to_state, label.arrow)
-            tail_content = f"{tail_marker}\n{label.tail}"
-            inserts.append((label.msg_index, {
-                "role": "assistant", "content": tail_content,
-                "annotations": {"state_transition": {"from": label.to_state, "to": label.to_state}},
-            }))
-        for msg_index, new_msg in sorted(inserts, key=lambda p: -p[0]):
-            messages.insert(msg_index + 1, new_msg)
+            msg_index = tp.source_turn_index  # a message index -- see Task 2's note
+            new_marker = _marker(tp.from_state, tp.to_state, tp.arrow)
+            content = _STATE_RE_SUB(messages[msg_index]["content"], new_marker)
+            messages[msg_index]["content"] = content
+            messages[msg_index]["annotations"] = {
+                **(messages[msg_index].get("annotations") or {}),
+                "state_transition": {"from": tp.from_state, "to": tp.to_state},
+            }
 
     if plan.move in ("insert_handoff_turn", "append_closing_pair"):
         if ledger_entries is None:
@@ -933,14 +938,14 @@ Note on `allowed_by_state` in `verify_repaired`: it is inferred from the *post-r
 Run: `source .venv/bin/activate && pytest tests/unit/test_state_convention_repair.py -v`
 Expected: PASS (all tests from Task 2 and Task 3)
 
-- [ ] **Step 5: Validate against 20 real conformant + 20 real relabel/split rows**
+- [ ] **Step 5: Validate against 20 real conformant + 20 real relabel rows**
 
 ```bash
 source .venv/bin/activate && python3 - <<'PY'
 import glob, json
 from llm_workflow_agents.data.state_convention_repair import plan_repair, apply_plan, verify_repaired
 
-seen = {"none": 0, "relabel": 0, "split_fused_tool_turn": 0}
+seen = {"none": 0, "relabel": 0}
 for f in sorted(glob.glob("data/output/sft/task_a/l*_merged_*.jsonl")):
     for line in open(f):
         if not line.strip():
@@ -1319,7 +1324,7 @@ python scripts/remediate_task_a_states.py triage \
   --report data/interim/task_a_state_triage/report.json
 ```
 
-Compare `by_move` in the printed summary against the design spec's bucket table (§Measured baseline): ~3,476 `none`, ~608 `relabel`, ~535 `split_fused_tool_turn`, ~443 `insert_handoff_turn`, ~599 `append_closing_pair`. This is the authoritative, code-verified version of the exploratory numbers used throughout the design doc — record any material deviation in the playbook (Task 12) rather than silently trusting the earlier estimate.
+This is the authoritative, code-verified version of the exploratory numbers used throughout the design doc, superseding them — record the actual `by_move` counts in the playbook (Task 11) rather than comparing against any earlier estimate (Task 2's implementer already found the original bucket table was not a partition and does not correspond to the final, simplified move ladder — see the design spec's "Core algorithm" section). The only checks that matter: every one of the 5,549 conversations lands in exactly one bucket, and `none` lands at or very near 3,476.
 
 - [ ] **Step 6: Commit**
 
@@ -2742,8 +2747,9 @@ sed -n '1,90p' dvc.yaml
     desc: >-
       Bring the raw Task A corpus onto the tool-call state convention (a turn
       that emits <tool_call> annotates [STATE: X -> X]; the advance moves to
-      a later turn). Deterministic: relabels the trajectory and splits fused
-      tool turns, then replays the DVC-tracked authoring ledger produced
+      a later turn). Deterministic: relabels the trajectory (never moving a
+      tool call to a different state), then replays the DVC-tracked
+      authoring ledger produced
       out-of-band by scripts/build_remediation_ledger.py. Every repaired row
       is re-validated and dropped on any violation. No API keys, no LLM
       calls at repro time. Produces task-a-sft-v2. See
