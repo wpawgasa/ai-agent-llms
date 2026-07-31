@@ -674,7 +674,7 @@ print("pullback_fuse candidates:", pullback_candidates)
 PY
 ```
 
-There is no fixed target bucket table to compare against here: the design spec's original exploratory estimate (535 `split_fused_tool_turn` / 443 `insert_handoff_turn` / 599 `append_closing_pair`) was measured against a different, since-removed move ladder that classified fused and bare tool turns differently, and its own authored-text buckets were shown (by Task 2's implementer) to double-count conversations needing more than one kind of fix — they are not a partition (443 + 599 = 1,042 against a 930-conversation headline, a 112 overlap). The only numbers worth checking now: (1) every one of the 5,549 conversations lands in exactly one bucket (`sum(counts.values()) == 5549`, `drop` count included) — if not, there's a real bug; (2) `none` should land at or very near 3,476 (the fraction with zero forward-annotated tool turns is a corpus-content fact this refactor cannot change); (3) `relabel` should be noticeably larger than the old spec's 608-alone figure, since it now absorbs what used to be the `split_fused_tool_turn` bucket too. Record the actual measured counts in the playbook (Task 11) as the new authoritative baseline — do not chase the old numbers. If `pullback_fuse candidates` is a meaningful fraction (>15%) of the `insert_handoff_turn` bucket, add a `pullback_fuse` move to `plan_repair` before Task 3 (move the tool call onto the preceding self-loop turn, zero authored text, and — like `relabel` — it must never change which state the tool call is attributed to); otherwise skip it and note the measured count in the playbook.
+There is no fixed target bucket table to compare against here: the design spec's original exploratory estimate (535 `split_fused_tool_turn` / 443 `insert_handoff_turn` / 599 `append_closing_pair`) was measured against a different, since-removed move ladder that classified fused and bare tool turns differently, and its own authored-text buckets were shown (by Task 2's implementer) to double-count conversations needing more than one kind of fix — they are not a partition (443 + 599 = 1,042 against a 930-conversation headline, a 112 overlap). The only numbers worth checking now: (1) every one of the 5,549 conversations lands in exactly one bucket (`sum(counts.values()) == 5549`, `drop` count included) — if not, there's a real bug; (2) `none` should land at or very near 3,476 (the fraction with zero forward-annotated tool turns is a corpus-content fact this refactor cannot change). Record the actual measured counts in the playbook (Task 11) as the new authoritative baseline — do not chase the old numbers. **Already measured** (Task 2's fix-round re-run, code-verified): `none` 3,476 / `relabel` 608 / `insert_handoff_turn` 1,150 / `append_closing_pair` 315 / `drop` 0. Note `relabel` did **not** grow relative to the old spec's 608 figure — the entire old split bucket redistributed into the two authored-text moves instead (they are the only moves that can absorb a stacked-tool case once splitting is off the table), so authoring cases rise from 930 to 1,465 (see the design spec's Task-2 note). If `pullback_fuse candidates` is a meaningful fraction (>15%) of the `insert_handoff_turn` bucket, add a `pullback_fuse` move to `plan_repair` before Task 3 (move the tool call onto the preceding self-loop turn, zero authored text, and — like `relabel` — it must never change which state the tool call is attributed to); Task 2's implementer already measured this at 11 candidates (1.6%, well below threshold) and skipped it — no further action needed here.
 
 - [ ] **Step 6: Commit**
 
@@ -2362,8 +2362,9 @@ python scripts/build_remediation_ledger.py \
   --limit 20
 cat data/interim/task_a_remediation_ledger/accepted.jsonl | python3 -m json.tool
 
-# 4. Full ledger run (costly: ~$5-8, 1-2h at 4 workers -- get explicit
-#    go-ahead before running this against the full ~930-conversation queue)
+# 4. Full ledger run (costly: ~$8-13, 1.5-3h at 4 workers -- get explicit
+#    go-ahead before running this against the full ~1,465-conversation queue;
+#    see design spec's Task-2 note for why this grew from the original ~930)
 python scripts/build_remediation_ledger.py \
   --input-dir data/output/sft/task_a \
   --triage-report data/interim/task_a_state_triage/report.json \
@@ -2797,7 +2798,7 @@ git commit -m "chore(dvc): add task_a_sft_remediate stage between generate and c
 
 ## Task 14 (gated — requires explicit go-ahead before running): Full corpus remediation run
 
-This task spends real money (`claude -p` API usage, estimated $5–8) and 1–2 hours of wall-clock time. **Do not run Steps 3+ without the user's explicit go-ahead in that session** — Steps 1–2 (triage, deterministic-only apply) are free and safe to run any time.
+This task spends real money (`claude -p` API usage, estimated $8–13 for ~1,465 authoring cases — see the design spec's Task-2 note for why this grew from the original ~930/$5–8 estimate after the `split_fused_tool_turn` placement-safety fix) and 1.5–3 hours of wall-clock time. **Do not run Steps 3+ without the user's explicit go-ahead in that session** — Steps 1–2 (triage, deterministic-only apply) are free and safe to run any time.
 
 - [ ] **Step 1:** Re-run `triage` if the corpus changed since Task 4 Step 5; otherwise reuse `data/interim/task_a_state_triage/report.json`.
 - [ ] **Step 2:** Run `remediate_task_a_states.py apply` with no `--ledger-dir` to confirm the deterministic-only kept/dropped counts match Task 4 Step 5's expectations.
