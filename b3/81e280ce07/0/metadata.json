@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b381e280ce07",
+  "session_id": "a7991fc5-bb0e-46a5-a8a2-79c243bdffcf",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-31T04:35:28.867866019Z",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/llm_workflow_agents/data/state_convention_repair.py",
+    "tests/unit/test_state_convention_repair.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "c403e1505906",
+  "checkpoint_transcript_start": 574,
+  "transcript_lines_at_start": 574,
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 2723,
+    "cache_read_tokens": 2638314,
+    "output_tokens": 3431,
+    "api_call_count": 6
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-31T04:35:26.567476975Z",
+    "agent_lines": 260,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 260,
+    "agent_percentage": 100
+  }
+}
