@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "a5c92f0cad57",
+  "session_id": "a7991fc5-bb0e-46a5-a8a2-79c243bdffcf",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-31T04:17:30.185665976Z",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/plans/2026-07-31-task-a-tool-stay-convention-plan.md",
+    "docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "25aeed564cd4",
+  "checkpoint_transcript_start": 488,
+  "transcript_lines_at_start": 488,
+  "token_usage": {
+    "input_tokens": 18,
+    "cache_creation_tokens": 11688,
+    "cache_read_tokens": 3776641,
+    "output_tokens": 6060,
+    "api_call_count": 9
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-07-31T04:17:28.056616809Z",
+    "agent_lines": 0,
+    "human_added": 3,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 3,
+    "agent_percentage": 0
+  }
+}
