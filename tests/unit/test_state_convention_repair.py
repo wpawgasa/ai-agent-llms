@@ -1,7 +1,7 @@
 import copy
 import json
 
-from llm_workflow_agents.data.state_convention_repair import plan_repair
+from llm_workflow_agents.data.state_convention_repair import InsertRequest, plan_repair
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
 
 
@@ -267,3 +267,77 @@ def test_verify_repaired_catches_state_sequence_mismatch():
                             "terminal_state": "TERMINAL", "terminal_reached": True}
     violations = verify_repaired(rec)
     assert any("state_sequence" in v for v in violations)
+
+
+# --- Fix round 1: relabels accumulated before an insert must not be dropped ---
+
+
+def _stub_ledger(plan, stem="f", line_index=0):
+    """Emulate the Task 4 CLI: assign insert_ids, then author stub content.
+
+    Also exercises the fact that InsertRequest is no longer frozen.
+    """
+    entries = {}
+    for i, ins in enumerate(plan.inserts):
+        ins.insert_id = f"{stem}:{line_index}:{i}"
+        content = (f"{ins.required_marker}\nOk, let me follow up on that."
+                   if ins.role == "assistant" else "Sure, thanks.")
+        entries[ins.insert_id] = {"content": content}
+    return entries
+
+
+def test_insert_request_is_mutable_so_the_cli_can_assign_insert_id():
+    req = InsertRequest(insert_id="", position_after_msg_index=0,
+                        role="assistant", required_marker="[STATE: A → A]")
+    req.insert_id = "stem:3:0"
+    assert req.insert_id == "stem:3:0"
+
+
+def test_insert_handoff_plan_keeps_and_applies_earlier_relabels():
+    # Same shape as test_stacked_tool_turn_after_a_fused_turn_needs_insert_handoff:
+    # the FUSED first turn needs an A->A relabel, and a later stacked tool turn
+    # forces an insert_handoff_turn. The relabel must survive into the plan and
+    # be written by apply_plan -- otherwise msg 0 keeps its wrong [A -> B]
+    # marker on a tool turn and the repaired record is still non-conformant.
+    msgs = [
+        _amsg(
+            '[STATE: A → B]\nChecking that now.\n'
+            '<tool_call>{"name": "t1", "arguments": {}}</tool_call>'
+        ),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → B]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: B → TERMINAL]\nDone."),
+    ]
+    rec = _record(msgs, [("A", "B"), ("B", "TERMINAL")])
+    plan = plan_repair(rec)
+    assert plan.move == "insert_handoff_turn"
+    assert [(t.source_turn_index, t.from_state, t.to_state) for t in plan.turns
+            if t.content_op == "relabel"] == [(0, "A", "A")]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert repaired is not None
+    assert repaired["messages"][0]["content"].startswith("[STATE: A → A]")
+    assert find_tool_stay_violations(repaired["messages"]) == []
+    assert rec["messages"][0]["content"].startswith("[STATE: A → B]")  # input untouched
+
+
+def test_append_closing_pair_plan_keeps_and_applies_earlier_relabels():
+    # Same shape as test_tail_deficit_requires_append_closing_pair. The single
+    # fused tool turn relabels to A->A and the displaced A->TERMINAL advance is
+    # carried by the appended closing turn.
+    msgs = [
+        _amsg('[STATE: A → TERMINAL]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>'),
+    ]
+    rec = _record(msgs, [("A", "TERMINAL")])
+    plan = plan_repair(rec)
+    assert plan.move == "append_closing_pair"
+    assert [(t.source_turn_index, t.from_state, t.to_state) for t in plan.turns
+            if t.content_op == "relabel"] == [(0, "A", "A")]
+
+    repaired = apply_plan(rec, plan, ledger_entries=_stub_ledger(plan))
+    assert repaired is not None
+    assert repaired["messages"][0]["content"].startswith("[STATE: A → A]")
+    assert [m["role"] for m in repaired["messages"]] == ["assistant", "user", "assistant"]
+    assert repaired["messages"][2]["content"].startswith("[STATE: A → TERMINAL]")
+    assert find_tool_stay_violations(repaired["messages"]) == []

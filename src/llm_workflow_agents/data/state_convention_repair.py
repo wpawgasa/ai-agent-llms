@@ -45,7 +45,7 @@ class TurnPlan:
     content_op: Literal["relabel", "insert", "verbatim"]
 
 
-@dataclass(frozen=True)
+@dataclass
 class InsertRequest:
     """One message the corpus-remediator agent must author (Task 6/13)."""
 
@@ -127,8 +127,12 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
                 # bridge cur -> from_state. Covers bare-after-bare and
                 # bare-after-relabelled-fused alike (a fused turn's
                 # relabel-in-place does not advance cur).
+                # ``turns`` carries the relabels already decided for EARLIER
+                # turns of this same conversation; it must ride along or those
+                # turns silently keep their wrong markers after apply_plan.
                 return RepairPlan(
                     conversation_id=conversation_id, move="insert_handoff_turn",
+                    turns=turns, drift_turns=drift_turns,
                     inserts=[InsertRequest(
                         insert_id="", position_after_msg_index=label.msg_index - 1,
                         role="assistant",
@@ -186,8 +190,12 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
         if deficit not in terminals:
             return RepairPlan(conversation_id=conversation_id, move="drop",
                               infeasible_reason=f"final state '{deficit}' is not a terminal")
+        # The loop has finished, so ``turns`` is the COMPLETE relabel set for
+        # the conversation; the appended pair is on top of it, not instead of
+        # it.
         return RepairPlan(
             conversation_id=conversation_id, move="append_closing_pair",
+            turns=turns, drift_turns=drift_turns,
             inserts=[
                 InsertRequest(insert_id="", position_after_msg_index=len(messages) - 1,
                               role="user", required_marker=""),
@@ -234,7 +242,12 @@ def apply_plan(
     record = copy.deepcopy(record)
     messages = record["messages"]
 
-    if plan.move == "relabel":
+    # Relabels are applied for EVERY move that carries them, not just
+    # move == "relabel": an insert_handoff_turn / append_closing_pair plan can
+    # also carry relabels decided for earlier turns of the same conversation.
+    # They must run BEFORE the inserts, because TurnPlan.source_turn_index was
+    # computed by plan_repair against the PRE-insert message list.
+    if plan.turns:
         for tp in plan.turns:
             if tp.content_op == "verbatim":
                 continue
