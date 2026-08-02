@@ -175,7 +175,10 @@ def test_tool_turn_semantics_rewrites_success_line_and_adds_stay_note():
                                     tool_turn_semantics=True, retry_budget=2)
     assert "on a LATER turn" in output
     assert "stays in" in output.lower() or "stay in" in output.lower()
-    assert "retry at most 2" in output.lower()
+    # N-total-attempts wording (fix round 1), not "retry at most N times"
+    # (N retries after the first, i.e. N+1 total) — see
+    # test_retry_note_agrees_with_format_rules_attempt_count.
+    assert "2 attempts total" in output.lower()
 
 
 def test_tool_turn_semantics_no_effect_on_text_only_state():
@@ -205,13 +208,53 @@ def test_retry_note_wording_at_budgets_1_2_3():
     assert "do not retry" in out_1.lower()
     assert "only one attempt" in out_1.lower()
 
+    # Fix round 1: wording must say N attempts TOTAL (counting the first), not
+    # "retry N times" (which would mean N retries *after* the first, i.e. N+1
+    # total) — see the comment above _RETRY_NOTE_WITH_RETRIES in
+    # _workflow_script.py and system_prompt.py's _RETRY_RULE_WITH_RETRIES.
     out_2 = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
                                    tool_turn_semantics=True, retry_budget=2)
-    assert "retry at most 2 times" in out_2.lower()
+    assert "2 attempts total" in out_2.lower()
+    assert "retry at most 2 times" not in out_2.lower()
 
     out_3 = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
                                    tool_turn_semantics=True, retry_budget=3)
-    assert "retry at most 3 times" in out_3.lower()
+    assert "3 attempts total" in out_3.lower()
+    assert "retry at most 3 times" not in out_3.lower()
+
+
+def test_retry_note_agrees_with_format_rules_attempt_count():
+    """Regression for fix round 1: the workflow script's tool-error retry note
+    (_workflow_script.py::_retry_note) and the system prompt's FORMAT_RULES
+    retry rule (system_prompt.py::_retry_rule) both get concatenated into the
+    same system prompt by build_enriched_system_prompt, so they must state the
+    same attempt-count semantics for a given retry_budget — otherwise the
+    corpus bakes in two contradictory policies a few hundred characters apart.
+
+    This test crosses _workflow_script.py and system_prompt.py; it lives here
+    (test_playbook_render.py) rather than a system_prompt-specific test file
+    because the other retry-note tests it guards against regressing already
+    live in this file (see test_retry_note_wording_at_budgets_1_2_3 above).
+    """
+    from llm_workflow_agents.data.system_prompt import _retry_rule
+
+    graph = _tool_state_graph()
+    for budget in (1, 2, 3):
+        script_note = build_workflow_script(
+            graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+            tool_turn_semantics=True, retry_budget=budget,
+        )
+        prompt_rule = _retry_rule(2, budget)
+
+        if budget <= 1:
+            # Neither side should mention a numeral attempt count at budget 1
+            # (there is no retry to count) — both use "no retry" framing.
+            assert "do not retry" in script_note.lower()
+            assert "do not retry" in prompt_rule.lower()
+        else:
+            # Both must cite the SAME numeral as the total attempt count.
+            assert f"{budget} attempts" in script_note.lower()
+            assert f"{budget} attempts" in prompt_rule.lower()
 
 
 def test_tool_turn_semantics_thai_placeholders_all_substituted():

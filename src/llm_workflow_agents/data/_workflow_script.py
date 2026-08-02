@@ -77,13 +77,20 @@ _FALLBACK_TEXT: dict[str, str] = {
 # paragraph (with its own "[STATE: X → X]" framing); this one needs a single
 # script line in both "en" and "th". The retry_budget<=1 branch point mirrors
 # _retry_rule exactly; keep the two in sync if either wording changes.
+#
+# NUMBER semantics must also match: retry_budget is N TOTAL attempts including
+# the first (see build_workflow_script's docstring and _RETRY_RULE_WITH_RETRIES's
+# "in total, counting the first"). "retry at most N times" would mean N retries
+# *after* the first (N+1 total) and was a bug fixed in fix-round-1 of Task 8 —
+# _RETRY_NOTE_WITH_RETRIES must render the same attempt count as _retry_rule at
+# a given retry_budget, not N+1.
 _RETRY_NOTE_NO_RETRY: dict[str, str] = {
     "en": "- On tool error: stay in [{name}] and do NOT retry — this workflow allows only one attempt per call; after that, {fallback}",
     "th": "- หากเครื่องมือผิดพลาด: คงอยู่ที่ [{name}] และห้ามลองใหม่ — ขั้นตอนนี้อนุญาตให้ลองได้เพียงครั้งเดียว; หลังจากนั้น {fallback}",
 }
 _RETRY_NOTE_WITH_RETRIES: dict[str, str] = {
-    "en": "- On tool error: stay in [{name}] and retry at most {n} times; after that, {fallback}",
-    "th": "- หากเครื่องมือผิดพลาด: คงอยู่ที่ [{name}] และลองใหม่ได้ไม่เกิน {n} ครั้ง; หลังจากนั้น {fallback}",
+    "en": "- On tool error: stay in [{name}] and retry — up to {n} attempts total, counting the first; after that, {fallback}",
+    "th": "- หากเครื่องมือผิดพลาด: คงอยู่ที่ [{name}] และลองใหม่ได้ — รวมทั้งหมดไม่เกิน {n} ครั้ง (นับครั้งแรกด้วย); หลังจากนั้น {fallback}",
 }
 
 
