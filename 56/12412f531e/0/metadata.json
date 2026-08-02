@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "5612412f531e",
+  "session_id": "a7991fc5-bb0e-46a5-a8a2-79c243bdffcf",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-02T20:03:20.231388411Z",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-5[1m]",
+  "turn_id": "22c7fe109aba",
+  "token_usage": {
+    "input_tokens": 371,
+    "cache_creation_tokens": 1650804,
+    "cache_read_tokens": 71713198,
+    "output_tokens": 306114,
+    "api_call_count": 187
+  },
+  "session_metrics": {
+    "turn_count": 4
+  }
+}
