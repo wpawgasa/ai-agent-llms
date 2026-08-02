@@ -12,71 +12,154 @@ from typing import Any
 
 from llm_workflow_agents.data._workflow_script import build_workflow_script
 
-# Experimental, opt-in via TASK_A_STAY_RULE=1. FORMAT_RULES rule 1 gives the
-# SYNTAX for a self-loop but never the POLICY — it never says when the state
-# does not change. Meanwhile the workflow script says only "on success: proceed
-# to [Y]", which the policy follows literally: it advances on the same turn it
-# issues the tool call, before the result exists. Measured on ckpt-500 /
-# task-a-sft-v1: gold expects a self-loop on 41.6% of turns, the policy emits
-# one on 4.8%, and state accuracy on stay+tool-expected turns is 0.055.
+# Default-on since 2026-07-31 (task-a-sft-v2). Opt out with TASK_A_STAY_RULE=0
+# to reproduce the exact v1 prompt every existing checkpoint (ckpt-500,
+# ckpt-1770) was trained against — see tests/unit/_v1_format_rules_golden.py
+# and docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md.
+#
+# FORMAT_RULES rule 1 gives the SYNTAX for a self-loop but never the POLICY.
+# Meanwhile the workflow script said only "on success: proceed to [Y]", which a
+# policy follows literally: it advances on the same turn it issues the tool
+# call, before the result exists. Measured on ckpt-500 / task-a-sft-v1: gold
+# expects a self-loop on 41.6% of turns, the policy emits one on 4.8%, and
+# state accuracy on stay+tool-expected turns is 0.055.
 # See docs/cat_a_state_annotation_convention_review.md §5.
-# Gated so the default prompt — the one every existing checkpoint was trained
-# against — is byte-identical unless the flag is set.
+#
+# NOTE: this flag selects the whole prompt REVISION, not just the stay rule.
+# v1 (disabled) is a frozen historical artifact and differs from v2 in three
+# places: no stay rule, the rule-2 worked example shows an advancing transition
+# (the defect this revision fixes), and the tool-error rule is the vague
+# one-liner with no retry budget. Anything that changes v1's rendered bytes
+# breaks checkpoint comparability and is caught by the golden test.
+_STAY_RULE_ENABLED = os.environ.get("TASK_A_STAY_RULE", "1") != "0"
+
 STAY_RULE = """\
-10. Tool-execution turns do NOT advance. When your turn issues a <tool_call>, you have not
-    yet seen the result, so you MUST remain in the current state and write the same name on
-    both sides:
-        [STATE: SEARCH_OPTIONS → SEARCH_OPTIONS]
-        <tool_call>{"name": "search_flights", "arguments": {...}}</tool_call>
-    Advance only on a LATER turn, after the tool result has come back and you have used it.
-    The workflow script's "- on success: proceed to [Y]" describes where to go once the
-    result confirms success — it does NOT mean advance on the turn that issues the call.
-    Never announce a state you do not yet have the evidence to be in."""
+2. Tool-execution turns do NOT advance. When your turn issues a <tool_call>, you have not
+   yet seen the result, so you MUST remain in the current state and write the same name on
+   both sides:
+       [STATE: SEARCH_OPTIONS → SEARCH_OPTIONS]
+       <tool_call>{"name": "search_flights", "arguments": {...}}</tool_call>
+   Advance only on a LATER turn, after the tool result has come back and you have used it.
+   The workflow script's "- on success: proceed to [Y]" describes where to go once the
+   result confirms success — it does NOT mean advance on the turn that issues the call.
+   Never announce a state you do not yet have the evidence to be in."""
 
-FORMAT_RULES = """\
-Rules:
+# v2 tool-error rule. Formatted with the rule number and the retry budget.
+_RETRY_RULE = """\
+{n}. If a tool returns an error, stay in the current state and you may retry the SAME
+   call, annotating [STATE: X → X] on every retry — never advance while retrying. Retry
+   at most {retry_budget} time(s) total (including the first attempt). If it still fails
+   after that budget, stop retrying: follow the workflow's error path if the script names
+   one, otherwise say plainly that this step cannot be completed right now and that you
+   will hand off / follow up, while remaining in [STATE: X → X]. Do not invent a
+   transition just to move past a failure."""
 
-1. Turn template — EVERY assistant turn MUST start with a state annotation, including
+# v1 tool-error rule, frozen. Note v1 renders its final three rules separated by
+# SINGLE newlines (every other rule is separated by a blank line); that spacing
+# is part of the bytes the checkpoints saw, so it is reproduced exactly here.
+_RETRY_RULE_V1 = "{n}. If a tool returns an error, attempt recovery before escalating."
+
+
+def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
+    """Render FORMAT_RULES.
+
+    Args:
+        retry_budget: Max total attempts for a failing tool call, rendered into
+            the v2 tool-error rule. Ignored when *stay_rule* is False, because
+            the v1 rule states no budget and its bytes are frozen.
+        stay_rule: Select the prompt revision. ``True`` → v2 (stay rule, fixed
+            worked example, retry budget). ``False`` → the frozen v1 text.
+            ``None`` (default) → follow the ``TASK_A_STAY_RULE`` env flag.
+    """
+    if stay_rule is None:
+        stay_rule = _STAY_RULE_ENABLED
+
+    # v1's rule-2 worked example demonstrated an ADVANCING transition on a
+    # tool-call turn — the exact defect this revision exists to fix. v2 shows a
+    # self-loop, matching rule 1's syntax example.
+    example_transition = (
+        "VERIFY_PATIENT → VERIFY_PATIENT" if stay_rule else "VERIFY_PATIENT → TERMINAL"
+    )
+
+    rules = [
+        """1. Turn template — EVERY assistant turn MUST start with a state annotation, including
    tool-only turns and the terminal turn. Use exactly this format on the first line:
        [STATE: CURRENT → NEXT]
    If the state does not change, write the same name on both sides:
        [STATE: QUALIFY_PROSPECT → QUALIFY_PROSPECT]
    Never omit this line. A turn that is "just a tool call" still needs the STATE line
-   above the <tool_call> tag.
+   above the <tool_call> tag.""",
+    ]
 
-2. Tool-call format — when you call a tool, emit it on its own line(s) as:
-       <tool_call>{"name": "<tool_name>", "arguments": {<arg_key>: <arg_value>, ...}}</tool_call>
+    next_num = 2
+    if stay_rule:
+        rules.append(STAY_RULE)
+        next_num = 3
+
+    rules.append(
+        f"""{next_num}. Tool-call format — when you call a tool, emit it on its own line(s) as:
+       <tool_call>{{"name": "<tool_name>", "arguments": {{<arg_key>: <arg_value>, ...}}}}</tool_call>
    The two top-level keys are exactly "name" and "arguments". Do NOT flatten arguments
    into the top level. Worked example for a schema with required=[patient_id, specialty]
    and optional reason:
-       [STATE: VERIFY_PATIENT → TERMINAL]
-       <tool_call>{"name": "request_referral", "arguments": {"patient_id": "P12345", "specialty": "cardiology"}}</tool_call>
+       [STATE: {example_transition}]
+       <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345", "specialty": "cardiology"}}}}</tool_call>"""
+    )
 
-3. Tool authority — the "Tool schemas" section is the ONLY authoritative source for which
+    next_num += 1
+    rules.append(
+        f"""{next_num}. Tool authority — the "Tool schemas" section is the ONLY authoritative source for which
    tools exist and which parameters they accept. The "Workflow script" hints at conversation
    flow but its per-state tool listings are UNRELIABLE; if it conflicts with a tool schema,
    trust the schema. Note that the schema uses "parameters" (OpenAI tools format) while
-   your <tool_call> emits "arguments" — these refer to the same thing, do not confuse them.
+   your <tool_call> emits "arguments" — these refer to the same thing, do not confuse them."""
+    )
 
-4. Argument discipline (strict):
+    next_num += 1
+    rules.append(
+        f"""{next_num}. Argument discipline (strict):
    a. Pass ONLY parameters listed in the schema's "required" array, plus any optional
       parameter for which the user has EXPLICITLY stated a value in the conversation.
    b. Do NOT invent values for optional parameters. If the user has not said anything
       about `reason`, `description`, `offer_details`, `notes`, etc., omit those fields.
    c. Use parameter values verbatim from the user. Do not paraphrase, expand abbreviations,
       or reformat (e.g. user says "premium" → pass exactly "premium", not "premium package";
-      user says "competitor.com" → ask for the full URL before calling; do not fabricate one).
+      user says "competitor.com" → ask for the full URL before calling; do not fabricate one)."""
+    )
 
-5. Tool-call necessity — do not call a tool unless the workflow requires it. Greetings,
+    next_num += 1
+    rules.append(
+        f"""{next_num}. Tool-call necessity — do not call a tool unless the workflow requires it. Greetings,
    acknowledgements, clarifying questions, and terminal closings are text-only turns; do
-   not append a tool call just to "wrap up" the conversation.
+   not append a tool call just to "wrap up" the conversation."""
+    )
 
-6. Multi-turn negotiation — if a required argument is missing from what the user has said
-   so far, ask the user for it BEFORE calling the tool. Do not synthesize plausible values.
+    next_num += 1
+    rules.append(
+        f"""{next_num}. Multi-turn negotiation — if a required argument is missing from what the user has said
+   so far, ask the user for it BEFORE calling the tool. Do not synthesize plausible values."""
+    )
 
-7. If a tool returns an error, attempt recovery before escalating.
-8. Reach a terminal state to complete the workflow.
-9. Never skip states or make invalid transitions."""
+    next_num += 1
+    terminal_rule = f"{next_num + 1}. Reach a terminal state to complete the workflow."
+    never_skip_rule = f"{next_num + 2}. Never skip states or make invalid transitions."
+
+    if stay_rule:
+        rules.append(_RETRY_RULE.format(n=next_num, retry_budget=retry_budget))
+        rules.append(terminal_rule)
+        rules.append(never_skip_rule)
+    else:
+        # Frozen v1 spacing: the last three rules form one single-newline block.
+        rules.append(
+            "\n".join(
+                [_RETRY_RULE_V1.format(n=next_num), terminal_rule, never_skip_rule]
+            )
+        )
+
+    return "Rules:\n\n" + "\n\n".join(rules)
+
+
+FORMAT_RULES = _format_rules()
 
 
 def build_enriched_system_prompt(
@@ -158,7 +241,8 @@ def build_enriched_system_prompt(
             ref_parts.append("\nTool schemas: none — this workflow does not call any tools.")
         parts.append("\n".join(ref_parts))
 
+    # STAY_RULE is rendered inline as rule 2 of FORMAT_RULES (default-on since
+    # 2026-07-31); it must NOT also be appended here or TASK_A_STAY_RULE=1 would
+    # emit it twice with inconsistent numbering.
     parts.append(f"\n{FORMAT_RULES}")
-    if os.environ.get("TASK_A_STAY_RULE") == "1":
-        parts.append(f"\n{STAY_RULE}")
     return "\n".join(parts)
