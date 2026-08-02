@@ -73,9 +73,17 @@ _REQUIRED_STR_FIELDS = (
 
 MIN_CONTENT_LEN = 20
 MAX_CONTENT_LEN = 600
-# Minimum prose after an assistant's marker. Markers run 25-60 chars, so a
-# marker plus a newline can clear MIN_CONTENT_LEN while carrying no message at
-# all -- this floor closes that hole.
+# Minimum *visible* prose, measured with invisible characters removed and
+# whitespace runs collapsed (see `_visible_prose_len`). Applied to both roles:
+#   * assistant -- measured after the marker. Markers run 25-60 chars, so a
+#     marker plus a newline clears MIN_CONTENT_LEN while carrying no message.
+#   * user -- measured on the whole content. MIN_CONTENT_LEN counts padding, so
+#     "x" plus 19 spaces cleared it with no content at all.
+# 10 is the length of "ok, thanks" -- the shortest acknowledgement anyone would
+# plausibly write -- and half the content floor, so a real ack that clears
+# MIN_CONTENT_LEN honestly clears this with room to spare. Thai acks are shorter
+# still per character ("ขอบคุณค่ะ รับทราบนะคะ" is 21 chars / 20 visible), and are
+# bounded by MIN_CONTENT_LEN long before this floor binds.
 MIN_PROSE_LEN = 10
 # Only a long verbatim copy of a neighbouring turn is treated as a copy: short
 # acknowledgements ("ขอบคุณค่ะ") legitimately repeat.
@@ -84,11 +92,56 @@ COPY_GUARD_MIN_LEN = 40
 VALID_LANGUAGES = ("en", "th", "code_switch")
 VALID_ROLES = ("assistant", "user")
 
-# Thai script block. Presence/absence of any character in it is the
-# wrong-language signal; see the module docstring of the report for why
-# data_validator.detect_thai_corruption is not the right tool here.
-_THAI_RE = re.compile(r"[฀-๿]")
+# Thai *letters*: consonants (U+0E01-U+0E2E), the spacing vowels U+0E30/32/33
+# and the leading vowels U+0E40-U+0E45. Presence/absence is the wrong-language
+# signal; see the report for why data_validator.detect_thai_corruption is not
+# the right tool here.
+#
+# Deliberately NOT the whole U+0E00-U+0E7F block. That block also holds the baht
+# sign (฿ U+0E3F), the repetition/abbreviation marks (ๆ ฯ ๏ ๚ ๛) and the Thai
+# digits ๐-๙, none of which is evidence that a sentence was written in Thai.  # noqa: RUF003
+# Matching the block defeated this rule in both directions: a single `฿` in an
+# all-English answer satisfied a `th`/`code_switch` request (measured: it let all
+# 2,853 th/code_switch rows through), while `en` rows were rejected for a price
+# -- the one legitimate English use of a Thai-block character.
+#
+# Combining marks (U+0E31, U+0E34-U+0E3A, U+0E47-U+0E4E) are excluded on the same
+# reasoning: they cannot occur without a base consonant, so they add no signal
+# while reinstating the same hole for a stray tone mark.
+_THAI_RE = re.compile(r"[ก-ฮะาำเ-ๅ]")
 _TOOL_CALL_RE = re.compile(r"</?tool_call>")
+# Invisible characters that survive `str.strip()`: Unicode format characters
+# (U+200B ZWSP, U+200C/D ZWNJ/ZWJ, U+FEFF BOM, U+2060 word joiner, the bidi
+# overrides, U+00AD soft hyphen) and C0/C1 controls other than \n and \t.
+# U+200B is not whitespace to Python -- '\u200b'.strip() is non-empty -- which
+# reinstated the empty-turn hole the prose floor exists to close. None of these
+# has a legitimate use in a corpus turn, so they are both stripped before any
+# length is measured AND rejected outright.
+_INVISIBLE_RE = re.compile(
+    "["
+    "\u0000-\u0008\u000b-\u001f\u007f-\u009f"  # C0/C1 controls except \n and \t
+    "\u00ad\u061c\u180e"                          # soft hyphen, ALM, Mongolian vowel sep
+    "\u200b-\u200f\u202a-\u202e"                 # zero-width, bidi embedding/override
+    "\u2060-\u2064\u2066-\u206f"                 # word joiner, invisible ops, isolates
+    "\ufeff\ufff9-\ufffb"                         # BOM / ZWNBSP, interlinear annotation
+    "]"
+)
+# Chat-template sentinels. Anything here baked into `content` is re-read as a
+# turn boundary or a control token when the corpus is templated, corrupting
+# tokenisation for every model that owns the token. Gated by *form*, not by one
+# literal, because Task A trains across several families:
+#   <|...|>            ChatML/Qwen (<|im_end|>), Llama 3 (<|eot_id|>), GLM (<|user|>)
+#   <start_of_turn>    Gemma 3/4
+#   <s> </s> <bos> ... SentencePiece / Mistral / Llama
+#   [INST] [gMASK]     Mistral instruct, GLM
+#   <extra_id_N>       T5 / Nemotron sentinel range
+_SPECIAL_TOKEN_RE = re.compile(
+    r"<\|[^|<>]{0,64}\|>"
+    r"|</?(?:s|bos|eos|pad|unk|mask|sop|eop|start_of_turn|end_of_turn"
+    r"|begin_of_text|end_of_text|extra_id_\d+)>"
+    r"|\[/?(?:INST|SYS|gMASK|sMASK|MASK|CLS|SEP|PAD)\]",
+    re.IGNORECASE,
+)
 _STATE_TOKEN = "[STATE:"
 # Mirrors llm_workflow_agents.data._workflow_script._STATE_RE. Duplicated
 # rather than imported to keep this driver stdlib-only; a unit test asserts the
@@ -153,11 +206,31 @@ def _validate_request(request: object) -> list[str]:
     return problems
 
 
+def _strip_invisible(text: str) -> str:
+    """Drop characters that occupy no width but survive ``str.strip()``."""
+    return _INVISIBLE_RE.sub("", text)
+
+
+def _visible_prose_len(text: str) -> int:
+    """Length of `text` with invisible characters dropped and whitespace runs
+    collapsed to a single space.
+
+    This is what the prose floors are measured on, so neither space padding nor
+    a run of U+200B can buy length. Whitespace is collapsed rather than removed
+    so that "ok, thanks" measures its true 10 characters.
+    """
+    return len(" ".join(_strip_invisible(text).split()))
+
+
 def _strip_structure(text: str) -> str:
-    """Prose only: markers and tool-call blocks removed, whitespace collapsed."""
+    """Prose only: markers and tool-call blocks removed, whitespace collapsed.
+
+    Invisible characters are removed first so a ZWSP cannot make two identical
+    sentences compare unequal and slip past the copy / duplicate guards.
+    """
     text = _TOOL_CALL_BLOCK_RE.sub(" ", text)
     text = _STATE_MARKER_RE.sub(" ", text)
-    return " ".join(text.split())
+    return " ".join(_strip_invisible(text).split())
 
 
 def _copies_a_context_turn(prose: str, request: dict) -> bool:
@@ -226,6 +299,13 @@ def validate_entry(entry: object, request: object) -> list[str]:
     content: str = entry["content"]
     if _TOOL_CALL_RE.search(content):
         violations.append("content must not contain <tool_call> or </tool_call>")
+    special = _SPECIAL_TOKEN_RE.search(content)
+    if special is not None:
+        violations.append(
+            f"content contains the chat-template special token {special.group(0)!r}"
+        )
+    if _INVISIBLE_RE.search(content):
+        violations.append("content contains zero-width or control characters")
 
     required_marker: str = request["required_marker"]
     if required_marker:
@@ -242,15 +322,21 @@ def validate_entry(entry: object, request: object) -> list[str]:
             prose = remainder.lstrip("\n")
             if _STATE_TOKEN in remainder:
                 violations.append("content contains a second [STATE:] marker")
-            if len(prose.strip()) < MIN_PROSE_LEN:
-                violations.append(
-                    f"only {len(prose.strip())} characters of prose after the marker "
-                    f"(minimum {MIN_PROSE_LEN})"
-                )
     else:
         prose = content
         if _STATE_TOKEN in content:
             violations.append("user-role insert must not contain a [STATE:] marker")
+
+    # Both roles. A `user` ack carries no marker, so MIN_CONTENT_LEN was its only
+    # length rule -- and that counts padding, so "x" plus 19 spaces passed with
+    # no content at all. 1,673 of the 3,902 inserts are acks.
+    prose_len = _visible_prose_len(prose)
+    if prose_len < MIN_PROSE_LEN:
+        where = "after the marker" if required_marker else "in the insert"
+        violations.append(
+            f"only {prose_len} characters of visible prose {where} "
+            f"(minimum {MIN_PROSE_LEN})"
+        )
 
     if not (MIN_CONTENT_LEN <= len(content) <= MAX_CONTENT_LEN):
         violations.append(
@@ -261,10 +347,11 @@ def validate_entry(entry: object, request: object) -> list[str]:
     has_thai = bool(_THAI_RE.search(prose))
     if language in ("th", "code_switch") and not has_thai:
         violations.append(
-            f"language '{language}' entry contains no Thai script (U+0E00-U+0E7F)"
+            f"language '{language}' entry contains no Thai letters (a Thai digit, "
+            "the baht sign or a repetition mark does not count)"
         )
     elif language == "en" and has_thai:
-        violations.append("language 'en' entry contains Thai script")
+        violations.append("language 'en' entry contains Thai letters")
 
     if _copies_a_context_turn(prose, request):
         violations.append("content copies a message already in the context window")
@@ -275,6 +362,18 @@ def validate_entry(entry: object, request: object) -> list[str]:
 # ---------------------------------------------------------------------------
 # append-only ledger IO
 # ---------------------------------------------------------------------------
+
+
+def _ends_without_newline(path: Path) -> bool:
+    """True if `path` exists, is non-empty, and its last byte is not a newline."""
+    try:
+        with open(path, "rb") as handle:
+            if handle.seek(0, os.SEEK_END) == 0:
+                return False
+            handle.seek(-1, os.SEEK_END)
+            return handle.read(1) != b"\n"
+    except OSError:
+        return False
 
 
 def append_jsonl(path: Path, records: list[dict]) -> int:
@@ -288,6 +387,16 @@ def append_jsonl(path: Path, records: list[dict]) -> int:
     if not records:
         return 0
     blob = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+    # Never glue a record onto an unterminated final line. That tail is
+    # reachable two ways: `_repair_torn_tail` deliberately PRESERVES a
+    # complete-but-unterminated line (a kill that landed exactly on an object
+    # boundary), and the ledger is designed to be hand-edited and PR-reviewed,
+    # so an editor that drops the trailing newline leaves the same state.
+    # Gluing destroys BOTH entries -- the concatenated line parses as neither,
+    # so both vanish from the resume set and
+    # `remediate_task_a_states.py::_load_ledger` then fails on it.
+    if _ends_without_newline(path):
+        blob = "\n" + blob
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(blob)
         handle.flush()
@@ -298,9 +407,12 @@ def append_jsonl(path: Path, records: list[dict]) -> int:
 def _repair_torn_tail(path: Path) -> None:
     """Truncate a trailing partial JSON line left by a crash mid-append.
 
-    Only fires when the file does not end in a newline AND the trailing
-    fragment does not parse -- a complete last line that merely lacks its
-    newline is left alone.
+    Only truncates when the file does not end in a newline AND the trailing
+    fragment does not parse. A complete last line that merely lacks its newline
+    keeps its entry -- but the newline is written, so the checkpoint on disk is
+    always well-formed for the next reader and the next appender. (`append_jsonl`
+    guards the same case independently, because `rejected.jsonl` is appended
+    without ever being repaired and either file may be hand-edited.)
     """
     try:
         data = path.read_bytes()
@@ -313,9 +425,18 @@ def _repair_torn_tail(path: Path) -> None:
     tail = data[cut:]
     try:
         json.loads(tail.decode("utf-8"))
-        return  # complete, just unterminated
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
+    else:
+        # Complete, just unterminated. Keep the entry, terminate the line.
+        try:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:  # pragma: no cover - read-only checkpoint
+            _log(f"warning: cannot terminate the final line of {path}: {exc}")
+        return
     try:
         os.truncate(path, cut)
     except OSError as exc:  # pragma: no cover - read-only checkpoint
@@ -445,6 +566,33 @@ def run_agent_batch(batch_path: Path, scratch_dir: Path, timeout: int) -> dict:
     return {"error": None, "ledger_path": ledger_path, "reported_count": reported_count}
 
 
+def _request_id(request: object) -> str | None:
+    """The request's `insert_id`, or None for any shape that cannot carry one."""
+    if isinstance(request, dict):
+        value = request.get("insert_id")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def rejection_stub(request: object, index: int, reasons: list[str]) -> dict:
+    """A rejection record for a request of *any* shape.
+
+    Indexing `request["insert_id"]` was the one place the never-raise guarantee
+    leaked: a request without the key raised `KeyError` out of `process_batch`,
+    and main's `except Exception` net re-raised while building its own fallback
+    record from the same key. A request this broken means the triage report or
+    this driver is wrong, so it degrades the way every other failure does --
+    a rejection with a reason, and the conversation drops.
+    """
+    return {
+        "insert_id": _request_id(request) or f"<request {index} without insert_id>",
+        "conversation_id": (request.get("conversation_id", "")
+                            if isinstance(request, dict) else ""),
+        "reasons": reasons,
+    }
+
+
 def process_batch(requests: list[dict], scratch_dir: Path, timeout: int) -> dict:
     """Author one batch and gate every entry. Never raises.
 
@@ -455,21 +603,42 @@ def process_batch(requests: list[dict], scratch_dir: Path, timeout: int) -> dict
     scratch_dir = Path(scratch_dir)
     scratch_dir.mkdir(parents=True, exist_ok=True)
     batch_path = scratch_dir / "batch.json"
-    by_id = {r["insert_id"]: r for r in requests}
+
+    # A request with no usable insert_id can never be answered -- the agent has
+    # nothing to echo back and the ledger line could not be matched to it. It is
+    # rejected here and kept out of the batch file rather than confusing the
+    # agent, but it still appears in `rejected` so the count reconciles.
+    by_id: dict[str, dict] = {}
+    authorable: list[dict] = []
+    unusable: list[dict] = []
+    for index, request in enumerate(requests):
+        insert_id = _request_id(request)
+        if insert_id is None:
+            unusable.append(rejection_stub(
+                request, index,
+                ["request has no insert_id; it cannot be authored or matched"],
+            ))
+            continue
+        by_id[insert_id] = request
+        authorable.append(request)
 
     def _reject_all(reason: str) -> dict:
         return {
             "accepted": [],
-            "rejected": [{"insert_id": r["insert_id"],
-                          "conversation_id": r.get("conversation_id", ""),
-                          "reasons": [reason]} for r in requests],
+            "rejected": unusable + [rejection_stub(r, i, [reason])
+                                    for i, r in enumerate(authorable)],
             "error": reason,
             "reported_count": None,
         }
 
+    if not authorable:
+        reason = "batch contains no request with a usable insert_id"
+        return {"accepted": [], "rejected": unusable, "error": reason,
+                "reported_count": None}
+
     try:
         batch_path.write_text(
-            json.dumps(requests, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(authorable, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except OSError as exc:
         return _reject_all(f"cannot write batch file: {exc}")
@@ -528,7 +697,7 @@ def process_batch(requests: list[dict], scratch_dir: Path, timeout: int) -> dict
                              "conversation_id": request.get("conversation_id", ""),
                              "reasons": ["no ledger entry produced"]})
 
-    return {"accepted": accepted, "rejected": rejected, "error": None,
+    return {"accepted": accepted, "rejected": unusable + rejected, "error": None,
             "reported_count": outcome["reported_count"]}
 
 
@@ -640,6 +809,31 @@ def build_batches(pending: list[dict], batch_size: int) -> list[list[dict]]:
     return batches
 
 
+def limit_pending(pending: list[dict], limit: int | None) -> list[dict]:
+    """Trim to at most `limit` inserts **without ever splitting a conversation**.
+
+    A flat slice took, say, 2 of a conversation's 4 inserts, so the smoke run
+    authored a conversation it could not complete -- `apply_plan` drops a
+    conversation with a missing entry, so the smoke output misrepresented
+    exactly the thing the smoke run exists to check.
+
+    Whole conversations are taken, in report order, until the next one would
+    exceed the limit. The first conversation is always taken, so a limit smaller
+    than one conversation still produces something reviewable instead of
+    nothing; that is the only case where the result exceeds `limit`.
+    """
+    if limit is None:
+        return pending
+    if limit <= 0:
+        return []
+    trimmed: list[dict] = []
+    for group in _group_by_conversation(pending):
+        if trimmed and len(trimmed) + len(group) > limit:
+            break
+        trimmed.extend(group)
+    return trimmed
+
+
 def _group_by_conversation(pending: list[dict]):
     """Consecutive runs sharing a conversation key, in report order.
 
@@ -718,7 +912,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-workers", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--limit", type=int, default=None,
-                        help="Author at most N pending inserts (smoke runs).")
+                        help="Author at most N pending inserts (smoke runs). "
+                             "Trims on conversation boundaries, so every "
+                             "conversation it starts is authored in full; a "
+                             "single conversation larger than N is still taken "
+                             "whole.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Render the first batch's prompt and exit. No subprocess "
                              "calls, no files written.")
@@ -732,12 +930,14 @@ def main(argv: list[str] | None = None) -> int:
     ledger_dir = Path(args.ledger_dir)
     already_done = load_accepted_ids(ledger_dir)
     pending = [r for r in all_requests if r.get("insert_id") not in already_done]
-    if args.limit is not None:
-        pending = pending[: max(0, args.limit)]
+    pending = limit_pending(pending, args.limit)
     batches = build_batches(pending, max(1, args.batch_size))
 
+    conversations = sum(1 for _ in _group_by_conversation(pending))
+    limited = "" if args.limit is None else f" (--limit {args.limit}, trimmed whole conversations)"
     print(f"Inserts: {len(all_requests)} total, {len(already_done)} already accepted, "
-          f"{len(pending)} pending in {len(batches)} batch(es)")
+          f"{len(pending)} pending across {conversations} conversation(s) "
+          f"in {len(batches)} batch(es){limited}")
 
     if args.dry_run:
         if batches:
@@ -793,13 +993,13 @@ def main(argv: list[str] | None = None) -> int:
             index = futures[future]
             try:
                 outcome = future.result()
-            except Exception as exc:  # pragma: no cover - process_batch never raises
+            except Exception as exc:  # process_batch is not supposed to raise
+                # Built with `rejection_stub`, not `r["insert_id"]`: the net
+                # itself must not raise while recording a failure.
                 outcome = {"accepted": [], "error": f"unexpected: {exc!r}",
                            "reported_count": None,
-                           "rejected": [{"insert_id": r["insert_id"],
-                                         "conversation_id": r.get("conversation_id", ""),
-                                         "reasons": [f"driver error: {exc!r}"]}
-                                        for r in batches[index]]}
+                           "rejected": [rejection_stub(r, i, [f"driver error: {exc!r}"])
+                                        for i, r in enumerate(batches[index])]}
             # accepted.jsonl is the checkpoint and is written FIRST: a crash
             # between the two appends loses only a rejection log line, and a
             # rejected insert is retried on the next run anyway.

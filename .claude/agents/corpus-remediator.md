@@ -210,11 +210,14 @@ into pure Thai either.
 
 ## Hard formatting rules
 
-Rules 1–11 are checked deterministically by the driver's `validate_entry`
-(`scripts/build_remediation_ledger.py`). An entry that fails any of them is rejected
-and its conversation is dropped from the corpus. This list and that function are kept
-in exact correspondence — the gate enforces nothing beyond it, and nothing on it goes
-unenforced.
+Rules 1–13 are checked deterministically by the driver
+(`scripts/build_remediation_ledger.py`): all of them in `validate_entry`, except the
+*batch-level* half of rule 9 — a sentence reused across two entries in one batch — which
+is checked in `_reject_duplicate_content` after every entry has been validated
+individually, since it is the only rule that cannot be decided from one entry alone.
+An entry that fails any of them is rejected and its conversation is dropped from the
+corpus. This list and that code are kept in exact correspondence — the gate enforces
+nothing beyond it, and nothing on it goes unenforced.
 
 1. **`role` must equal the request's `role`.**
 2. **For `role: "assistant"`: `content` must start with `required_marker` byte for
@@ -230,15 +233,25 @@ unenforced.
 6. **`20 <= len(content) <= 600`**, counted on the whole string **including the
    marker**. Markers run 25–60 characters, so an assistant insert has roughly 540
    characters of prose budget — one or two sentences, not a paragraph.
-   For an assistant insert, at least **10 characters of prose after the marker**: a
-   long marker plus a newline can clear the 20-character floor while saying nothing.
+   **Both roles additionally need at least 10 characters of *visible* prose** —
+   measured with invisible characters removed and runs of whitespace collapsed, so
+   padding buys nothing. For an assistant insert it is measured after the marker (a
+   long marker plus a newline would otherwise clear the 20-character floor while
+   saying nothing); for a `user` insert it is measured on the whole content (the
+   20-character floor counts spaces, so `"x"` plus 19 spaces would otherwise pass).
+   Ten is the length of `"ok, thanks"` — any real acknowledgement clears it easily.
 7. **Match the request's `language` in script.** A `th` or `code_switch` entry must
-   contain at least one Thai character (U+0E00–U+0E7F); an `en` entry must contain
-   none. This is the one quality failure invisible to every other check, so it is
-   gated: an all-English answer to a Thai customer is rejected outright. It is a
-   *script* check, not a fluency check — a `code_switch` entry mixing Thai grammar
-   with English technical nouns passes, which is exactly the register you should be
-   writing.
+   contain at least one Thai **letter**; an `en` entry must contain none. This is the
+   one quality failure invisible to every other check, so it is gated: an all-English
+   answer to a Thai customer is rejected outright.
+   *Letters* means consonants ก–ฮ and the spacing vowels ะ, า, ำ, เ, แ, โ, ใ, ไ, ๅ —
+   **not** the rest of the Thai Unicode block. A baht sign (฿), a repetition or
+   abbreviation mark (ๆ ฯ ๏ ๚ ๛) or a Thai digit (๐–๙) does **not** make an English
+   sentence Thai, and none of them will satisfy this rule. The mirror holds: an `en`
+   entry **may** quote a price like ฿1,200, because ฿ is not a letter.
+   It is a *script* check, not a fluency check — a `code_switch` entry mixing Thai
+   grammar with English technical nouns passes, which is exactly the register you
+   should be writing.
 8. **Echo `insert_id` and `conversation_id` from the request verbatim.** A mismatch
    means the content was authored against the wrong request and is rejected.
 9. **`content` must not be a verbatim copy of a message already in the
@@ -248,16 +261,28 @@ unenforced.
    inserts — that is especially wrong inside a closing pair, where the `user` ack and
    the terminal turn have to read as one exchange rather than one sentence twice.
    Where a duplicate is found the first entry stands and the later ones are rejected.
-10. **`rationale` and `agent_model` must be present and non-empty**, and every field
-    must be a JSON string. They are the provenance a human reviewer reads in the
-    ledger diff.
-11. **`schema_version` must be `1`** if you set it at all.
+10. **`rationale` and `agent_model` must be present and non-empty.** Every field in the
+    entry shape under **Output contract** below must be a JSON **string** — `schema_version` (rule 11) is the
+    one exception and is a JSON **integer**. `rationale` and `agent_model` are the
+    provenance a human reviewer reads in the ledger diff.
+11. **`schema_version` must be the integer `1`** if you set it at all — `1`, not `"1"`.
+12. **No invisible characters.** Zero-width and format characters (U+200B ZWSP,
+    U+200C/D ZWNJ/ZWJ, U+FEFF, U+2060, the bidi controls, U+00AD soft hyphen) and
+    control characters other than newline and tab are rejected outright. They survive
+    `strip()`, so they can fake a prose length while contributing nothing, and they
+    corrupt the corpus silently. Write plain text.
+13. **No chat-template special tokens.** Anything shaped like `<|im_end|>`,
+    `<|eot_id|>`, `<|user|>`, `<start_of_turn>`, `<end_of_turn>`, `<s>`, `</s>`,
+    `<bos>`, `[INST]`, `[gMASK]` or `<extra_id_0>` is rejected. Task A is templated
+    for several model families, and a sentinel baked into `content` is re-read as a
+    turn boundary at training time. `[STATE: … ]` is the one bracketed token the
+    corpus legitimately contains.
 
 Not gated, but still required — the driver cannot see these, so they are on you:
 
-12. Never mention states, the workflow graph, queues, or "tools" as a concept. Write as
+14. Never mention states, the workflow graph, queues, or "tools" as a concept. Write as
     the persona already established in the conversation.
-13. Never narrate a success the tool result did not report (§2 above). No deterministic
+15. Never narrate a success the tool result did not report (§2 above). No deterministic
     check can catch this, and it is the worst failure mode in the set.
 
 ## Procedure

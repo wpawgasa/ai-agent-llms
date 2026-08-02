@@ -313,3 +313,58 @@ def test_verify_strict_exits_nonzero_on_violation(tmp_path):
         capture_output=True, text=True,
     )
     assert result.returncode != 0
+
+
+def _load_ledger_module():
+    """Import the CLI module in-process so `_load_ledger` can be called directly."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("remediate_task_a_states", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_load_ledger_fails_loudly_on_a_malformed_line(tmp_path):
+    """The ledger is append-only but hand-editable, so a bad line is reachable.
+    It must name the file and line rather than surfacing a bare JSONDecodeError,
+    and it must not silently skip the entry -- a dropped entry drops a
+    conversation from the corpus without saying so.
+    """
+    import pytest
+
+    module = _load_ledger_module()
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_text(
+        json.dumps({"insert_id": "f:0:0", "content": "ok"}) + "\n"
+        + '{"insert_id": "f:0:1", "content": trunc\n'
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        module._load_ledger(ledger_dir)
+    message = str(excinfo.value)
+    assert "accepted.jsonl:2" in message and "not valid JSON" in message
+
+
+def test_load_ledger_rejects_an_entry_without_an_insert_id(tmp_path):
+    import pytest
+
+    module = _load_ledger_module()
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_text('{"content": "no id here"}\n')
+    with pytest.raises(SystemExit) as excinfo:
+        module._load_ledger(ledger_dir)
+    assert "insert_id" in str(excinfo.value)
+
+
+def test_load_ledger_reads_a_well_formed_ledger(tmp_path):
+    module = _load_ledger_module()
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_text(
+        json.dumps({"insert_id": "f:0:0", "content": "a"}) + "\n\n"
+        + json.dumps({"insert_id": "f:0:1", "content": "b"}) + "\n"
+    )
+    entries = module._load_ledger(ledger_dir)
+    assert set(entries) == {"f:0:0", "f:0:1"}

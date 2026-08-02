@@ -121,16 +121,39 @@ def cmd_triage(args: argparse.Namespace) -> int:
 
 
 def _load_ledger(ledger_dir: Path | None) -> dict[str, dict]:
+    """Read `accepted.jsonl` into {insert_id: entry}.
+
+    Fails loudly and specifically on a bad line rather than with a bare
+    `JSONDecodeError` traceback. The ledger is append-only *and* deliberately
+    hand-editable -- the design markets it as PR-reviewable -- so a malformed
+    line is a plausible operator error, not an impossible one. Skipping the line
+    would be worse than dying: a silently dropped entry silently drops a
+    conversation from the corpus, which is exactly the failure this whole
+    pipeline is trying to make visible.
+    """
     if ledger_dir is None:
         return {}
     accepted = ledger_dir / "accepted.jsonl"
     if not accepted.exists():
         return {}
     entries = {}
-    for line in accepted.read_text().splitlines():
-        if line.strip():
+    for number, line in enumerate(accepted.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
             entry = json.loads(line)
-            entries[entry["insert_id"]] = entry
+        except json.JSONDecodeError as exc:
+            raise SystemExit(
+                f"error: {accepted}:{number} is not valid JSON ({exc.msg}). "
+                "Fix or remove that line before applying -- refusing to splice a "
+                "partially-readable ledger into the corpus."
+            ) from exc
+        if not isinstance(entry, dict) or not isinstance(entry.get("insert_id"), str):
+            raise SystemExit(
+                f"error: {accepted}:{number} is not a ledger entry with a string "
+                "'insert_id'."
+            )
+        entries[entry["insert_id"]] = entry
     return entries
 
 

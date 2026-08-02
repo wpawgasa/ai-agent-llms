@@ -843,3 +843,206 @@ def test_main_rejects_a_report_without_usable_records(tmp_path, payload):
     argv = ["--input-dir", "data/output/sft/task_a", "--triage-report", str(bad),
             "--ledger-dir", str(tmp_path / "ledger")]
     assert brl.main(argv) == 2
+
+
+# --------------------------------------------------------------------------
+# fix round 1 -- adversarial false-accept regressions
+#
+# Each test here encodes an input the reviewer proved the gate ACCEPTED. They
+# are the highest-value tests in the file: a regression re-opens a hole that
+# bakes corrupt prose into the corpus with nothing downstream to catch it.
+# --------------------------------------------------------------------------
+
+
+def test_rejects_thai_row_whose_only_thai_character_is_the_baht_sign():
+    """The measured hole: one ฿ let all 2,853 th/code_switch rows through."""
+    entry = _entry(content=f"{MARKER}\nYour refund of ฿1,200 has been approved today.")
+    violations = brl.validate_entry(entry, _request(language="th"))
+    assert any("no Thai letters" in v for v in violations)
+
+
+@pytest.mark.parametrize("char", ["฿", "ๆ", "๛", "๏", "ฯ", "๐", "๙"])  # noqa: RUF001
+def test_non_letter_thai_block_characters_do_not_satisfy_the_language_rule(char):
+    """Currency, repetition/abbreviation marks and Thai digits are not evidence
+    that a sentence was written in Thai."""
+    entry = _entry(content=f"{MARKER}\nAll done here {char} please confirm shortly.")
+    violations = brl.validate_entry(entry, _request(language="code_switch"))
+    assert any("no Thai letters" in v for v in violations)
+
+
+def test_english_row_may_quote_a_baht_price():
+    """The asymmetry ran backwards: `en` was rejected for the one legitimate
+    English use of a Thai-block character."""
+    entry = _entry(content=f"{MARKER}\nYour refund of ฿1,200 has been approved today.")
+    assert brl.validate_entry(entry, _request(language="en")) == []
+
+
+def test_thai_letters_still_satisfy_the_language_rule_after_narrowing():
+    entry = _user_entry(content="รับทราบแล้วค่ะ รบกวนดำเนินการต่อได้เลยนะคะ")
+    assert brl.validate_entry(entry, _user_request(language="th")) == []
+
+
+def test_rejects_prose_padded_with_zero_width_characters():
+    """U+200B is not whitespace to Python, so str.strip() left it in place and
+    the 10-character prose floor was satisfied by nothing at all."""
+    entry = _entry(content=f"{MARKER}\n" + "​" * 40)
+    violations = brl.validate_entry(entry, _request())
+    assert any("visible prose" in v for v in violations)
+    assert any("zero-width" in v for v in violations)
+
+
+@pytest.mark.parametrize("char", ["​", "‌", "‍", "﻿", "⁠", "­"])
+def test_rejects_each_zero_width_character_family(char):
+    entry = _user_entry(content="ขอบคุณค่ะ รับทราบแล้วนะคะ" + char)
+    violations = brl.validate_entry(entry, _user_request(language="th"))
+    assert any("zero-width or control" in v for v in violations)
+
+
+def test_rejects_user_ack_that_is_one_character_of_padding():
+    """1,673 of the 3,902 inserts are acks and had no prose floor at all."""
+    entry = _user_entry(content="x" + " " * 19, language="en")
+    violations = brl.validate_entry(entry, _user_request(language="en"))
+    assert any("visible prose" in v for v in violations)
+
+
+def test_accepts_a_short_but_real_english_user_ack():
+    """The floor is 10 = len("ok, thanks"); a real ack clears it comfortably."""
+    entry = _user_entry(content="ok, thanks -- please go ahead", language="en")
+    assert brl.validate_entry(entry, _user_request(language="en")) == []
+
+
+@pytest.mark.parametrize("token", [
+    "<|im_end|>", "<|im_start|>", "<|eot_id|>", "<|endoftext|>", "<|user|>",
+    "<end_of_turn>", "<start_of_turn>", "</s>", "<bos>", "[INST]", "[gMASK]",
+    "<extra_id_0>",
+])
+def test_rejects_chat_template_special_tokens(token):
+    """A sentinel baked into the corpus is re-read as a turn boundary at
+    template time, corrupting tokenisation for whichever family owns it."""
+    entry = _entry(content=f"{MARKER}\nAll set on my side. {token} Anything else?")
+    violations = brl.validate_entry(entry, _request())
+    assert any("special token" in v for v in violations), violations
+
+
+def test_state_marker_is_not_mistaken_for_a_special_token():
+    """The one bracketed token the corpus legitimately contains."""
+    assert brl.validate_entry(_entry(), _request()) == []
+
+
+# --------------------------------------------------------------------------
+# fix round 1 -- torn tail must never be glued to the next append
+# --------------------------------------------------------------------------
+
+
+def test_append_after_an_unterminated_tail_keeps_every_line_parseable(tmp_path):
+    """`_repair_torn_tail` preserves a complete-but-unterminated last line; the
+    next append used to concatenate onto it, destroying both entries."""
+    path = tmp_path / "accepted.jsonl"
+    path.write_text(
+        json.dumps(_entry(insert_id="f:0:0")) + "\n"
+        + json.dumps(_entry(insert_id="f:0:1")),  # no trailing newline
+        encoding="utf-8",
+    )
+    seen = brl.load_accepted_ids(tmp_path)
+    assert seen == {"f:0:0", "f:0:1"}
+
+    brl.append_jsonl(path, [_entry(insert_id="f:0:2"), _entry(insert_id="f:0:3")])
+
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 4
+    ids = [json.loads(ln)["insert_id"] for ln in lines]  # must not raise
+    assert ids == ["f:0:0", "f:0:1", "f:0:2", "f:0:3"]
+    assert brl.load_accepted_ids(tmp_path) == {"f:0:0", "f:0:1", "f:0:2", "f:0:3"}
+
+
+def test_append_jsonl_separates_a_hand_edited_unterminated_tail(tmp_path):
+    """The ledger is marketed as PR-reviewable, so an editor that drops the
+    final newline is a reachable state -- and `rejected.jsonl` is appended
+    without ever passing through `_repair_torn_tail`."""
+    path = tmp_path / "rejected.jsonl"
+    path.write_text(json.dumps({"insert_id": "f:0:0"}), encoding="utf-8")
+    brl.append_jsonl(path, [{"insert_id": "f:0:1"}])
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(ln)["insert_id"] for ln in lines] == ["f:0:0", "f:0:1"]
+
+
+def test_repair_terminates_a_preserved_final_line_on_disk(tmp_path):
+    path = tmp_path / "accepted.jsonl"
+    path.write_text(json.dumps(_entry()), encoding="utf-8")
+    brl.load_accepted_ids(tmp_path)
+    assert path.read_bytes().endswith(b"\n")
+
+
+# --------------------------------------------------------------------------
+# fix round 1 -- never-raise: a request without insert_id must degrade
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [{}, {"conversation_id": "L1_009"},
+                                 {"insert_id": None}, {"insert_id": ""}, "not-a-dict"])
+def test_process_batch_degrades_on_a_request_without_insert_id(tmp_path, monkeypatch, bad):
+    _mock_agent(monkeypatch, [json.dumps(_entry())])
+    out = brl.process_batch([_request(), bad], tmp_path, timeout=10)
+    assert [a["insert_id"] for a in out["accepted"]] == ["f:0:0"]
+    assert any("no insert_id" in r for rec in out["rejected"] for r in rec["reasons"])
+
+
+def test_process_batch_degrades_when_no_request_is_usable(tmp_path, monkeypatch):
+    with patch.object(brl.subprocess, "run") as run:
+        out = brl.process_batch([{}, {}], tmp_path, timeout=10)
+    run.assert_not_called()
+    assert out["accepted"] == [] and len(out["rejected"]) == 2
+    assert out["error"]
+
+
+def test_reject_all_path_survives_a_request_without_insert_id(tmp_path, monkeypatch):
+    """The agent-failure path built its records from `r["insert_id"]` too."""
+    _mock_agent(monkeypatch, None, returncode=1)
+    out = brl.process_batch([_request(), {}], tmp_path, timeout=10)
+    assert out["accepted"] == [] and len(out["rejected"]) == 2
+
+
+def test_main_safety_net_survives_a_request_without_insert_id(tmp_path, monkeypatch, capsys):
+    """main's own `except Exception` net indexed the same missing key."""
+    report = _write_report(tmp_path, n_convs=1)
+    monkeypatch.setattr(brl, "process_batch",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(brl, "build_batches", lambda pending, size: [[{}]])
+    assert brl.main(_argv(tmp_path, report, "--max-workers", "1")) == 1
+    assert "driver error" in (tmp_path / "ledger" / "rejected.jsonl").read_text()
+
+
+# --------------------------------------------------------------------------
+# fix round 1 -- --limit must not split a conversation
+# --------------------------------------------------------------------------
+
+
+def _insert(conv: int, ordinal: int) -> dict:
+    return {"insert_id": f"f:{conv}:{ordinal}", "key": ["f", conv],
+            "conversation_id": f"L1_{conv:03d}"}
+
+
+def test_limit_never_splits_a_conversation():
+    """The playbook's own `--limit 20` took 2 of a conversation's 4 inserts, so
+    the smoke run authored a conversation `apply_plan` would then drop."""
+    pending = [_insert(0, i) for i in range(4)] + [_insert(1, i) for i in range(4)]
+    trimmed = brl.limit_pending(pending, 6)
+    assert [r["insert_id"] for r in trimmed] == [f"f:0:{i}" for i in range(4)]
+
+
+def test_limit_takes_whole_conversations_up_to_the_budget():
+    pending = [_insert(0, 0), _insert(1, 0), _insert(2, 0), _insert(3, 0)]
+    assert len(brl.limit_pending(pending, 3)) == 3
+
+
+def test_limit_always_takes_at_least_one_whole_conversation():
+    """A conversation bigger than the limit is taken whole; a smoke run that
+    produced nothing would be worse than one that overshoots by a few inserts."""
+    pending = [_insert(0, i) for i in range(14)]
+    assert len(brl.limit_pending(pending, 5)) == 14
+
+
+@pytest.mark.parametrize("limit,expected", [(None, 8), (0, 0), (-3, 0)])
+def test_limit_edge_values(limit, expected):
+    pending = [_insert(c, i) for c in range(2) for i in range(4)]
+    assert len(brl.limit_pending(pending, limit)) == expected

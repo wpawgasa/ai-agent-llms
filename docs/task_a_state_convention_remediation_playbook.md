@@ -406,13 +406,15 @@ Empty list == accept. Rejects on:
 | tool calls | neither `"<tool_call>"` nor `"</tool_call>"` in `content` |
 | marker prefix (assistant) | `content.startswith(required_marker)` — **byte for byte, arrow glyph included** |
 | marker newline (assistant) | the character right after the marker is `"\n"` (100% of the 64,964 markers in the corpus are followed by one) |
-| prose floor (assistant) | ≥10 non-blank characters after the marker — a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing |
+| prose floor (both roles) | ≥10 characters of *visible* prose — invisible characters removed, whitespace runs collapsed. Assistant: measured after the marker (a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing). User: measured on the whole content (the 20-char floor counts spaces, so `"x"` + 19 spaces otherwise passed — and 1,673 of the 3,902 inserts are acks). 10 = `len("ok, thanks")` |
 | second marker | no `"[STATE:"` in `content[len(required_marker):]` |
 | marker (user) | no `"[STATE:"` anywhere when `required_marker == ""` |
 | length | `20 <= len(content) <= 600`, counted **including** the marker |
-| language | th / code_switch rows must contain Thai script (U+0E00–U+0E7F); `en` rows must contain none |
+| language | th / code_switch rows must contain a Thai **letter** (ก–ฮ and the spacing vowels ะ า ำ เ–ๅ); `en` rows must contain none. **Not** the whole Thai block: ฿, ๆ, ๏, ๚, ๛ and ๐–๙ are excluded, so a baht sign cannot pass an English sentence off as Thai and an `en` row may quote a ฿ price |
+| invisible characters | no zero-width or format characters (U+200B/C/D, U+FEFF, U+2060, bidi controls, U+00AD) and no control characters other than `\n`/`\t`. They survive `strip()`, so they faked prose length; they also corrupt the corpus silently |
+| special tokens | no chat-template sentinel: any `<|…|>` form (`<|im_end|>`, `<|eot_id|>`, `<|user|>`), `<start_of_turn>`/`<end_of_turn>`, `<s>`/`</s>`/`<bos>`/`<eos>`, `[INST]`/`[gMASK]`, `<extra_id_N>`. Baked into `content` these are re-read as turn boundaries at template time |
 | copy guard | `content`'s prose is not a verbatim copy of a `context_window` message, for copies ≥40 characters |
-| duplicate prose (batch level, in `process_batch`) | no two accepted entries in one batch share ≥40 characters of identical prose — the "generic ack repeated across rows" defect. First occurrence stands |
+| duplicate prose (batch level, in `_reject_duplicate_content`, not `validate_entry`) | no two accepted entries in one batch share ≥40 characters of identical prose — the "generic ack repeated across rows" defect. First occurrence stands |
 
 The arrow-glyph rule bites in practice: of the 2,229 markered requests, **2,151 carry
 a Unicode `→` and 78 carry an ASCII `->`**. `_marker()` copies the arrow from the
@@ -431,6 +433,17 @@ an `en` entry rejects 0 of 31,164 `en` turns. `data_validator.detect_thai_corrup
 is deliberately *not* used here: it detects *garbled* Thai (Latin glued into a Thai
 word, obsolete `ฃ`/`ฅ`), so a wholly-English entry on a `th` row — the failure mode
 that matters — trips neither of its signals and passes it clean.
+
+**The check counts Thai *letters*, not the Thai Unicode block** (fixed 2026-08-02 after
+review). Matching the whole `U+0E00–U+0E7F` block defeated the rule in both directions:
+a single `฿` in an otherwise all-English answer satisfied it, which — measured by
+injecting exactly that into every row — let **all 2,853** th/code_switch inserts pass,
+and the same block match rejected `en` rows for a baht price, the one legitimate English
+use of a Thai-block character. The narrowed class costs nothing on real content: across
+all **93,059** corpus turns of ≥20 characters, the letter class and the old block class
+agree on every single one (**0 disagreements**), so the 1-of-29,968 `th` and
+207-of-31,856 `code_switch` figures above are unchanged. Post-fix the injection is
+caught 2,853/2,853, and 0 of 1,049 `en` rows are rejected for quoting `฿1,200`.
 
 Every row of this table corresponds to a numbered rule in
 `.claude/agents/corpus-remediator.md` § "Hard formatting rules", and the agent's own
@@ -621,7 +634,7 @@ money on the other half.
 Run §5's protocol now, before the paid step. It is the last cheap opportunity to find
 a trajectory bug.
 
-### Step 4 — Smoke the agent pass (20 inserts)
+### Step 4 — Smoke the agent pass (~20 inserts, whole conversations)
 
 > Steps 4–5 require `scripts/build_remediation_ledger.py`, which now exists (Task 12).
 > The commands below are its documented contract and are exercised by
@@ -641,7 +654,15 @@ python scripts/build_remediation_ledger.py \
 python3 -m json.tool < data/interim/task_a_remediation_ledger/accepted.jsonl
 ```
 
-**Read all 20 entries by hand.** Deterministic gates cannot catch the failure modes
+**`--limit` trims on conversation boundaries, so it undershoots rather than splitting.**
+On the current queue `--limit 20` authors **18 inserts across 8 complete conversations,
+in 2 batches**. It used to take a flat slice of exactly 20, which cut conversation
+`l1_merged_20260629:528` in half — and a conversation with one insert missing is dropped
+whole by `apply_plan`, so the smoke run was silently reporting on a conversation that
+could never have been applied. The run prints the conversation count; if it ever reports
+a partially-authored conversation, that is a bug.
+
+**Read all 18 entries by hand.** Deterministic gates cannot catch the failure modes
 that matter here. Check specifically:
 
 - Any `th` / `code_switch` row answered in English → stop, the agent file's language
