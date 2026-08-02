@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import os
 import warnings
+from functools import lru_cache
 from typing import Any
 
+from llm_workflow_agents.config.schema import COMPLEXITY_SPECS
 from llm_workflow_agents.data._workflow_script import build_workflow_script
 
 # Default-on since 2026-07-31 (task-a-sft-v2). Opt out with TASK_A_STAY_RULE=0
@@ -215,7 +217,69 @@ def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
     return "Rules:\n\n" + "\n\n".join(rules)
 
 
+# Module-level rendering at the DEFAULT budget, kept as a stable import for
+# callers that want "the rules" without a sample in hand (tests, docs, ad-hoc
+# probes). Per-sample prompts must NOT use this constant — they go through
+# :func:`format_rules_for_sample`, which renders the rule at the sample's own
+# retry budget. Keeping the constant at budget 1 preserves its historical
+# meaning for every existing importer.
 FORMAT_RULES = _format_rules()
+
+#: Budget used when a sample carries no usable ``complexity_level``. Matches the
+#: pre-Task-9 hardcoded behaviour (one attempt, no retry), so an unlabelled
+#: sample renders exactly the prompt it rendered before this became per-sample.
+DEFAULT_RETRY_BUDGET = 1
+
+
+@lru_cache(maxsize=32)
+def _format_rules_cached(retry_budget: int, stay_rule: bool) -> str:
+    """Memoised :func:`_format_rules`.
+
+    ``build_enriched_system_prompt`` is called once per row at SFT/GRPO data-load
+    time (tens of thousands of calls), but there are only ~3 distinct budgets, so
+    the rendering collapses to a handful of cache entries. The cache lives on the
+    module object, so the module-reload trick the ``TASK_A_STAY_RULE`` tests use
+    (see ``tests/unit/test_stay_rule_flag.py``) gets a fresh cache and cannot
+    observe a stale revision.
+    """
+    return _format_rules(retry_budget=retry_budget, stay_rule=stay_rule)
+
+
+def retry_budget_for_sample(sample: Any) -> int:
+    """Resolve a sample's tool-error retry budget from its complexity level.
+
+    Task 9 made ``retry_budget`` a per-level property of
+    :data:`~llm_workflow_agents.config.schema.COMPLEXITY_SPECS` (L1-L2: 1,
+    L3-L4: 2, L5: 3) and the generator bakes conversations that actually retry
+    that many times. This resolves the same number at train/eval load time so the
+    rebuilt prompt states the policy the row's data was generated under.
+
+    Degrades to :data:`DEFAULT_RETRY_BUDGET` — never raises — for a sample with a
+    missing, non-string, or unknown ``complexity_level``: a prompt rebuild must
+    not be able to fail a training run over a metadata gap.
+    """
+    if not isinstance(sample, dict):
+        return DEFAULT_RETRY_BUDGET
+    level = sample.get("complexity_level")
+    if not isinstance(level, str):
+        return DEFAULT_RETRY_BUDGET
+    # ComplexityLevel is a StrEnum, so a plain "L3" hashes/compares equal to the
+    # enum member and indexes COMPLEXITY_SPECS directly.
+    spec = COMPLEXITY_SPECS.get(level.strip().upper())
+    if spec is None:
+        return DEFAULT_RETRY_BUDGET
+    return max(1, int(spec.retry_budget))
+
+
+def format_rules_for_sample(sample: Any) -> str:
+    """Render FORMAT_RULES at *sample*'s own retry budget.
+
+    Same text as :data:`FORMAT_RULES` except for the tool-error rule, which
+    states the sample's budget instead of a hardcoded 1. Under
+    ``TASK_A_STAY_RULE=0`` the budget is ignored entirely (the frozen v1 rule
+    states no budget), so v1 bytes are identical for every sample.
+    """
+    return _format_rules_cached(retry_budget_for_sample(sample), _STAY_RULE_ENABLED)
 
 
 def build_enriched_system_prompt(
@@ -232,7 +296,10 @@ def build_enriched_system_prompt(
 
     Args:
         sample: A dataset sample dict with optional keys ``workflow_script``,
-            ``workflow_graph``, and ``tool_schemas``.
+            ``workflow_graph``, ``tool_schemas``, and ``complexity_level``. The
+            last selects the retry budget stated by the prompt's two tool-error
+            passages (see :func:`retry_budget_for_sample`); a sample without it
+            renders at :data:`DEFAULT_RETRY_BUDGET`.
         original_content: The existing system-message content (may be bare or
             already enriched).
         force_rebuild: If True, strip any existing enrichment from
@@ -256,6 +323,12 @@ def build_enriched_system_prompt(
 
     parts: list[str] = [original_content]
 
+    # One budget for the whole prompt. Both halves that mention retries — the
+    # workflow script's per-state tool-error note and FORMAT_RULES' tool-error
+    # rule — are rendered from THIS value, so a sample can never carry two
+    # contradictory retry policies a few hundred characters apart.
+    retry_budget = retry_budget_for_sample(sample)
+
     # Regenerate the workflow script from the actual GT conversation rather than
     # trusting sample["workflow_script"] (which is frozen at data-generation time
     # against a randomly-populated state.tools field and is wrong in ~60% of
@@ -271,10 +344,7 @@ def build_enriched_system_prompt(
             language=language,
             messages=messages,
             tool_turn_semantics=True,
-            # TODO(Task 9): thread the sample's actual retry budget once one is
-            # available here; 1 is a placeholder that matches today's implicit
-            # no-retry behavior.
-            retry_budget=1,
+            retry_budget=retry_budget,
         )
     else:
         script = sample.get("workflow_script") or ""
@@ -305,5 +375,9 @@ def build_enriched_system_prompt(
     # STAY_RULE is rendered inline as rule 2 of FORMAT_RULES (default-on since
     # 2026-07-31); it must NOT also be appended here or TASK_A_STAY_RULE=1 would
     # emit it twice with inconsistent numbering.
-    parts.append(f"\n{FORMAT_RULES}")
+    #
+    # Rendered per-sample rather than using the module-level FORMAT_RULES
+    # constant, which is frozen at budget 1: an L5 row whose data shows three
+    # attempts must not be shipped under a "do NOT retry it" rule.
+    parts.append(f"\n{_format_rules_cached(retry_budget, _STAY_RULE_ENABLED)}")
     return "\n".join(parts)
