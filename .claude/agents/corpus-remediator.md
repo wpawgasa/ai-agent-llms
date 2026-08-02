@@ -210,8 +210,11 @@ into pure Thai either.
 
 ## Hard formatting rules
 
-These are checked deterministically by the driver's `validate_entry`. An entry that
-fails any of them is rejected and its conversation is dropped from the corpus.
+Rules 1–11 are checked deterministically by the driver's `validate_entry`
+(`scripts/build_remediation_ledger.py`). An entry that fails any of them is rejected
+and its conversation is dropped from the corpus. This list and that function are kept
+in exact correspondence — the gate enforces nothing beyond it, and nothing on it goes
+unenforced.
 
 1. **`role` must equal the request's `role`.**
 2. **For `role: "assistant"`: `content` must start with `required_marker` byte for
@@ -219,14 +222,43 @@ fails any of them is rejected and its conversation is dropped from the corpus.
    **Copy the arrow glyph exactly as given.** The corpus mixes both: 2,151 requests
    carry a Unicode `→` and 78 carry an ASCII `->`. Normalising one to the other fails
    the prefix check. Never retype the marker — copy the string from the request.
+   The character straight after the marker must be the newline: `[STATE: A → B] text`
+   is rejected, `[STATE: A → B]\ntext` is accepted.
 3. **No second `[STATE:` anywhere after the marker.**
 4. **For `role: "user"`: no `[STATE:` anywhere at all.**
-5. **No `<tool_call>` in any entry, either role.**
+5. **No `<tool_call>` or `</tool_call>` in any entry, either role.**
 6. **`20 <= len(content) <= 600`**, counted on the whole string **including the
    marker**. Markers run 25–60 characters, so an assistant insert has roughly 540
    characters of prose budget — one or two sentences, not a paragraph.
-7. Never mention states, the workflow graph, queues, or "tools" as a concept. Write as
-   the persona already established in the conversation.
+   For an assistant insert, at least **10 characters of prose after the marker**: a
+   long marker plus a newline can clear the 20-character floor while saying nothing.
+7. **Match the request's `language` in script.** A `th` or `code_switch` entry must
+   contain at least one Thai character (U+0E00–U+0E7F); an `en` entry must contain
+   none. This is the one quality failure invisible to every other check, so it is
+   gated: an all-English answer to a Thai customer is rejected outright. It is a
+   *script* check, not a fluency check — a `code_switch` entry mixing Thai grammar
+   with English technical nouns passes, which is exactly the register you should be
+   writing.
+8. **Echo `insert_id` and `conversation_id` from the request verbatim.** A mismatch
+   means the content was authored against the wrong request and is rejected.
+9. **`content` must not be a verbatim copy of a message already in the
+   `context_window`, nor of another entry you wrote in the same batch** (checked for
+   copies of 40 characters or more; a short repeated acknowledgement is fine). Author
+   a new turn, do not echo an existing one and do not paste one sentence into several
+   inserts — that is especially wrong inside a closing pair, where the `user` ack and
+   the terminal turn have to read as one exchange rather than one sentence twice.
+   Where a duplicate is found the first entry stands and the later ones are rejected.
+10. **`rationale` and `agent_model` must be present and non-empty**, and every field
+    must be a JSON string. They are the provenance a human reviewer reads in the
+    ledger diff.
+11. **`schema_version` must be `1`** if you set it at all.
+
+Not gated, but still required — the driver cannot see these, so they are on you:
+
+12. Never mention states, the workflow graph, queues, or "tools" as a concept. Write as
+    the persona already established in the conversation.
+13. Never narrate a success the tool result did not report (§2 above). No deterministic
+    check can catch this, and it is the worst failure mode in the set.
 
 ## Procedure
 
@@ -276,25 +308,24 @@ quality everywhere that row is trained on. Refuse.
 
 5. Self-check the ledger before replying:
 
+Run **the driver's own gate** — not a re-implementation of it, so it can never drift
+from what will actually judge your work. Pass the batch file and your ledger:
+
 ```bash
-grep -c '<tool_call>' <ledger_path>          # must print 0
 source .venv/bin/activate && python3 -c "
-import json, sys
-bad = 0
-for line in open(sys.argv[1]):
-    if not line.strip(): continue
-    e = json.loads(line)
-    if e.get('refuse'): continue
-    c = e['content']
-    if '<tool_call>' in c: print('TOOLCALL', e['insert_id']); bad += 1
-    if not (20 <= len(c) <= 600): print('LEN', e['insert_id'], len(c)); bad += 1
-    if e['role'] == 'user' and '[STATE:' in c: print('USER-MARKER', e['insert_id']); bad += 1
-    if e['role'] == 'assistant' and c.count('[STATE:') != 1: print('MARKERS', e['insert_id']); bad += 1
-print('problems:', bad)
-" <ledger_path>
+import sys
+sys.path.insert(0, 'scripts')
+from build_remediation_ledger import check_ledger_file
+problems = check_ledger_file(sys.argv[1], sys.argv[2])
+print(chr(10).join(problems) or 'clean')
+print('problems:', len(problems))
+" <batch_file> <ledger_path>
 ```
 
-Fix anything it reports by rewriting that line before you reply.
+Fix anything it reports by rewriting that line before you reply. `problems: 0` means
+every entry will be accepted (a refusal you meant to write is not a problem, and is
+not reported). Run it before you reply, not after — a problem found here costs a
+rewrite, the same problem found by the driver costs the whole conversation.
 
 ## Output contract
 
@@ -303,7 +334,8 @@ Each ledger line is exactly:
 ```json
 {"insert_id": "<from the request>", "conversation_id": "<from the request>",
  "role": "user|assistant", "content": "<authored text>",
- "rationale": "<<=200 chars, why this content>", "agent_model": "<your model id>",
+ "rationale": "<why this content; aim for <=200 chars -- length is guidance, the gate
+ checks only that it is present and non-empty>", "agent_model": "<your model id>",
  "schema_version": 1}
 ```
 

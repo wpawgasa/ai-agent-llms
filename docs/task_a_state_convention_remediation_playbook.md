@@ -397,26 +397,45 @@ Empty list == accept. Rejects on:
 
 | Check | Rule |
 |---|---|
+| request integrity | the *request* carries a valid `insert_id`/`conversation_id`/`language`/`role`, and `required_marker` is non-empty iff `role == "assistant"`. A driver-side bug fails loudly here instead of silently disabling the checks that depend on the missing field |
 | refusal | `refuse: true` → `["agent refused this insert"]` |
-| required fields | `insert_id`, `role`, `content` all present |
-| identity | `entry.insert_id == request.insert_id` |
+| entry shape | the ledger line is a JSON **object**; `insert_id`, `conversation_id`, `role`, `content`, `rationale`, `agent_model` are all present, all strings, all non-empty |
+| identity | `entry.insert_id == request.insert_id` and `entry.conversation_id == request.conversation_id` |
 | role | `entry.role == request.role` |
-| tool calls | `"<tool_call>" not in content` |
+| schema_version | `1` when present |
+| tool calls | neither `"<tool_call>"` nor `"</tool_call>"` in `content` |
 | marker prefix (assistant) | `content.startswith(required_marker)` — **byte for byte, arrow glyph included** |
+| marker newline (assistant) | the character right after the marker is `"\n"` (100% of the 64,964 markers in the corpus are followed by one) |
+| prose floor (assistant) | ≥10 non-blank characters after the marker — a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing |
 | second marker | no `"[STATE:"` in `content[len(required_marker):]` |
 | marker (user) | no `"[STATE:"` anywhere when `required_marker == ""` |
 | length | `20 <= len(content) <= 600`, counted **including** the marker |
-| language | th / code_switch rows must contain Thai script (U+0E00–U+0E7F) |
+| language | th / code_switch rows must contain Thai script (U+0E00–U+0E7F); `en` rows must contain none |
+| copy guard | `content`'s prose is not a verbatim copy of a `context_window` message, for copies ≥40 characters |
+| duplicate prose (batch level, in `process_batch`) | no two accepted entries in one batch share ≥40 characters of identical prose — the "generic ack repeated across rows" defect. First occurrence stands |
 
 The arrow-glyph rule bites in practice: of the 2,229 markered requests, **2,151 carry
 a Unicode `→` and 78 carry an ASCII `->`**. `_marker()` copies the arrow from the
 source turn, so both survive into the queue. An agent that normalises one to the other
 fails the prefix check and loses the row.
 
-> The language check is specified here as part of the agent's output contract because
-> 1,894 of 2,853 authored inserts are th or code_switch and silent English drift is
-> the single most likely quality failure. The `validate_entry` draft in the
-> implementation plan's Task 12 does **not** yet include it — Task 12 must add it.
+The language check is gated because 2,853 of the 3,902 authored inserts are th or
+code_switch and silent English drift is the single most likely quality failure — and
+the only one no other check can see. It is a *script-presence* check, not a fluency or
+ratio check, which is what keeps it safe for `code_switch`: that register mixes Thai
+grammar with English technical nouns, and any such entry contains Thai characters and
+passes. Measured against the corpus, requiring ≥1 Thai character rejects 1 of 29,968
+`th` turns and 207 of 31,856 `code_switch` turns (0.65%, all of them fully-English
+turns, which the agent file explicitly forbids authoring); requiring **zero** Thai in
+an `en` entry rejects 0 of 31,164 `en` turns. `data_validator.detect_thai_corruption`
+is deliberately *not* used here: it detects *garbled* Thai (Latin glued into a Thai
+word, obsolete `ฃ`/`ฅ`), so a wholly-English entry on a `th` row — the failure mode
+that matters — trips neither of its signals and passes it clean.
+
+Every row of this table corresponds to a numbered rule in
+`.claude/agents/corpus-remediator.md` § "Hard formatting rules", and the agent's own
+self-check calls `validate_entry` directly rather than re-implementing it, so the
+three cannot drift.
 
 ### Layer 2 — record gate (`apply_plan` + `cmd_apply`, per conversation)
 
@@ -446,6 +465,20 @@ at startup to skip work already done. **Re-running the full command after a part
 run is safe and is the intended recovery path.** `rejected.jsonl` is *not* consulted
 for resume — a rejected insert is retried on the next run. If you want a rejection to
 stick, you must remove the request or accept the drop.
+
+Three details make that safe under a hard kill. Appends are a single `write()` of the
+whole blob followed by `fsync`, and only the main thread writes, so concurrent batches
+never interleave lines. A kill can still leave a torn final line; `load_accepted_ids`
+detects a trailing fragment that does not parse and truncates it before the next
+append, so a good line is never glued onto a partial one. And `accepted.jsonl` is
+written *before* `rejected.jsonl` for each batch, so the only record a crash between
+the two can lose is a rejection log line — whose insert is retried anyway.
+
+A third file, `progress.json`, is rewritten (atomically, via `os.replace`) after every
+batch with the run id, the arguments, batch/accept/reject counts and every batch-level
+error. It is a monitoring artefact only — nothing reads it back, and deleting it does
+not affect resume. Each batch also keeps its request file and the agent's raw ledger
+under `<ledger-dir>/batches/<run-id>/batch_NNNNN/` for post-hoc review.
 
 ---
 
@@ -590,10 +623,13 @@ a trajectory bug.
 
 ### Step 4 — Smoke the agent pass (20 inserts)
 
-> Steps 4–5 require `scripts/build_remediation_ledger.py`, which is **Task 12 of the
-> implementation plan and is not yet written**. The commands below are the contract
-> Task 12 must satisfy; they have not been executed. Everything in steps 1–3, 6 and 7
-> has been.
+> Steps 4–5 require `scripts/build_remediation_ledger.py`, which now exists (Task 12).
+> The commands below are its documented contract and are exercised by
+> `tests/unit/test_build_remediation_ledger.py`, but they have **not been executed
+> against the live API** — that spend is still gated on an explicit go-ahead. Add
+> `--dry-run` to render the first batch's prompt and request file without calling
+> `claude` at all; that path is free and is the right way to review the prompt before
+> paying for anything.
 
 ```bash
 python scripts/build_remediation_ledger.py \
@@ -635,12 +671,13 @@ python scripts/build_remediation_ledger.py \
 Resumable — re-run the identical command after any interruption; `accepted.jsonl`
 makes it skip completed inserts.
 
-> **Set `--batch-size` deliberately.** At the default 10, **249 of the 1,465
-> conversations have their inserts split across a batch boundary**, so the agent sees
-> only part of the conversation's authoring job. That matters most for closing pairs
-> (the `user` ack and the terminal turn must read as one exchange) and for the 100+
-> conversations needing 6–14 bridges. Either raise `--batch-size` or have Task 12 pack
-> batches on conversation boundaries rather than by flat slicing.
+> **Batches are packed on conversation boundaries** (`build_batches`), so no
+> conversation is ever split across two agent calls — flat slicing at the default size
+> of 10 would have split 249 of the 1,465. That matters most for closing pairs (the
+> `user` ack and the terminal turn must read as one exchange) and for the 100+
+> conversations needing 6–14 bridges. `--batch-size` is therefore a soft cap: a
+> conversation with more inserts than the cap gets a batch to itself. Measured on the
+> full queue at the default 10: **437 batches, 0 conversations split**, sizes 2–14.
 
 ### Step 6 — Final apply, with the ledger
 
