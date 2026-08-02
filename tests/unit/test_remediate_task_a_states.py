@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -231,6 +232,72 @@ def test_rebuild_prompts_states_the_per_sample_retry_budget(tmp_path):
     assert "attempts at that call in total" not in l1_prompt, (
         "L1 must not state a multi-attempt budget"
     )
+
+
+def _env_with_stay_rule(value: str | None) -> dict:
+    env = os.environ.copy()
+    if value is None:
+        env.pop("TASK_A_STAY_RULE", None)
+    else:
+        env["TASK_A_STAY_RULE"] = value
+    return env
+
+
+def test_rebuild_prompts_refuses_when_stay_rule_is_0(tmp_path):
+    # TASK_A_STAY_RULE=0 selects the frozen v1 system prompt. Rebuilding under
+    # it would bake that v1 prompt into what --rebuild-prompts exists to make
+    # a v2 corpus -- silently, since verify --strict and the quality profiler
+    # never look at system-prompt content. Must fail BEFORE any output is
+    # written, not after a partial run.
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    output_dir = tmp_path / "out"
+    _write_jsonl(input_dir / "l1_merged_test.jsonl", [_rebuildable_record("E_001", "L3")])
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "apply", "--input-dir", str(input_dir),
+         "--output-dir", str(output_dir), "--rebuild-prompts"],
+        capture_output=True, text=True, env=_env_with_stay_rule("0"),
+    )
+    assert result.returncode != 0
+    assert "TASK_A_STAY_RULE" in result.stderr
+    assert not output_dir.exists(), "must refuse before creating the output directory"
+
+
+def test_rebuild_prompts_works_when_stay_rule_unset(tmp_path):
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    output_dir = tmp_path / "out"
+    _write_jsonl(input_dir / "l1_merged_test.jsonl", [_rebuildable_record("E_002", "L3")])
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "apply", "--input-dir", str(input_dir),
+         "--output-dir", str(output_dir), "--rebuild-prompts"],
+        capture_output=True, text=True, env=_env_with_stay_rule(None),
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads((output_dir / "l1_merged_test.jsonl").read_text().splitlines()[0])
+    assert "Tool-execution turns do NOT advance" in out["messages"][0]["content"]
+
+
+def test_apply_without_rebuild_prompts_ignores_stay_rule_env(tmp_path):
+    # apply without --rebuild-prompts never touches system prompts, so the
+    # guard must not fire even when TASK_A_STAY_RULE=0 is set.
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    output_dir = tmp_path / "out"
+    rec = _rebuildable_record("E_003", "L3")
+    original_system = rec["messages"][0]["content"]
+    _write_jsonl(input_dir / "l1_merged_test.jsonl", [rec])
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "apply", "--input-dir", str(input_dir),
+         "--output-dir", str(output_dir)],
+        capture_output=True, text=True, env=_env_with_stay_rule("0"),
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads((output_dir / "l1_merged_test.jsonl").read_text().splitlines()[0])
+    assert out["messages"][0]["content"] == original_system
 
 
 def test_verify_strict_exits_nonzero_on_violation(tmp_path):

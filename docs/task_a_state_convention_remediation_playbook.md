@@ -664,6 +664,10 @@ python scripts/remediate_task_a_states.py apply \
 > `--on-unrepairable` accepts only `drop`. A row that cannot be brought onto the
 > convention is by definition still violating it, so retaining it would poison the v2
 > corpus and fail Step 7's `verify --strict`.
+>
+> `--rebuild-prompts` hard-fails (exit 2, nothing written) if `TASK_A_STAY_RULE=0` is
+> set in the environment — that value would bake the frozen v1 prompt into this v2
+> corpus. Unset it before running this step.
 
 ### Step 7 — Verify
 

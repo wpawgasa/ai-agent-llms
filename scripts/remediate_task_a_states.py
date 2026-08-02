@@ -30,7 +30,9 @@ from llm_workflow_agents.data.state_convention_repair import (  # noqa: E402
     apply_plan, plan_repair, verify_repaired,
 )
 from llm_workflow_agents.data._workflow_script import infer_state_tools_from_messages  # noqa: E402
-from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt  # noqa: E402
+from llm_workflow_agents.data.system_prompt import (  # noqa: E402
+    _STAY_RULE_ENABLED, build_enriched_system_prompt,
+)
 
 
 def _iter_records(input_dir: Path):
@@ -169,6 +171,31 @@ def _rebuild_system_prompt(record: dict) -> bool:
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
+    # Guard BEFORE any work (including creating output_dir): reuse
+    # system_prompt._STAY_RULE_ENABLED -- the same resolution
+    # system_prompt.build_enriched_system_prompt itself uses -- so this check
+    # can never disagree with what --rebuild-prompts would actually render.
+    # It is False only when TASK_A_STAY_RULE is the exact string "0"; any other
+    # value (unset, "1", "0 ", "00", "false", ...) resolves True there, so this
+    # guard stays silent for those too -- it only blocks the one combination
+    # that would silently bake the frozen v1 prompt into a v2 corpus.
+    if args.rebuild_prompts and not _STAY_RULE_ENABLED:
+        print(
+            "error: --rebuild-prompts refuses to run with TASK_A_STAY_RULE=0.\n"
+            "  TASK_A_STAY_RULE=0 selects the frozen v1 system prompt (wrong "
+            "rule-2 worked example, no stay rule, vague no-budget tool-error "
+            "rule). Rebuilding system prompts under it would bake that v1 "
+            "prompt into what --rebuild-prompts exists to make a v2 corpus -- "
+            "the output would state a contract its own repaired trajectories "
+            "contradict, and neither `verify --strict` nor the quality "
+            "profiler checks system-prompt content, so nothing downstream "
+            "would catch it.\n"
+            "  To proceed: unset TASK_A_STAY_RULE (or set it to \"1\") and "
+            "re-run, or drop --rebuild-prompts if a v1-prompt corpus is "
+            "genuinely what you want.",
+            file=sys.stderr,
+        )
+        return 2
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -271,7 +298,10 @@ def main() -> int:
             "convention its trajectory now demonstrates: the corrected rule-2 "
             "worked example, the stay rule, and the retry budget for the row's "
             "own complexity_level. Off by default -- omitting it leaves system "
-            "messages byte-identical to the input."
+            "messages byte-identical to the input. Refuses to run (exit 2, no "
+            "output written) if TASK_A_STAY_RULE=0 is set, since that would "
+            "bake the frozen v1 prompt into a v2 corpus; unset it or drop this "
+            "flag."
         ),
     )
     # Only 'drop' is offered. 'keep' used to be accepted and then silently
