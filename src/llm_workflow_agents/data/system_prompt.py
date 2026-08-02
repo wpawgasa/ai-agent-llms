@@ -270,6 +270,11 @@ def build_enriched_system_prompt(
             tool_schemas=tool_schemas,
             language=language,
             messages=messages,
+            tool_turn_semantics=True,
+            # TODO(Task 9): thread the sample's actual retry budget once one is
+            # available here; 1 is a placeholder that matches today's implicit
+            # no-retry behavior.
+            retry_budget=1,
         )
     else:
         script = sample.get("workflow_script") or ""

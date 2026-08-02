@@ -117,3 +117,111 @@ def test_draw_distractors_deterministic_and_filtered():
     filtered = pr.draw_distractors(len(pr.DISTRACTOR_LIBRARY["en"]), "en", random.Random(7),
                                    forbidden_terms=[poison])
     assert entry0 not in filtered
+
+
+# --- Task 8: build_workflow_script's tool_turn_semantics must not perturb
+# Task C's STATE_SCRIPT register, which calls build_workflow_script() with the
+# (default-only) `language` kwarg and nothing else. This is what makes
+# render_playbook's teacher-API-free STATE_SCRIPT path byte-stable. ---
+
+from llm_workflow_agents.data._workflow_script import build_workflow_script  # noqa: E402
+
+_TOOL_SCHEMAS_SINGLE = [{"type": "function", "function": {"name": "t"}}]
+
+# Captured by rendering `_tool_state_graph()` through the pre-Task-8 version of
+# _workflow_script.py (git rev b12e243, the commit this plan's Task 8 brief
+# names as the pre-edit baseline) with no tool_turn_semantics/retry_budget
+# kwargs at all (they didn't exist yet). This is the actual historical output,
+# not just "default == explicit False" (which would still pass if both were
+# accidentally changed together).
+_GOLDEN_PRE_EDIT_OUTPUT = (
+    "### [A]  (initial state)\n"
+    "Instruction: do it\n"
+    "Available tools: t\n"
+    "- On success: proceed to [TERMINAL]\n"
+    "\n"
+    "### [TERMINAL]\n"
+    "This is the terminal state — end the conversation here."
+)
+
+
+def _tool_state_graph():
+    return {
+        "states": ["A", "TERMINAL"],
+        "state_details": [
+            {"name": "A", "tools": ["t"], "entry_actions": [], "instruction": "do it"},
+            {"name": "TERMINAL", "tools": [], "entry_actions": [], "instruction": ""},
+        ],
+        "transitions": [{"from": "A", "to": "TERMINAL", "condition": "", "priority": 0}],
+        "initial": "A", "terminal": ["TERMINAL"],
+    }
+
+
+def test_state_script_unchanged_by_tool_turn_semantics_default():
+    graph = _tool_state_graph()
+    default_output = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE)
+    explicit_off = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+                                          tool_turn_semantics=False)
+    assert default_output == explicit_off
+    # The real guard: both the default path and the explicit-False path must
+    # equal the pre-edit golden, not just equal each other.
+    assert default_output == _GOLDEN_PRE_EDIT_OUTPUT
+    assert explicit_off == _GOLDEN_PRE_EDIT_OUTPUT
+
+
+def test_tool_turn_semantics_rewrites_success_line_and_adds_stay_note():
+    graph = _tool_state_graph()
+    output = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+                                    tool_turn_semantics=True, retry_budget=2)
+    assert "on a LATER turn" in output
+    assert "stays in" in output.lower() or "stay in" in output.lower()
+    assert "retry at most 2" in output.lower()
+
+
+def test_tool_turn_semantics_no_effect_on_text_only_state():
+    """A state with no tools renders identically regardless of the flag."""
+    graph = {
+        "states": ["A", "TERMINAL"],
+        "state_details": [
+            {"name": "A", "tools": [], "entry_actions": [], "instruction": "say hi"},
+            {"name": "TERMINAL", "tools": [], "entry_actions": [], "instruction": ""},
+        ],
+        "transitions": [{"from": "A", "to": "TERMINAL", "condition": "", "priority": 0}],
+        "initial": "A", "terminal": ["TERMINAL"],
+    }
+    off = build_workflow_script(graph, tool_turn_semantics=False)
+    on = build_workflow_script(graph, tool_turn_semantics=True, retry_budget=3)
+    assert off == on
+    assert "<tool_call>" not in on
+    assert "LATER" not in on
+
+
+def test_retry_note_wording_at_budgets_1_2_3():
+    graph = _tool_state_graph()
+
+    out_1 = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+                                   tool_turn_semantics=True, retry_budget=1)
+    assert "retry at most 1" not in out_1.lower()  # ungrammatical/wrong at budget 1
+    assert "do not retry" in out_1.lower()
+    assert "only one attempt" in out_1.lower()
+
+    out_2 = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+                                   tool_turn_semantics=True, retry_budget=2)
+    assert "retry at most 2 times" in out_2.lower()
+
+    out_3 = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE,
+                                   tool_turn_semantics=True, retry_budget=3)
+    assert "retry at most 3 times" in out_3.lower()
+
+
+def test_tool_turn_semantics_thai_placeholders_all_substituted():
+    graph = _tool_state_graph()
+    output = build_workflow_script(graph, tool_schemas=_TOOL_SCHEMAS_SINGLE, language="th",
+                                    tool_turn_semantics=True, retry_budget=2)
+    assert "{name}" not in output
+    assert "{to}" not in output
+    assert "{n}" not in output
+    assert "{fallback}" not in output
+    assert "[A]" in output
+    assert "[TERMINAL]" in output
+    assert "2" in output

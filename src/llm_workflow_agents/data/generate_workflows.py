@@ -608,6 +608,11 @@ def _graph_to_script(
         tool_schemas=tool_schemas,
         language=language,
         messages=messages,
+        tool_turn_semantics=True,
+        # TODO(Task 9): thread the spec's actual retry budget once
+        # ComplexitySpec grows a retry_budget field; 1 is a placeholder that
+        # matches today's implicit no-retry behavior.
+        retry_budget=1,
     )
 
 
