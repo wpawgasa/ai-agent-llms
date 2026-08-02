@@ -41,6 +41,7 @@ from llm_workflow_agents.data._workflow_script import (
     find_shape_violations,
     find_tool_placement_violations,
 )
+from llm_workflow_agents.data.state_convention import find_tool_stay_violations
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     CROSS_CUTTING_INTENTS,
@@ -1585,6 +1586,7 @@ def generate_workflow_dataset(
                     violations = (
                         find_tool_placement_violations(allowed, msgs, schema_names)
                         or _find_transition_violations(valid_edge_pairs, msgs)
+                        or find_tool_stay_violations(msgs)
                         or find_continuity_violations(
                             msgs, initial_name, terminal_names
                         )

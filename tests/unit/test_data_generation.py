@@ -706,6 +706,81 @@ class TestPostGenerationRepair:
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
 
+    @staticmethod
+    def _advancing_tool_call_conversation(workflow, *args, **kwargs):
+        """A draft with a genuine graph edge and a tool the from-state is
+        allowed to call, but whose tool-call turn advances the state instead
+        of staying -- violates find_tool_stay_violations only. Picks the
+        first (from, to) transition where `from` has an allowed tool, so
+        find_tool_placement_violations (real tool, real state) and
+        _find_transition_violations (real edge) both see nothing wrong."""
+        id_to_name = {s.id: s.name for s in workflow.states}
+        tools_by_name = {s.name: list(s.tools) for s in workflow.states}
+        for t in workflow.transitions:
+            a = id_to_name.get(t.from_state, t.from_state)
+            b = id_to_name.get(t.to_state, t.to_state)
+            if a != b and tools_by_name.get(a):
+                tool_name = tools_by_name[a][0]
+                return [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": f"[STATE: {a} → {b}]\n"
+                        f'<tool_call>{{"name": "{tool_name}", "arguments": {{}}}}</tool_call>',
+                    },
+                    {"role": "tool", "content": '{"status": "ok"}'},
+                ]
+        raise AssertionError(
+            "expected some legal edge whose from-state has an allowed tool"
+        )
+
+    def test_repair_loop_rejects_advancing_tool_turn(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """A draft whose tool-execution turn advances the state (instead of
+        annotating a self-loop) is rejected by find_tool_stay_violations, the
+        third check in the or-chain -- even though it uses a real edge and a
+        tool the from-state is allowed to call, so the two referential checks
+        ahead of it (find_tool_placement_violations, _find_transition_
+        violations) both pass it through clean. If find_tool_stay_violations
+        were absent from (or reverted out of) the or-chain, this same draft
+        satisfies every remaining check -- real edge, real tool, single
+        well-formed turn -- and would be accepted on the first attempt with
+        repair_retries == 0, so this test would NOT catch that regression by
+        accident; it specifically requires the new check to fire."""
+        calls = {"n": 0}
+        feedback_seen: list[list[str]] = []
+
+        def advancing_then_coherent(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if "repair_feedback" in kwargs:
+                feedback_seen.append(kwargs["repair_feedback"])
+            if calls["n"] == 1:
+                return TestPostGenerationRepair._advancing_tool_call_conversation(workflow)
+            return TestPostGenerationRepair._coherent_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", advancing_then_coherent)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert calls["n"] >= 2, "expected the repair loop to retry after the first draft"
+        assert feedback_seen, "expected at least one repair retry to carry feedback"
+        assert any(
+            "tool-execution turn must annotate" in v
+            for feedback in feedback_seen
+            for v in feedback
+        ), feedback_seen
+        # The second (coherent) draft was accepted in-attempt -- no fresh
+        # sample redraw or placeholder fallback was needed.
+        assert result.stats["repair_fallbacks"] == 0
+        assert result.stats["sample_fallbacks"] == 0
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
+
     def test_placeholder_path_needs_no_repair(self, tmp_output_dir: Path) -> None:
         result = generate_workflow_dataset(
             complexity_level="L3",
