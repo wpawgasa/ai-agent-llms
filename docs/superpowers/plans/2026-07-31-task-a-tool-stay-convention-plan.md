@@ -1050,6 +1050,45 @@ def test_triage_reports_bucket_counts(tmp_path):
     assert report["records"][1]["key"] == ["l1_merged_test", 1]
 
 
+def test_triage_embeds_context_window_for_each_insert(tmp_path):
+    # Task 12's agent builds its prompt ONLY from the triage report, so
+    # every insert must carry enough surrounding conversation to author
+    # in-register prose -- and must NOT carry the 5-7 KB system message or
+    # any structured annotations.
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    needs_insert = _record("A_003", [
+        {"role": "system", "content": "S" * 6000, "annotations": None},
+        {"role": "user", "content": "hello there", "annotations": None},
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg('[STATE: B → TERMINAL]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: TERMINAL → TERMINAL]\nAll done."),
+    ], [("A", "B"), ("B", "TERMINAL")])
+    _write_jsonl(input_dir / "l1_merged_test.jsonl", [needs_insert])
+
+    report_path = tmp_path / "report.json"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "triage", "--input-dir", str(input_dir),
+         "--report", str(report_path)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    rec = json.loads(report_path.read_text())["records"][0]
+    assert rec["move"] == "insert_handoff_turn"
+    assert rec["inserts"], "an insert-bearing move must emit at least one insert"
+    for ins in rec["inserts"]:
+        window = ins["context_window"]
+        assert window, "every insert needs a non-empty context window"
+        assert all(m["index"] >= 1 for m in window), "system message must be excluded"
+        assert all("annotations" not in m for m in window), "annotations must be stripped"
+        assert all({"index", "role", "content"} == set(m) for m in window)
+        # the window must actually bracket the insert point
+        indices = [m["index"] for m in window]
+        assert min(indices) <= ins["position_after_msg_index"] <= max(indices) + 1
+
+
 def test_apply_writes_repaired_output_and_drops_unrepairable(tmp_path):
     input_dir = tmp_path / "in"
     input_dir.mkdir()
@@ -1143,6 +1182,27 @@ def _iter_records(input_dir: Path):
                 yield stem, line_index, path, json.loads(line)
 
 
+_CONTEXT_RADIUS = 6
+
+
+def _context_window(messages: list[dict], position_after_msg_index: int) -> list[dict]:
+    """The messages surrounding an insert point, for the authoring agent.
+
+    Returns up to ``_CONTEXT_RADIUS`` messages either side of the insert
+    point, each as ``{"index", "role", "content"}``. ``annotations`` are
+    dropped -- the agent authors prose and must never see (or be tempted to
+    copy) the structured state/tool metadata. The system message (index 0)
+    is always excluded: it is 5-7 KB of workflow contract per row, which
+    would dominate the batch prompt for no authoring benefit.
+    """
+    lo = max(1, position_after_msg_index - _CONTEXT_RADIUS + 1)
+    hi = min(len(messages), position_after_msg_index + _CONTEXT_RADIUS + 1)
+    return [
+        {"index": i, "role": messages[i].get("role"), "content": messages[i].get("content") or ""}
+        for i in range(lo, hi)
+    ]
+
+
 def cmd_triage(args: argparse.Namespace) -> int:
     input_dir = Path(args.input_dir)
     totals = Counter()
@@ -1166,6 +1226,10 @@ def cmd_triage(args: argparse.Namespace) -> int:
                 "position_after_msg_index": ins.position_after_msg_index,
                 "role": ins.role,
                 "required_marker": ins.required_marker,
+                # The agent (Task 12) builds its prompt ONLY from this report --
+                # it never re-reads the corpus -- so the surrounding messages it
+                # needs to author in-register prose must be embedded here.
+                "context_window": _context_window(rec["messages"], ins.position_after_msg_index),
             }
             for i, ins in enumerate(plan.inserts)
         ]
