@@ -54,6 +54,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace as _dc_replace
 from datetime import datetime
 from pathlib import Path
 
@@ -64,11 +65,66 @@ from clean_task_a_sft import clean_record  # noqa: E402
 from llm_workflow_agents.data.data_validator import detect_thai_corruption  # noqa: E402
 from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset  # noqa: E402
 from llm_workflow_agents.data.quality_profiler import (  # noqa: E402
+    ProfileReport,
     defective_conversation_ids,
     profile_task_a,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Substring identifying a tool-stay defect among ``ProfileReport.defects``.
+# The profiler records these as f"{cid}: {v}" where v comes from
+# ``state_convention.find_tool_stay_violations``; this is the invariant slice of
+# that message (the surrounding text interpolates turn index and state names).
+# ``tests/unit/test_generate_sft_until_target_cli.py`` asserts the two still
+# match, so a reword upstream fails loudly instead of silently making
+# --no-require-tool-stay a no-op and stay_dropped a permanent zero.
+_STAY_DEFECT_MARKER = "issues a <tool_call> but annotates an advancing transition"
+
+
+def _select_defects(rep: ProfileReport, keep) -> set[str]:
+    """Conversation ids whose defects survive the *keep* predicate.
+
+    Routes through :func:`defective_conversation_ids` on a filtered copy rather
+    than re-implementing the ``"<cid>: ..."`` / ``"file: ..."`` prefix parsing —
+    that contract is owned by the profiler and documented there as the thing
+    callers must not duplicate.
+    """
+    return defective_conversation_ids(
+        _dc_replace(rep, defects=[d for d in rep.defects if keep(d)])
+    )
+
+
+def _disqualified_ids(rep: ProfileReport, require_tool_stay: bool) -> set[str]:
+    """Conversation ids to DROP from a batch.
+
+    With *require_tool_stay* False, a conversation whose ONLY hard defect is an
+    advancing tool-call turn is kept — the v1-comparable regeneration mode. Any
+    other hard defect still drops it, and a conversation carrying both a stay
+    violation and some other defect still drops on the other defect.
+
+    (The brief called this ``_qualified_ids``; it returns the disqualified set,
+    so it is named for what it returns.)
+    """
+    if require_tool_stay:
+        return defective_conversation_ids(rep)
+    return _select_defects(rep, lambda d: _STAY_DEFECT_MARKER not in d)
+
+
+def _resolve_retry_exhaustion(value: str | None) -> str | None:
+    """Translate the CLI's ``"auto"`` sentinel into the library's ``None``.
+
+    ``generate_workflow_dataset`` spells "keep the level's own policy" as
+    ``None``; argparse ``choices`` can't express that, so the CLI spells it
+    ``"auto"``. Passing the literal string through would be silently wrong —
+    it is not a valid ``retry_exhaustion`` value and would raise.
+    """
+    return None if value in (None, "auto") else value
+
+
+def _stay_violating_ids(rep: ProfileReport) -> set[str]:
+    """Conversation ids with at least one advancing tool-call turn."""
+    return _select_defects(rep, lambda d: _STAY_DEFECT_MARKER in d)
 
 # Per-leg curriculum target (1/3 of the per-level total; mirrors generate_sft_data.sh).
 CURRICULUM: dict[str, int] = {"L1": 1000, "L2": 1000, "L3": 834, "L4": 667, "L5": 667}
@@ -186,15 +242,25 @@ def generate_leg(
     max_workers: int = 1,
     verify_batches: bool = False,
     verify_timeout: int = 600,
+    retry_budget: int | None = None,
+    retry_exhaustion: str | None = None,
+    require_tool_stay: bool = True,
 ) -> dict:
     """Run the generate -> qualify -> accumulate loop for one level/language leg.
 
     Returns a stats dict and writes ``out_file``. ``seed_offset`` makes each leg's
     seed stream disjoint so legs don't regenerate identical batches.
+
+    ``retry_budget`` / ``retry_exhaustion`` are ``None`` to keep the level's own
+    ``COMPLEXITY_SPECS`` values. ``require_tool_stay`` gates the convention at
+    BOTH ends: the generator's teacher repair loop stops treating an advancing
+    tool-call turn as a coherence violation, and the qualification filter stops
+    dropping conversations for it.
     """
     accum: list[dict] = []
     seen_ids: dict[str, int] = {}
     gen = clean_dropped = corruption_dropped = defect_dropped = 0
+    stay_dropped = stay_violating = 0
     iteration = 0
     batch_verdicts: list[dict] = []
 
@@ -215,6 +281,9 @@ def generate_leg(
                 intent_category_preset=intent_category,
                 initiation_preset=initiation,
                 max_workers=max_workers,
+                retry_budget=retry_budget,
+                retry_exhaustion=retry_exhaustion,  # type: ignore[arg-type]
+                require_tool_stay=require_tool_stay,
             )
             batch = _read_jsonl(meta.output_files[0])
             gen += len(batch)
@@ -243,9 +312,33 @@ def generate_leg(
             # --- qualify: hard structural defects ---
             clean_file = scratch / "cleaned.jsonl"
             _write_jsonl(clean_file, uncorrupted)
-            bad = defective_conversation_ids(profile_task_a(clean_file))
+            # Profile ONCE and derive every count from that single report: a
+            # second profile_task_a() pass over the same file would re-parse
+            # every conversation to answer a question this report already
+            # answers.
+            report = profile_task_a(clean_file)
+            bad = _disqualified_ids(report, require_tool_stay)
             qualified = [r for r in uncorrupted if r.get("conversation_id") not in bad]
             defect_dropped += len(uncorrupted) - len(qualified)
+
+            # Stay observability, reported in both modes:
+            #   iter_stay_violating — conversations with an advancing tool-call
+            #     turn, whether or not the gate dropped them (the number that
+            #     tells you how often the teacher breaks the convention);
+            #   iter_stay_dropped — conversations this gate ALONE removed, i.e.
+            #     the marginal cost of --require-tool-stay. Zero by construction
+            #     when the gate is off. A conversation that also carries another
+            #     hard defect is not attributed to the stay gate, since it would
+            #     have been dropped regardless.
+            stay_ids = _stay_violating_ids(report)
+            iter_stay_violating = len(stay_ids)
+            iter_stay_dropped = (
+                len(stay_ids - _select_defects(report, lambda d: _STAY_DEFECT_MARKER not in d))
+                if require_tool_stay
+                else 0
+            )
+            stay_violating += iter_stay_violating
+            stay_dropped += iter_stay_dropped
 
             # --- optional advisory gate: dataset-verifier agent on survivors ---
             verdict = None
@@ -282,7 +375,8 @@ def generate_leg(
             f"    iter {iteration}: +{len(qualified)} qualified "
             f"(gen {len(batch)}, clean-drop {len(batch) - n_after_clean}, "
             f"corruption-drop {iter_corruption}, "
-            f"defect-drop {n_after_clean - iter_corruption - len(qualified)}) "
+            f"defect-drop {n_after_clean - iter_corruption - len(qualified)}, "
+            f"stay-drop {iter_stay_dropped}/{iter_stay_violating} violating) "
             f"-> {len(accum)}/{target}{verdict_msg}"
         )
 
@@ -307,6 +401,12 @@ def generate_leg(
         "clean_dropped": clean_dropped,
         "corruption_dropped": corruption_dropped,
         "defect_dropped": defect_dropped,
+        # Subset of defect_dropped attributable solely to the stay gate.
+        "stay_dropped": stay_dropped,
+        "stay_violating": stay_violating,
+        "retry_budget": retry_budget,
+        "retry_exhaustion": retry_exhaustion,
+        "require_tool_stay": require_tool_stay,
         "iterations": iteration,
         "output_file": str(out_file),
         "batch_verdicts": batch_verdicts,
@@ -342,6 +442,23 @@ def main() -> int:
     p.add_argument("--behavior-preset", default="adversarial")
     p.add_argument("--intent-category", default="default")
     p.add_argument("--initiation", default="default")
+    p.add_argument("--retry-budget", type=int, default=None,
+                   help="Override the retry budget for ALL selected levels: TOTAL attempts "
+                        "at a failing tool call, counting the first (so 1 = no retry). "
+                        "Default: per-level from COMPLEXITY_SPECS (L1-L2: 1, L3-L4: 2, L5: 3).")
+    p.add_argument("--retry-exhaustion", choices=["auto", "error_path", "handoff_in_state", "none"],
+                   default="auto",
+                   help="Override what the agent does once the budget is spent. "
+                        "'auto' (default) keeps the per-level policy. Note 'error_path' still "
+                        "degrades per-sample to 'handoff_in_state' on subgraphs with no "
+                        "tool_error arc.")
+    p.add_argument("--require-tool-stay", action="store_true", default=True,
+                   help="Enforce the stay convention (default: on): a turn issuing a "
+                        "<tool_call> must annotate [STATE: X -> X]. Violations are repaired "
+                        "during generation and dropped during qualification.")
+    p.add_argument("--no-require-tool-stay", dest="require_tool_stay", action="store_false",
+                   help="Disable the stay-convention gate to regenerate v1-comparable data. "
+                        "Advancing tool-call turns are neither repaired nor dropped.")
     p.add_argument("--keep-intermediates", action="store_true",
                    help="Keep per-iteration scratch dirs for debugging.")
     p.add_argument("--verify-batches", action="store_true",
@@ -359,6 +476,13 @@ def main() -> int:
 
     if args.verify_batches and not shutil.which("claude"):
         sys.exit("Error: --verify-batches requires the 'claude' CLI on PATH (not found).")
+
+    if args.retry_budget is not None and args.retry_budget < 1:
+        sys.exit(
+            "--retry-budget must be >= 1 (it counts the first attempt), "
+            f"got {args.retry_budget}"
+        )
+    retry_exhaustion = _resolve_retry_exhaustion(args.retry_exhaustion)
 
     teacher_model: str | None = args.teacher_model
     if teacher_model is not None and teacher_model.lower() in PLACEHOLDER_ALIASES:
@@ -401,6 +525,11 @@ def main() -> int:
     print(f"Languages:     {','.join(languages)}")
     print(f"Behavior:      {args.behavior_preset}   Intent: {args.intent_category}   Initiation: {args.initiation}")
     print(f"Base seed:     {args.seed}   Batch size: {args.batch_size or 'remaining'}   Max iters/leg: {args.max_iterations}")
+    print(
+        f"Retry budget:  {args.retry_budget if args.retry_budget is not None else 'per-level'}"
+        f"   Exhaustion: {args.retry_exhaustion}"
+        f"   Tool-stay gate: {'on' if args.require_tool_stay else 'OFF (v1-comparable)'}"
+    )
     _workers_note = (
         "serial" if args.max_workers <= 1 or teacher_model is None
         else "concurrent teacher calls"
@@ -445,6 +574,9 @@ def main() -> int:
                 max_workers=args.max_workers,
                 verify_batches=args.verify_batches,
                 verify_timeout=args.verify_timeout,
+                retry_budget=args.retry_budget,
+                retry_exhaustion=retry_exhaustion,
+                require_tool_stay=args.require_tool_stay,
             )
             all_stats.append(stats)
             # Reserve a disjoint seed band per leg so legs never share batches.
@@ -460,9 +592,14 @@ def main() -> int:
         "intent_category": args.intent_category,
         "initiation": args.initiation,
         "base_seed": args.seed,
+        "retry_budget": args.retry_budget,
+        "retry_exhaustion": args.retry_exhaustion,
+        "require_tool_stay": args.require_tool_stay,
         "legs": all_stats,
         "total_kept": sum(s["kept"] for s in all_stats),
         "total_shortfall": sum(s["shortfall"] for s in all_stats),
+        "total_stay_dropped": sum(s["stay_dropped"] for s in all_stats),
+        "total_stay_violating": sum(s["stay_violating"] for s in all_stats),
         "verify_batches": args.verify_batches,
         "total_batches_not_fit": sum(s.get("batches_not_fit", 0) for s in all_stats),
     }
@@ -471,6 +608,11 @@ def main() -> int:
 
     print("\n=== Done ===")
     print(f"Kept {manifest['total_kept']} qualified samples across {len(all_stats)} legs.")
+    print(
+        f"Tool-stay: {manifest['total_stay_violating']} conversation(s) had an advancing "
+        f"tool-call turn; {manifest['total_stay_dropped']} dropped by the gate "
+        f"({'on' if args.require_tool_stay else 'OFF'})."
+    )
     if manifest["total_shortfall"]:
         print(f"WARNING: total shortfall {manifest['total_shortfall']} (see warnings above).")
     if args.verify_batches and manifest["total_batches_not_fit"]:

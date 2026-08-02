@@ -742,12 +742,20 @@ class TestPostGenerationRepair:
         third check in the or-chain -- even though it uses a real edge and a
         tool the from-state is allowed to call, so the two referential checks
         ahead of it (find_tool_placement_violations, _find_transition_
-        violations) both pass it through clean. If find_tool_stay_violations
-        were absent from (or reverted out of) the or-chain, this same draft
-        satisfies every remaining check -- real edge, real tool, single
-        well-formed turn -- and would be accepted on the first attempt with
-        repair_retries == 0, so this test would NOT catch that regression by
-        accident; it specifically requires the new check to fire."""
+        violations) both pass it through clean, so the stay check is what
+        produces the feedback asserted below.
+
+        Note (corrected 2026-08-02, Task 10): an earlier version of this
+        docstring claimed the draft "satisfies every remaining check" and would
+        be accepted with repair_retries == 0 if the stay check were removed.
+        That is not so -- measured by running this exact draft with
+        require_tool_stay=False, find_continuity_violations still rejects it
+        (the single turn neither starts at the initial state nor ends at a
+        terminal one); the or-chain short-circuits at the stay check, hiding
+        that. The regression this test actually pins is the stay-specific
+        FEEDBACK text, which no other check produces -- see
+        test_require_tool_stay_false_drops_the_stay_check_from_the_or_chain for
+        the negative case."""
         calls = {"n": 0}
         feedback_seen: list[list[str]] = []
 
@@ -780,6 +788,44 @@ class TestPostGenerationRepair:
         assert result.stats["sample_fallbacks"] == 0
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
+
+    def test_require_tool_stay_false_drops_the_stay_check_from_the_or_chain(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """Task 10: ``require_tool_stay=False`` stops an advancing tool-call turn
+        from counting as a coherence violation (v1-comparable regeneration).
+
+        Uses the exact draft ``test_repair_loop_rejects_advancing_tool_turn``
+        feeds in, and asserts the complement of what that test asserts: the
+        stay-specific repair feedback must NOT appear. The draft is still
+        repaired (it independently violates continuity), so the assertion is
+        about the REASON, not about acceptance — asserting acceptance would be
+        wrong here, and that mistake is what surfaced the stale claim corrected
+        in the sibling test's docstring.
+        """
+        feedback_seen: list[list[str]] = []
+
+        def always_advancing(workflow, *args, **kwargs):
+            if "repair_feedback" in kwargs:
+                feedback_seen.append(kwargs["repair_feedback"])
+            return TestPostGenerationRepair._advancing_tool_call_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", always_advancing)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            require_tool_stay=False,
+        )
+        assert feedback_seen, "expected the repair loop to run (continuity still fails)"
+        assert not any(
+            "tool-execution turn must annotate" in v
+            for feedback in feedback_seen
+            for v in feedback
+        ), f"stay check still firing with require_tool_stay=False: {feedback_seen}"
+        assert result.stats["require_tool_stay"] is False
 
     def test_placeholder_path_needs_no_repair(self, tmp_output_dir: Path) -> None:
         result = generate_workflow_dataset(

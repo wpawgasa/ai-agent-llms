@@ -1415,6 +1415,9 @@ def generate_workflow_dataset(
     max_sample_attempts: int = 3,
     max_total_redraws: int | None = None,
     max_workers: int = 1,
+    retry_budget: int | None = None,
+    retry_exhaustion: Literal["none", "error_path", "handoff_in_state"] | None = None,
+    require_tool_stay: bool = True,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1488,6 +1491,24 @@ def generate_workflow_dataset(
             output is **identical regardless of ``max_workers``** — the result
             is reproducible and independent of completion order. Default 1
             (serial).
+        retry_budget: Override ``COMPLEXITY_SPECS[level].retry_budget`` — the
+            TOTAL attempts (the first counts) the generated conversations make
+            at a failing tool call, and the number stated by both retry-bearing
+            passages of the baked system prompt. ``None`` (default) keeps the
+            per-level value (L1-L2: 1, L3-L4: 2, L5: 3). Must be >= 1.
+        retry_exhaustion: Override ``COMPLEXITY_SPECS[level].retry_exhaustion``
+            — what the agent does once the budget is spent. ``None`` (default)
+            keeps the per-level value. Note that ``"error_path"`` still degrades
+            to ``"handoff_in_state"`` per-sample when the selected subgraph has
+            no ``tool_error`` arc to follow; an override changes the requested
+            policy, not that (necessary) resolution.
+        require_tool_stay: When True (default), an assistant turn that issues a
+            ``<tool_call>`` while annotating an advancing transition counts as a
+            coherence violation, so the teacher conversation is regenerated and
+            ultimately replaced by the placeholder. Set False to regenerate
+            v1-comparable data, where tool-call turns were free to advance.
+            Only affects the teacher repair loop (``repair_incoherent=True``);
+            the placeholder generator always emits conforming self-loops.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1530,6 +1551,25 @@ def generate_workflow_dataset(
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
+    # Retry overrides are applied ONCE, here, by substituting the spec every
+    # downstream consumer already reads (placeholder arc generation, the baked
+    # workflow script, the baked FORMAT_RULES). Threading a separate override
+    # value through each call site would let them drift apart, which is exactly
+    # the contradiction this convention work exists to remove.
+    spec_overrides: dict[str, Any] = {}
+    if retry_budget is not None:
+        if retry_budget < 1:
+            raise ValueError(f"retry_budget must be >= 1, got {retry_budget}")
+        spec_overrides["retry_budget"] = retry_budget
+    if retry_exhaustion is not None:
+        if retry_exhaustion not in ("none", "error_path", "handoff_in_state"):
+            raise ValueError(
+                f"retry_exhaustion must be one of none/error_path/handoff_in_state, "
+                f"got {retry_exhaustion!r}"
+            )
+        spec_overrides["retry_exhaustion"] = retry_exhaustion
+    if spec_overrides:
+        spec = spec.model_copy(update=spec_overrides)
     # Pre-draw one child seed per sample from the master RNG (a fast, serial,
     # order-independent step). Each sample then builds from its own
     # random.Random(child_seed) so generation can run concurrently while staying
@@ -1699,7 +1739,10 @@ def generate_workflow_dataset(
                     violations = (
                         find_tool_placement_violations(allowed, msgs, schema_names)
                         or _find_transition_violations(valid_edge_pairs, msgs)
-                        or find_tool_stay_violations(msgs)
+                        # Gated: with require_tool_stay=False an advancing
+                        # tool-call turn is accepted as-is, reproducing v1
+                        # generation behaviour for comparability runs.
+                        or (find_tool_stay_violations(msgs) if require_tool_stay else [])
                         or find_continuity_violations(
                             msgs, initial_name, terminal_names
                         )
@@ -2028,6 +2071,15 @@ def generate_workflow_dataset(
         "generation_source_counts": source_counts,
         "redraw_budget": redraw_budget,
         "redraws_used": redraws_used,
+        # Effective retry/stay settings after any override, so a corpus built
+        # with a non-default budget or with the stay gate off is identifiable
+        # from its own sidecar rather than from shell history. Note
+        # `retry_exhaustion` is the REQUESTED policy; "error_path" still
+        # degrades per-sample to "handoff_in_state" on subgraphs with no
+        # tool_error arc.
+        "retry_budget": spec.retry_budget,
+        "retry_exhaustion": spec.retry_exhaustion,
+        "require_tool_stay": require_tool_stay,
     }
 
     # Persist the run stats next to the JSONL so fallback rates are auditable
