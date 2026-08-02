@@ -10,7 +10,8 @@ deterministic + ledger-supplied repairs (apply), re-checks a directory
 Usage:
     python scripts/remediate_task_a_states.py triage --input-dir DIR --report PATH
     python scripts/remediate_task_a_states.py apply  --input-dir DIR --output-dir DIR
-                                                       [--ledger-dir DIR] [--on-unrepairable drop|keep]
+                                                       [--ledger-dir DIR] [--rebuild-prompts]
+                                                       [--on-unrepairable drop] [--limit N]
     python scripts/remediate_task_a_states.py verify --input-dir DIR [--strict]
     python scripts/remediate_task_a_states.py diff   --before DIR --after DIR
 """
@@ -29,6 +30,7 @@ from llm_workflow_agents.data.state_convention_repair import (  # noqa: E402
     apply_plan, plan_repair, verify_repaired,
 )
 from llm_workflow_agents.data._workflow_script import infer_state_tools_from_messages  # noqa: E402
+from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt  # noqa: E402
 
 
 def _iter_records(input_dir: Path):
@@ -130,6 +132,42 @@ def _load_ledger(ledger_dir: Path | None) -> dict[str, dict]:
     return entries
 
 
+def _rebuild_system_prompt(record: dict) -> bool:
+    """Regenerate ``messages[0]``'s content from current prompt code (D5).
+
+    A v1 row's system message is frozen at generation time: it carries the v1
+    FORMAT_RULES, whose rule-2 worked example shows an ADVANCING transition on a
+    tool-call turn -- the exact defect this remediation removes from the
+    trajectories -- plus the vague "attempt recovery before escalating"
+    tool-error rule with no retry budget. Repairing only the assistant turns
+    would ship a corpus that DEMONSTRATES the stay convention while its own
+    contract still CONTRADICTS it.
+
+    Passing the whole *record* as the sample matters twice over:
+      * ``retry_budget_for_sample`` keys off ``record["complexity_level"]``, so
+        an L5 row states 3 attempts and an L1 row states no-retry, matching the
+        conversations Task 9's generator actually bakes.
+      * ``build_enriched_system_prompt`` regenerates the workflow script from
+        ``record["messages"]``. Called AFTER the repair, those are the REPAIRED
+        messages, so the script's per-state tool listing describes the corrected
+        trajectory rather than the pre-repair one.
+
+    Mutates *record* in place and touches nothing but the system content.
+    Returns True if a rebuild happened. A record whose ``messages[0]`` is not a
+    ``system`` message is left alone rather than having one synthesised: the
+    remediation must not change conversation shape, which ``verify_repaired``'s
+    initiator gate scores.
+    """
+    messages = record.get("messages") or []
+    if not messages or messages[0].get("role") != "system":
+        return False
+    original = messages[0].get("content") or ""
+    messages[0]["content"] = build_enriched_system_prompt(
+        record, original, force_rebuild=True
+    )
+    return True
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
@@ -137,9 +175,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
     ledger_entries = _load_ledger(Path(args.ledger_dir) if args.ledger_dir else None)
 
     kept = dropped = 0
+    rebuilt = 0
     drop_reasons = Counter()
     by_file: dict[str, list[dict]] = {}
+    seen = 0
     for stem, line_index, path, rec in _iter_records(input_dir):
+        if args.limit and seen >= args.limit:
+            break
+        seen += 1
         plan = plan_repair(rec)
         # assign insert_ids matching the triage convention so a ledger built
         # from a `triage` report lines up with this pass
@@ -161,6 +204,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
             dropped += 1
             drop_reasons["post-gate-failed"] += 1
             continue
+        # Deliberately LAST, after every gate. A dropped row never pays the
+        # rebuild cost, and each gate above sees the same message structure it
+        # would see with the flag off -- none of them read system CONTENT (the
+        # finders scan assistant turns; find_shape_violations filters the
+        # system role out entirely), so the ordering is about cost and
+        # reviewability, not correctness.
+        if args.rebuild_prompts and _rebuild_system_prompt(repaired):
+            rebuilt += 1
         kept += 1
         by_file.setdefault(Path(path).stem, []).append(repaired)
 
@@ -170,7 +221,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
             for rec in records:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-    print(f"Apply: kept {kept}, dropped {dropped} ({dict(drop_reasons)})")
+    suffix = f", system prompts rebuilt {rebuilt}" if args.rebuild_prompts else ""
+    print(f"Apply: kept {kept}, dropped {dropped} ({dict(drop_reasons)}){suffix}")
     return 0
 
 
@@ -210,7 +262,44 @@ def main() -> int:
     p_apply.add_argument("--input-dir", required=True)
     p_apply.add_argument("--output-dir", required=True)
     p_apply.add_argument("--ledger-dir", default=None)
-    p_apply.add_argument("--on-unrepairable", choices=["drop", "keep"], default="drop")
+    p_apply.add_argument(
+        "--rebuild-prompts",
+        action="store_true",
+        help=(
+            "Regenerate each retained row's system message from current prompt "
+            "code (design decision D5), so a v2 row STATES the tool-stay "
+            "convention its trajectory now demonstrates: the corrected rule-2 "
+            "worked example, the stay rule, and the retry budget for the row's "
+            "own complexity_level. Off by default -- omitting it leaves system "
+            "messages byte-identical to the input."
+        ),
+    )
+    # Only 'drop' is offered. 'keep' used to be accepted and then silently
+    # ignored (every unrepairable row was dropped anyway), which is worse than
+    # not offering it: an operator could ask for retention and get none, with no
+    # error. Implementing it properly is also not wanted -- a kept row is by
+    # definition one that still violates the convention, so it would poison the
+    # v2 corpus this stage exists to produce and would fail the `verify
+    # --strict` gate that runs right after. The flag survives as a single-choice
+    # argument so the documented DVC/runbook command line stays valid and the
+    # policy is explicit at the call site rather than implicit.
+    p_apply.add_argument(
+        "--on-unrepairable",
+        choices=["drop"],
+        default="drop",
+        help=(
+            "What to do with a row that cannot be brought onto the convention. "
+            "Only 'drop' is supported: retaining a violating row would defeat "
+            "the purpose of the remediation and fail the downstream "
+            "`verify --strict` gate."
+        ),
+    )
+    p_apply.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Process at most N input rows (smoke runs); default: all.",
+    )
     p_apply.set_defaults(func=cmd_apply)
 
     p_verify = sub.add_parser("verify")

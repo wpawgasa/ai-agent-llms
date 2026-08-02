@@ -117,3 +117,53 @@ def test_tool_turn_state_ignores_tool_call_with_no_state_marker(tmp_path):
     assert tts["self_loop"] == 0
     assert tts["advancing"] == 0
     assert tts["pct_conformant"] == 100.0
+
+
+def test_profile_task_a_ignores_tool_call_examples_in_the_system_prompt(tmp_path):
+    # The enriched system prompt teaches the <tool_call> syntax by SHOWING it:
+    # FORMAT_RULES carries a placeholder template that is deliberately invalid
+    # JSON plus a worked example naming `request_referral`, a tool that belongs
+    # to the illustration and not to this row's tool_schemas. Scanning the
+    # system message therefore charged 3 phantom hard defects to every row
+    # whose prompt had been rebuilt (remediate_task_a_states.py
+    # --rebuild-prompts), which would make the v2 "zero hard defects"
+    # acceptance gate unsatisfiable. A contract document is not a tool-call site.
+    system_content = (
+        "You are a helpful agent.\n\n"
+        "Rules:\n\n"
+        '1. Tool-call format:\n'
+        '       <tool_call>{"name": "<tool_name>", "arguments": {<arg_key>: <arg_value>}}</tool_call>\n'
+        "   Worked example:\n"
+        "       [STATE: VERIFY_PATIENT → VERIFY_PATIENT]\n"
+        '       <tool_call>{"name": "request_referral", "arguments": {"patient_id": "P12345"}}</tool_call>'
+    )
+    rec = _base_rec(
+        messages=[
+            {"role": "system", "annotations": None, "content": system_content},
+            {"role": "user", "annotations": None, "content": "hi"},
+            {
+                "role": "assistant",
+                "annotations": None,
+                "content": '[STATE: A → A]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>',
+            },
+            {"role": "tool", "annotations": None, "content": "{}"},
+            {"role": "assistant", "annotations": None, "content": "[STATE: A → TERMINAL]\nDone."},
+        ],
+        ground_truth={
+            "state_sequence": [{"from": "A", "to": "A"}, {"from": "A", "to": "TERMINAL"}],
+            "tool_calls": [],
+            "tool_chain_dependencies": [],
+            "terminal_state": "TERMINAL",
+            "terminal_reached": True,
+        },
+    )
+    path = _write(tmp_path, rec, "l1_rebuilt_prompt.jsonl")
+    report = profile_task_a(path)
+    assert report.defects == [], report.defects
+
+    # ...but a real assistant-emitted tool call outside tool_schemas is still caught.
+    rec["messages"][2]["content"] = (
+        '[STATE: A → A]\n<tool_call>{"name": "request_referral", "arguments": {}}</tool_call>'
+    )
+    path2 = _write(tmp_path, rec, "l1_real_offender.jsonl")
+    assert any("not in tool_schemas" in d for d in profile_task_a(path2).defects)

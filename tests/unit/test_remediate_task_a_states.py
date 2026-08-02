@@ -135,6 +135,104 @@ def test_apply_writes_repaired_output_and_drops_unrepairable(tmp_path):
     assert "[STATE: A → A]" in kept["messages"][0]["content"]
 
 
+def _v1_system_content() -> str:
+    """A frozen-v1 system message, shaped like a real corpus row's.
+
+    Persona line, then the ``Workflow script`` marker ``force_rebuild`` strips
+    back to, then the v1 FORMAT_RULES -- whose rule-2 worked example shows the
+    ADVANCING transition this remediation exists to remove.
+    """
+    from llm_workflow_agents.data.system_prompt import _format_rules
+
+    v1_rules = _format_rules(retry_budget=1, stay_rule=False)
+    assert "[STATE: VERIFY_PATIENT → TERMINAL]" in v1_rules, "fixture must carry the v1 defect"
+    return (
+        "You are a helpful support agent.\n\n"
+        "Workflow script (follow this for conversation flow):\n"
+        "[A]\n  - on success: proceed to [TERMINAL]\n\n"
+        f"{v1_rules}"
+    )
+
+
+def _rebuildable_record(cid: str, level: str) -> dict:
+    """A repairable row that opens with a v1 system message."""
+    rec = _record(cid, [
+        {"role": "system", "content": _v1_system_content(), "annotations": None},
+        _amsg('[STATE: A → TERMINAL]\n<tool_call>{"name": "t", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": "{}", "annotations": None},
+        _amsg("[STATE: TERMINAL → TERMINAL]\nAll set."),
+    ], [("A", "TERMINAL")])
+    # find_shape_violations skips the system message, so the first *body*
+    # message is the assistant tool turn -- an outbound shape (see the note in
+    # test_apply_writes_repaired_output_and_drops_unrepairable).
+    rec["conversation_initiator"] = "agent"
+    rec["complexity_level"] = level
+    return rec
+
+
+def _run_apply(tmp_path, records, *extra_args, out_name="out"):
+    input_dir = tmp_path / f"in_{out_name}"
+    input_dir.mkdir()
+    output_dir = tmp_path / out_name
+    _write_jsonl(input_dir / "l1_merged_test.jsonl", records)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "apply", "--input-dir", str(input_dir),
+         "--output-dir", str(output_dir), *extra_args],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = (output_dir / "l1_merged_test.jsonl").read_text().splitlines()
+    return [json.loads(line) for line in lines]
+
+
+def test_rebuild_prompts_replaces_the_v1_worked_example(tmp_path):
+    # D5: a v2 row must STATE the convention it demonstrates. Without the flag
+    # the frozen v1 system prompt -- wrong worked example and all -- survives
+    # byte-for-byte.
+    rec = _rebuildable_record("D_001", "L3")
+    original_system = rec["messages"][0]["content"]
+
+    without = _run_apply(tmp_path, [rec], out_name="off")
+    assert len(without) == 1
+    assert without[0]["messages"][0]["content"] == original_system, (
+        "omitting --rebuild-prompts must leave the system message byte-identical"
+    )
+
+    with_flag = _run_apply(tmp_path, [rec], "--rebuild-prompts", out_name="on")
+    assert len(with_flag) == 1
+    rebuilt = with_flag[0]["messages"][0]["content"]
+    assert "[STATE: VERIFY_PATIENT → VERIFY_PATIENT]" in rebuilt, "corrected self-loop example"
+    assert "[STATE: VERIFY_PATIENT → TERMINAL]" not in rebuilt, "old advancing example must be gone"
+    # the stay rule itself, not just the example
+    assert "Tool-execution turns do NOT advance" in rebuilt
+    # and the rebuild must not disturb the role or the rest of the record
+    assert with_flag[0]["messages"][0]["role"] == "system"
+    assert with_flag[0]["conversation_id"] == "D_001"
+    assert with_flag[0]["messages"][1:] == without[0]["messages"][1:]
+    assert {k: v for k, v in with_flag[0].items() if k != "messages"} == \
+           {k: v for k, v in without[0].items() if k != "messages"}
+
+
+def test_rebuild_prompts_states_the_per_sample_retry_budget(tmp_path):
+    # Task 10 made the budget per-sample off complexity_level: L5 -> 3 total
+    # attempts, L1 -> no retry at all. Passing the whole record as the sample is
+    # what makes that flow through.
+    l5 = _run_apply(tmp_path, [_rebuildable_record("D_L5", "L5")],
+                    "--rebuild-prompts", out_name="l5")[0]
+    l1 = _run_apply(tmp_path, [_rebuildable_record("D_L1", "L1")],
+                    "--rebuild-prompts", out_name="l1")[0]
+
+    l5_prompt = l5["messages"][0]["content"]
+    l1_prompt = l1["messages"][0]["content"]
+    assert "3 attempts at that call in total, counting the first" in l5_prompt
+    assert "do NOT retry it" not in l5_prompt, "L5 must not state the no-retry policy"
+
+    assert "do NOT retry it — this workflow allows one attempt per" in l1_prompt
+    assert "attempts at that call in total" not in l1_prompt, (
+        "L1 must not state a multi-attempt budget"
+    )
+
+
 def test_verify_strict_exits_nonzero_on_violation(tmp_path):
     bad_dir = tmp_path / "bad"
     bad_dir.mkdir()

@@ -654,9 +654,16 @@ python scripts/remediate_task_a_states.py apply \
 ```
 
 > `--rebuild-prompts` is the D2/D5 system-prompt rebuild (so v2 rows *state* the rule
-> they now demonstrate). The flag is **not yet implemented** in
-> `remediate_task_a_states.py`'s argparse — omit it until it is, or the command will
-> exit 2.
+> they now demonstrate). It regenerates each **retained** row's `messages[0]` from
+> current prompt code, after every repair gate has passed: the corrected rule-2 worked
+> example, the default-on stay rule, and the retry budget for that row's own
+> `complexity_level` (L1–L2 no-retry, L3–L4 two attempts, L5 three). It also refreshes
+> the embedded workflow script from the **repaired** messages. Omitting the flag leaves
+> system messages byte-identical to the input.
+>
+> `--on-unrepairable` accepts only `drop`. A row that cannot be brought onto the
+> convention is by definition still violating it, so retaining it would poison the v2
+> corpus and fail Step 7's `verify --strict`.
 
 ### Step 7 — Verify
 

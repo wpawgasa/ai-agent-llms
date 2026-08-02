@@ -284,6 +284,20 @@ def profile_task_a(path: Path) -> ProfileReport:
             (ts.get("function") or ts).get("name") for ts in s.get("tool_schemas", [])
         }
         for m in msgs:
+            # The system message is a CONTRACT DOCUMENT, not a tool-call site.
+            # FORMAT_RULES teaches the <tool_call> syntax by showing it, so an
+            # enriched system prompt always contains two literal <tool_call>
+            # blocks: a placeholder template ({"name": "<tool_name>",
+            # "arguments": {<arg_key>: ...}}) that is deliberately not valid
+            # JSON, and a worked example naming `request_referral`, a tool from
+            # the illustration rather than from this row's tool_schemas.
+            # Scanning it flagged 3 phantom hard defects on EVERY row whose
+            # prompt had been rebuilt (see remediate_task_a_states.py
+            # --rebuild-prompts), which would make the v2 acceptance gate
+            # "zero hard defects" unsatisfiable. Only messages that actually
+            # emit or carry tool traffic are scanned.
+            if m.get("role") == "system":
+                continue
             for tc in _TOOL_RE.finditer(m.get("content", "")):
                 try:
                     obj = json.loads(tc.group(1))
