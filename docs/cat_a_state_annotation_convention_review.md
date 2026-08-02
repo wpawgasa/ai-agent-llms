@@ -308,8 +308,10 @@ points at `generate_workflows.py` rather than a cleanup pass.
 as the opt-out that reproduces the frozen v1 prompt; it was opt-in via `TASK_A_STAY_RULE=1` when
 this experiment ran) was added stating the policy and explicitly
 reinterpreting the workflow script's `- on success: proceed to [Y]` line. Re-audited ckpt-500 on
-identical corpus / split / seed / n — the rule is the only variable (guarded by
-`tests/unit/test_stay_rule_flag.py`, which asserts the enabled prompt is a strict prefix + rule).
+identical corpus / split / seed / n — the rule is the only variable (guarded at the time by a
+strict-prefix assertion in `tests/unit/test_stay_rule_flag.py`, retired on 2026-08-02 when the rule
+moved inline as rule 2 and renumbered the rules below it; the equivalent guard is now that file's
+byte-identity assertion that `TASK_A_STAY_RULE=0` reproduces the v1 prompt exactly).
 
 | | baseline | STAY_RULE ON |
 |---|---|---|
