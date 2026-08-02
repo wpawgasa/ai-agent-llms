@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "d442f689cf2b",
+  "strategy": "manual-commit",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/d4/42f689cf2b/0/metadata.json",
+      "transcript": "/d4/42f689cf2b/0/full.jsonl",
+      "content_hash": "/d4/42f689cf2b/0/content_hash.txt",
+      "prompt": "/d4/42f689cf2b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 359,
+    "cache_creation_tokens": 1633616,
+    "cache_read_tokens": 68614821,
+    "output_tokens": 297221,
+    "api_call_count": 181
+  }
+}
