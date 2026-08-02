@@ -35,6 +35,10 @@ from typing import Any
 
 from llm_workflow_agents.config.schema import COMPLEXITY_SPECS, ComplexityLevel
 from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY
+from llm_workflow_agents.data.state_convention import (
+    find_tool_stay_violations,
+    parse_assistant_turns,
+)
 
 # Accept either the unicode arrow (most data) or the ASCII fallback.
 _STATE_RE = re.compile(
@@ -151,6 +155,7 @@ def profile_task_a(path: Path) -> ProfileReport:
     nstates: list[int] = []
     arrow_uni = arrow_ascii = 0
     trans_total = self_loops = undeclared = 0
+    n_stay_advancing = n_stay_self_loop = 0
     prop_samples = 0
     max_hops = 0
     recovery_samples = 0
@@ -237,6 +242,31 @@ def profile_task_a(path: Path) -> ProfileReport:
                 f"{cid}: message STATE seq (len {len(msg_states)}) != "
                 f"ground_truth.state_sequence (len {len(gt_seq)})"
             )
+
+        # tool-call turns must self-loop (Task 1's state_convention gate); an
+        # assistant turn that emits <tool_call> but annotates an advancing
+        # transition is a hard defect, not a stylistic nit.
+        stay_violations = find_tool_stay_violations(msgs)
+        for v in stay_violations:
+            rep.defects.append(f"{cid}: {v}")
+        n_stay_advancing += len(stay_violations)
+        # NOTE: the self-loop count must be derived from the *same* population
+        # find_tool_stay_violations actually inspects (assistant turns with a
+        # parsable [STATE: ...] marker AND a <tool_call> found after that
+        # marker, per parse_assistant_turns), not from a naive substring scan
+        # for "<tool_call>" over every assistant message's raw content. Those
+        # two populations differ: a turn with a <tool_call> but no parsable
+        # STATE marker (e.g. corrupted content) or with the <tool_call> text
+        # appearing *before* the marker is skipped by parse_assistant_turns
+        # (label is None or has_tool_call is False) and so is invisible to
+        # find_tool_stay_violations -- counting it via substring match would
+        # silently misclassify it as a conformant self-loop and inflate
+        # n_stay_self_loop against a different denominator than n_stay_advancing.
+        n_stay_self_loop += sum(
+            1
+            for label in parse_assistant_turns(msgs)
+            if label is not None and label.has_tool_call and label.from_state == label.to_state
+        )
 
         # role sequencing must match the declared initiator
         roles = [m.get("role") for m in msgs]
@@ -325,6 +355,12 @@ def profile_task_a(path: Path) -> ProfileReport:
             "max_hops_single_convo": max_hops,
         },
         "recovery_samples": recovery_samples,
+    }
+    _tool_total = n_stay_self_loop + n_stay_advancing
+    rep.distributions["tool_turn_state"] = {
+        "self_loop": n_stay_self_loop,
+        "advancing": n_stay_advancing,
+        "pct_conformant": round(100 * n_stay_self_loop / _tool_total, 1) if _tool_total else 100.0,
     }
     return rep
 

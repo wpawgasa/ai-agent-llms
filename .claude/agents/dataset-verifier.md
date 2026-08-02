@@ -58,7 +58,8 @@ Use `--json` if you want to compute on the output. This reports, against the can
 `COMPLEXITY_SPECS` and `DOMAIN_REGISTRY`:
 
 - **HARD STRUCTURAL DEFECTS** — undeclared (non-self-loop) transitions, STATE-seq vs
-  ground-truth mismatch, bad tool_call JSON, off-schema tool names, role-sequencing breaks.
+  ground-truth mismatch, bad tool_call JSON, off-schema tool names, role-sequencing breaks,
+  tool-call turns annotating an advancing transition instead of a self-loop.
   Must be **zero**.
 - **SPEC-CONFORMANCE VIOLATIONS** — `num_states` outside the tier's `target_path_len`,
   `num_tools` below the tier floor, `chain_depth`/back-edge counts below spec. Advisory: the
@@ -70,9 +71,14 @@ Use `--json` if you want to compute on the output. This reports, against the can
 - **DISTRIBUTIONS** — behavior mix, language split, inbound/outbound, self-loop share, arrow
   glyphs (unicode `→` vs ASCII `->`), tool-chain propagation, recovery coverage.
 
-Self-loops (`[STATE: X → X]`) are a legitimate generator convention (staying in a state across
-turns) and are **not** defects — the reward path exempts them (`transition_legality_score`).
-A high self-loop share is expected, not a finding.
+Tool-call turns MUST self-loop (`[STATE: X → X]`) — the advance to a new
+state happens on the *next* turn, after the tool result has come back. This
+is now a hard defect class (`find_tool_stay_violations`, wired into
+`profile_task_a` and `data_validator` as of task-a-sft-v2). Check
+`distributions.tool_turn_state.pct_conformant` — it must read 100.0. A
+corpus-wide self-loop share materially below ~40% is itself a finding, not
+merely "expected." See
+docs/superpowers/specs/2026-07-31-task-a-tool-stay-convention-design.md.
 
 ### 3. Qualitative rationality review (read real conversations)
 
