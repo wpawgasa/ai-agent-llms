@@ -406,15 +406,15 @@ Empty list == accept. Rejects on:
 | tool calls | neither `"<tool_call>"` nor `"</tool_call>"` in `content` |
 | marker prefix (assistant) | `content.startswith(required_marker)` — **byte for byte, arrow glyph included** |
 | marker newline (assistant) | the character right after the marker is `"\n"` (100% of the 64,964 markers in the corpus are followed by one) |
-| prose floor (both roles) | ≥10 characters of *visible* prose — invisible characters removed, whitespace runs collapsed. Assistant: measured after the marker (a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing). User: measured on the whole content (the 20-char floor counts spaces, so `"x"` + 19 spaces otherwise passed — and 1,673 of the 3,902 inserts are acks). 10 = `len("ok, thanks")` |
+| meaningful-content floor (both roles) | the prose must **contain ≥10 meaningful characters** — letters or digits of the Latin or Thai script, NFKC-folded. Stated positively on purpose: padding, punctuation, symbols, combining marks and *every* invisible codepoint count zero, so there is no blocklist to keep current. Assistant: measured after the marker (a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing). User: measured on the whole content (the 20-char floor counts spaces, so `"x"` + 19 spaces otherwise passed — and 1,673 of the 3,902 inserts are acks). Calibrated: 10 costs **0** false rejections across the 93,064 assistant/user corpus turns that clear the other floors; the shortest real turn carries 12 |
 | second marker | no `"[STATE:"` in `content[len(required_marker):]` |
 | marker (user) | no `"[STATE:"` anywhere when `required_marker == ""` |
 | length | `20 <= len(content) <= 600`, counted **including** the marker |
 | language | th / code_switch rows must contain a Thai **letter** (ก–ฮ and the spacing vowels ะ า ำ เ–ๅ); `en` rows must contain none. **Not** the whole Thai block: ฿, ๆ, ๏, ๚, ๛ and ๐–๙ are excluded, so a baht sign cannot pass an English sentence off as Thai and an `en` row may quote a ฿ price |
-| invisible characters | no zero-width or format characters (U+200B/C/D, U+FEFF, U+2060, bidi controls, U+00AD) and no control characters other than `\n`/`\t`. They survive `strip()`, so they faked prose length; they also corrupt the corpus silently |
-| special tokens | no chat-template sentinel: any `<|…|>` form (`<|im_end|>`, `<|eot_id|>`, `<|user|>`), `<start_of_turn>`/`<end_of_turn>`, `<s>`/`</s>`/`<bos>`/`<eos>`, `[INST]`/`[gMASK]`, `<extra_id_N>`. Baked into `content` these are re-read as turn boundaries at template time |
-| copy guard | `content`'s prose is not a verbatim copy of a `context_window` message, for copies ≥40 characters |
-| duplicate prose (batch level, in `_reject_duplicate_content`, not `validate_entry`) | no two accepted entries in one batch share ≥40 characters of identical prose — the "generic ack repeated across rows" defect. First occurrence stands |
+| never-text characters | no character whose Unicode **category** is `Cc`/`Cf`/`Co`/`Cs`/`Cn` (controls other than `\n`/`\t`, format characters, private use, surrogates, unassigned). Category-based, not a codepoint list. This is the *secondary* defence only — invisible codepoints outside those categories (U+3164 HANGUL FILLER and U+115F/U+1160/U+FFA0 are `Lo`, U+2800 is `So`, U+FE00–FE0F/U+E0100/U+17B4/U+17B5/U+034F are `Mn`) are stopped by the meaningful-content floor instead, which never counts them |
+| special tokens | no chat-template sentinel: any `<|…|>` form (`<|im_end|>`, `<|eot_id|>`, `<|user|>`), `<start_of_turn>`/`<end_of_turn>`, `<s>`/`</s>`/`<bos>`/`<eos>`, `[INST]`/`[gMASK]`, `<extra_id_N>`, `<<SYS>>`, `<think>`/`</think>`, `<tool_response>`, `<unusedN>` (Gemma), `<reserved_special_token_N>` (Llama 3), and Mistral v3's `[TOOL_CALLS]`/`[AVAILABLE_TOOLS]`/`[TOOL_RESULTS]` — Mistral-Small-3.1-24B is a live Cat A candidate and this is a tool-calling corpus. Baked into `content` these are re-read as turn boundaries at template time. 0 false positives across all 106,992 assistant/user corpus turns; `[STATE: …]` and ordinary bracketed prose are untouched |
+| copy guard | `content`'s prose is not a copy of a `context_window` message, for copies ≥40 characters. Compared on the **meaningful skeleton** (NFKC, meaningful characters only, casefolded), so one invisible character or a changed comma cannot defeat it. The ≥40 gate stays on the visible prose so the guard cannot fire *less* often than before |
+| duplicate prose (batch level, in `_reject_duplicate_content`, not `validate_entry`) | no two accepted entries in one batch share ≥40 characters of prose with the same **meaningful skeleton** — the "generic ack repeated across rows" defect. Same normalisation as the copy guard, so an invisible-character variant is still a duplicate. First occurrence stands |
 
 The arrow-glyph rule bites in practice: of the 2,229 markered requests, **2,151 carry
 a Unicode `→` and 78 carry an ASCII `->`**. `_marker()` copies the arrow from the
@@ -654,7 +654,10 @@ python scripts/build_remediation_ledger.py \
 python3 -m json.tool < data/interim/task_a_remediation_ledger/accepted.jsonl
 ```
 
-**`--limit` trims on conversation boundaries, so it undershoots rather than splitting.**
+**`--limit` trims on conversation boundaries, so it never splits a conversation.**
+It normally undershoots, but it takes the first conversation whole even when that
+conversation alone exceeds the limit — so it can overshoot by up to one conversation's
+worth of inserts (at most 14, the largest authoring queue on a single conversation).
 On the current queue `--limit 20` authors **18 inserts across 8 complete conversations,
 in 2 batches**. It used to take a flat slice of exactly 20, which cut conversation
 `l1_merged_20260629:528` in half — and a conversation with one insert missing is dropped

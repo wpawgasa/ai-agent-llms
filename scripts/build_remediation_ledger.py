@@ -49,6 +49,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,18 +74,32 @@ _REQUIRED_STR_FIELDS = (
 
 MIN_CONTENT_LEN = 20
 MAX_CONTENT_LEN = 600
-# Minimum *visible* prose, measured with invisible characters removed and
-# whitespace runs collapsed (see `_visible_prose_len`). Applied to both roles:
+# Minimum number of *meaningful* characters the prose must CONTAIN (see
+# `_meaningful_len`). Applied to both roles:
 #   * assistant -- measured after the marker. Markers run 25-60 chars, so a
 #     marker plus a newline clears MIN_CONTENT_LEN while carrying no message.
 #   * user -- measured on the whole content. MIN_CONTENT_LEN counts padding, so
 #     "x" plus 19 spaces cleared it with no content at all.
-# 10 is the length of "ok, thanks" -- the shortest acknowledgement anyone would
-# plausibly write -- and half the content floor, so a real ack that clears
-# MIN_CONTENT_LEN honestly clears this with room to spare. Thai acks are shorter
-# still per character ("ขอบคุณค่ะ รับทราบนะคะ" is 21 chars / 20 visible), and are
-# bounded by MIN_CONTENT_LEN long before this floor binds.
-MIN_PROSE_LEN = 10
+#
+# This is a *positive* floor, and that is the whole point: it is stated in terms
+# of what the prose must contain, not what it must avoid. The previous rule
+# measured "visible" length -- everything not on an enumerated blocklist of
+# invisible codepoints -- which made the invariant "no empty turn reaches the
+# corpus" only as good as the enumeration. It was not good enough: a turn of 20
+# U+3164 HANGUL FILLERs, or U+2800 BRAILLE PATTERN BLANKs, or variation
+# selectors, was accepted, and so was a body of 30 dots. Counting only
+# meaningful characters closes that entire class at once -- every codepoint that
+# is not a letter or a digit of a script this corpus is written in contributes
+# zero, whether or not anyone thought of it.
+#
+# Calibration (measured, `data/output/sft/task_a`, 93,064 assistant/user turns
+# that clear MIN_CONTENT_LEN and carry >=10 characters of prose): a floor of 10
+# costs **0** false rejections. The shortest real turn carries 12 meaningful
+# characters ('ชื่อ ณิชา ศิริวัฒน์ ค่ะ' -- a Thai name), so 10 leaves two
+# characters of margin. Thai costs ~20% of its length to combining marks, which
+# are not meaningful on their own, and English acks are pure Latin; both clear
+# this floor long before MIN_CONTENT_LEN stops binding.
+MIN_MEANINGFUL_LEN = 10
 # Only a long verbatim copy of a neighbouring turn is treated as a copy: short
 # acknowledgements ("ขอบคุณค่ะ") legitimately repeat.
 COPY_GUARD_MIN_LEN = 40
@@ -110,22 +125,39 @@ VALID_ROLES = ("assistant", "user")
 # while reinstating the same hole for a stray tone mark.
 _THAI_RE = re.compile(r"[ก-ฮะาำเ-ๅ]")
 _TOOL_CALL_RE = re.compile(r"</?tool_call>")
-# Invisible characters that survive `str.strip()`: Unicode format characters
-# (U+200B ZWSP, U+200C/D ZWNJ/ZWJ, U+FEFF BOM, U+2060 word joiner, the bidi
-# overrides, U+00AD soft hyphen) and C0/C1 controls other than \n and \t.
-# U+200B is not whitespace to Python -- '\u200b'.strip() is non-empty -- which
-# reinstated the empty-turn hole the prose floor exists to close. None of these
-# has a legitimate use in a corpus turn, so they are both stripped before any
-# length is measured AND rejected outright.
-_INVISIBLE_RE = re.compile(
-    "["
-    "\u0000-\u0008\u000b-\u001f\u007f-\u009f"  # C0/C1 controls except \n and \t
-    "\u00ad\u061c\u180e"                          # soft hyphen, ALM, Mongolian vowel sep
-    "\u200b-\u200f\u202a-\u202e"                 # zero-width, bidi embedding/override
-    "\u2060-\u2064\u2066-\u206f"                 # word joiner, invisible ops, isolates
-    "\ufeff\ufff9-\ufffb"                         # BOM / ZWNBSP, interlinear annotation
-    "]"
-)
+# Characters that are never text, identified by Unicode *category* rather than
+# by an enumerated list of codepoints:
+#   Cc  C0/C1 controls (\n and \t are exempted -- the corpus uses both)
+#   Cf  format characters: U+200B ZWSP, U+200C/D ZWNJ/ZWJ, U+FEFF, U+2060 word
+#       joiner, the bidi overrides, U+00AD soft hyphen, the U+E00xx tag block
+#   Co  private use            Cs  lone surrogates          Cn  unassigned
+# These survive `str.strip()` (a lone U+200B does not strip to empty), carry no
+# width, and corrupt the corpus silently, so they are stripped before anything
+# is measured AND rejected outright.
+#
+# This class is necessary but NOT sufficient, and the gate does not lean on it
+# for the no-empty-turn invariant. Plenty of zero-width codepoints sit outside
+# it -- U+3164 HANGUL FILLER and U+115F/U+1160/U+FFA0 are `Lo` (letters!),
+# U+2800 BRAILLE PATTERN BLANK is `So`, and the variation selectors
+# U+FE00-FE0F / U+E0100, U+17B4/U+17B5 and U+034F are `Mn`. Unicode groups
+# these as Default_Ignorable_Code_Point, a property the stdlib does not expose.
+# Rather than re-enumerate them -- the bug this replaced -- the prose floor
+# simply does not count them: see `_meaningful_len`.
+_NEVER_TEXT_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn"})
+_TEXT_CONTROL_CHARS = frozenset("\n\t")
+
+# The scripts this corpus is written in. `language` is one of en / th /
+# code_switch, so a character counts as content only if it is a letter or digit
+# of the Latin or Thai script, or a plain digit. Measured over every
+# letter/number character in all 132,975 corpus turns: LATIN 12,936,230,
+# THAI 7,357,135, DIGIT 479,915, plus a single stray CJK ideograph sitting
+# inside an otherwise-Thai sentence (itself corpus corruption). Nothing else
+# occurs.
+#
+# Script is read off the character's Unicode *name* prefix, which is stdlib and
+# needs no data tables. Text is NFKC-folded first, so fullwidth Latin and
+# superscript digits fold onto their plain forms and still count.
+_MEANINGFUL_SCRIPTS = ("LATIN", "THAI", "DIGIT")
 # Chat-template sentinels. Anything here baked into `content` is re-read as a
 # turn boundary or a control token when the corpus is templated, corrupting
 # tokenisation for every model that owns the token. Gated by *form*, not by one
@@ -135,11 +167,28 @@ _INVISIBLE_RE = re.compile(
 #   <s> </s> <bos> ... SentencePiece / Mistral / Llama
 #   [INST] [gMASK]     Mistral instruct, GLM
 #   <extra_id_N>       T5 / Nemotron sentinel range
+#   [TOOL_CALLS]       Mistral v3 tool protocol -- [AVAILABLE_TOOLS] and
+#                      [TOOL_RESULTS] too. Mistral-Small-3.1-24B is a live Cat A
+#                      candidate and this is a tool-calling corpus, so these are
+#                      the sentinels most likely to actually show up.
+#   <<SYS>>            Llama 2 system delimiter
+#   <think> </think>   reasoning-model delimiters (Qwen3, GLM-4.7, Nemotron)
+#   <tool_response>    Hermes/Qwen tool-result delimiter (the request side,
+#                      <tool_call>, is already rejected by _TOOL_CALL_RE)
+#   <unusedN>          Gemma reserved range
+#   <reserved_special_token_N>  Llama 3 reserved range
+#
+# Measured cost of the additions: 0 hits across all 106,992 assistant/user
+# corpus turns. The bracket forms stay anchored to a closing `]` immediately
+# after a known name, so the `[STATE: X -> Y]` marker and ordinary bracketed
+# prose ('[ดูรายละเอียด]', 'see [1] and [2]') are untouched.
 _SPECIAL_TOKEN_RE = re.compile(
     r"<\|[^|<>]{0,64}\|>"
-    r"|</?(?:s|bos|eos|pad|unk|mask|sop|eop|start_of_turn|end_of_turn"
-    r"|begin_of_text|end_of_text|extra_id_\d+)>"
-    r"|\[/?(?:INST|SYS|gMASK|sMASK|MASK|CLS|SEP|PAD)\]",
+    r"|</?(?:s|bos|eos|pad|unk|mask|sop|eop|sys|start_of_turn|end_of_turn"
+    r"|begin_of_text|end_of_text|think|tool_response|extra_id_\d+"
+    r"|unused\d+|reserved_special_token_\d+)>"
+    r"|\[/?(?:INST|SYS|gMASK|sMASK|MASK|CLS|SEP|PAD"
+    r"|TOOL_CALLS|AVAILABLE_TOOLS|TOOL_RESULTS)\]",
     re.IGNORECASE,
 )
 _STATE_TOKEN = "[STATE:"
@@ -206,36 +255,105 @@ def _validate_request(request: object) -> list[str]:
     return problems
 
 
-def _strip_invisible(text: str) -> str:
-    """Drop characters that occupy no width but survive ``str.strip()``."""
-    return _INVISIBLE_RE.sub("", text)
+def _is_never_text(char: str) -> bool:
+    """True for a character that is never legitimate corpus text.
 
-
-def _visible_prose_len(text: str) -> int:
-    """Length of `text` with invisible characters dropped and whitespace runs
-    collapsed to a single space.
-
-    This is what the prose floors are measured on, so neither space padding nor
-    a run of U+200B can buy length. Whitespace is collapsed rather than removed
-    so that "ok, thanks" measures its true 10 characters.
+    Category-based, not a codepoint list: see `_NEVER_TEXT_CATEGORIES`.
     """
-    return len(" ".join(_strip_invisible(text).split()))
+    return (
+        char not in _TEXT_CONTROL_CHARS
+        and unicodedata.category(char) in _NEVER_TEXT_CATEGORIES
+    )
+
+
+def _strip_never_text(text: str) -> str:
+    """Drop every control / format / private-use / surrogate / unassigned char."""
+    return "".join(ch for ch in text if not _is_never_text(ch))
+
+
+def _is_meaningful(char: str) -> bool:
+    """True if `char` is a letter or digit of a script this corpus is written in.
+
+    The positive half of the content rule. A character has to earn its place:
+    it must be a letter (`L*`) or a number (`N*`) AND belong to Latin, Thai or
+    the plain digits. Everything else -- punctuation, whitespace, symbols,
+    combining marks, and every invisible codepoint in Unicode whether or not
+    anyone enumerated it -- contributes nothing.
+
+    This is what closes the Default_Ignorable class the stdlib cannot name.
+    U+3164 HANGUL FILLER is a letter, so `category()` alone would admit it; it
+    is not a Latin or Thai letter, so it is not meaningful here.
+    """
+    if unicodedata.category(char)[0] not in ("L", "N"):
+        return False
+    return unicodedata.name(char, "").split(" ", 1)[0] in _MEANINGFUL_SCRIPTS
+
+
+def _meaningful_len(text: str) -> int:
+    """How many meaningful characters `text` CONTAINS.
+
+    NFKC first, so fullwidth Latin (U+FF28 and friends) and superscript digits
+    fold onto their plain forms and count normally rather than being punished
+    for their encoding.
+    """
+    return sum(1 for ch in unicodedata.normalize("NFKC", text) if _is_meaningful(ch))
 
 
 def _strip_structure(text: str) -> str:
     """Prose only: markers and tool-call blocks removed, whitespace collapsed.
 
-    Invisible characters are removed first so a ZWSP cannot make two identical
-    sentences compare unequal and slip past the copy / duplicate guards.
+    Never-text characters are removed first so a ZWSP cannot pad the length the
+    copy / duplicate guards gate on.
     """
     text = _TOOL_CALL_BLOCK_RE.sub(" ", text)
     text = _STATE_MARKER_RE.sub(" ", text)
-    return " ".join(_strip_invisible(text).split())
+    return " ".join(_strip_never_text(text).split())
+
+
+def _comparison_key(text: str) -> str:
+    """The meaningful skeleton of `text`, for the copy and duplicate guards.
+
+    Both guards ask "is this the same sentence?", and that question must not be
+    answerable with a cosmetic difference. Comparing raw prose let a single
+    U+3164 -- or any other invisible character outside the old blocklist --
+    defeat both. So the comparison is made on what the text *says*: NFKC-folded,
+    reduced to its meaningful characters, casefolded.
+
+    Non-meaningful characters are **deleted, not replaced with a space**. That
+    detail is load-bearing and was wrong in the first draft of this fix:
+    substituting a space lets an invisible character act as a word separator, so
+    'status' with one U+3164 after the third letter keys as 'sta tus' and the
+    copy guard misses it -- exactly the hole being closed. Measured on the
+    corpus, that draft caught 92/300 invisible-variant copies; deleting instead
+    catches 300/300.
+
+    The cost of dropping spacing and punctuation as well is that two turns with
+    the same letters in the same order but different punctuation key alike. That
+    is the safe direction (a false duplicate rejects one entry; a false accept
+    corrupts the corpus permanently) and it is both rare and *wanted*: measured
+    over the 86,215 corpus turns carrying >=40 characters of prose, this key
+    merges 89 of 85,329 key groups, and every merged group is one sentence
+    written twice with a different closing mark ("...have a wonderful day!" vs
+    "...have a wonderful day.") -- the repeated-generic-ack defect the duplicate
+    guard exists to catch.
+
+    The `COPY_GUARD_MIN_LEN` gate is deliberately still measured on the visible
+    prose, not on this key. The key is shorter than the prose (Thai spends ~20%
+    of its length on combining marks), so gating on it would make the guards
+    fire *less* often than before on Thai -- a false-accept regression. Padding
+    can only lengthen the visible prose, so gating there can only make the
+    guards fire more.
+    """
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(ch for ch in folded if _is_meaningful(ch)).casefold()
 
 
 def _copies_a_context_turn(prose: str, request: dict) -> bool:
     normalised = " ".join(prose.split())
     if len(normalised) < COPY_GUARD_MIN_LEN:
+        return False
+    key = _comparison_key(normalised)
+    if not key:
         return False
     for message in request.get("context_window") or []:
         if not isinstance(message, dict):
@@ -244,7 +362,7 @@ def _copies_a_context_turn(prose: str, request: dict) -> bool:
         if not isinstance(other, str):
             continue
         other = _strip_structure(other)
-        if len(other) >= COPY_GUARD_MIN_LEN and other == normalised:
+        if len(other) >= COPY_GUARD_MIN_LEN and _comparison_key(other) == key:
             return True
     return False
 
@@ -304,8 +422,11 @@ def validate_entry(entry: object, request: object) -> list[str]:
         violations.append(
             f"content contains the chat-template special token {special.group(0)!r}"
         )
-    if _INVISIBLE_RE.search(content):
-        violations.append("content contains zero-width or control characters")
+    if any(_is_never_text(ch) for ch in content):
+        violations.append(
+            "content contains control, format, private-use, surrogate or "
+            "unassigned characters (zero-width and bidi controls among them)"
+        )
 
     required_marker: str = request["required_marker"]
     if required_marker:
@@ -330,12 +451,18 @@ def validate_entry(entry: object, request: object) -> list[str]:
     # Both roles. A `user` ack carries no marker, so MIN_CONTENT_LEN was its only
     # length rule -- and that counts padding, so "x" plus 19 spaces passed with
     # no content at all. 1,673 of the 3,902 inserts are acks.
-    prose_len = _visible_prose_len(prose)
-    if prose_len < MIN_PROSE_LEN:
+    #
+    # Stated positively: the prose must CONTAIN this many meaningful characters.
+    # Length of any other kind -- spaces, dots, braille blanks, Hangul fillers,
+    # variation selectors -- buys nothing, so there is no enumeration to keep up
+    # to date and no next invisible codepoint to be caught out by.
+    meaningful = _meaningful_len(prose)
+    if meaningful < MIN_MEANINGFUL_LEN:
         where = "after the marker" if required_marker else "in the insert"
         violations.append(
-            f"only {prose_len} characters of visible prose {where} "
-            f"(minimum {MIN_PROSE_LEN})"
+            f"the prose {where} carries only {meaningful} meaningful characters "
+            f"(Latin/Thai letters or digits; minimum {MIN_MEANINGFUL_LEN}) -- "
+            "padding, punctuation and invisible characters do not count"
         )
 
     if not (MIN_CONTENT_LEN <= len(content) <= MAX_CONTENT_LEN):
@@ -711,21 +838,26 @@ def _reject_duplicate_content(accepted: list[dict], by_id: dict) -> tuple[list[d
     exchange, not as one sentence twice). The first occurrence stands; later
     ones are rejected. Short prose is exempt on the same reasoning as the
     context copy-guard: brief acknowledgements legitimately repeat.
+
+    Entries are compared on their meaningful skeleton (`_comparison_key`), so
+    re-pasting the same sentence with one extra invisible character -- which
+    defeated the raw-text comparison this replaced -- is still a duplicate.
     """
     kept: list[dict] = []
     rejected: list[dict] = []
     first_seen: dict[str, str] = {}
     for entry in accepted:
         prose = _strip_structure(entry["content"])
-        if len(prose) >= COPY_GUARD_MIN_LEN and prose in first_seen:
+        key = _comparison_key(prose)
+        if len(prose) >= COPY_GUARD_MIN_LEN and key and key in first_seen:
             rejected.append({
                 "insert_id": entry["insert_id"],
                 "conversation_id": entry.get("conversation_id", ""),
                 "reasons": [f"content duplicates the prose already authored for "
-                            f"{first_seen[prose]} in this batch"],
+                            f"{first_seen[key]} in this batch"],
             })
             continue
-        first_seen.setdefault(prose, entry["insert_id"])
+        first_seen.setdefault(key, entry["insert_id"])
         kept.append(entry)
     return kept, rejected
 

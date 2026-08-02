@@ -368,3 +368,91 @@ def test_load_ledger_reads_a_well_formed_ledger(tmp_path):
     )
     entries = module._load_ledger(ledger_dir)
     assert set(entries) == {"f:0:0", "f:0:1"}
+
+
+# ---------------------------------------------------------------------------
+# Fix round 2: explicit encodings
+#
+# This file's IO used the locale default. The corpus and the authored ledger are
+# largely Thai, so under LC_ALL=C every read died with a bare UnicodeDecodeError
+# naming neither the file nor the cause.
+# ---------------------------------------------------------------------------
+
+THAI_LEDGER_LINE = json.dumps(
+    {"insert_id": "f:0:0", "content": "ขอบคุณค่ะ รับทราบแล้วนะคะ"},
+    ensure_ascii=False,
+)
+
+
+def test_load_ledger_reads_thai_content(tmp_path):
+    module = _load_ledger_module()
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_text(THAI_LEDGER_LINE + "\n", encoding="utf-8")
+    entries = module._load_ledger(ledger_dir)
+    assert entries["f:0:0"]["content"] == "ขอบคุณค่ะ รับทราบแล้วนะคะ"
+
+
+def test_load_ledger_tolerates_a_utf8_bom(tmp_path):
+    """A BOM-prefixed ledger used to be reported as invalid JSON on line 1,
+    which blames the entry rather than the encoding."""
+    module = _load_ledger_module()
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_bytes(
+        b"\xef\xbb\xbf" + (THAI_LEDGER_LINE + "\n").encode("utf-8")
+    )
+    entries = module._load_ledger(ledger_dir)
+    assert set(entries) == {"f:0:0"}
+
+
+def test_load_ledger_reads_thai_under_a_c_locale(tmp_path):
+    """The actual reproduction: a child interpreter with LC_ALL=C, where the
+    locale default encoding is ASCII. Runs the real module, not a stub."""
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    (ledger_dir / "accepted.jsonl").write_text(THAI_LEDGER_LINE + "\n", encoding="utf-8")
+    program = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('m', r'{SCRIPT}')\n"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        "from pathlib import Path\n"
+        f"e = m._load_ledger(Path(r'{ledger_dir}'))\n"
+        "print(len(e))\n"
+    )
+    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    env.pop("PYTHONUTF8", None)
+    env.pop("PYTHONIOENCODING", None)
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", "-c", program],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"
+
+
+def test_iter_records_reads_thai_corpus_under_a_c_locale(tmp_path):
+    """Same defect on the corpus reader, which every subcommand goes through."""
+    input_dir = tmp_path / "in"
+    input_dir.mkdir()
+    (input_dir / "l1.jsonl").write_text(
+        json.dumps({"conversation_id": "L1_1", "messages": [_amsg("สวัสดีค่ะ")]},
+                   ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    program = (
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('m', r'{SCRIPT}')\n"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+        "from pathlib import Path\n"
+        f"print(len(list(m._iter_records(Path(r'{input_dir}')))))\n"
+    )
+    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    env.pop("PYTHONUTF8", None)
+    env.pop("PYTHONIOENCODING", None)
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", "-c", program],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"

@@ -233,13 +233,15 @@ nothing beyond it, and nothing on it goes unenforced.
 6. **`20 <= len(content) <= 600`**, counted on the whole string **including the
    marker**. Markers run 25–60 characters, so an assistant insert has roughly 540
    characters of prose budget — one or two sentences, not a paragraph.
-   **Both roles additionally need at least 10 characters of *visible* prose** —
-   measured with invisible characters removed and runs of whitespace collapsed, so
-   padding buys nothing. For an assistant insert it is measured after the marker (a
-   long marker plus a newline would otherwise clear the 20-character floor while
-   saying nothing); for a `user` insert it is measured on the whole content (the
-   20-character floor counts spaces, so `"x"` plus 19 spaces would otherwise pass).
-   Ten is the length of `"ok, thanks"` — any real acknowledgement clears it easily.
+   **Both roles additionally need the prose to CONTAIN at least 10 meaningful
+   characters** — letters or digits of the Latin or Thai script. That is a positive
+   rule: spaces, punctuation, symbols, combining marks and every invisible character
+   count as zero, so padding of any kind buys nothing. For an assistant insert it is
+   measured after the marker (a long marker plus a newline would otherwise clear the
+   20-character floor while saying nothing); for a `user` insert it is measured on the
+   whole content (the 20-character floor counts spaces, so `"x"` plus 19 spaces would
+   otherwise pass). Any real acknowledgement clears 10 easily — the shortest genuine
+   turn in the whole corpus carries 12.
 7. **Match the request's `language` in script.** A `th` or `code_switch` entry must
    contain at least one Thai **letter**; an `en` entry must contain none. This is the
    one quality failure invisible to every other check, so it is gated: an all-English
@@ -254,9 +256,12 @@ nothing beyond it, and nothing on it goes unenforced.
    should be writing.
 8. **Echo `insert_id` and `conversation_id` from the request verbatim.** A mismatch
    means the content was authored against the wrong request and is rejected.
-9. **`content` must not be a verbatim copy of a message already in the
+9. **`content` must not be a copy of a message already in the
    `context_window`, nor of another entry you wrote in the same batch** (checked for
-   copies of 40 characters or more; a short repeated acknowledgement is fine). Author
+   copies of 40 characters or more; a short repeated acknowledgement is fine).
+   Comparison ignores case, punctuation, spacing and invisible characters, so
+   changing a comma or slipping in a zero-width character does not make a copy
+   original — only different words do. Author
    a new turn, do not echo an existing one and do not paste one sentence into several
    inserts — that is especially wrong inside a closing pair, where the `user` ack and
    the terminal turn have to read as one exchange rather than one sentence twice.
@@ -267,13 +272,18 @@ nothing beyond it, and nothing on it goes unenforced.
     provenance a human reviewer reads in the ledger diff.
 11. **`schema_version` must be the integer `1`** if you set it at all — `1`, not `"1"`.
 12. **No invisible characters.** Zero-width and format characters (U+200B ZWSP,
-    U+200C/D ZWNJ/ZWJ, U+FEFF, U+2060, the bidi controls, U+00AD soft hyphen) and
-    control characters other than newline and tab are rejected outright. They survive
-    `strip()`, so they can fake a prose length while contributing nothing, and they
-    corrupt the corpus silently. Write plain text.
+    U+200C/D ZWNJ/ZWJ, U+FEFF, U+2060, the bidi controls, U+00AD soft hyphen, the tag
+    block) and control characters other than newline and tab are rejected outright.
+    They survive `strip()` and corrupt the corpus silently. Invisible characters that
+    are *not* format characters — U+3164 HANGUL FILLER, U+2800 BRAILLE PATTERN BLANK,
+    the variation selectors, U+034F — are not rejected by name, but they count for
+    nothing against rule 6's meaningful-character floor, so a turn padded with them
+    fails anyway. Write plain text.
 13. **No chat-template special tokens.** Anything shaped like `<|im_end|>`,
     `<|eot_id|>`, `<|user|>`, `<start_of_turn>`, `<end_of_turn>`, `<s>`, `</s>`,
-    `<bos>`, `[INST]`, `[gMASK]` or `<extra_id_0>` is rejected. Task A is templated
+    `<bos>`, `[INST]`, `[gMASK]`, `<extra_id_0>`, `<<SYS>>`, `<think>`/`</think>`,
+    `<tool_response>`, `<unused0>`, `<reserved_special_token_0>`, or Mistral's
+    `[TOOL_CALLS]` / `[AVAILABLE_TOOLS]` / `[TOOL_RESULTS]` is rejected. Task A is templated
     for several model families, and a sentinel baked into `content` is re-read as a
     turn boundary at training time. `[STATE: … ]` is the one bracketed token the
     corpus legitimately contains.

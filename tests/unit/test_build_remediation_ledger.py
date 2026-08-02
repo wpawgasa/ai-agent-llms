@@ -884,25 +884,25 @@ def test_thai_letters_still_satisfy_the_language_rule_after_narrowing():
 
 def test_rejects_prose_padded_with_zero_width_characters():
     """U+200B is not whitespace to Python, so str.strip() left it in place and
-    the 10-character prose floor was satisfied by nothing at all."""
+    the prose floor was satisfied by nothing at all."""
     entry = _entry(content=f"{MARKER}\n" + "​" * 40)
     violations = brl.validate_entry(entry, _request())
-    assert any("visible prose" in v for v in violations)
-    assert any("zero-width" in v for v in violations)
+    assert any("meaningful characters" in v for v in violations)
+    assert any("control, format" in v for v in violations)
 
 
 @pytest.mark.parametrize("char", ["​", "‌", "‍", "﻿", "⁠", "­"])
 def test_rejects_each_zero_width_character_family(char):
     entry = _user_entry(content="ขอบคุณค่ะ รับทราบแล้วนะคะ" + char)
     violations = brl.validate_entry(entry, _user_request(language="th"))
-    assert any("zero-width or control" in v for v in violations)
+    assert any("control, format" in v for v in violations)
 
 
 def test_rejects_user_ack_that_is_one_character_of_padding():
     """1,673 of the 3,902 inserts are acks and had no prose floor at all."""
     entry = _user_entry(content="x" + " " * 19, language="en")
     violations = brl.validate_entry(entry, _user_request(language="en"))
-    assert any("visible prose" in v for v in violations)
+    assert any("meaningful characters" in v for v in violations)
 
 
 def test_accepts_a_short_but_real_english_user_ack():
@@ -1046,3 +1046,188 @@ def test_limit_always_takes_at_least_one_whole_conversation():
 def test_limit_edge_values(limit, expected):
     pending = [_insert(c, i) for c in range(2) for i in range(4)]
     assert len(brl.limit_pending(pending, limit)) == expected
+
+
+# ---------------------------------------------------------------------------
+# Fix round 2: the meaningful-content rule
+#
+# The prose floor used to measure "visible" length -- everything not on an
+# enumerated blocklist of invisible codepoints -- so the no-empty-turn invariant
+# was only as good as that list, and it had holes. Each case below is a turn
+# that carries no message at all and was ACCEPTED before the rule was restated
+# as "the prose must contain N meaningful characters".
+# ---------------------------------------------------------------------------
+
+# All are invisible or content-free, and none is `Cf`, so none was on the old
+# blocklist. Categories are noted because they are why enumeration kept losing:
+# the Hangul fillers are *letters*.
+INVISIBLE_BUT_NOT_FORMAT = [
+    pytest.param("ㅤ", id="U+3164-hangul-filler-Lo"),
+    pytest.param("⠀", id="U+2800-braille-blank-So"),
+    pytest.param("️", id="U+FE0F-variation-selector-16-Mn"),
+    pytest.param("\U000e0100", id="U+E0100-variation-selector-17-Mn"),
+    pytest.param("ᅟ", id="U+115F-choseong-filler-Lo"),
+    pytest.param("ᅠ", id="U+1160-jungseong-filler-Lo"),
+    pytest.param("ﾠ", id="U+FFA0-halfwidth-filler-Lo"),
+    pytest.param("឴", id="U+17B4-khmer-vowel-aq-Mn"),
+    pytest.param("឵", id="U+17B5-khmer-vowel-aa-Mn"),
+    pytest.param("͏", id="U+034F-combining-grapheme-joiner-Mn"),
+    pytest.param("⁥", id="U+2065-unassigned-Cn"),
+    pytest.param("\U000e0020", id="U+E0020-tag-space-Cf"),
+]
+
+
+@pytest.mark.parametrize("char", INVISIBLE_BUT_NOT_FORMAT)
+def test_rejects_assistant_turn_made_entirely_of_an_invisible_character(char):
+    entry = _entry(content=f"{MARKER}\n" + char * 40)
+    violations = brl.validate_entry(entry, _request())
+    assert any("meaningful characters" in v for v in violations), violations
+
+
+@pytest.mark.parametrize("char", INVISIBLE_BUT_NOT_FORMAT)
+def test_rejects_user_ack_made_entirely_of_an_invisible_character(char):
+    entry = _user_entry(content=char * 40)
+    violations = brl.validate_entry(entry, _user_request(language="th"))
+    assert any("meaningful characters" in v for v in violations), violations
+
+
+def test_rejects_a_body_of_dots():
+    """The old floor counted any visible character, so 30 dots cleared it."""
+    entry = _entry(content=f"{MARKER}\n" + "." * 30)
+    violations = brl.validate_entry(entry, _request())
+    assert any("meaningful characters" in v for v in violations)
+
+
+def test_rejects_a_body_of_punctuation_and_spaces():
+    entry = _entry(content=f"{MARKER}\n" + ". " * 20)
+    violations = brl.validate_entry(entry, _request())
+    assert any("meaningful characters" in v for v in violations)
+
+
+def test_rejects_prose_whose_letters_are_all_outside_the_corpus_scripts():
+    """Positive rule: content must contain Latin/Thai letters or digits. A body
+    of Hangul syllables is real text, but it is not this corpus's text, and it
+    is the same category of accident as a filler character."""
+    entry = _entry(content=f"{MARKER}\n" + "가" * 30)
+    violations = brl.validate_entry(entry, _request())
+    assert any("meaningful characters" in v for v in violations)
+
+
+def test_accepts_a_short_real_thai_ack():
+    """The floor must not cost a legitimate short Thai acknowledgement. Thai
+    spends ~20% of its length on combining marks, which are not meaningful on
+    their own, so this is the case most at risk from the change."""
+    entry = _user_entry(content="ขอบคุณค่ะ รับทราบนะคะ")
+    assert brl.validate_entry(entry, _user_request(language="th")) == []
+
+
+def test_accepts_a_short_real_english_ack():
+    entry = _user_entry(content="ok, thanks -- please go ahead", language="en")
+    assert brl.validate_entry(entry, _user_request(language="en")) == []
+
+
+def test_accepts_prose_containing_an_emoji_alongside_real_content():
+    """Only the *floor* is positive: a turn is not rejected for containing a
+    non-meaningful character, it is rejected for containing nothing else."""
+    entry = _entry(content=f"{MARKER}\nAll set on my side, thanks for waiting ☀")
+    assert brl.validate_entry(entry, _request()) == []
+
+
+def test_accepts_fullwidth_latin_because_the_count_is_nfkc_folded():
+    # Fullwidth forms are the point of this test, hence the noqa.
+    entry = _user_entry(content="Ｏｋａｙ, please proceed with that", language="en")  # noqa: RUF001
+    assert brl.validate_entry(entry, _user_request(language="en")) == []
+
+
+# --- the guards -------------------------------------------------------------
+
+_LONG_TH = "สวัสดีค่ะ ขอบคุณสำหรับข้อมูลนะคะ ระบบกำลังตรวจสอบรายการให้เรียบร้อยแล้วค่ะ"
+
+
+@pytest.mark.parametrize("char", INVISIBLE_BUT_NOT_FORMAT[:4])
+def test_copy_guard_survives_one_invisible_character(char):
+    """A verbatim copy of a context turn plus one invisible character defeated
+    the raw-text comparison."""
+    request = _user_request(
+        language="th",
+        context_window=[{"index": 2, "role": "assistant", "content": _LONG_TH}],
+    )
+    entry = _user_entry(content=_LONG_TH[:5] + char + _LONG_TH[5:])
+    violations = brl.validate_entry(entry, request)
+    assert any("copies a message" in v for v in violations), violations
+
+
+def test_copy_guard_survives_a_punctuation_change():
+    request = _user_request(
+        language="th",
+        context_window=[{"index": 2, "role": "assistant", "content": _LONG_TH}],
+    )
+    entry = _user_entry(content=_LONG_TH + "!")
+    violations = brl.validate_entry(entry, request)
+    assert any("copies a message" in v for v in violations), violations
+
+
+def test_copy_guard_still_allows_genuinely_different_prose():
+    request = _user_request(
+        language="th",
+        context_window=[{"index": 2, "role": "assistant", "content": _LONG_TH}],
+    )
+    entry = _user_entry(content="รับทราบค่ะ รบกวนช่วยตรวจสอบยอดคงเหลือให้ด้วยนะคะ")
+    assert brl.validate_entry(entry, request) == []
+
+
+@pytest.mark.parametrize("char", INVISIBLE_BUT_NOT_FORMAT[:4])
+def test_duplicate_guard_survives_one_invisible_character(char):
+    first = {"insert_id": "f:0:0", "conversation_id": "L1_009", "content": _LONG_TH}
+    second = {"insert_id": "f:0:1", "conversation_id": "L1_009",
+              "content": _LONG_TH[:5] + char + _LONG_TH[5:]}
+    kept, rejected = brl._reject_duplicate_content([first, second], {})
+    assert [e["insert_id"] for e in kept] == ["f:0:0"]
+    assert len(rejected) == 1
+    assert "duplicates the prose" in rejected[0]["reasons"][0]
+
+
+def test_duplicate_guard_keeps_two_genuinely_different_turns():
+    first = {"insert_id": "f:0:0", "conversation_id": "L1_009", "content": _LONG_TH}
+    second = {"insert_id": "f:0:1", "conversation_id": "L1_009",
+              "content": "รับทราบค่ะ รบกวนช่วยตรวจสอบยอดคงเหลือในบัญชีให้ด้วยนะคะ ขอบคุณมากค่ะ"}
+    kept, rejected = brl._reject_duplicate_content([first, second], {})
+    assert len(kept) == 2 and rejected == []
+
+
+def test_comparison_key_deletes_rather_than_spaces_invisibles():
+    """Regression: substituting a space let an invisible character act as a word
+    separator, so 'status' keyed as 'sta tus' and the guards missed the copy."""
+    assert brl._comparison_key("status") == brl._comparison_key("staㅤtus")
+
+
+# --- special tokens ---------------------------------------------------------
+
+@pytest.mark.parametrize("token", [
+    "[TOOL_CALLS]", "[AVAILABLE_TOOLS]", "[TOOL_RESULTS]",   # Mistral v3
+    "<<SYS>>",                                                # Llama 2
+    "<think>", "</think>",                                    # reasoning models
+    "<unused0>", "<unused99>",                                # Gemma reserved
+    "<reserved_special_token_0>",                             # Llama 3 reserved
+    "<tool_response>", "</tool_response>",                    # Hermes/Qwen
+])
+def test_rejects_additional_chat_template_sentinels(token):
+    entry = _entry(content=f"{MARKER}\nUnderstood, proceeding now {token} all done.")
+    violations = brl.validate_entry(entry, _request())
+    assert any("special token" in v for v in violations), violations
+
+
+@pytest.mark.parametrize("text", [
+    "Your reference is [1] and the follow-up is [2].",
+    "Please review [the attached summary] before we proceed today.",
+    "The status is [PENDING] until the review completes tomorrow.",
+    "Bracketed prose like [see notes] must not trip the sentinel rule.",
+])
+def test_ordinary_bracketed_prose_is_not_a_special_token(text):
+    entry = _entry(content=f"{MARKER}\n{text}")
+    assert brl.validate_entry(entry, _request()) == []
+
+
+def test_state_marker_is_not_a_special_token():
+    """The gate's own required marker must survive the widened sentinel rule."""
+    assert brl._SPECIAL_TOKEN_RE.search(MARKER) is None

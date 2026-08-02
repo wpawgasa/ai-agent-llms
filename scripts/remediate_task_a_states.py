@@ -38,7 +38,11 @@ from llm_workflow_agents.data.system_prompt import (  # noqa: E402
 def _iter_records(input_dir: Path):
     for path in sorted(glob.glob(str(input_dir / "*.jsonl"))):
         stem = Path(path).stem
-        with open(path) as fh:
+        # utf-8-sig, not the locale default: the corpus is Thai, so under
+        # LC_ALL=C an unqualified open() dies with a bare UnicodeDecodeError.
+        # The -sig codec also eats a leading BOM, which would otherwise make
+        # line 1 look like invalid JSON.
+        with open(path, encoding="utf-8-sig") as fh:
             for line_index, line in enumerate(fh):
                 if not line.strip():
                     continue
@@ -115,7 +119,12 @@ def cmd_triage(args: argparse.Namespace) -> int:
         "by_language": dict(by_language),
         "records": records_out,
     }
-    Path(args.report).write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    # ensure_ascii=False keeps Thai readable in the report, which makes the
+    # encoding explicit rather than locale-dependent: under LC_ALL=C an
+    # unqualified write_text() would raise UnicodeEncodeError here.
+    Path(args.report).write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"Triage: {totals['rows']} rows -> {dict(by_move)}")
     return 0
 
@@ -137,7 +146,11 @@ def _load_ledger(ledger_dir: Path | None) -> dict[str, dict]:
     if not accepted.exists():
         return {}
     entries = {}
-    for number, line in enumerate(accepted.read_text().splitlines(), start=1):
+    # utf-8-sig: authored ledger prose is mostly Thai (LC_ALL=C would otherwise
+    # raise a bare UnicodeDecodeError here), and a BOM-prefixed ledger should
+    # load rather than be reported as invalid JSON on line 1.
+    ledger_text = accepted.read_text(encoding="utf-8-sig")
+    for number, line in enumerate(ledger_text.splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -267,7 +280,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     for stem, records in by_file.items():
         out_path = output_dir / f"{stem}.jsonl"
-        with open(out_path, "w") as fh:
+        with open(out_path, "w", encoding="utf-8") as fh:
             for rec in records:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
