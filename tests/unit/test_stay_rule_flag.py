@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import re
+import warnings
 
 import pytest
 
@@ -81,7 +82,6 @@ def test_rule_2_worked_example_is_a_self_loop():
 def test_retry_rule_states_a_budget_and_fallback():
     rules = system_prompt.FORMAT_RULES
     assert "retry" in rules.lower()
-    assert "at most 1 time(s) total" in rules
     assert "hand off" in rules
     # The vague v1 wording must be gone.
     assert "attempt recovery before escalating" not in rules
@@ -90,9 +90,72 @@ def test_retry_rule_states_a_budget_and_fallback():
     assert "{retry_budget}" not in rules
 
 
-def test_retry_budget_is_parameterised():
-    """Task 8 wires a caller-supplied budget through; the renderer must honour it."""
-    assert "at most 3 time(s) total" in system_prompt._format_rules(retry_budget=3)
+# --------------------------------------------------------------------------
+# Retry-budget wording — two branches, both must be coherent and grammatical
+#
+# The budget counts TOTAL attempts including the first, so budget 1 means "no
+# retry at all". The original wording said "you may retry the SAME call ...
+# retry at most 1 time(s) total (including the first attempt)" — which both
+# contradicts itself at budget 1 and renders "1 time(s)". L1/L2 hold budget 1
+# permanently, so that text would be frozen into every L1/L2 corpus row.
+# --------------------------------------------------------------------------
+
+
+def _retry_rule_text(text):
+    """Extract the tool-error rule block (rule 8 in v2) from rendered rules."""
+    match = re.search(r"^8\. .*?(?=\n\n9\. )", text, re.S | re.M)
+    assert match, "could not locate the tool-error rule (rule 8) in the rendered text"
+    return match.group(0)
+
+
+@pytest.mark.parametrize("budget", [1, 2, 3])
+def test_retry_rule_never_renders_the_plural_placeholder(budget):
+    """No "1 time(s)" — the wording must be grammatical at every spec budget
+    (L1-L2: 1, L3-L4: 2, L5: 3)."""
+    text = system_prompt._format_rules(retry_budget=budget)
+    assert "time(s)" not in text
+    assert "(s)" not in _retry_rule_text(text)
+    assert "{n}" not in text and "{retry_budget}" not in text
+
+
+def test_retry_rule_at_budget_1_forbids_retrying():
+    """Budget 1 means one attempt: it must NOT invite a retry it then forbids."""
+    rule = _retry_rule_text(system_prompt._format_rules(retry_budget=1))
+    assert "do NOT retry it" in rule
+    assert "one attempt per" in rule
+    # The permissive wording belongs only to the budget>1 branch.
+    assert "you may retry" not in rule
+    # A bare "1" budget must not be interpolated as a count anywhere.
+    assert "1 attempt" not in rule
+
+
+@pytest.mark.parametrize("budget", [2, 3])
+def test_retry_rule_above_budget_1_permits_retries_up_to_the_cap(budget):
+    rule = _retry_rule_text(system_prompt._format_rules(retry_budget=budget))
+    assert "you may retry the SAME call" in rule
+    assert f"{budget} attempts at that call in total" in rule
+    assert "counting the first" in rule
+    assert "do NOT retry it" not in rule
+
+
+@pytest.mark.parametrize("budget", [1, 2, 3])
+def test_retry_rule_states_the_same_policy_at_every_budget(budget):
+    """Both branches must carry the identical underlying policy."""
+    rule = _retry_rule_text(system_prompt._format_rules(retry_budget=budget))
+    assert "[STATE: X → X]" in rule            # annotate the self-loop
+    assert "never advance" in rule.lower()      # never advance while retrying
+    assert "error path if the script names one" in rule   # scripted fallback
+    assert "cannot be completed right now" in rule        # unscripted fallback
+    assert "hand off" in rule
+    assert "Do not invent a transition" in rule
+
+
+def test_retry_budget_below_1_falls_back_to_the_no_retry_wording():
+    """Degenerate budgets must not emit "0 attempts"/"-1 attempts" prose."""
+    for budget in (0, -1):
+        rule = _retry_rule_text(system_prompt._format_rules(retry_budget=budget))
+        assert "do NOT retry it" in rule
+        assert "attempts at that call" not in rule
 
 
 def test_stay_rule_states_the_policy_not_just_syntax():
@@ -130,7 +193,29 @@ def test_only_exact_0_disables_the_rule(monkeypatch):
 @pytest.mark.parametrize("value", [None, "1", "true", "yes", "", "00", "0 "])
 def test_anything_other_than_0_leaves_the_rule_enabled(monkeypatch, value):
     """Opt-out is strict: only the exact string "0" reverts to the v1 prompt."""
-    assert _MARKER in _reload_with(monkeypatch, value).FORMAT_RULES
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        assert _MARKER in _reload_with(monkeypatch, value).FORMAT_RULES
+
+
+@pytest.mark.parametrize("value", ["true", "yes", "", "00", "0 ", "false", "off"])
+def test_unrecognised_flag_value_warns(monkeypatch, value):
+    """`!= "0"` fails OPEN toward v2: "false"/"off"/"0 " silently render the v2
+    prompt when v1 was probably meant, and that is the direction that breaks
+    checkpoint comparability. Parsing stays exact (v1 bytes must not depend on
+    fuzzy matching) but a typo must surface rather than quietly produce the
+    wrong corpus."""
+    with pytest.warns(RuntimeWarning, match="TASK_A_STAY_RULE"):
+        reloaded = _reload_with(monkeypatch, value)
+    # Warning only — the resolved behaviour is unchanged (still enabled/v2).
+    assert _MARKER in reloaded.FORMAT_RULES
+
+
+@pytest.mark.parametrize("value", [None, "0", "1"])
+def test_recognised_flag_values_do_not_warn(monkeypatch, value):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        _reload_with(monkeypatch, value)
 
 
 def test_disabled_prompt_is_byte_identical_to_v1_baseline(monkeypatch):

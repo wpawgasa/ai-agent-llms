@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from typing import Any
 
 from llm_workflow_agents.data._workflow_script import build_workflow_script
@@ -31,7 +32,35 @@ from llm_workflow_agents.data._workflow_script import build_workflow_script
 # (the defect this revision fixes), and the tool-error rule is the vague
 # one-liner with no retry budget. Anything that changes v1's rendered bytes
 # breaks checkpoint comparability and is caught by the golden test.
-_STAY_RULE_ENABLED = os.environ.get("TASK_A_STAY_RULE", "1") != "0"
+def _resolve_stay_rule_flag() -> bool:
+    """Read TASK_A_STAY_RULE. Only the exact string "0" opts out.
+
+    Parsing is deliberately exact rather than lenient: the flag selects which
+    prompt revision gets frozen into a corpus, so "close enough" matching is the
+    wrong trade. But `!= "0"` fails OPEN toward v2 — a typo like "false", "off"
+    or a stray trailing space silently yields the v2 prompt when v1 was meant,
+    and that is the direction that breaks checkpoint comparability. So an
+    unrecognised value still resolves to enabled (no behaviour change, v1 bytes
+    untouched) but warns, so the typo surfaces instead of quietly producing the
+    wrong corpus.
+    """
+    raw = os.environ.get("TASK_A_STAY_RULE")
+    if raw is None:
+        return True
+    if raw not in ("0", "1"):
+        warnings.warn(
+            f"TASK_A_STAY_RULE={raw!r} is not a recognised value; expected "
+            '"1" (default — the v2 prompt with the stay rule) or "0" (opt out to '
+            "the frozen v1 prompt). Only the exact string \"0\" disables it, so "
+            "this value resolves to ENABLED (v2). If you meant to opt out, set "
+            'TASK_A_STAY_RULE=0 exactly.',
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return raw != "0"
+
+
+_STAY_RULE_ENABLED = _resolve_stay_rule_flag()
 
 STAY_RULE = """\
 2. Tool-execution turns do NOT advance. When your turn issues a <tool_call>, you have not
@@ -44,15 +73,27 @@ STAY_RULE = """\
    result confirms success — it does NOT mean advance on the turn that issues the call.
    Never announce a state you do not yet have the evidence to be in."""
 
-# v2 tool-error rule. Formatted with the rule number and the retry budget.
-_RETRY_RULE = """\
-{n}. If a tool returns an error, stay in the current state and you may retry the SAME
-   call, annotating [STATE: X → X] on every retry — never advance while retrying. Retry
-   at most {retry_budget} time(s) total (including the first attempt). If it still fails
-   after that budget, stop retrying: follow the workflow's error path if the script names
-   one, otherwise say plainly that this step cannot be completed right now and that you
-   will hand off / follow up, while remaining in [STATE: X → X]. Do not invent a
-   transition just to move past a failure."""
+# v2 tool-error rule, in two forms. The budget counts TOTAL attempts including the
+# first, so budget 1 means "no retry at all" — phrasing that as "retry at most 1
+# time(s)" is both self-contradictory and ungrammatical, and L1/L2 keep budget 1
+# permanently, so that text would be frozen into every L1/L2 corpus row. The two
+# forms state the same policy; pick with _retry_rule().
+_RETRY_RULE_NO_RETRY = """\
+{n}. If a tool returns an error, do NOT retry it — this workflow allows one attempt per
+   call. Stay in the current state, keep annotating [STATE: X → X], and never advance on a
+   failure: follow the workflow's error path if the script names one, otherwise say plainly
+   that this step cannot be completed right now and that you will hand off / follow up,
+   while remaining in [STATE: X → X]. Do not invent a transition just to move past a
+   failure."""
+
+_RETRY_RULE_WITH_RETRIES = """\
+{n}. If a tool returns an error, stay in the current state and you may retry the SAME call,
+   annotating [STATE: X → X] on every attempt — never advance while retrying. You get
+   {retry_budget} attempts at that call in total, counting the first; once they are used up, stop
+   retrying: follow the workflow's error path if the script names one, otherwise say plainly
+   that this step cannot be completed right now and that you will hand off / follow up,
+   while remaining in [STATE: X → X]. Do not invent a transition just to move past a
+   failure."""
 
 # v1 tool-error rule, frozen. Note v1 renders its final three rules separated by
 # SINGLE newlines (every other rule is separated by a blank line); that spacing
@@ -60,13 +101,28 @@ _RETRY_RULE = """\
 _RETRY_RULE_V1 = "{n}. If a tool returns an error, attempt recovery before escalating."
 
 
+def _retry_rule(n: int, retry_budget: int) -> str:
+    """Render the v2 tool-error rule for *retry_budget* total attempts.
+
+    ``retry_budget`` counts the first attempt, so a budget of 1 permits no retry
+    and selects the no-retry wording. Budgets below 1 are treated the same way
+    (there is no coherent "fewer than one attempt" policy to state, and refusing
+    to render would fail a corpus build rather than a config check).
+    """
+    if retry_budget <= 1:
+        return _RETRY_RULE_NO_RETRY.format(n=n)
+    return _RETRY_RULE_WITH_RETRIES.format(n=n, retry_budget=retry_budget)
+
+
 def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
     """Render FORMAT_RULES.
 
     Args:
-        retry_budget: Max total attempts for a failing tool call, rendered into
-            the v2 tool-error rule. Ignored when *stay_rule* is False, because
-            the v1 rule states no budget and its bytes are frozen.
+        retry_budget: Max TOTAL attempts for a failing tool call (the first
+            attempt counts), rendered into the v2 tool-error rule. A budget of 1
+            therefore permits no retry and selects different wording — see
+            :func:`_retry_rule`. Ignored when *stay_rule* is False, because the
+            v1 rule states no budget and its bytes are frozen.
         stay_rule: Select the prompt revision. ``True`` → v2 (stay rule, fixed
             worked example, retry budget). ``False`` → the frozen v1 text.
             ``None`` (default) → follow the ``TASK_A_STAY_RULE`` env flag.
@@ -145,7 +201,7 @@ def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
     never_skip_rule = f"{next_num + 2}. Never skip states or make invalid transitions."
 
     if stay_rule:
-        rules.append(_RETRY_RULE.format(n=next_num, retry_budget=retry_budget))
+        rules.append(_retry_rule(next_num, retry_budget))
         rules.append(terminal_rule)
         rules.append(never_skip_rule)
     else:
