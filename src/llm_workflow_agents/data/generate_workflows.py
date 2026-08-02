@@ -50,7 +50,11 @@ from llm_workflow_agents.data.domain_registry import (
     OutboundReason,
     classify_intent,
 )
-from llm_workflow_agents.data.system_prompt import FORMAT_RULES as _FORMAT_RULES
+# _format_rules is module-private to system_prompt, but it is the only entry
+# point that renders FORMAT_RULES at a caller-chosen retry budget; the exported
+# FORMAT_RULES constant is frozen at budget 1. Imported (rather than
+# re-implemented) so system_prompt stays the single source of truth.
+from llm_workflow_agents.data.system_prompt import _format_rules as _render_format_rules
 
 logger = structlog.get_logger(__name__)
 
@@ -549,7 +553,7 @@ def walk_path(
     return path
 
 
-# _FORMAT_RULES is imported from data.system_prompt (single source of truth)
+# FORMAT_RULES is rendered via data.system_prompt._format_rules (single source of truth)
 
 _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
     "en": {
@@ -591,6 +595,7 @@ def _graph_to_script(
     tool_schemas: list[dict[str, Any]],
     language: str = "en",
     messages: list[dict[str, Any]] | None = None,
+    retry_budget: int = 1,
 ) -> str:
     """Convert a WorkflowGraph to a natural language script.
 
@@ -600,6 +605,11 @@ def _graph_to_script(
     ``state.tools`` field — fixes the data-generation bug where ``state.tools``
     was set randomly by ``rng.randint(0, 2)`` independent of conversation
     content (~60% of samples have script-vs-GT mismatches).
+
+    ``retry_budget`` is the sample's ``ComplexitySpec.retry_budget`` — TOTAL
+    attempts at a failing tool call, counting the first — and is rendered into
+    the script's retry note. Its default of 1 (no retry) keeps every caller that
+    has no spec in hand on the pre-Task-9 wording.
     """
     from llm_workflow_agents.data._workflow_script import build_workflow_script
 
@@ -609,10 +619,7 @@ def _graph_to_script(
         language=language,
         messages=messages,
         tool_turn_semantics=True,
-        # TODO(Task 9): thread the spec's actual retry budget once
-        # ComplexitySpec grows a retry_budget field; 1 is a placeholder that
-        # matches today's implicit no-retry behavior.
-        retry_budget=1,
+        retry_budget=retry_budget,
     )
 
 
@@ -871,6 +878,37 @@ def _select_domain(
 
 
 
+# Retry-exhaustion hand-off turn, emitted in-state ([STATE: X → X]) once the
+# retry budget is spent with the tool still failing. Keep these free of any
+# "[STATE:" text: find_continuity_violations rejects an assistant turn with a
+# second state marker mid-content.
+_HANDOFF_TEMPLATES: dict[str, str] = {
+    "en": (
+        "I'm sorry — I tried {attempts} time(s) and {tool} is still failing, so I "
+        "can't complete this step right now. I'll hand this over to a colleague "
+        "who will follow up with you."
+    ),
+    "th": (
+        "ขออภัยค่ะ ลองแล้ว {attempts} ครั้ง แต่ {tool} ยังใช้งานไม่ได้ "
+        "จึงยังดำเนินการขั้นตอนนี้ให้ไม่ได้ในตอนนี้ "
+        "ดิฉันจะส่งเรื่องต่อให้เจ้าหน้าที่ติดตามให้นะคะ"
+    ),
+    "code_switch": (
+        "ขออภัยค่ะ ลองไปแล้ว {attempts} ครั้ง แต่ {tool} ยัง fail อยู่ "
+        "เลยยัง complete ขั้นตอนนี้ให้ไม่ได้ตอนนี้ค่ะ "
+        "เดี๋ยวดิฉัน hand off ให้เจ้าหน้าที่ follow up ให้นะคะ"
+    ),
+}
+
+# Customer acknowledgement of the hand-off, so the agent's next (transition)
+# turn is not a second consecutive assistant prose turn.
+_HANDOFF_ACK_TEMPLATES: dict[str, str] = {
+    "en": "Alright, please do that.",
+    "th": "ได้ค่ะ รบกวนด้วยนะคะ",
+    "code_switch": "ได้ค่ะ รบกวน follow up ให้ด้วยนะคะ",
+}
+
+
 def _generate_placeholder_conversation(
     workflow: WorkflowGraph,
     tool_schemas: list[dict[str, Any]],
@@ -882,12 +920,26 @@ def _generate_placeholder_conversation(
     intent_category: str = "service",
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
+    resolved_retry_exhaustion: str = "none",
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
     In production, this would call the teacher model (GPT-4o / Claude).
     For now, generates structurally valid placeholder conversations using
     walk_path to traverse the subgraph with trigger-based edge selection.
+
+    A failing tool call is retried up to ``spec.retry_budget`` TOTAL attempts
+    (the first counts), every attempt annotated ``[STATE: X → X]``.
+    ``resolved_retry_exhaustion`` is the sample-time resolution of
+    ``spec.retry_exhaustion`` (see ``_attempt_sample``): when it is
+    ``"handoff_in_state"`` and the budget is spent with the call still failing,
+    the agent emits an in-state hand-off turn instead of silently advancing.
+    The spine still advances on the following turn, so the conversation never
+    dead-ends short of a terminal.
+
+    Every random draw here must come from the caller's per-sample ``rng`` — the
+    concurrent generation path relies on per-sample RNG isolation for
+    byte-identical output at any ``max_workers``.
     """
     messages: list[dict[str, Any]] = []
     domain_name = domain_spec.name if domain_spec else spec.level
@@ -993,25 +1045,63 @@ def _generate_placeholder_conversation(
         user_msg = tmpl.format(t=turn_idx + 1, intent=intent_text, state=from_name)
         messages.append({"role": "user", "content": user_msg})
 
-        # In-state tool turn (emitted once per state visit)
+        # In-state tool turn (emitted once per state visit). A failing call is
+        # retried up to spec.retry_budget TOTAL attempts (the first counts), so
+        # budget 1 reproduces the pre-Task-9 single-call behavior exactly —
+        # including its RNG draw count. Every attempt annotates
+        # [STATE: X → X]: a tool-execution turn never advances.
         if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
             in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
-            messages.append({
-                "role": "assistant",
-                "content": in_state_content,
-                "annotations": {
-                    "state_transition": {"from": from_name, "to": from_name},
-                    "tool_calls": [tool_call],
-                },
-            })
-            if rng.random() < TOOL_ERROR_RATE:
-                tool_response = json.dumps({"error": "Service temporarily unavailable"})
-            else:
-                tool_response = json.dumps({"status": "success", "data": {"result": "ok"}})
-            messages.append({"role": "tool", "content": tool_response})
+            budget = max(1, spec.retry_budget)
+            attempts = 0
+            succeeded = False
+            while attempts < budget and not succeeded:
+                attempts += 1
+                messages.append({
+                    "role": "assistant",
+                    "content": in_state_content,
+                    "annotations": {
+                        "state_transition": {"from": from_name, "to": from_name},
+                        "tool_calls": [tool_call],
+                    },
+                })
+                if rng.random() < TOOL_ERROR_RATE:
+                    tool_response = json.dumps({"error": "Service temporarily unavailable"})
+                else:
+                    tool_response = json.dumps({"status": "success", "data": {"result": "ok"}})
+                    succeeded = True
+                messages.append({"role": "tool", "content": tool_response})
             visited_state_ids.add(step.from_state)
+
+            if not succeeded and resolved_retry_exhaustion == "handoff_in_state":
+                # Budget spent and this subgraph offers no tool_error arc to
+                # follow: stay in X, say plainly that the step cannot be
+                # completed and that a hand-off follows. Never invent a
+                # transition to escape a failure — the spine advances on the
+                # regular transition turn below, so the walk still terminates.
+                handoff_tmpl = _HANDOFF_TEMPLATES.get(
+                    language or "en", _HANDOFF_TEMPLATES["en"]
+                )
+                messages.append({
+                    "role": "assistant",
+                    "content": (
+                        f"[STATE: {from_name} → {from_name}]\n"
+                        + handoff_tmpl.format(attempts=attempts, tool=tool_name)
+                    ),
+                    "annotations": {
+                        "state_transition": {"from": from_name, "to": from_name},
+                    },
+                })
+                # The customer acknowledges before the agent moves on. Without
+                # this turn the hand-off prose and the transition prose would be
+                # consecutive assistant turns, which find_shape_violations only
+                # permits when the later one is a pure tool-call turn.
+                ack_tmpl = _HANDOFF_ACK_TEMPLATES.get(
+                    language or "en", _HANDOFF_ACK_TEMPLATES["en"]
+                )
+                messages.append({"role": "user", "content": ack_tmpl})
 
         # Transition turn
         transition_content = f"[STATE: {from_name} → {to_name}]"
@@ -1100,7 +1190,9 @@ def _build_teacher_prompt(
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
     lang_instruction = _LANGUAGE_INSTRUCTIONS.get(language, _LANGUAGE_INSTRUCTIONS["en"])
-    script = _graph_to_script(workflow, tool_schemas, language)
+    script = _graph_to_script(
+        workflow, tool_schemas, language, retry_budget=spec.retry_budget
+    )
     promo_line = (
         "Conversation focus: naturally weave in promotion, cross-sell, or upsell "
         "opportunities relevant to this domain. The workflow must still reach a "
@@ -1137,7 +1229,7 @@ def _build_teacher_prompt(
         f"Workflow graph (structured reference — use for state annotations):\n{json.dumps(workflow.to_dict(), indent=2)}\n\n"
         f"Available tools ({len(tool_schemas)}):\n{json.dumps(tool_schemas, indent=2)}\n\n"
         f"Tool names in scope: {tool_names}\n\n"
-        f"{_FORMAT_RULES}\n\n"
+        f"{_render_format_rules(retry_budget=spec.retry_budget)}\n\n"
         "Generate the conversation now."
     )
 
@@ -1528,6 +1620,21 @@ def generate_workflow_dataset(
 
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
+        # Resolve the level's retry-exhaustion policy against THIS subgraph.
+        # "error_path" asks the agent to follow a tool_error arc, but only 8 of
+        # the 18 domains define one and subgraph selection may drop even those
+        # (a recovery arc is kept only when include_recovery is set and both its
+        # endpoints survive into the subgraph). Where no tool_error transition
+        # exists there is no error path to follow, so the policy degrades to
+        # staying in state and handing off. WorkflowTransition.trigger is
+        # carried through from the domain registry Edge by select_subgraph, so
+        # this reads the real trigger, not a default.
+        resolved_retry_exhaustion = spec.retry_exhaustion
+        if resolved_retry_exhaustion == "error_path" and not any(
+            t.trigger == "tool_error" for t in workflow.transitions
+        ):
+            resolved_retry_exhaustion = "handoff_in_state"
+
         # tool_schemas = exactly the tools the selected subgraph's states use, no
         # padding. A purely conversational subgraph yields an empty list; the
         # sample's num_tools reflects this actual count (not spec.num_tools, which
@@ -1544,6 +1651,7 @@ def generate_workflow_dataset(
             return _generate_placeholder_conversation(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
                 intent_category, initiator, outbound_reason,
+                resolved_retry_exhaustion=resolved_retry_exhaustion,
             )
 
         fell_back = False
@@ -1770,7 +1878,10 @@ def generate_workflow_dataset(
             num_tools=len(tool_schemas),
             chain_depth=spec.chain_depth,
             workflow_graph=workflow.to_dict(),
-            workflow_script=_graph_to_script(workflow, tool_schemas, sample_language, messages=messages),
+            workflow_script=_graph_to_script(
+                workflow, tool_schemas, sample_language, messages=messages,
+                retry_budget=spec.retry_budget,
+            ),
             tool_schemas=tool_schemas,
             messages=messages,
             user_behavior=behavior,

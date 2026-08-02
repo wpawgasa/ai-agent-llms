@@ -2108,3 +2108,152 @@ class TestValidatorOutbound:
         ]
         errs = _validate_workflow_sample(self._base(msgs, "user"), 0)
         assert any("first message role" in e for e in errs)
+
+
+class TestRetryBudget:
+    """Per-level retry budget + retry-exhaustion policy (Task 9)."""
+
+    def test_complexity_specs_have_retry_fields(self) -> None:
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_budget == 1
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_exhaustion == "none"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_budget == 1
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_exhaustion == "none"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L4].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L4].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L5].retry_budget == 3
+        assert COMPLEXITY_SPECS[ComplexityLevel.L5].retry_exhaustion == "error_path"
+
+    def test_retry_arc_is_deterministic_across_max_workers(
+        self, tmp_output_dir: Path
+    ) -> None:
+        common = dict(
+            complexity_level="L3", num_samples=6, teacher_model=None,
+            seed=123, language="en",
+        )
+        serial = generate_workflow_dataset(
+            output_dir=tmp_output_dir / "serial", max_workers=1, **common
+        )
+        parallel = generate_workflow_dataset(
+            output_dir=tmp_output_dir / "parallel", max_workers=4, **common
+        )
+        assert (
+            Path(serial.output_files[0]).read_text()
+            == Path(parallel.output_files[0]).read_text()
+        ), "retry-arc output must be byte-identical across max_workers"
+
+    def test_error_path_resolves_to_handoff_without_a_tool_error_arc(self) -> None:
+        """`error_path` is only honoured when the SELECTED SUBGRAPH carries a
+        tool_error transition. 10 of the 18 domains define no tool_error edge at
+        all, and subgraph selection can drop the ones that exist, so the policy
+        must degrade rather than promise an arc that isn't there."""
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        assert spec.retry_exhaustion == "error_path"
+        seen = set()
+        for seed in range(200):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            has_arc = any(t.trigger == "tool_error" for t in wf.transitions)
+            seen.add("error_path" if has_arc else "handoff_in_state")
+        assert seen == {"error_path", "handoff_in_state"}, (
+            "both resolutions must occur across the domain registry"
+        )
+
+    def test_budget_one_emits_no_retry(self) -> None:
+        """L1/L2 keep budget 1 permanently: one attempt per state visit, never a
+        second call from the same state."""
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        assert spec.retry_budget == 1
+        for seed in range(60):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+            )
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                if m.get("role") != "assistant" or "<tool_call>" not in (m.get("content") or ""):
+                    continue
+                src = (m.get("annotations") or {})["state_transition"]["from"]
+                per_state[src] = per_state.get(src, 0) + 1
+            assert not [s for s, n in per_state.items() if n > 1], per_state
+
+    def test_retry_and_handoff_output_passes_every_validator(self) -> None:
+        """The placeholder path is the offline reference AND the teacher-failure
+        fallback, so its retry/hand-off output must satisfy all four coherence
+        gates the generator's repair loop enforces."""
+        import random
+
+        from llm_workflow_agents.data._workflow_script import (
+            find_continuity_violations,
+            find_shape_violations,
+            find_tool_placement_violations,
+        )
+        from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        handoffs = 0
+        for seed in range(150):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            tools = [t for t in dom.tools]
+            msgs = gw._generate_placeholder_conversation(
+                wf, tools, "cooperative", spec, rng, dom, "en", "service",
+                # force the branch under test rather than waiting for the
+                # subgraph-dependent resolution to pick it
+                resolved_retry_exhaustion="handoff_in_state",
+            )
+            id_to_name = {s.id: s.name for s in wf.states}
+            allowed = {s.name: set(s.tools) for s in wf.states}
+            names = {t["function"]["name"] for t in tools}
+            assert find_tool_stay_violations(msgs) == []
+            assert find_continuity_violations(
+                msgs,
+                id_to_name[wf.initial_state],
+                {id_to_name[t] for t in wf.terminal_states},
+            ) == []
+            assert find_shape_violations(msgs, "user") == []
+            assert find_tool_placement_violations(allowed, msgs, names) == []
+            handoffs += sum(
+                1 for m in msgs
+                if m.get("role") == "assistant" and "hand this over" in (m.get("content") or "")
+            )
+        assert handoffs > 0, "the hand-off branch was never exercised"
+
+    def test_handoff_turn_stays_in_state_and_reaches_terminal(self) -> None:
+        """A hand-off must not invent a transition, and must not dead-end the
+        conversation short of a terminal."""
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        checked = 0
+        for seed in range(150):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, [t for t in dom.tools], "cooperative", spec, rng, dom, "en",
+                "service", resolved_retry_exhaustion="handoff_in_state",
+            )
+            terminals = {s.name for s in wf.states if s.id in set(wf.terminal_states)}
+            for i, m in enumerate(msgs):
+                if "hand this over" not in (m.get("content") or ""):
+                    continue
+                checked += 1
+                st = m["annotations"]["state_transition"]
+                assert st["from"] == st["to"], "hand-off must stay in state"
+                # the hand-off is preceded by a failing tool result ...
+                assert msgs[i - 1]["role"] == "tool"
+                assert "error" in msgs[i - 1]["content"]
+                # ... and the conversation still runs on to a terminal
+                last = [x for x in msgs if x.get("role") == "assistant"][-1]
+                assert last["annotations"]["state_transition"]["to"] in terminals
+        assert checked > 0
