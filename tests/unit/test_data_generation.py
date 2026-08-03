@@ -2290,6 +2290,46 @@ class TestRetryBudget:
         assert retried > 0, f"{level} never retried a failing call"
         assert handoffs > 0, f"{level} never reached the exhaustion hand-off arc"
 
+    def test_each_retry_attempt_owns_its_tool_call_dict(self) -> None:
+        """No aliasing between attempt annotations.
+
+        The retry loop used to annotate every attempt with the SAME dict object,
+        so one dict was reachable from up to ``retry_budget`` messages at once
+        and any later in-place edit (an arg-normalisation pass, a remediation
+        script) would fan out silently. Serialised output is unaffected — this
+        pins object identity, not bytes.
+
+        Note the separate, PRE-EXISTING aliasing this does not touch:
+        ``_extract_ground_truth`` ``extend``s the annotation dicts themselves
+        into ``ground_truth.tool_calls``, for every conversation at every level,
+        long before the retry loop existed.
+        """
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        multi_attempt_states = 0
+        for seed in range(60):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+                resolved_retry_exhaustion="handoff_in_state",
+            )
+            ids: list[int] = []
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                tcs = (m.get("annotations") or {}).get("tool_calls") or []
+                ids.extend(id(tc) for tc in tcs)
+                if tcs:
+                    src = m["annotations"]["state_transition"]["from"]
+                    per_state[src] = per_state.get(src, 0) + 1
+            multi_attempt_states += sum(1 for n in per_state.values() if n > 1)
+            assert len(set(ids)) == len(ids), (
+                "a tool_call dict is shared between attempt annotations"
+            )
+        assert multi_attempt_states, "no state was visited with more than one attempt"
+
     def test_retry_and_handoff_output_passes_every_validator(self) -> None:
         """The placeholder path is the offline reference AND the teacher-failure
         fallback, so its retry/hand-off output must satisfy all four coherence

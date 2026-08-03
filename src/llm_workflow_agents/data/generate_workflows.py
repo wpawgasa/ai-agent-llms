@@ -16,6 +16,7 @@ Teacher model generation:
 
 from __future__ import annotations
 
+import copy
 import json
 import random
 import re
@@ -1064,7 +1065,14 @@ def _generate_placeholder_conversation(
                     "content": in_state_content,
                     "annotations": {
                         "state_transition": {"from": from_name, "to": from_name},
-                        "tool_calls": [tool_call],
+                        # A fresh dict per attempt. Serialised output is
+                        # identical either way, but `derive_ground_truth`
+                        # `extend`s these same objects into
+                        # ground_truth.tool_calls, so a single shared dict would
+                        # be reachable from up to retry_budget+1 places at once
+                        # and any later in-place edit (an arg-normalisation pass,
+                        # a remediation script) would silently fan out.
+                        "tool_calls": [copy.deepcopy(tool_call)],
                     },
                 })
                 if rng.random() < TOOL_ERROR_RATE:
