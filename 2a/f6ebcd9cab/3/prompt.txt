@@ -103,3 +103,15 @@ run Step 4
 ---
 
 yes, re-run
+
+---
+
+start step 5
+
+---
+
+<task-notification>
+<task-id>b1tqbhuvj</task-id>
+<summary>Monitor event: "ledger full-run progress and failures"</summary>
+<event>progress: 40/427 batches, 348 accepted, 8 rejected, 0 batch-errors</event>
+</task-notification>
