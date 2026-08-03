@@ -124,11 +124,16 @@ VALID_ROLES = ("assistant", "user")
 # reasoning: they cannot occur without a base consonant, so they add no signal
 # while reinstating the same hole for a stray tone mark.
 _THAI_RE = re.compile(r"[ก-ฮะาำเ-ๅ]")
-# Thai digits are NOT evidence a sentence was written in Thai (hence their absence
-# from _THAI_RE above), but they are Thai script and `_meaningful_len` counts them,
-# so without a separate check 40x U+0E50 cleared the prose floor as an `en` answer.
-# Rejected for `en` only: they still do not satisfy a th/code_switch request.
-_THAI_DIGIT_RE = re.compile(r"[๐-๙]")  # noqa: RUF001
+# Thai digits and the repetition/abbreviation marks are NOT evidence a sentence was
+# written in Thai (hence their absence from _THAI_RE above), but they ARE Thai script
+# and `_meaningful_len` counts them, so without a separate check 40x U+0E50 -- or
+# 40x U+0E2F, or 40x U+0E46 -- cleared the prose floor as an `en` answer.
+#
+# Derived from the script, NOT from an enumerated codepoint range: enumerating
+# `[๐-๙]` closed the digit hole and left PAIYANNOI and MAIYAMOK open, which is the  # noqa: RUF003
+# same mistake, twice. The rule below is "anything that buys floor length and is
+# Thai script", so it cannot be re-opened by a Thai character nobody listed.
+# Rejected for `en` only: none of these satisfies a th/code_switch request either.
 _TOOL_CALL_RE = re.compile(r"</?tool_call>")
 # Characters that are never text, identified by Unicode *category* rather than
 # by an enumerated list of codepoints:
@@ -317,6 +322,22 @@ def _meaningful_len(text: str) -> int:
     )
 
 
+def _has_counting_thai_script(text: str) -> bool:
+    """True if any character that `_meaningful_len` COUNTS is Thai script.
+
+    The `en` guard. `_THAI_RE` answers "was this written in Thai?" and deliberately
+    ignores digits, the baht sign and the repetition marks. This answers the
+    different question "did a Thai-script character buy floor length?", which is
+    what an attacker needs. Kept in lockstep with `_meaningful_len` by folding the
+    same way, so a character can never count toward the floor while escaping here.
+    """
+    return any(
+        _is_meaningful(c) and unicodedata.name(c, "").startswith("THAI")
+        for ch in text
+        for c in unicodedata.normalize("NFKC", ch)
+    )
+
+
 def _strip_structure(text: str) -> str:
     """Prose only: markers and tool-call blocks removed, whitespace collapsed.
 
@@ -495,8 +516,8 @@ def validate_entry(entry: object, request: object) -> list[str]:
             f"language '{language}' entry contains no Thai letters (a Thai digit, "
             "the baht sign or a repetition mark does not count)"
         )
-    elif language == "en" and (has_thai or _THAI_DIGIT_RE.search(prose)):
-        violations.append("language 'en' entry contains Thai letters or digits")
+    elif language == "en" and (has_thai or _has_counting_thai_script(prose)):
+        violations.append("language 'en' entry contains Thai-script characters")
 
     if _copies_a_context_turn(prose, request):
         violations.append("content copies a message already in the context window")

@@ -1162,12 +1162,40 @@ def test_nfkc_folding_still_credits_legitimate_compatibility_forms():
     assert brl._meaningful_len("x\u00b2\u00b3") == 3  # superscript digits
 
 
-def test_thai_digits_cannot_carry_an_english_entry():
+@pytest.mark.parametrize(
+    ("codepoint", "name"),
+    [
+        ("\u0e50", "THAI DIGIT ZERO"),
+        ("\u0e2f", "THAI CHARACTER PAIYANNOI"),
+        ("\u0e46", "THAI CHARACTER MAIYAMOK"),
+    ],
+)
+def test_thai_script_non_letters_cannot_carry_an_english_entry(codepoint, name):
     """They count toward the prose floor (Thai script) but are not Thai letters,
-    so before this an all-Thai-digit body passed as an `en` insert."""
-    entry = _user_entry(content="\u0e50" * 40, language="en")
+    so before this an all-Thai-digit body passed as an `en` insert.
+
+    Parametrised deliberately: the first fix enumerated `[\u0e50-\u0e59]` and left
+    PAIYANNOI and MAIYAMOK open. The gate is now derived from the script, so the
+    class is closed rather than three codepoints being listed.
+    """
+    entry = _user_entry(content=codepoint * 40, language="en")
     violations = brl.validate_entry(entry, _user_request(language="en"))
-    assert any("Thai letters or digits" in v for v in violations), violations
+    assert any("Thai-script characters" in v for v in violations), (name, violations)
+
+
+def test_no_thai_script_character_can_buy_floor_length_for_an_english_entry():
+    """The structural claim, brute-forced over the whole Thai block.
+
+    Anything `_meaningful_len` counts must be visible to the `en` guard; a gap
+    between the two is exactly the hole this closed twice.
+    """
+    escapees = [
+        f"U+{cp:04X}"
+        for cp in range(0x0E00, 0x0E80)
+        if brl._meaningful_len(chr(cp)) > 0
+        and not brl._has_counting_thai_script(chr(cp))
+    ]
+    assert escapees == [], escapees
 
 
 def test_thai_digits_still_do_not_satisfy_a_thai_request():
