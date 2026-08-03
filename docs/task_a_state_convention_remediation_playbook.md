@@ -740,14 +740,14 @@ python3 -m json.tool < data/interim/task_a_remediation_ledger/accepted.jsonl
 It normally undershoots, but it takes the first conversation whole even when that
 conversation alone exceeds the limit — so it can overshoot by up to one conversation's
 worth of inserts (at most 14, the largest authoring queue on a single conversation).
-On the current queue `--limit 20` authors **18 inserts across 8 complete conversations,
+On the current queue `--limit 20` authors **20 inserts across 8 complete conversations,
 in 2 batches**. It used to take a flat slice of exactly 20, which cut conversation
 `l1_merged_20260629:528` in half — and a conversation with one insert missing is dropped
 whole by `apply_plan`, so the smoke run was silently reporting on a conversation that
 could never have been applied. The run prints the conversation count; if it ever reports
 a partially-authored conversation, that is a bug.
 
-**Read all 18 entries by hand.** Deterministic gates cannot catch the failure modes
+**Read all 20 entries by hand.** Deterministic gates cannot catch the failure modes
 that matter here. Check specifically:
 
 - Any `th` / `code_switch` row answered in English → stop, the agent file's language
@@ -761,11 +761,52 @@ that matter here. Check specifically:
 Also inspect `rejected.jsonl`. A rejection rate above ~5% at this stage means the agent
 file needs work, not that you should raise the budget.
 
+#### Smoke result, 2026-08-03 — **20 accepted, 0 rejected**
+
+8 conversations (12 code_switch / 6 en / 2 th inserts), 10 assistant bridges and 10 user
+acks, all applied cleanly and passed `verify --strict`. Hand-read against the four
+checks above:
+
+- **Language and register: correct throughout**, including the part that is easy to get
+  wrong. `L1_028_2` keeps the agent on ครับ/ผม; `L1_002_3` keeps it on ค่ะ; `L1_036_2`
+  correctly splits them — customer Anan on ครับ, agent on ค่ะ — rather than harmonising
+  the conversation onto one particle.
+- **No success-after-error prose.** Structurally impossible after §4.1, and confirmed:
+  `L1_028_2`'s errored result at message 5 is handled by the row's own existing retry,
+  with no insert anywhere near it.
+- **User acks are in character and distinct** — `L1_009_6`'s two acks are deliberately
+  different ("Please hurry — I don't think everyone's out of the building yet." then
+  "Okay, please send them fast — the water's still rising near the electrical room"),
+  not two copies of "Thank you!".
+- **Closing pairs land short**, which is the §5 farewell guidance working: `L1_104_2`
+  answers with "You're very welcome — take care, and reach out again if the delays
+  continue." rather than a second full sign-off.
+
+One quality nit, not a blocker: in `L1_067_3` the authored bridge reports ticket
+INC-7721 and the *following* existing turn reports it again. The agent definition's "do
+not duplicate the turn that follows you" rule exists for exactly this and did not fully
+land. 1 of 10 bridges; worth re-checking in the full run's output rather than
+re-engineering the prompt for it now.
+
+Two conversations produce **two consecutive `user` turns** (`L1_123`, `L1_036_2`): a
+closing-pair opener appended after a row whose last message was already a user turn.
+This is legal — `find_shape_violations` only forbids consecutive *assistant* prose — and
+reads naturally, since customers do send two messages in a row.
+
 ### Step 5 — Full ledger run (costly — get explicit go-ahead)
 
-**~$8–13 and 1.5–3 h at 4 workers**, for 3,842 inserts across 1,453 conversations.
-This supersedes the Task 11 brief's "~$5–8 / 1–2 h", which was priced against the
-pre-Task-2 count of ~930 conversations / ~1,020 inserts.
+**Budget ~10 h at 4 workers** for 3,842 inserts across 1,453 conversations in 429
+batches. Measured at the smoke run (2026-08-03): 2 batches ran concurrently in 5m37s,
+so ~5.6 min per batch → 429 ÷ 4 workers × 5.6 min ≈ 10 h. Earlier estimates of
+"1.5–3 h" (and the Task 11 brief's "1–2 h") were never measured; they are wrong.
+
+`--max-workers 8` roughly halves the wall clock and is the first thing to reach for.
+The run is resumable, so splitting it across sittings costs nothing.
+
+**Spend is not observable from the driver under Claude-subscription auth** — the
+`--output-format json` envelope omits `total_cost_usd`, so `progress.json` reports
+`cost_usd: 0.0`. Track it in the Claude console. Under API-key auth the field
+populates and the per-batch line shows a running total.
 
 ```bash
 python scripts/build_remediation_ledger.py \
