@@ -206,6 +206,32 @@ def _rebuild_system_prompt(record: dict) -> bool:
     return True
 
 
+def _gains_tool_attribution(
+    before: dict[str, list[str]], after: dict[str, list[str]]
+) -> bool:
+    """True if the repair credits any tool to a state it was not called from.
+
+    The tool-attribution invariant, stated as a SUBSET rather than an equality.
+    The property that keeps the corpus safe is "the repair never invents a
+    call-site": every (state, tool) pair after the repair must already have
+    existed before it. Losing a pair is the opposite of dangerous — it means a
+    tool stopped being credited to a state it never legitimately ran from.
+
+    Equality was the original wording, and it was one notch too strong for a
+    case it had not anticipated. Fixing the retry-after-error bug (see
+    ``state_convention_repair._errored``) relabels a retry turn back to the
+    state it actually retried from, which correctly *removes* the wrongly
+    advanced attribution. Under equality that dropped 100 conversations —
+    precisely the rows demonstrating the retry-then-advance behaviour the whole
+    convention exists to teach. Measured on the real corpus: of the 102
+    conversations whose map changes, 97 only lose pairs (keep them) and 5
+    genuinely move a tool from one state to another (still dropped).
+    """
+    return any(
+        set(tools) - set(before.get(state, ())) for state, tools in after.items()
+    )
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     # Guard BEFORE any work (including creating output_dir): reuse
     # system_prompt._STAY_RULE_ENABLED -- the same resolution
@@ -258,7 +284,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             drop_reasons[plan.infeasible_reason or f"needs-ledger:{plan.move}"] += 1
             continue
         after_tools = infer_state_tools_from_messages(repaired["messages"])
-        if before_tools != after_tools:
+        if _gains_tool_attribution(before_tools, after_tools):
             dropped += 1
             drop_reasons["tool-from-state-changed"] += 1
             continue

@@ -464,3 +464,32 @@ def test_iter_records_reads_thai_corpus_under_a_c_locale(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "1"
+
+
+def test_tool_attribution_guard_allows_losing_a_pair_but_never_gaining_one():
+    """The invariant is a subset relation, not equality.
+
+    Losing a (state, tool) pair means the repair stopped crediting a tool to a
+    state it never legitimately ran from — that is the retry-after-error fix
+    working. Gaining one means the repair invented a call-site, which is the
+    corpus-corrupting case the guard exists to catch.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_rtas", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _gains_tool_attribution = mod._gains_tool_attribution
+
+    before = {"A": ["t1"], "B": ["t1", "t2"]}
+
+    # unchanged
+    assert _gains_tool_attribution(before, before) is False
+    # narrowed: the retry stops being credited to B
+    assert _gains_tool_attribution(before, {"A": ["t1"], "B": ["t2"]}) is False
+    # a whole state's attribution disappears
+    assert _gains_tool_attribution(before, {"A": ["t1"]}) is False
+    # gained: t2 newly credited to A
+    assert _gains_tool_attribution(before, {"A": ["t1", "t2"], "B": ["t1", "t2"]}) is True
+    # moved: lost from B, gained at a brand-new state
+    assert _gains_tool_attribution(before, {"A": ["t1"], "C": ["t2"]}) is True
