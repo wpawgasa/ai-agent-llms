@@ -1139,6 +1139,50 @@ def test_accepts_fullwidth_latin_because_the_count_is_nfkc_folded():
     assert brl.validate_entry(entry, _user_request(language="en")) == []
 
 
+# ---------------------------------------------------------------------------
+# Final review wave: the two residuals the Task 12 re-review left open
+# ---------------------------------------------------------------------------
+
+
+def test_nfkc_expansion_cannot_multiply_a_codepoint_past_the_floor():
+    """U+33AF folds to "rad/s2" -- five meaningful characters from one glyph.
+
+    Folding the whole string first let two codepoints of visible garbage clear a
+    ten-character floor. Each SOURCE character now contributes at most 1.
+    """
+    assert brl._meaningful_len("\u33af" * 2) == 2
+    entry = _entry(content=f"{MARKER}\n" + "\u33af" * 2)
+    violations = brl.validate_entry(entry, _request())
+    assert any("meaningful characters" in v for v in violations), violations
+
+
+def test_nfkc_folding_still_credits_legitimate_compatibility_forms():
+    """The cap must not undo the folding it constrains."""
+    assert brl._meaningful_len("Ｏｋａｙ") == 4  # noqa: RUF001 - fullwidth is the point
+    assert brl._meaningful_len("x\u00b2\u00b3") == 3  # superscript digits
+
+
+def test_thai_digits_cannot_carry_an_english_entry():
+    """They count toward the prose floor (Thai script) but are not Thai letters,
+    so before this an all-Thai-digit body passed as an `en` insert."""
+    entry = _user_entry(content="\u0e50" * 40, language="en")
+    violations = brl.validate_entry(entry, _user_request(language="en"))
+    assert any("Thai letters or digits" in v for v in violations), violations
+
+
+def test_thai_digits_still_do_not_satisfy_a_thai_request():
+    """Rejecting them for `en` must not promote them to Thai-language evidence."""
+    entry = _user_entry(content="\u0e50" * 40)
+    violations = brl.validate_entry(entry, _user_request(language="th"))
+    assert any("no Thai letters" in v for v in violations), violations
+
+
+def test_a_baht_price_is_still_legal_in_an_english_entry():
+    """The one legitimate English use of a Thai-block character stays legal."""
+    entry = _entry(content=f"{MARKER}\nYour refund of \u0e3f1,200 has been approved today.")
+    assert brl.validate_entry(entry, _request(language="en")) == []
+
+
 # --- the guards -------------------------------------------------------------
 
 _LONG_TH = "สวัสดีค่ะ ขอบคุณสำหรับข้อมูลนะคะ ระบบกำลังตรวจสอบรายการให้เรียบร้อยแล้วค่ะ"

@@ -124,6 +124,11 @@ VALID_ROLES = ("assistant", "user")
 # reasoning: they cannot occur without a base consonant, so they add no signal
 # while reinstating the same hole for a stray tone mark.
 _THAI_RE = re.compile(r"[ก-ฮะาำเ-ๅ]")
+# Thai digits are NOT evidence a sentence was written in Thai (hence their absence
+# from _THAI_RE above), but they are Thai script and `_meaningful_len` counts them,
+# so without a separate check 40x U+0E50 cleared the prose floor as an `en` answer.
+# Rejected for `en` only: they still do not satisfy a th/code_switch request.
+_THAI_DIGIT_RE = re.compile(r"[๐-๙]")  # noqa: RUF001
 _TOOL_CALL_RE = re.compile(r"</?tool_call>")
 # Characters that are never text, identified by Unicode *category* rather than
 # by an enumerated list of codepoints:
@@ -292,11 +297,24 @@ def _is_meaningful(char: str) -> bool:
 def _meaningful_len(text: str) -> int:
     """How many meaningful characters `text` CONTAINS.
 
-    NFKC first, so fullwidth Latin (U+FF28 and friends) and superscript digits
-    fold onto their plain forms and count normally rather than being punished
-    for their encoding.
+    Each SOURCE character is folded with NFKC on its own and contributes at most
+    1. Folding is what lets fullwidth Latin (U+FF28 and friends) and superscript
+    digits count normally rather than being punished for their encoding; the cap
+    is what stops a compatibility character from *multiplying*. NFKC expands some
+    single codepoints into several meaningful ones -- U+33AF SQUARE RAD OVER S
+    SQUARED folds to "rad/s2", five -- so folding the whole string first let two
+    codepoints of visible garbage clear a ten-character floor.
+
+    The cap also slightly under-counts genuine ligatures (U+FB01 "ﬁ" scores 1,
+    not 2). That is the right trade: one source glyph is one unit of content, and
+    the ligature would have to make up the whole floor to matter. Measured on all
+    132,975 corpus turns, capping changes the count of exactly 0 of them.
     """
-    return sum(1 for ch in unicodedata.normalize("NFKC", text) if _is_meaningful(ch))
+    return sum(
+        1
+        for ch in text
+        if any(_is_meaningful(c) for c in unicodedata.normalize("NFKC", ch))
+    )
 
 
 def _strip_structure(text: str) -> str:
@@ -477,8 +495,8 @@ def validate_entry(entry: object, request: object) -> list[str]:
             f"language '{language}' entry contains no Thai letters (a Thai digit, "
             "the baht sign or a repetition mark does not count)"
         )
-    elif language == "en" and has_thai:
-        violations.append("language 'en' entry contains Thai letters")
+    elif language == "en" and (has_thai or _THAI_DIGIT_RE.search(prose)):
+        violations.append("language 'en' entry contains Thai letters or digits")
 
     if _copies_a_context_turn(prose, request):
         violations.append("content copies a message already in the context window")
