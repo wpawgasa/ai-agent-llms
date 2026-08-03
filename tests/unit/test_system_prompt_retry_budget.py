@@ -2,7 +2,8 @@
 
 Task 9 made ``retry_budget`` a per-level property (L1-L4: 2, L5: 3 — L1/L2
 raised from 1 in the final review wave, superseding decision D4) and taught the
-generator to emit conversations that really do retry that many times. ``system_prompt.py`` kept rendering the prompt at a hardcoded budget of 1
+generator to emit conversations that really do retry that many times.
+``system_prompt.py`` kept rendering the prompt at a hardcoded budget of 1
 in BOTH of its retry-mentioning passages, and that prompt is rebuilt at training
 and eval load time (``training/sft.py``, ``training/grpo.py``,
 ``eval/agent_benchmark.py``, ``webui/samples.py``). The result was a direct

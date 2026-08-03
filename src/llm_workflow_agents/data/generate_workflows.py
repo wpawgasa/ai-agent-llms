@@ -54,7 +54,7 @@ from llm_workflow_agents.data.domain_registry import (
 # point that renders FORMAT_RULES at a caller-chosen retry budget; the exported
 # FORMAT_RULES constant is frozen at budget 1. Imported (rather than
 # re-implemented) so system_prompt stays the single source of truth.
-from llm_workflow_agents.data.system_prompt import _format_rules as _render_format_rules
+from llm_workflow_agents.data.system_prompt import render_format_rules as _render_format_rules
 
 logger = structlog.get_logger(__name__)
 
@@ -553,7 +553,7 @@ def walk_path(
     return path
 
 
-# FORMAT_RULES is rendered via data.system_prompt._format_rules (single source of truth)
+# FORMAT_RULES is rendered via data.system_prompt.render_format_rules (single source of truth)
 
 _SCRIPT_TEMPLATES: dict[str, dict[str, str]] = {
     "en": {

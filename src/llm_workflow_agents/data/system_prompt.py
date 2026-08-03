@@ -227,6 +227,14 @@ def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
 # meaning for every existing importer.
 FORMAT_RULES = _format_rules()
 
+#: Public name for :func:`_format_rules`, for callers outside this module.
+#: ``generate_workflows.py`` needs the rules at an arbitrary budget when building
+#: a teacher prompt — neither the frozen :data:`FORMAT_RULES` constant nor the
+#: sample-keyed :func:`format_rules_for_sample` fits — and reaching across
+#: modules for an underscored name made this module's private surface part of
+#: its contract by accident. Same object, so the two can never drift.
+render_format_rules = _format_rules
+
 #: Budget used when a sample carries no usable ``complexity_level``. Matches the
 #: pre-Task-9 hardcoded behaviour (one attempt, no retry), so an unlabelled
 #: sample renders exactly the prompt it rendered before this became per-sample.
