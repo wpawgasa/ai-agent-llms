@@ -661,3 +661,62 @@ def test_apply_plan_inserts_at_the_same_position_keep_their_list_order():
     assert [m["content"] for m in repaired["messages"][1:4]] == [
         "first", "second", "third",
     ]
+
+
+def test_retry_after_tool_error_stays_in_state_and_needs_no_bridge():
+    """A stacked tool turn that RETRIES after an error must not advance.
+
+    The convention's rule 4: on a tool error the next turn stays in the same
+    state and may retry; the advance happens only after a success. Before this,
+    the walk saw a stacked tool turn, inserted a bridge to carry the displaced
+    advance, and so authored a turn asserting `A -> B` immediately after
+    `{"error": ...}` — teaching exactly the tool-result hallucination the whole
+    convention exists to prevent. Measured on the real corpus: 107 of 912
+    advancing bridges (11.7%) landed after an errored tool result.
+
+    Correct shape: both tool turns self-loop at A, the advance stays queued,
+    and the prose turn after the SUCCESSFUL result drains it. No authored text
+    at all — the conversation collapses to a plain relabel.
+    """
+    msgs = [
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": '{"error": "Service temporarily unavailable"}',
+         "annotations": None},
+        _amsg('[STATE: B → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": '{"status": "success"}', "annotations": None},
+        _amsg("[STATE: B → B]\nAll set — verified."),
+    ]
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
+    plan = plan_repair(rec)
+
+    assert plan.move == "relabel"
+    assert plan.inserts == []
+    repaired = apply_plan(rec, plan, ledger_entries=None)
+    assert _markers(repaired["messages"]) == [
+        "[STATE: A → A]",   # first attempt self-loops
+        "[STATE: A → A]",   # the retry stays put; the error did not advance us
+        "[STATE: A → B]",   # the advance lands after the SUCCESSFUL result
+    ]
+    assert find_tool_stay_violations(repaired["messages"]) == []
+
+
+def test_stacked_tool_turn_after_a_SUCCESSFUL_result_still_bridges():
+    """The error rule must not swallow the ordinary stacked-tool case.
+
+    Same shape as above but the intervening result succeeded, so there is a
+    genuine gap: the displaced advance has no prose turn to land on and still
+    needs an authored bridge.
+    """
+    msgs = [
+        _amsg('[STATE: A → B]\n<tool_call>{"name": "t1", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": '{"status": "success"}', "annotations": None},
+        _amsg('[STATE: B → B]\n<tool_call>{"name": "t2", "arguments": {}}</tool_call>'),
+        {"role": "tool", "content": '{"status": "success"}', "annotations": None},
+        _amsg("[STATE: B → B]\nDone."),
+    ]
+    rec = _record(msgs, [("A", "B")], terminal=("B",))
+    plan = plan_repair(rec)
+    assert plan.move == "insert_handoff_turn"
+    assert [(i.role, i.required_marker) for i in plan.inserts] == [
+        ("assistant", "[STATE: A → B]"),
+    ]

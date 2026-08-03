@@ -9,6 +9,7 @@ consumes a RepairPlan and returns a new record.
 from __future__ import annotations
 
 import copy
+import json
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -76,6 +77,26 @@ def _marker(from_state: str, to_state: str, arrow: str) -> str:
     return f"[STATE: {from_state} {arrow} {to_state}]"
 
 
+def _errored(message: dict[str, Any] | None) -> bool:
+    """True if ``message`` is a ``role: "tool"`` result reporting a failure.
+
+    The corpus emits errors as ``{"error": "..."}`` (see
+    ``generate_workflows.py``'s teacher prompt), but a tool result is untrusted
+    text, so a payload that will not parse falls back to a substring test
+    rather than being silently treated as a success.
+    """
+    if not message or message.get("role") != "tool":
+        return False
+    content = message.get("content") or ""
+    try:
+        payload = json.loads(content)
+    except (ValueError, TypeError):
+        return '"error"' in content
+    return isinstance(payload, dict) and (
+        "error" in payload or payload.get("status") == "error"
+    )
+
+
 def plan_repair(record: dict[str, Any]) -> RepairPlan:
     """Plan the whole-trajectory requeue repair for one conversation record.
 
@@ -141,6 +162,42 @@ def plan_repair(record: dict[str, Any]) -> RepairPlan:
 
     for label in labels:
         if label.has_tool_call:
+            if cur != label.from_state and _errored(
+                messages[label.msg_index - 1] if label.msg_index >= 1 else None
+            ):
+                # RETRY AFTER A TOOL ERROR — do not bridge, do not advance.
+                #
+                # Convention rule 4: on a tool error the turn stays in its
+                # state and may retry; the advance happens only after a
+                # success. The generic stacked-tool branch below would instead
+                # author a bridge asserting cur -> from_state directly after
+                # `{"error": ...}`, which is (a) semantically backwards, and
+                # (b) an impossible authoring request -- corpus-remediator.md
+                # forbids narrating success after an error, so the agent could
+                # only refuse or hallucinate. Measured on the real corpus: 107
+                # of 912 advancing bridges landed after an errored result (104
+                # same-tool retries, 3 a different tool; advancing is wrong in
+                # both, so the rule is "never drain an advance across a tool
+                # error" rather than "never drain across a same-tool retry").
+                #
+                # Leaving the already-queued advance in `pending` is the whole
+                # fix: it survives the retry and drains at the first prose turn
+                # after a SUCCESSFUL result, which is where the existing prose
+                # already says the step completed.
+                #
+                # The retry turn's OWN advance still has to be queued behind
+                # it, exactly as the ordinary tool-turn branch below does.
+                # Dropping it on the floor would be silent corruption rather
+                # than a caught failure: `verify_repaired` re-derives
+                # ground_truth from the repaired markers, so a trajectory
+                # missing a transition agrees with itself and passes every
+                # gate. Caught on the real corpus -- a 4-deep stacked chain
+                # with an error in the middle (`L4_058_2`) lost three states.
+                any_relabelled = True
+                if label.to_state != label.from_state:
+                    pending.append(label.to_state)
+                turns.append(TurnPlan(label.msg_index, cur, cur, label.arrow, "relabel"))
+                continue
             if cur != label.from_state:
                 # Stacked tool turn: no prose turn in between to carry the
                 # requeued advance, so one authored assistant message must
