@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "2af6ebcd9cab",
+  "session_id": "5f2e4b5f-222a-4038-9746-fe61d88fd86f",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-03T07:01:31.289930143Z",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".claude/agents/corpus-remediator.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "6c92250fd164",
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 46939,
+    "cache_read_tokens": 210211,
+    "output_tokens": 4420,
+    "api_call_count": 5
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-03T07:01:31.26247151Z",
+    "agent_lines": 0,
+    "human_added": 40,
+    "human_modified": 9,
+    "human_removed": 0,
+    "total_committed": 40,
+    "agent_percentage": 0
+  }
+}
