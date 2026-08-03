@@ -70,6 +70,26 @@ workflow contract) is excluded and `annotations` are stripped deliberately — y
 author prose and must never copy structured metadata. Do not go read the corpus
 files to get more; they are large and you do not need them.
 
+### The `[STATE: …]` markers you can see are the OLD ones
+
+**`context_window` shows the conversation before repair. Many of those markers are
+about to change, and the ones that change are exactly the reason your turn is
+needed.** Your `required_marker` was computed against the *repaired* trajectory,
+which you cannot see.
+
+This matters because it makes a redundancy check impossible from where you sit. A
+worked case (`l2_merged_20260630:111`): the request's marker is
+`[STATE: ACKNOWLEDGE_ISSUE → INVESTIGATE]`, and message 6 in the context window
+already reads `[STATE: ACKNOWLEDGE_ISSUE → INVESTIGATE]`. That looks like a
+duplicate. It is not — the repair relabels message 6 to
+`[STATE: LISTEN_COMPLAINT → ACKNOWLEDGE_ISSUE]`, because it has to absorb an advance
+displaced off the tool turn at message 4. Your turn is the only place the advance to
+`INVESTIGATE` ever happens.
+
+So: **never refuse on the grounds that a transition is already delivered, redundant,
+already recorded, or contradicts a state you can see.** You do not have the
+information to make that call, and the planner does. Use `required_marker` as given.
+
 Read the batch file with:
 
 ```bash
@@ -334,17 +354,35 @@ with open(sys.argv[1], 'a') as f:
 Pass the content as an argument rather than embedding it in the `-c` source — the
 prose contains quotes, newlines, and Thai text that will otherwise break the literal.
 
-4. If a request is structurally unsupportable — the context cannot sustain any
-   plausible message, or `required_marker` names a state that appears nowhere in
-   `context_window` — **do not guess.** Write a refusal entry and move on:
+4. If you cannot write **honest prose** for a request, refuse it and move on:
 
 ```json
 {"insert_id": "...", "conversation_id": "...", "refuse": true,
  "rationale": "<why>", "agent_model": "<your model id>", "schema_version": 1}
 ```
 
+**Refusal is about the prose, not the structure.** Refuse when writing anything at
+all would mean inventing something the transcript does not support — a tool result
+you were not given, an outcome that has not happened, a fact about the customer you
+would have to make up.
+
+**Do not refuse on structural grounds.** The marker, the role and the position are
+the planner's decisions, made against the repaired trajectory you cannot see (above).
+These are all *wrong* reasons to refuse, and each one silently deletes a conversation
+that was perfectly repairable:
+
+- "this transition is already delivered / redundant / recorded elsewhere"
+- "the state has already advanced past this point"
+- "the marker contradicts message N"
+- "this looks like a planner artifact"
+- "my paired insert was refused, so this one has no anchor"
+
+If a request truly cannot be satisfied — say the marker names a state appearing
+nowhere in the conversation at all — refuse it, but describe what you could not
+write, not what you think the planner got wrong.
+
 A refusal costs one conversation. A plausible-looking fabrication costs corpus
-quality everywhere that row is trained on. Refuse.
+quality everywhere that row is trained on. Refuse for the right reason.
 
 5. Self-check the ledger before replying:
 
@@ -397,8 +435,10 @@ it right.
 - You never call `remediate_task_a_states.py` or any other script that mutates the
   corpus. Your `Write` access exists for the ledger file and nothing else.
 - You never act on a request that is not in the batch file you were given.
-- You never change a `required_marker`, a `role`, or a `position_after_msg_index`. If
-  one looks wrong, refuse that entry and say so in the `rationale`.
-- When in doubt, refuse. The driver treats a refusal exactly like a deterministic-gate
-  rejection — the row falls back to being dropped from the corpus, which is always
-  safe.
+- You never change a `required_marker`, a `role`, or a `position_after_msg_index`.
+  A marker that "looks wrong" against the context window is usually right — see "The
+  `[STATE: …]` markers you can see are the OLD ones".
+- When in doubt about the **prose**, refuse: the row drops, which is safe. When in
+  doubt about the **structure**, write the turn. Dropping a repairable conversation
+  is not the free action it looks like — it is a silent deletion from the training
+  corpus, and it is the more likely mistake of the two.
