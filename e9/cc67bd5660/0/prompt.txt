@@ -119,3 +119,15 @@ start step 5
 ---
 
 stop the step 5 run. i run out of credits and i'll run it later
+
+---
+
+resume step 5 but with 4 max-workers
+
+---
+
+<task-notification>
+<task-id>bhc146wpb</task-id>
+<summary>Monitor event: "ledger run progress, rejection rate and failures"</summary>
+<event>progress: 51/385 batches, 459 accepted, 0 rejected (0.0%), 0 batch-errors</event>
+</task-notification>
