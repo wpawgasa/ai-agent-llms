@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """`claude -p` driver that authors the missing Task A conversation turns.
 
-1,465 of the 5,549 Task A SFT conversations cannot be brought onto the
+1,453 of the 5,549 Task A SFT conversations cannot be brought onto the
 tool-call stay convention by `plan_repair` alone: they need 1-14 short
-messages written (3,902 inserts in total -- 2,229 assistant "hand-off bridges"
-carrying a displaced `[STATE: X -> Y]` advance, and 1,673 `user`
+messages written (3,842 inserts in total -- 2,203 assistant "hand-off bridges"
+carrying a displaced `[STATE: X -> Y]` advance, and 1,639 `user`
 acknowledgements with no marker at all). This script drives the
 `corpus-remediator` agent over those inserts in batches and collects a
 *decision ledger*.
@@ -42,6 +42,7 @@ skipped. `rejected.jsonl` is *not* consulted, so a rejected insert is retried.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -656,9 +657,49 @@ def render_prompt(batch_path: Path, ledger_path: Path, count: int) -> str:
     )
 
 
+# Tools the headless agent is allowed to use WITHOUT an interactive approval.
+#
+# Without this the run is a guaranteed, expensive no-op: `claude -p` cannot
+# prompt anyone, so every Write is refused and the agent finishes having drafted
+# the entries it can never persist. That is exactly what the first smoke run
+# did -- 20/20 rejected as "wrote no ledger file", ~10 minutes and real tokens,
+# with the agent reporting "the Write tool consistently returned 'you haven't
+# granted it yet' across 6 attempts". Unit tests could not catch it: they mock
+# the CLI, so the permission contract only exists against the real binary.
+#
+# Kept to the four tools `corpus-remediator.md`'s frontmatter already declares
+# plus Bash (its documented procedure reads the batch file with python3). Write
+# is the one that matters and the one that carries risk -- see
+# `_corpus_fingerprint`, which fails the run if the corpus moves underneath it.
+_ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Write", "Bash"]
+
+
 def build_command(prompt: str) -> list[str]:
     return ["claude", "-p", prompt, "--agent", "corpus-remediator",
-            "--output-format", "json"]
+            "--output-format", "json", "--allowedTools", *_ALLOWED_TOOLS]
+
+
+def _corpus_fingerprint(input_dir: str) -> dict[str, tuple[int, int]]:
+    """`(size, mtime_ns)` per corpus file, for a before/after equality check.
+
+    Granting the headless agent `Write` is what makes the run work at all, and
+    it is also the one thing that could let an LLM touch the corpus directly --
+    the design's central rule is that the agent proposes text into a ledger and
+    never edits corpus rows. The prompt and the agent definition both forbid it;
+    this is the check that does not rely on either being obeyed.
+
+    Deliberately stat-based, not content-hashed: it runs on 75 MB of JSONL and
+    only has to answer "did anything move", which mtime+size does at a fraction
+    of the cost. A best-effort empty dict (unreadable dir) skips the check
+    rather than blocking the run -- the gate is a tripwire, not a dependency.
+    """
+    try:
+        return {
+            p.name: (p.stat().st_size, p.stat().st_mtime_ns)
+            for p in sorted(Path(input_dir).glob("*.jsonl"))
+        }
+    except OSError:
+        return {}
 
 
 def _count_requests(batch_path: Path) -> int:
@@ -680,6 +721,32 @@ def _unwrap_result(stdout: str) -> str:
     if isinstance(envelope, dict):
         return str(envelope.get("result") or envelope.get("text") or text)
     return text
+
+
+def _envelope_cost(stdout: str) -> float | None:
+    """The batch's USD cost from the `--output-format json` envelope, if present.
+
+    A ~$10 / multi-hour run should not be a black box while it is running: this
+    accumulates into `progress.json` so the operator can compare actual spend
+    against the estimate at any point and stop early if they diverge. Returns
+    None rather than 0.0 when the field is absent, so "not reported" and "free"
+    stay distinguishable.
+
+    **Measured 2026-08-03: the envelope does NOT carry `total_cost_usd` under
+    Claude-subscription auth**, so `progress.json` reports `cost_usd: 0.0` and
+    the per-batch spend line stays hidden. That is the graceful-absence path
+    working, not a bug — track spend via the Claude console instead. The field
+    is kept because an API-key-authenticated run does report it, and because
+    silently guessing a cost would be worse than showing none.
+    """
+    try:
+        envelope = json.loads((stdout or "").strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(envelope, dict):
+        return None
+    value = envelope.get("total_cost_usd")
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 def run_agent_batch(batch_path: Path, scratch_dir: Path, timeout: int) -> dict:
@@ -724,12 +791,26 @@ def run_agent_batch(batch_path: Path, scratch_dir: Path, timeout: int) -> dict:
         return {"error": f"claude exited {proc.returncode}: {(proc.stderr or '').strip()[:200]}",
                 "ledger_path": None, "reported_count": None}
 
-    reported = _REPORTED_COUNT_RE.search(_unwrap_result(proc.stdout))
+    reply = _unwrap_result(proc.stdout)
+    cost = _envelope_cost(proc.stdout)
+    reported = _REPORTED_COUNT_RE.search(reply)
     reported_count = int(reported.group(1)) if reported else None
     if not ledger_path.exists():
-        return {"error": f"claude exited 0 but wrote no ledger file at {ledger_path}",
-                "ledger_path": None, "reported_count": reported_count}
-    return {"error": None, "ledger_path": ledger_path, "reported_count": reported_count}
+        # Persist the agent's own words. Without this the only signal is "wrote
+        # no ledger file", and every diagnostic cycle costs an API call and
+        # several minutes -- the smoke run rejected 20/20 this way and the
+        # reason (whatever the agent said about it) had already been discarded.
+        # Best-effort: a failure to write the log must not mask the real error.
+        snippet = reply.strip()
+        with contextlib.suppress(OSError):
+            ledger_path.with_suffix(".reply.txt").write_text(
+                snippet or "<empty reply>", encoding="utf-8"
+            )
+        return {"error": f"claude exited 0 but wrote no ledger file at {ledger_path}"
+                         f"; agent said: {snippet[:400] or '<empty reply>'}",
+                "ledger_path": None, "reported_count": reported_count, "cost_usd": cost}
+    return {"error": None, "ledger_path": ledger_path,
+            "reported_count": reported_count, "cost_usd": cost}
 
 
 def _request_id(request: object) -> str | None:
@@ -1151,9 +1232,11 @@ def main(argv: list[str] | None = None) -> int:
         "accepted": 0,
         "rejected": 0,
         "batch_errors": [],
+        "cost_usd": 0.0,
         "finished_at": None,
     }
     _write_progress(progress_path, progress)
+    corpus_before = _corpus_fingerprint(args.input_dir)
 
     with ThreadPoolExecutor(max_workers=max(1, args.max_workers)) as pool:
         futures = {
@@ -1179,6 +1262,9 @@ def main(argv: list[str] | None = None) -> int:
             progress["batches_done"] += 1
             progress["accepted"] += len(outcome["accepted"])
             progress["rejected"] += len(outcome["rejected"])
+            progress["cost_usd"] = round(
+                progress["cost_usd"] + (outcome.get("cost_usd") or 0.0), 4
+            )
             if outcome["error"]:
                 progress["batch_errors"].append({"batch": index, "error": outcome["error"]})
             _write_progress(progress_path, progress)
@@ -1186,13 +1272,28 @@ def main(argv: list[str] | None = None) -> int:
             mismatch = ""
             if outcome["reported_count"] not in (None, expected):
                 mismatch = f"  [agent reported {outcome['reported_count']} entries]"
+            spend = f"  ${progress['cost_usd']:.2f} so far" if progress["cost_usd"] else ""
             _log(f"batch {progress['batches_done']}/{len(batches)} (#{index}): "
                  f"+{len(outcome['accepted'])} accepted, "
-                 f"+{len(outcome['rejected'])} rejected{mismatch}")
+                 f"+{len(outcome['rejected'])} rejected{mismatch}{spend}")
 
     progress["finished_at"] = datetime.now(UTC).isoformat()
+    corpus_after = _corpus_fingerprint(args.input_dir)
+    if corpus_before and corpus_after != corpus_before:
+        changed = sorted(
+            set(corpus_before) ^ set(corpus_after)
+            | {k for k in corpus_before.keys() & corpus_after.keys()
+               if corpus_before[k] != corpus_after[k]}
+        )
+        progress["corpus_modified"] = changed
+        _write_progress(progress_path, progress)
+        print(f"error: the input corpus changed during the run: {', '.join(changed)}. "
+              "The agent must never write to data/output/; treat this ledger as "
+              "untrusted and restore the corpus before re-running.", file=sys.stderr)
+        return 2
     _write_progress(progress_path, progress)
-    print(f"Done: {progress['accepted']} accepted, {progress['rejected']} rejected. "
+    spend = f" Cost: ${progress['cost_usd']:.2f}." if progress["cost_usd"] else ""
+    print(f"Done: {progress['accepted']} accepted, {progress['rejected']} rejected.{spend} "
           f"See {accepted_path}, {rejected_path}, {progress_path}.")
     if progress["accepted"] == 0:
         print("error: no entries were accepted", file=sys.stderr)

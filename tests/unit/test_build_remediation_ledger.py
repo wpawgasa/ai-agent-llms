@@ -1303,3 +1303,36 @@ def test_ordinary_bracketed_prose_is_not_a_special_token(text):
 def test_state_marker_is_not_a_special_token():
     """The gate's own required marker must survive the widened sentinel rule."""
     assert brl._SPECIAL_TOKEN_RE.search(MARKER) is None
+
+
+def test_build_command_grants_the_tools_the_headless_agent_needs():
+    """`claude -p` cannot prompt, so an ungranted Write is a silent no-op.
+
+    The first smoke run rejected 20/20 as "wrote no ledger file" — the agent had
+    authored every entry and had no way to persist it. Unit tests mock the CLI,
+    so this contract only exists against the real binary; assert it explicitly.
+    """
+    cmd = brl.build_command("do the thing")
+    assert "--allowedTools" in cmd
+    granted = cmd[cmd.index("--allowedTools") + 1:]
+    assert "Write" in granted, cmd
+    # everything corpus-remediator.md's frontmatter declares
+    for tool in ("Read", "Grep", "Glob", "Bash"):
+        assert tool in granted, (tool, cmd)
+
+
+def test_corpus_fingerprint_notices_a_modified_file(tmp_path):
+    """The tripwire behind granting Write."""
+    (tmp_path / "a.jsonl").write_text('{"x": 1}\n', encoding="utf-8")
+    (tmp_path / "b.jsonl").write_text('{"y": 2}\n', encoding="utf-8")
+    before = brl._corpus_fingerprint(str(tmp_path))
+    assert set(before) == {"a.jsonl", "b.jsonl"}
+    assert brl._corpus_fingerprint(str(tmp_path)) == before
+
+    (tmp_path / "a.jsonl").write_text('{"x": 999999}\n', encoding="utf-8")
+    assert brl._corpus_fingerprint(str(tmp_path)) != before
+
+
+def test_corpus_fingerprint_is_empty_and_harmless_on_a_missing_dir(tmp_path):
+    """A tripwire must never be the thing that breaks the run."""
+    assert brl._corpus_fingerprint(str(tmp_path / "nope")) == {}
