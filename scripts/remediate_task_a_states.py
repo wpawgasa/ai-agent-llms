@@ -183,7 +183,7 @@ def _rebuild_system_prompt(record: dict) -> bool:
 
     Passing the whole *record* as the sample matters twice over:
       * ``retry_budget_for_sample`` keys off ``record["complexity_level"]``, so
-        an L5 row states 3 attempts and an L1 row states no-retry, matching the
+        an L5 row states 3 attempts and an L1 row states 2, matching the
         conversations Task 9's generator actually bakes.
       * ``build_enriched_system_prompt`` regenerates the workflow script from
         ``record["messages"]``. Called AFTER the repair, those are the REPAIRED

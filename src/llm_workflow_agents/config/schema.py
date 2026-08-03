@@ -214,7 +214,9 @@ class ComplexitySpec(BaseModel):
       dataclass default stays 1 so that any caller constructing a bare
       ``ComplexitySpec`` reproduces the pre-Task-9 implicit no-retry behavior.
     - ``retry_exhaustion``: what the agent does once the budget is spent.
-      ``"none"`` — no retry policy is stated (budget-1 levels).
+      ``"none"`` — no retry policy is stated. No level uses this after the final
+      review raised L1/L2 to budget 2; it survives for bare ``ComplexitySpec``
+      construction, ``--retry-exhaustion none``, and unlabelled samples.
       ``"error_path"`` — follow the workflow's ``tool_error`` arc.
       ``"handoff_in_state"`` — stay in the current state, say the step cannot be
       completed and that a hand-off will happen, then continue on a later turn.
