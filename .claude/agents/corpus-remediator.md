@@ -181,6 +181,21 @@ The last request of an `append_closing_pair` conversation. Its marker ends at th
 terminal state (`… → TERMINAL`). Write a natural close: confirm what was accomplished,
 offer nothing new, sign off in the register the agent has been using.
 
+**Expect the agent to have already said goodbye.** Measured on the full queue: in
+**548 of 599** closing-pair conversations (91.5%) the last existing assistant turn
+already contains a farewell — "have a wonderful day", `สวัสดีค่ะ`, `ขอให้เดินทางปลอดภัย`.
+You are writing the turn *after* that. A second full sign-off reads as a bug, and it
+would teach the model to close twice.
+
+What works instead: the customer's ack raises the last small thing (a thank-you, a
+one-line question already answered above, a "that's all"), and your assistant turn
+answers it in one sentence and stops. Short is correct here — this pair exists to give
+the trajectory a terminal turn, not to add content.
+
+- Bad: `Thank you for choosing us! Have a wonderful day!` — after the previous turn
+  already said exactly that.
+- Good: `ยินดีเสมอค่ะ แล้วพบกันใหม่นะคะ` / `Of course — anytime.`
+
 Note the `context_window` for this one ends at the last *existing* message — it does
 not show the `user` ack you are authoring in the request just before it. Author the
 pair together so they read as one exchange.

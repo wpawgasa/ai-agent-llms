@@ -368,6 +368,47 @@ rather than proceeding to §8 step 4. This is a quality gate, not a formality �
 authoring pass costs real money and its output is only as good as the trajectory it
 is authored into.
 
+> **Align before/after by prose, not by turn ordinal.** `insert_handoff_turn` adds
+> messages, so after-turn *n* is not before-turn *n* — an ordinal-aligned dump makes
+> correct repairs look like wild mislabels on all 866 insert rows. `apply_plan` never
+> edits existing prose, so prose is a stable join key; authored inserts are the
+> after-turns with no match in the before-list.
+
+### Audit result (run 2026-08-03, 36 conversations, 3 languages × 3 moves)
+
+**0 of 36 read badly.** The gate passes with a wide margin, and the corpus-wide
+measurement below explains why — the failure shape the protocol hunts for is
+structurally impossible here, not merely rare.
+
+Over all 1,873 drifted conversations, 5,082 drifted turns:
+
+| Shape | turns | share |
+|---|---:|---:|
+| `from` changed, destination identical | 2,093 | 41.2% |
+| destination changed | 2,989 | 58.8% |
+| — of those, new destination == that turn's **own old `from`** | **2,989** | **100.0%** |
+| — of those, re-pointed anywhere else | **0** | **0%** |
+
+Every destination change in the corpus is the same move: **the label is pulled back by
+exactly one state.** There is no case of a turn being re-pointed to an unrelated
+destination, which is precisely the "prose names the destination, requeue sent it
+elsewhere" failure §5 was written to catch.
+
+Reading the sample explains the direction. The v1 labels ran consistently *one state
+ahead of the prose*: a turn saying "the claim is approved — next I'll process the
+payout" was labelled `→ PROCESS_PAYOUT`, when the payout is explicitly the *next* turn's
+work. The requeue pulls it back to `→ APPROVE_OR_DENY`, which is what the prose actually
+reports completing. Across the sample the repaired label was **more** faithful to the
+prose than the original in every destination-change case, not less. Same pattern in all
+three languages (`L4_087` th/code_switch insurance chains, `L3_045_6`/`L3_078_6` en
+sales, `L5_051_7` th telecom).
+
+**What the audit *did* surface** is not a trajectory bug but an authoring risk, now
+fixed in `.claude/agents/corpus-remediator.md`: in **548 of 599** `append_closing_pair`
+conversations (91.5%) the last existing assistant turn **already says goodbye**, so the
+authored closing pair lands after a farewell. Left unaddressed, the agent would have
+written a second full sign-off on ~550 rows.
+
 ---
 
 ## 6. Ledger contract and the three gate layers
