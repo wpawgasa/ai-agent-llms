@@ -620,10 +620,9 @@ python scripts/remediate_task_a_states.py diff \
 # after:  {'none': 4084}
 ```
 
-> **Known cosmetic defect.** `--on-unrepairable` is parsed but never read by
-> `cmd_apply` — the code always drops. Passing `keep` does nothing. Harmless today
-> because `drop` is the intended behaviour at every call site in this playbook, but do
-> not rely on `keep`.
+> `--on-unrepairable` accepts only `drop`; `keep` and `truncate` were removed rather
+> than left as flags that argparse took and `cmd_apply` ignored. A row that cannot be
+> brought onto the convention is still violating it, so retaining it would fail Step 7.
 
 **Do not ship this directory.** It fails acceptance gate 6 badly (§9) — L4 would lose
 41.6% of its rows. It exists to prove the deterministic half is sound before spending
