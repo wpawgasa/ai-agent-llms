@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "fb627e28de2e",
+  "session_id": "59cd1aa4-2d21-4d30-a623-76b0e5e27188",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-03T05:33:07.538654567Z",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "scripts/build_remediation_ledger.py"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "1b9f48bb7774",
+  "token_usage": {
+    "input_tokens": 124,
+    "cache_creation_tokens": 69003,
+    "cache_read_tokens": 3743189,
+    "output_tokens": 30826,
+    "api_call_count": 62
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-03T05:33:07.409466222Z",
+    "agent_lines": 87,
+    "human_added": 53,
+    "human_modified": 5,
+    "human_removed": 0,
+    "total_committed": 142,
+    "agent_percentage": 61.267605633802816
+  }
+}
