@@ -116,51 +116,41 @@ response correctly.`
 Bad: anything that says the severity assessment came back, or that a team is on the
 way. Neither has happened at this point in the conversation.
 
-### 2. Hand-off bridge after an ERROR result
+### 2. Never narrate a tool result you were not given
 
-**108 of the bridge requests land immediately after a tool result carrying an
-`"error"` key**, and the turn that follows retries the same tool. The marker on these
-still *advances*, because the advance was displaced off the earlier tool turn — the
-marker is bookkeeping, not a claim that the call succeeded. Your prose must not
-narrate success.
+You will not be asked to bridge across an errored tool result — `plan_repair` keeps the
+state advance queued until after a *successful* result, so a retry stays in its state
+and needs no authored turn (playbook §4.1). An earlier version of this file described
+the opposite case as routine and told you to write an advancing bridge after
+`{"error": …}`; that was a bug in the planner, now fixed. **If you ever receive such a
+request, refuse it** (`{"insert_id": …, "refuse": true, "rationale": "advancing bridge
+after an errored tool result"}`) rather than trying to satisfy it — it means the
+planner regressed.
 
-Real request (`l1_merged_20260629:519:0`, `L1_024_5`, en, technical_support), marker
-`[STATE: IDENTIFY_ISSUE → COLLECT_DIAGNOSTICS]`:
+The general rule still binds everywhere: **write only what the transcript has already
+established.** Check the message at `position_after_msg_index` before you write. If it
+is a `tool` result, your prose may report exactly what that payload says and nothing
+more.
 
-```
-[6] assistant: [STATE: IDENTIFY_ISSUE → COLLECT_DIAGNOSTICS] ... "Now, let me run diagnostics"
-[7] tool:     {"error": "Service temporarily unavailable"}      <== INSERT AFTER
-[8] assistant: [STATE: COLLECT_DIAGNOSTICS → COLLECT_DIAGNOSTICS]
-              "It looks like I hit a temporary network glitch... Let me try running that
-               connectivity check once more."  + <tool_call>
-```
+Bad: `Great, that worked!` / `The diagnostics came back clean.` when the payload does
+not say so. Writing success prose the tool did not return teaches the model to
+hallucinate tool results, which is the exact defect this whole corpus change exists
+to fix.
 
-Good: `[STATE: IDENTIFY_ISSUE → COLLECT_DIAGNOSTICS]\nThe diagnostics service did not
-respond just now. Let me move on to the connectivity checks and try again from there.`
-
-Bad: `Great, that worked!` / `The diagnostics came back clean.` — the tool errored.
-Writing success prose here teaches the model to hallucinate tool results, which is the
-exact defect this whole corpus change exists to fix.
-
-Check the message at `position_after_msg_index` before you write. If its role is
-`tool` and its content carries `"error"`, you are in this case.
-
-**Do not duplicate the turn that follows you.** On the error path the *next* turn
-almost always opens with its own apology for the same failure ("ขออภัยด้วยนะคะ พอดีระบบ
-verify ขัดข้องชั่วคราว…"). If your bridge also leads with an apology for that failure,
-the conversation says sorry twice in a row and reads like a loop. Read the following
-turn in `context_window` and write the part it does *not* cover — acknowledge the
-result briefly and hand off, then let the next turn do the apologising and the retry.
+**Do not duplicate the turn that follows you.** The next turn often opens by
+acknowledging the same thing you are acknowledging. If your bridge repeats it, the
+conversation says the same thing twice in a row and reads like a loop. Read the
+following turn in `context_window` and write the part it does *not* cover.
 
 ### 3. User acknowledgement — `role: "user"`, empty `required_marker`
 
-**1,673 of the 3,902 requests are these**, so most of your output is customer voice,
+**1,639 of the 3,842 requests are these**, so most of your output is customer voice,
 not agent voice. Two reasons one gets asked for:
 
-- **Shape padding (1,074 of them).** A bridge is assistant prose spliced next to
+- **Shape padding (1,019 of them).** A bridge is assistant prose spliced next to
   another assistant prose turn, and two assistant prose turns in a row is a structural
   violation. A short customer utterance in between makes the adjacency legal.
-- **Closing-pair opener (599 of them).** The last two requests of a conversation whose
+- **Closing-pair opener (620 of them).** The last two requests of a conversation whose
   final turn was a tool call: a `user` turn, then the terminal `assistant` turn.
 
 Write a short, natural customer utterance: an acknowledgement, a thanks, a small
@@ -182,7 +172,7 @@ terminal state (`… → TERMINAL`). Write a natural close: confirm what was acc
 offer nothing new, sign off in the register the agent has been using.
 
 **Expect the agent to have already said goodbye.** Measured on the full queue: in
-**548 of 599** closing-pair conversations (91.5%) the last existing assistant turn
+**568 of 620** closing-pair conversations (91.6%) the last existing assistant turn
 already contains a farewell — "have a wonderful day", `สวัสดีค่ะ`, `ขอให้เดินทางปลอดภัย`.
 You are writing the turn *after* that. A second full sign-off reads as a bug, and it
 would teach the model to close twice.
@@ -203,7 +193,7 @@ pair together so they read as one exchange.
 ## Language and register
 
 Three languages appear, and the authoring queue is **not** English-majority:
-code_switch 1,471 requests / th 1,382 / en 1,049. Match `language` exactly.
+code_switch 1,443 requests / th 1,372 / en 1,027. Match `language` exactly.
 
 - **`en`** — plain English.
 - **`th`** — natural Thai throughout. Keep the politeness particle the speaker has been
@@ -237,7 +227,7 @@ nothing beyond it, and nothing on it goes unenforced.
 1. **`role` must equal the request's `role`.**
 2. **For `role: "assistant"`: `content` must start with `required_marker` byte for
    byte**, then a newline, then your prose.
-   **Copy the arrow glyph exactly as given.** The corpus mixes both: 2,151 requests
+   **Copy the arrow glyph exactly as given.** The corpus mixes both: 2,125 requests
    carry a Unicode `→` and 78 carry an ASCII `->`. Normalising one to the other fails
    the prefix check. Never retype the marker — copy the string from the request.
    The character straight after the marker must be the newline: `[STATE: A → B] text`

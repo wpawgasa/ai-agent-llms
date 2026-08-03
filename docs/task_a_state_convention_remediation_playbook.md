@@ -72,12 +72,12 @@ Reproduce with the triage command in §8 step 1:
 | Move | Conversations | Share | Authored text |
 |---|---:|---:|---|
 | `none` — already conformant | 3,476 | 62.6% | — |
-| `relabel` — queue drains cleanly | 608 | 11.0% | none |
-| `insert_handoff_turn` — stacked tool turns | 866 | 15.6% | yes |
-| `append_closing_pair` — tail deficit | 599 | 10.8% | yes |
-| `drop` — planner found it infeasible | **0** | 0% | — |
+| `relabel` — queue drains cleanly | 619 | 11.2% | none |
+| `insert_handoff_turn` — stacked tool turns | 833 | 15.0% | yes |
+| `append_closing_pair` — tail deficit | 620 | 11.2% | yes |
+| `drop` — planner found it infeasible | **1** | 0.0% | — |
 
-**Authoring queue: 1,465 conversations carrying 3,902 individual inserts.**
+**Authoring queue: 1,453 conversations carrying 3,842 individual inserts.**
 
 > **Deviation from earlier documents.** The design spec's Task-2 note records the
 > split as `insert_handoff_turn` 1,150 / `append_closing_pair` 315, and the Task 11
@@ -85,40 +85,44 @@ Reproduce with the triage command in §8 step 1:
 > figure. Both are stale. The 930 figure predates the removal of
 > `split_fused_tool_turn`; the 1,150/315 split predates commits `9736933`, `2e739bb`,
 > `97c33a7`, and `7824c90`, which made one plan accumulate every bridge in a
-> conversation instead of returning at the first. The **total** authoring-case count
-> (1,465) is unchanged since the spec's Task-2 note; only its split between the two
-> moves and the per-conversation insert count moved.
+> conversation instead of returning at the first.
+>
+> The census above also supersedes the `608 / 866 / 599 / 1,465 convs / 3,902 inserts`
+> figures this document carried until the retry-after-error fix (§4.1). That fix moved
+> 33 conversations out of `insert_handoff_turn` — 11 collapsed to a free `relabel`, 21
+> became `append_closing_pair`, and 1 became the corpus's only `drop` — and removed 60
+> inserts from the paid queue.
 
-Insert composition of the 3,902:
+Insert composition of the 3,842:
 
 | Kind | Role | `required_marker` | Count |
 |---|---|---|---:|
-| Hand-off bridge | `assistant` | non-empty | 1,630 |
-| Closing-pair terminal turn | `assistant` | non-empty (`… → TERMINAL`) | 599 |
-| Shape-padding acknowledgement | `user` | `""` | **1,074** |
-| Closing-pair opener | `user` | `""` | 599 |
+| Hand-off bridge | `assistant` | non-empty | 1,583 |
+| Closing-pair terminal turn | `assistant` | non-empty (`… → TERMINAL`) | 620 |
+| Shape-padding acknowledgement | `user` | `""` | **1,019** |
+| Closing-pair opener | `user` | `""` | 620 |
 
-The 1,074 shape-padding user acks are the largest single surprise relative to the
+The 1,019 shape-padding user acks are the largest single surprise relative to the
 brief, which does not mention them at all. They exist because a bridge is assistant
 *prose* spliced next to another assistant turn, and `find_shape_violations` rejects
-two consecutive assistant prose turns. 1,059 pad the trailing edge (the stacked turn
-is fused, so prose follows prose) and 15 pad the leading edge (the bridge lands
-directly after an assistant turn). **43% of the authoring queue is customer voice,
-not agent voice.**
+two consecutive assistant prose turns — most pad the trailing edge (the stacked turn
+is fused, so prose follows prose), a handful pad the leading edge (the bridge lands
+directly after an assistant turn). Together with the closing-pair openers, **1,639 of
+3,842 requests (43%) are customer voice, not agent voice.**
 
 Distribution of inserts per conversation (max **14**):
 
 | inserts | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 14 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| conversations | 237 | 785 | 100 | 203 | 19 | 70 | 31 | 12 | 6 | 2 |
+| conversations | 242 | 777 | 101 | 198 | 19 | 66 | 30 | 12 | 6 | 2 |
 
 By language — the queue is **not** English-majority:
 
 | Language | corpus rows | authoring rows | at risk | inserts |
 |---|---:|---:|---:|---:|
-| `code_switch` | 1,895 | 531 | 28.0% | 1,471 |
-| `th` | 1,801 | 512 | 28.4% | 1,382 |
-| `en` | 1,853 | 422 | 22.8% | 1,049 |
+| `code_switch` | 1,895 | 525 | 27.7% | 1,443 |
+| `th` | 1,801 | 511 | 28.4% | 1,372 |
+| `en` | 1,853 | 417 | 22.5% | 1,027 |
 
 ---
 
@@ -228,38 +232,39 @@ AFTER   [GREETING→LISTEN_COMPLAINT, LISTEN_COMPLAINT→LISTEN_COMPLAINT,
 
 Note the `user` turn at index 9. Most tail deficits end on an assistant turn, so
 appending the terminal assistant turn alone would trip the "no two consecutive
-assistant prose turns" shape rule. That is why the move is a *pair*, and why 599 of
-the 1,673 user-role inserts exist.
+assistant prose turns" shape rule. That is why the move is a *pair*, and why 620 of
+the 1,639 user-role inserts exist.
 
-### 3.3 A real `insert_handoff_turn` row — `L1_009_2`
+### 3.3 A real retry-after-error row — `L1_009_2`
 
-`l1_merged_20260629` line 101, code_switch, L1, `account_management`. Two inserts, both
-at `position_after_msg_index` 7:
+`l1_merged_20260629` line 101, code_switch, L1, `account_management`. **Zero inserts** —
+this is the shape §4.1's fix produces, and it is the convention's rules 1–4 in one row:
 
 ```
- [6] assistant +tool  VERIFY_IDENTITY → AUTHENTICATE   -->  VERIFY_IDENTITY → VERIFY_IDENTITY
-                      (bare verify_identity call; AUTHENTICATE goes on the queue)
- [7] tool             {"error": "Service temporarily unavailable"}
-     ↳ INSERT 0  assistant  [STATE: VERIFY_IDENTITY → AUTHENTICATE]  «authored bridge»
-     ↳ INSERT 1  user       «authored ack»
- [8] assistant +tool  AUTHENTICATE → AUTHENTICATE   (fused: apology prose + retry call, unchanged)
+ [6] assistant +tool  VERIFY_IDENTITY → AUTHENTICATE  -->  VERIFY_IDENTITY → VERIFY_IDENTITY
+                      (bare verify_identity call; AUTHENTICATE goes on the queue)   rule 1
+ [7] tool             {"error": "Service temporarily unavailable"}                  rule 2
+ [8] assistant +tool  AUTHENTICATE → AUTHENTICATE     -->  VERIFY_IDENTITY → VERIFY_IDENTITY
+                      (fused: apology prose + retry call — stays put)               rule 4
+ [9] tool             {"status": "success", …}                                      rule 2
+[10] assistant        AUTHENTICATE → AUTHENTICATE     -->  VERIFY_IDENTITY → AUTHENTICATE
+                      "ระบบผ่านขั้นตอนนี้เรียบร้อยแล้วค่ะ" — the queued advance lands here  rule 3
 ```
 
-Message 8 is a *fused* tool turn whose `from` is `AUTHENTICATE`, but `cur` is still
-`VERIFY_IDENTITY` because message 6's relabel did not advance. That is the stacked-tool
-infeasibility: an authored assistant turn has to bridge `VERIFY_IDENTITY →
-AUTHENTICATE`. And because message 8 is fused (prose before its `<tool_call>`), the
-bridge would sit prose-next-to-prose, so a user ack is padded in behind it.
+The advance queued off message 6 survives the failed attempt and drains on the first
+prose turn *after the success* — which is precisely the turn whose existing prose says
+"we've passed this step". Nothing is authored, nothing is invented, and the row is a
+clean demonstration of stay → error → retry-in-place → advance-on-success.
 
-**This row is also the error case.** The tool result the bridge follows is an error,
-and the very next turn retries. The bridge's marker still *advances* — that advance was
-displaced off message 6 and has to land somewhere — but the prose must not narrate
-success. 108 of the 1,630 bridges are in this position. See the agent definition's
-"situation 2" for the good/bad wording contrast.
+**This row used to be `insert_handoff_turn` with two authored messages**, and this
+section used to explain why the authored bridge had to advance `VERIFY_IDENTITY →
+AUTHENTICATE` immediately after the error while somehow not narrating success. That
+was the bug, rationalised into documentation — see §4.1.
 
 Inserts that share a `position_after_msg_index` come out in **list order**;
 `apply_plan` guarantees this by sorting on `(-position, -list_index)` and inserting
-back-to-front.
+back-to-front. (`L2_071_4`, `l2_merged_20260630` line 365, is a surviving one-insert
+`insert_handoff_turn` if you want to trace that path instead.)
 
 ---
 
@@ -267,14 +272,51 @@ back-to-front.
 
 | # | Move | Authored text | Conversations |
 |---|---|---|---:|
-| 1 | `relabel` — queue drains cleanly (bare and fused tool turns alike) | none | 608 |
+| 1 | `relabel` — queue drains cleanly (bare and fused tool turns alike) | none | 619 |
 | 2 | `pullback_fuse` — move `<tool_call>` onto the preceding `X→X` prose turn | none | **not implemented** |
-| 3 | `insert_handoff_turn` — stacked tool turns; insert an assistant bridge (+ ack padding) | 1–13 msgs | 866 |
-| 4 | `append_closing_pair` — tail deficit; append `user` ack + terminal `assistant` | 2+ msgs | 599 |
-| 5 | `drop` — planner infeasibility, post-gate failure, or agent refusal | — | 0 planner-side |
+| 3 | `insert_handoff_turn` — stacked tool turns; insert an assistant bridge (+ ack padding) | 1–13 msgs | 833 |
+| 4 | `append_closing_pair` — tail deficit; append `user` ack + terminal `assistant` | 2+ msgs | 620 |
+| 5 | `drop` — planner infeasibility, post-gate failure, or agent refusal | — | 1 planner-side |
 
 Move 3 must bridge `cur` to the stacked turn's own `from`-state, **not** a bare
 self-loop at `cur` — a self-loop would leave the trajectory exactly as stuck as before.
+
+### 4.1 The retry-after-error exception (found at §8 step 4, 2026-08-03)
+
+**A queued advance is never drained across a tool error.** When a stacked tool turn
+follows an errored result, it is a retry: it stays at `cur`, the queued advance stays
+queued, and no bridge is authored. `state_convention_repair._errored` is the predicate;
+`plan_repair` short-circuits on it before the stacked-tool branch.
+
+Without this, `plan_repair` authored a bridge asserting `X → Y` directly after
+`{"error": …}` and the retry then fired *from Y* — teaching advance-on-failure, the
+exact inverse of rule 4, on **107 of 912 advancing bridges (11.7%)**. It was also an
+impossible authoring request: `corpus-remediator.md` forbids narrating success after an
+error, so the agent could only refuse or hallucinate. Both this document (old §3.3) and
+the agent definition had rationalised the contradiction into prose instead of treating
+it as a bug — worth remembering when a spec starts explaining why something
+uncomfortable is fine.
+
+Caught by `--dry-run` before any spend: it was the *first* request in batch 0.
+
+Two consequences worth knowing:
+
+- **The tool-attribution gate had to be narrowed from equality to a subset relation.**
+  Relabelling a retry back to the state it actually retried from correctly *removes* the
+  wrongly-advanced attribution, which `before != after` read as corruption and dropped
+  100 conversations — precisely the rows demonstrating rule 4. The property that
+  actually keeps the corpus safe is "the repair never invents a call-site", i.e.
+  `after ⊆ before`. Measured: of the 102 rows whose map changes, 97 only *lose* pairs
+  (kept) and 5 genuinely *move* a tool between states (still dropped).
+  `remediate_task_a_states._gains_tool_attribution`, with a unit test.
+- **One conversation became unrepairable** — `L4_058_2` (`l4_merged_20260630` line 155),
+  a four-deep stacked-tool chain with an error in the middle. `cur` stays at
+  `CLAIM_INTAKE` while the rest of the row is labelled as if already past
+  `ASSESS_COVERAGE`, and bridges jump `cur` straight to the stacked turn's `from`,
+  skipping the queue. It fails the deficit gate rather than shipping wrong: 1 of 5,549.
+
+Net across all levels: **6 drops (0.11%)** with a full ledger — 5 tool-attribution, 1
+infeasible — against 3 before the fix. Per level: L1 0, L2 0, L3 2, L4 4, L5 0.
 
 **`pullback_fuse` was measured and deliberately skipped.** It yielded 14 candidates —
 1.2% of what was then a 1,150-conversation insert bucket. Not worth a distinct code
@@ -289,7 +331,7 @@ path, so the implemented ladder goes straight from `relabel` to `insert_handoff_
   (777 of 1,227 shipped split sites, across 360 conversations = 6.5% of the corpus),
   directly violating the "preserve every tool call's `from`-state exactly" rule and
   the "GT-inferred tool→state map unchanged" acceptance gate. Removing it is what
-  raised the authoring bucket from 930 to 1,465 conversations, and it drove
+  raised the authoring bucket from 930 to ~1,450 conversations, and it drove
   tool-placement violations from 360 conversations to zero. That is the trade, and it
   was accepted.
 - **Marker-only inserted turns.** 0 of 64,964 corpus turns are marker-only; adding
@@ -313,10 +355,10 @@ low-signal.** Measured on the current corpus:
 
 | Move | conversations | with non-empty `drift_turns` |
 |---|---:|---:|
-| `relabel` | 608 | **608 (100%)** |
-| `insert_handoff_turn` | 866 | 666 |
-| `append_closing_pair` | 599 | 599 |
-| **total** | 2,073 | **1,873** |
+| `relabel` | 619 | **619 (100%)** |
+| `insert_handoff_turn` | 833 | 678 |
+| `append_closing_pair` | 620 | 620 |
+| **total** | 2,072 | **1,917** |
 
 It fires on **every single `relabel` plan**, because the queue-draining turn *always*
 has a changed `from` — that is the mechanism, not an anomaly. An audit protocol phrased
@@ -359,7 +401,7 @@ failure shape to hunt for is a turn whose prose names the destination explicitly
 ("Let's move on to scheduling your appointment") while the requeue has re-pointed it
 somewhere else.
 
-Stratify across all three language legs — the drift pool is 1,873 rows and the
+Stratify across all three language legs — the drift pool is 1,917 rows and the
 language mix of the authoring queue is 28% code_switch / 28% th / 23% en, so an
 English-only sample is not representative.
 
@@ -370,7 +412,7 @@ is authored into.
 
 > **Align before/after by prose, not by turn ordinal.** `insert_handoff_turn` adds
 > messages, so after-turn *n* is not before-turn *n* — an ordinal-aligned dump makes
-> correct repairs look like wild mislabels on all 866 insert rows. `apply_plan` never
+> correct repairs look like wild mislabels on all 833 insert rows. `apply_plan` never
 > edits existing prose, so prose is a stable join key; authored inserts are the
 > after-turns with no match in the before-list.
 
@@ -380,13 +422,13 @@ is authored into.
 measurement below explains why — the failure shape the protocol hunts for is
 structurally impossible here, not merely rare.
 
-Over all 1,873 drifted conversations, 5,082 drifted turns:
+Over all 1,917 drifted conversations, 5,260 drifted turns:
 
 | Shape | turns | share |
 |---|---:|---:|
-| `from` changed, destination identical | 2,093 | 41.2% |
-| destination changed | 2,989 | 58.8% |
-| — of those, new destination == that turn's **own old `from`** | **2,989** | **100.0%** |
+| `from` changed, destination identical | 2,114 | 40.2% |
+| destination changed | 3,146 | 59.8% |
+| — of those, new destination == that turn's **own old `from`** | **3,146** | **100.0%** |
 | — of those, re-pointed anywhere else | **0** | **0%** |
 
 Every destination change in the corpus is the same move: **the label is pulled back by
@@ -404,8 +446,8 @@ three languages (`L4_087` th/code_switch insurance chains, `L3_045_6`/`L3_078_6`
 sales, `L5_051_7` th telecom).
 
 **What the audit *did* surface** is not a trajectory bug but an authoring risk, now
-fixed in `.claude/agents/corpus-remediator.md`: in **548 of 599** `append_closing_pair`
-conversations (91.5%) the last existing assistant turn **already says goodbye**, so the
+fixed in `.claude/agents/corpus-remediator.md`: in **568 of 620** `append_closing_pair`
+conversations (91.6%) the last existing assistant turn **already says goodbye**, so the
 authored closing pair lands after a farewell. Left unaddressed, the agent would have
 written a second full sign-off on ~550 rows.
 
@@ -447,7 +489,7 @@ Empty list == accept. Rejects on:
 | tool calls | neither `"<tool_call>"` nor `"</tool_call>"` in `content` |
 | marker prefix (assistant) | `content.startswith(required_marker)` — **byte for byte, arrow glyph included** |
 | marker newline (assistant) | the character right after the marker is `"\n"` (100% of the 64,964 markers in the corpus are followed by one) |
-| meaningful-content floor (both roles) | the prose must **contain ≥10 meaningful characters** — letters or digits of the Latin or Thai script, NFKC-folded. Stated positively on purpose: padding, punctuation, symbols, combining marks and *every* invisible codepoint count zero, so there is no blocklist to keep current. Assistant: measured after the marker (a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing). User: measured on the whole content (the 20-char floor counts spaces, so `"x"` + 19 spaces otherwise passed — and 1,673 of the 3,902 inserts are acks). Calibrated: 10 costs **0** false rejections across the 93,064 assistant/user corpus turns that clear the other floors; the shortest real turn carries 12 |
+| meaningful-content floor (both roles) | the prose must **contain ≥10 meaningful characters** — letters or digits of the Latin or Thai script, NFKC-folded. Stated positively on purpose: padding, punctuation, symbols, combining marks and *every* invisible codepoint count zero, so there is no blocklist to keep current. Assistant: measured after the marker (a 25–60 char marker plus a newline otherwise clears the 20-char floor while saying nothing). User: measured on the whole content (the 20-char floor counts spaces, so `"x"` + 19 spaces otherwise passed — and 1,639 of the 3,842 inserts are acks). Calibrated: 10 costs **0** false rejections across the 93,064 assistant/user corpus turns that clear the other floors; the shortest real turn carries 12 |
 | second marker | no `"[STATE:"` in `content[len(required_marker):]` |
 | marker (user) | no `"[STATE:"` anywhere when `required_marker == ""` |
 | length | `20 <= len(content) <= 600`, counted **including** the marker |
@@ -457,12 +499,12 @@ Empty list == accept. Rejects on:
 | copy guard | `content`'s prose is not a copy of a `context_window` message, for copies ≥40 characters. Compared on the **meaningful skeleton** (NFKC, meaningful characters only, casefolded), so one invisible character or a changed comma cannot defeat it. The ≥40 gate stays on the visible prose so the guard cannot fire *less* often than before |
 | duplicate prose (batch level, in `_reject_duplicate_content`, not `validate_entry`) | no two accepted entries in one batch share ≥40 characters of prose with the same **meaningful skeleton** — the "generic ack repeated across rows" defect. Same normalisation as the copy guard, so an invisible-character variant is still a duplicate. First occurrence stands |
 
-The arrow-glyph rule bites in practice: of the 2,229 markered requests, **2,151 carry
+The arrow-glyph rule bites in practice: of the 2,203 markered requests, **2,125 carry
 a Unicode `→` and 78 carry an ASCII `->`**. `_marker()` copies the arrow from the
 source turn, so both survive into the queue. An agent that normalises one to the other
 fails the prefix check and loses the row.
 
-The language check is gated because 2,853 of the 3,902 authored inserts are th or
+The language check is gated because 2,815 of the 3,842 authored inserts are th or
 code_switch and silent English drift is the single most likely quality failure — and
 the only one no other check can see. It is a *script-presence* check, not a fluency or
 ratio check, which is what keeps it safe for `code_switch`: that register mixes Thai
@@ -478,13 +520,13 @@ that matters — trips neither of its signals and passes it clean.
 **The check counts Thai *letters*, not the Thai Unicode block** (fixed 2026-08-02 after
 review). Matching the whole `U+0E00–U+0E7F` block defeated the rule in both directions:
 a single `฿` in an otherwise all-English answer satisfied it, which — measured by
-injecting exactly that into every row — let **all 2,853** th/code_switch inserts pass,
+injecting exactly that into every row — let **all 2,815** th/code_switch inserts pass,
 and the same block match rejected `en` rows for a baht price, the one legitimate English
 use of a Thai-block character. The narrowed class costs nothing on real content: across
 all **93,059** corpus turns of ≥20 characters, the letter class and the old block class
 agree on every single one (**0 disagreements**), so the 1-of-29,968 `th` and
 207-of-31,856 `code_switch` figures above are unchanged. Post-fix the injection is
-caught 2,853/2,853, and 0 of 1,049 `en` rows are rejected for quoting `฿1,200`.
+caught 2,815/2,815, and 0 of 1,027 `en` rows are rejected for quoting `฿1,200`.
 
 Every row of this table corresponds to a numbered rule in
 `.claude/agents/corpus-remediator.md` § "Hard formatting rules", and the agent's own
@@ -573,7 +615,7 @@ python scripts/remediate_task_a_states.py triage \
 Runs in ~4 s, writes ~19 MB. Expected output:
 
 ```
-Triage: 5549 rows -> {'none': 3476, 'relabel': 608, 'insert_handoff_turn': 866, 'append_closing_pair': 599}
+Triage: 5549 rows -> {'none': 3476, 'relabel': 619, 'insert_handoff_turn': 833, 'append_closing_pair': 620, 'drop': 1}
 ```
 
 If those four numbers differ, the input corpus changed — stop and reconcile against §1
@@ -647,18 +689,18 @@ python scripts/remediate_task_a_states.py apply \
 Runs in ~13 s. Expected:
 
 ```
-Apply: kept 4084, dropped 1465 ({'needs-ledger:insert_handoff_turn': 866, 'needs-ledger:append_closing_pair': 599})
+Apply: kept 4094, dropped 1455 ({'needs-ledger:insert_handoff_turn': 833, 'needs-ledger:append_closing_pair': 620, 'tool-from-state-changed': 1, 'deficit of 4 states at end (only 1 supported)': 1})
 ```
 
-4,084 = 3,476 `none` + 608 `relabel`. Confirm the output is clean:
+4,094 = 3,476 `none` + 619 `relabel` − 1 tool-attribution drop. Confirm the output is clean:
 
 ```bash
 python scripts/remediate_task_a_states.py verify --input-dir /tmp/task_a_deterministic_only --strict
 # Total violations: 0     (exit 0)
 python scripts/remediate_task_a_states.py diff \
   --before data/output/sft/task_a --after /tmp/task_a_deterministic_only
-# before: {'none': 3476, 'relabel': 608, 'insert_handoff_turn': 866, 'append_closing_pair': 599}
-# after:  {'none': 4084}
+# before: {'none': 3476, 'relabel': 619, 'insert_handoff_turn': 833, 'append_closing_pair': 620, 'drop': 1}
+# after:  {'none': 4094}
 ```
 
 > `--on-unrepairable` accepts only `drop`; `keep` and `truncate` were removed rather
@@ -721,7 +763,7 @@ file needs work, not that you should raise the budget.
 
 ### Step 5 — Full ledger run (costly — get explicit go-ahead)
 
-**~$8–13 and 1.5–3 h at 4 workers**, for 3,902 inserts across 1,465 conversations.
+**~$8–13 and 1.5–3 h at 4 workers**, for 3,842 inserts across 1,453 conversations.
 This supersedes the Task 11 brief's "~$5–8 / 1–2 h", which was priced against the
 pre-Task-2 count of ~930 conversations / ~1,020 inserts.
 
@@ -737,7 +779,7 @@ makes it skip completed inserts.
 
 > **Batches are packed on conversation boundaries** (`build_batches`), so no
 > conversation is ever split across two agent calls — flat slicing at the default size
-> of 10 would have split 249 of the 1,465. That matters most for closing pairs (the
+> of 10 would have split ~250 of the 1,453. That matters most for closing pairs (the
 > `user` ack and the terminal turn must read as one exchange) and for the 100+
 > conversations needing 6–14 bridges. `--batch-size` is therefore a soft cap: a
 > conversation with more inserts than the cap gets a batch to itself. Measured on the
