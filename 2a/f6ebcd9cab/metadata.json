@@ -3,7 +3,7 @@
   "checkpoint_id": "2af6ebcd9cab",
   "strategy": "manual-commit",
   "branch": "task-a-tool-stay-convention",
-  "checkpoints_count": 5,
+  "checkpoints_count": 6,
   "files_touched": [
     ".claude/agents/corpus-remediator.md"
   ],
@@ -31,13 +31,19 @@
       "transcript": "/2a/f6ebcd9cab/3/full.jsonl",
       "content_hash": "/2a/f6ebcd9cab/3/content_hash.txt",
       "prompt": "/2a/f6ebcd9cab/3/prompt.txt"
+    },
+    {
+      "metadata": "/2a/f6ebcd9cab/4/metadata.json",
+      "transcript": "/2a/f6ebcd9cab/4/full.jsonl",
+      "content_hash": "/2a/f6ebcd9cab/4/content_hash.txt",
+      "prompt": "/2a/f6ebcd9cab/4/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 819,
-    "cache_creation_tokens": 2305460,
-    "cache_read_tokens": 128760276,
-    "output_tokens": 477318,
-    "api_call_count": 424
+    "input_tokens": 827,
+    "cache_creation_tokens": 2351233,
+    "cache_read_tokens": 128917673,
+    "output_tokens": 480601,
+    "api_call_count": 428
   }
 }
