@@ -337,7 +337,14 @@ def build_enriched_system_prompt(
     # workflow script's per-state tool-error note and FORMAT_RULES' tool-error
     # rule — are rendered from THIS value, so a sample can never carry two
     # contradictory retry policies a few hundred characters apart.
-    retry_budget = retry_budget_for_sample(sample)
+    #
+    # Under TASK_A_STAY_RULE=0 the budget collapses to 1 and the script's
+    # tool-turn semantics are switched off, because the opt-out's whole purpose
+    # is to reproduce the v1 prompt byte-for-byte (R7 / ckpt-500 vs ckpt-1770
+    # comparability). Freezing only the FORMAT_RULES half would not achieve that:
+    # every one of the 5,549 corpus rows carries `state_details`, so every row
+    # takes the build_workflow_script branch below.
+    retry_budget = retry_budget_for_sample(sample) if _STAY_RULE_ENABLED else 1
 
     # Regenerate the workflow script from the actual GT conversation rather than
     # trusting sample["workflow_script"] (which is frozen at data-generation time
@@ -353,7 +360,7 @@ def build_enriched_system_prompt(
             tool_schemas=tool_schemas,
             language=language,
             messages=messages,
-            tool_turn_semantics=True,
+            tool_turn_semantics=_STAY_RULE_ENABLED,
             retry_budget=retry_budget,
         )
     else:
