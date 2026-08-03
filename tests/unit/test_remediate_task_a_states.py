@@ -216,22 +216,30 @@ def test_rebuild_prompts_replaces_the_v1_worked_example(tmp_path):
 
 def test_rebuild_prompts_states_the_per_sample_retry_budget(tmp_path):
     # Task 10 made the budget per-sample off complexity_level: L5 -> 3 total
-    # attempts, L1 -> no retry at all. Passing the whole record as the sample is
-    # what makes that flow through.
+    # attempts, L1 -> 2 (raised from 1 in the final review wave). Passing the
+    # whole record as the sample is what makes that flow through.
     l5 = _run_apply(tmp_path, [_rebuildable_record("D_L5", "L5")],
                     "--rebuild-prompts", out_name="l5")[0]
     l1 = _run_apply(tmp_path, [_rebuildable_record("D_L1", "L1")],
                     "--rebuild-prompts", out_name="l1")[0]
+    unlabelled = _rebuildable_record("D_NONE", "L1")
+    del unlabelled["complexity_level"]
+    bare = _run_apply(tmp_path, [unlabelled], "--rebuild-prompts", out_name="bare")[0]
 
     l5_prompt = l5["messages"][0]["content"]
     l1_prompt = l1["messages"][0]["content"]
+    bare_prompt = bare["messages"][0]["content"]
     assert "3 attempts at that call in total, counting the first" in l5_prompt
     assert "do NOT retry it" not in l5_prompt, "L5 must not state the no-retry policy"
 
-    assert "do NOT retry it — this workflow allows one attempt per" in l1_prompt
-    assert "attempts at that call in total" not in l1_prompt, (
-        "L1 must not state a multi-attempt budget"
-    )
+    assert "2 attempts at that call in total, counting the first" in l1_prompt
+    assert "do NOT retry it" not in l1_prompt, "L1 must not state the no-retry policy"
+    assert "3 attempts at that call in total" not in l1_prompt
+
+    # The budget-1 no-retry wording is now reachable only via the degradation
+    # default for a row with no complexity_level.
+    assert "do NOT retry it — this workflow allows one attempt per" in bare_prompt
+    assert "attempts at that call in total" not in bare_prompt
 
 
 def _env_with_stay_rule(value: str | None) -> dict:

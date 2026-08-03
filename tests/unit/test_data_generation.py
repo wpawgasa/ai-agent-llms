@@ -2160,10 +2160,14 @@ class TestRetryBudget:
     """Per-level retry budget + retry-exhaustion policy (Task 9)."""
 
     def test_complexity_specs_have_retry_fields(self) -> None:
-        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_budget == 1
-        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_exhaustion == "none"
-        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_budget == 1
-        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_exhaustion == "none"
+        # L1/L2 raised from 1/"none" to 2/"error_path" in the final review wave:
+        # the existing corpus already retries at those levels (200/1,251 L1,
+        # 783/1,305 L2), so a "do NOT retry it" prompt would contradict the data
+        # it ships with. Supersedes design decision D4.
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_exhaustion == "error_path"
         assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_budget == 2
         assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_exhaustion == "error_path"
         assert COMPLEXITY_SPECS[ComplexityLevel.L4].retry_budget == 2
@@ -2210,11 +2214,18 @@ class TestRetryBudget:
         )
 
     def test_budget_one_emits_no_retry(self) -> None:
-        """L1/L2 keep budget 1 permanently: one attempt per state visit, never a
-        second call from the same state."""
+        """At budget 1 the generator makes one attempt per state visit and never
+        a second call from the same state.
+
+        No shipped level uses budget 1 any more (L1-L4: 2, L5: 3), but budget 1
+        is still reachable via the ``--retry-budget 1`` override and is the
+        prompt-side degradation default, so the generator must honour it.
+        """
         import random
 
-        spec = COMPLEXITY_SPECS[ComplexityLevel.L2]
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2].model_copy(
+            update={"retry_budget": 1, "retry_exhaustion": "none"}
+        )
         assert spec.retry_budget == 1
         for seed in range(60):
             rng = random.Random(seed)
@@ -2230,6 +2241,54 @@ class TestRetryBudget:
                 src = (m.get("annotations") or {})["state_transition"]["from"]
                 per_state[src] = per_state.get(src, 0) + 1
             assert not [s for s, n in per_state.items() if n > 1], per_state
+
+    @pytest.mark.parametrize("level", [ComplexityLevel.L1, ComplexityLevel.L2])
+    def test_l1_l2_emit_retries_and_reach_the_exhaustion_arc(self, level) -> None:
+        """The point of raising L1/L2 off budget 1.
+
+        Their prompts now say "you may retry"; the data they ship with has to
+        demonstrate that, and the exhaustion arc has to be reachable — otherwise
+        we have simply moved the train-time contradiction to the other side.
+        """
+        import random
+
+        from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+
+        spec = COMPLEXITY_SPECS[level]
+        assert (spec.retry_budget, spec.retry_exhaustion) == (2, "error_path")
+        retried = 0
+        handoffs = 0
+        for seed in range(120):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            resolved = spec.retry_exhaustion
+            if not any(t.trigger == "tool_error" for t in wf.transitions):
+                resolved = "handoff_in_state"
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+                resolved_retry_exhaustion=resolved,
+            )
+            assert find_tool_stay_violations(msgs) == []
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                if m.get("role") != "assistant" or "<tool_call>" not in (m.get("content") or ""):
+                    continue
+                src = (m.get("annotations") or {})["state_transition"]["from"]
+                per_state[src] = per_state.get(src, 0) + 1
+            if any(n > 1 for n in per_state.values()):
+                retried += 1
+            for i, m in enumerate(msgs):
+                if "hand this over" not in (m.get("content") or ""):
+                    continue
+                handoffs += 1
+                st = m["annotations"]["state_transition"]
+                assert st["from"] == st["to"], "hand-off must stay in state"
+                assert msgs[i - 1]["role"] == "tool" and "error" in msgs[i - 1]["content"]
+            # never more than the budget's worth of attempts from one state
+            assert max(per_state.values(), default=0) <= spec.retry_budget
+        assert retried > 0, f"{level} never retried a failing call"
+        assert handoffs > 0, f"{level} never reached the exhaustion hand-off arc"
 
     def test_retry_and_handoff_output_passes_every_validator(self) -> None:
         """The placeholder path is the offline reference AND the teacher-failure

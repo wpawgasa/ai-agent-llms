@@ -96,8 +96,10 @@ def test_retry_rule_states_a_budget_and_fallback():
 # The budget counts TOTAL attempts including the first, so budget 1 means "no
 # retry at all". The original wording said "you may retry the SAME call ...
 # retry at most 1 time(s) total (including the first attempt)" — which both
-# contradicts itself at budget 1 and renders "1 time(s)". L1/L2 hold budget 1
-# permanently, so that text would be frozen into every L1/L2 corpus row.
+# contradicts itself at budget 1 and renders "1 time(s)". No shipped level uses
+# budget 1 any more (L1-L4: 2, L5: 3), but budget 1 remains the degradation
+# default for a sample with a missing/unknown complexity_level, so the no-retry
+# wording must stay grammatical.
 # --------------------------------------------------------------------------
 
 
@@ -111,7 +113,7 @@ def _retry_rule_text(text):
 @pytest.mark.parametrize("budget", [1, 2, 3])
 def test_retry_rule_never_renders_the_plural_placeholder(budget):
     """No "1 time(s)" — the wording must be grammatical at every spec budget
-    (L1-L2: 1, L3-L4: 2, L5: 3)."""
+    (L1-L4: 2, L5: 3), and at the budget-1 degradation default."""
     text = system_prompt._format_rules(retry_budget=budget)
     assert "time(s)" not in text
     assert "(s)" not in _retry_rule_text(text)

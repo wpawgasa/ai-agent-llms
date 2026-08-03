@@ -1,8 +1,8 @@
 """Per-sample retry budget in the rebuilt Task A system prompt.
 
-Task 9 made ``retry_budget`` a per-level property (L1-L2: 1, L3-L4: 2, L5: 3)
-and taught the generator to emit conversations that really do retry that many
-times. ``system_prompt.py`` kept rendering the prompt at a hardcoded budget of 1
+Task 9 made ``retry_budget`` a per-level property (L1-L4: 2, L5: 3 — L1/L2
+raised from 1 in the final review wave, superseding decision D4) and taught the
+generator to emit conversations that really do retry that many times. ``system_prompt.py`` kept rendering the prompt at a hardcoded budget of 1
 in BOTH of its retry-mentioning passages, and that prompt is rebuilt at training
 and eval load time (``training/sft.py``, ``training/grpo.py``,
 ``eval/agent_benchmark.py``, ``webui/samples.py``). The result was a direct
@@ -78,7 +78,7 @@ def _script_retry_notes(prompt: str) -> list[str]:
 
 @pytest.mark.parametrize(
     "level,expected",
-    [("L1", 1), ("L2", 1), ("L3", 2), ("L4", 2), ("L5", 3)],
+    [("L1", 2), ("L2", 2), ("L3", 2), ("L4", 2), ("L5", 3)],
 )
 def test_retry_budget_follows_complexity_level(level, expected):
     """The resolved budget is the level's COMPLEXITY_SPECS value, not a constant."""
@@ -109,13 +109,20 @@ def test_level_is_normalised():
 # --- the actual train/serve contradiction ------------------------------------
 
 
-def test_l5_prompt_states_three_attempts_and_l1_states_no_retry():
+def test_l5_prompt_states_three_attempts_and_l1_states_two():
+    """Every shipped level now permits a retry; only the count differs.
+
+    L1/L2 moved off budget 1 in the final review wave because the corpus at
+    those levels already demonstrates same-tool retries (200/1,251 L1,
+    783/1,305 L2) — a "do NOT retry it" rule there would contradict its own
+    training data.
+    """
     l1 = sp.build_enriched_system_prompt(_sample("L1"), "You are an agent.", force_rebuild=True)
     l5 = sp.build_enriched_system_prompt(_sample("L5"), "You are an agent.", force_rebuild=True)
 
     l1_rule = _format_rules_retry_rule(l1)
-    assert "do NOT retry it" in l1_rule
-    assert "one attempt per call" in l1_rule
+    assert "You get 2 attempts at that call in total, counting the first" in l1_rule
+    assert "do NOT retry it" not in l1_rule
     assert "3 attempts" not in l1_rule
 
     l5_rule = _format_rules_retry_rule(l5)
@@ -123,7 +130,20 @@ def test_l5_prompt_states_three_attempts_and_l1_states_no_retry():
     assert "do NOT retry it" not in l5_rule
 
 
-@pytest.mark.parametrize("level,budget", [("L1", 1), ("L3", 2), ("L5", 3)])
+def test_unlabelled_sample_still_renders_the_no_retry_wording():
+    """The budget-1 wording is now reachable ONLY via the degradation default.
+
+    No complexity level renders it any more, so this is the last guard that the
+    no-retry branch stays wired up and grammatical.
+    """
+    rule = _format_rules_retry_rule(
+        sp.build_enriched_system_prompt(_sample(None), "You are an agent.", force_rebuild=True)
+    )
+    assert "do NOT retry it" in rule
+    assert "one attempt per call" in rule
+
+
+@pytest.mark.parametrize("level,budget", [("L1", 2), ("L2", 2), ("L3", 2), ("L5", 3)])
 def test_both_prompt_halves_state_the_same_budget(level, budget):
     """The workflow-script note and the FORMAT_RULES rule must not disagree.
 
@@ -148,14 +168,17 @@ def test_both_prompt_halves_state_the_same_budget(level, budget):
 
 
 def test_sample_without_complexity_level_renders_the_legacy_prompt():
-    """Degradation is to the exact pre-fix text, not merely to "something"."""
+    """Degradation is to the exact pre-fix text, not merely to "something".
+
+    The pre-fix text is the budget-1 rendering. Since L1 was raised to budget 2
+    it is no longer the reference for that; ``_format_rules(retry_budget=1)`` —
+    i.e. the frozen ``FORMAT_RULES`` constant — is.
+    """
     unlabelled = sp.build_enriched_system_prompt(
         _sample(None), "You are an agent.", force_rebuild=True
     )
-    l1 = sp.build_enriched_system_prompt(
-        _sample("L1"), "You are an agent.", force_rebuild=True
-    )
-    assert unlabelled == l1
+    assert sp.FORMAT_RULES in unlabelled
+    assert "do NOT retry it" in unlabelled
 
 
 # --- invariants the fix must not break ---------------------------------------

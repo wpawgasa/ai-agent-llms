@@ -1495,7 +1495,7 @@ def generate_workflow_dataset(
             TOTAL attempts (the first counts) the generated conversations make
             at a failing tool call, and the number stated by both retry-bearing
             passages of the baked system prompt. ``None`` (default) keeps the
-            per-level value (L1-L2: 1, L3-L4: 2, L5: 3). Must be >= 1.
+            per-level value (L1-L4: 2, L5: 3). Must be >= 1.
         retry_exhaustion: Override ``COMPLEXITY_SPECS[level].retry_exhaustion``
             — what the agent does once the budget is spent. ``None`` (default)
             keeps the per-level value. Note that ``"error_path"`` still degrades

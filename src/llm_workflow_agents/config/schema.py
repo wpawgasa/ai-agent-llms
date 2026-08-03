@@ -209,7 +209,10 @@ class ComplexitySpec(BaseModel):
     - ``retry_budget``: max TOTAL attempts at a failing tool call, *counting the
       first*. A budget of 1 therefore permits no retry at all. This matches the
       wording rendered by ``data.system_prompt._retry_rule`` and the note
-      rendered by ``data._workflow_script.build_workflow_script``.
+      rendered by ``data._workflow_script.build_workflow_script``. Shipped
+      per-level values: **L1-L4 = 2, L5 = 3** (see the registry below). The
+      dataclass default stays 1 so that any caller constructing a bare
+      ``ComplexitySpec`` reproduces the pre-Task-9 implicit no-retry behavior.
     - ``retry_exhaustion``: what the agent does once the budget is spent.
       ``"none"`` — no retry policy is stated (budget-1 levels).
       ``"error_path"`` — follow the workflow's ``tool_error`` arc.
@@ -272,8 +275,14 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(0, 0),
         include_recovery=False,
         num_tools=1,
-        retry_budget=1,
-        retry_exhaustion="none",
+        # Supersedes design decision D4 (L1/L2 = 1/"none"). The existing corpus
+        # already demonstrates same-tool retries after a tool error at every
+        # level — 200 of 1,251 retained L1 conversations and 783 of 1,305 L2 —
+        # so a budget-1 prompt ("do NOT retry it") would ship paired with data
+        # that retries. Complexity level describes graph SHAPE, not whether a
+        # failed call may be retried, so L1-L4 share one retry policy.
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(3, 4),
         branching_factor=(1, 2),
@@ -288,8 +297,9 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(0, 0),
         include_recovery=False,
         num_tools=2,
-        retry_budget=1,
-        retry_exhaustion="none",
+        # See the L1 note above (supersedes D4).
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(5, 7),
         branching_factor=(1, 2),

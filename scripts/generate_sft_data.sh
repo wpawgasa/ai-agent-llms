@@ -34,7 +34,7 @@
 #   --retry-budget <n>         Override the tool-error retry budget for ALL levels: TOTAL
 #                              attempts at a failing call, counting the first (so 1 = no
 #                              retry). Must be >= 1. Default: per-level from
-#                              COMPLEXITY_SPECS (L1-L2: 1, L3-L4: 2, L5: 3)
+#                              COMPLEXITY_SPECS (L1-L4: 2, L5: 3)
 #   --retry-exhaustion <p>     What the agent does once the budget is spent: auto (default,
 #                              keep the per-level policy), error_path, handoff_in_state, none.
 #                              error_path still degrades per-sample to handoff_in_state on

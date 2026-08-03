@@ -77,9 +77,11 @@ STAY_RULE = """\
 
 # v2 tool-error rule, in two forms. The budget counts TOTAL attempts including the
 # first, so budget 1 means "no retry at all" — phrasing that as "retry at most 1
-# time(s)" is both self-contradictory and ungrammatical, and L1/L2 keep budget 1
-# permanently, so that text would be frozen into every L1/L2 corpus row. The two
-# forms state the same policy; pick with _retry_rule().
+# time(s)" is both self-contradictory and ungrammatical. No shipped complexity
+# level uses budget 1 any more (L1-L4 = 2, L5 = 3), but budget 1 is still the
+# DEFAULT_RETRY_BUDGET degradation path for a sample with a missing or unknown
+# complexity_level, so both forms must stay grammatical. The two forms state the
+# same policy; pick with _retry_rule().
 _RETRY_RULE_NO_RETRY = """\
 {n}. If a tool returns an error, do NOT retry it — this workflow allows one attempt per
    call. Stay in the current state, keep annotating [STATE: X → X], and never advance on a
@@ -249,8 +251,8 @@ def retry_budget_for_sample(sample: Any) -> int:
     """Resolve a sample's tool-error retry budget from its complexity level.
 
     Task 9 made ``retry_budget`` a per-level property of
-    :data:`~llm_workflow_agents.config.schema.COMPLEXITY_SPECS` (L1-L2: 1,
-    L3-L4: 2, L5: 3) and the generator bakes conversations that actually retry
+    :data:`~llm_workflow_agents.config.schema.COMPLEXITY_SPECS` (L1-L4: 2,
+    L5: 3) and the generator bakes conversations that actually retry
     that many times. This resolves the same number at train/eval load time so the
     rebuilt prompt states the policy the row's data was generated under.
 

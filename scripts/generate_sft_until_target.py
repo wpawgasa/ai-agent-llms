@@ -445,7 +445,7 @@ def main() -> int:
     p.add_argument("--retry-budget", type=int, default=None,
                    help="Override the retry budget for ALL selected levels: TOTAL attempts "
                         "at a failing tool call, counting the first (so 1 = no retry). "
-                        "Default: per-level from COMPLEXITY_SPECS (L1-L2: 1, L3-L4: 2, L5: 3).")
+                        "Default: per-level from COMPLEXITY_SPECS (L1-L4: 2, L5: 3).")
     p.add_argument("--retry-exhaustion", choices=["auto", "error_path", "handoff_in_state", "none"],
                    default="auto",
                    help="Override what the agent does once the budget is spent. "
