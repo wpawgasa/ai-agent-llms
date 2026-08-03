@@ -51,10 +51,10 @@ from llm_workflow_agents.data.domain_registry import (
     OutboundReason,
     classify_intent,
 )
-# _format_rules is module-private to system_prompt, but it is the only entry
-# point that renders FORMAT_RULES at a caller-chosen retry budget; the exported
-# FORMAT_RULES constant is frozen at budget 1. Imported (rather than
-# re-implemented) so system_prompt stays the single source of truth.
+# render_format_rules is the only entry point that renders FORMAT_RULES at a
+# caller-chosen retry budget; the exported FORMAT_RULES constant is frozen at
+# budget 1. Imported (rather than re-implemented) so system_prompt stays the
+# single source of truth.
 from llm_workflow_agents.data.system_prompt import render_format_rules as _render_format_rules
 
 logger = structlog.get_logger(__name__)
@@ -884,8 +884,11 @@ def _select_domain(
 # "[STATE:" text: find_continuity_violations rejects an assistant turn with a
 # second state marker mid-content.
 _HANDOFF_TEMPLATES: dict[str, str] = {
+    # No "time(s)" placeholder plural: this is assistant prose the model trains
+    # on, and Task 5 removed the identical artifact from the prompt rules for the
+    # same reason. `{attempts}` is always >= 1, so the caller picks the word.
     "en": (
-        "I'm sorry — I tried {attempts} time(s) and {tool} is still failing, so I "
+        "I'm sorry — I tried {attempts} {times} and {tool} is still failing, so I "
         "can't complete this step right now. I'll hand this over to a colleague "
         "who will follow up with you."
     ),
@@ -1096,7 +1099,13 @@ def _generate_placeholder_conversation(
                     "role": "assistant",
                     "content": (
                         f"[STATE: {from_name} → {from_name}]\n"
-                        + handoff_tmpl.format(attempts=attempts, tool=tool_name)
+                        + handoff_tmpl.format(
+                            attempts=attempts,
+                            tool=tool_name,
+                            # Thai and code-switch use ครั้ง, which does not
+                            # inflect, so the key is simply unused there.
+                            times="time" if attempts == 1 else "times",
+                        )
                     ),
                     "annotations": {
                         "state_transition": {"from": from_name, "to": from_name},
