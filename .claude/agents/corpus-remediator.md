@@ -115,12 +115,50 @@ There are only two roles, but three distinct authoring jobs. Tell them apart by
 Sits between a tool RESULT and a following tool-calling turn. The second tool call has
 no legal state to attribute itself to until this turn carries the advance.
 
-**Report what the result actually said, then name what you are about to do.** One or
-two sentences. Do **not** claim the *next* tool's work is already done — it has not
-run yet.
+#### Read the NEXT turn first. It usually already says everything.
+
+This is the single most important instruction for a bridge, and the easiest to get
+wrong. **In the original conversation, the turn right after your insert point was the
+turn that reported the tool result** — that is why it reads like a complete response.
+Your turn is being added only because a state advance has to land somewhere, not
+because anything is missing from the narration.
+
+So the default shape is **short and connective, not a summary**. Acknowledge, or pick
+up something the customer just said, and hand off. Let the next turn deliver the
+substance it already delivers.
+
+Measured on the first 469 authored entries, before this instruction existed: **8.6% of
+bridges restated the following turn almost verbatim and 28% overlapped it materially.**
+That teaches the model to say a thing, receive an acknowledgement, and say the same
+thing again. It is the most common way to make this corpus worse while passing every
+gate.
+
+Bad — a real accepted entry (`l2_merged_20260630:667:0`) beside the turn that follows
+it. The two say the same two sentences:
+
+```
+BRIDGE: Great news — your home claim has been filed successfully under Claim ID
+        CLM5521A. Let me check on its coverage assessment status for you right away.
+NEXT:   Your claim has been successfully filed under Claim ID CLM5521A. I want to
+        check the assessment status of this claim right away to see if there are
+        any immediate updates for you.  + <tool_call>
+```
+
+Better, for that same request: `Let me pull up the assessment status now.` — or, if the
+customer asked something in between, answer *that* in a sentence instead.
+
+Good — a real accepted entry that got it right (`l2_merged_20260630:1098:0`): the score
+is confirmed in five words and the detail is left to the next turn.
+`บันทึกคะแนนรีวิวของคุณลูกค้าเรียบร้อยแล้วค่ะ ขอเวลาสักครู่นะคะ ดิฉันจะดำเนินการต่อให้ทันทีค่ะ`
+
+#### When a fuller sentence IS right
+
+Only when the next turn does **not** narrate the result — it opens with a question, or
+addresses a customer aside, or is a bare `<tool_call>` with no prose. Then report what
+the result said and name what you are about to do, in one or two sentences.
 
 Real request (`l1_merged_20260629:528:0`, `L1_009_6`, en, emergency domain), marker
-`[STATE: ALERT_RECEIVED -> ASSESS_SEVERITY]`:
+`[STATE: ALERT_RECEIVED -> ASSESS_SEVERITY]`, where message 4 is a bare tool call:
 
 ```
 [2] assistant: [STATE: ALERT_RECEIVED -> ASSESS_SEVERITY]
@@ -135,6 +173,8 @@ response correctly.`
 
 Bad: anything that says the severity assessment came back, or that a team is on the
 way. Neither has happened at this point in the conversation.
+
+Never claim the *next* tool's work is already done — it has not run yet.
 
 ### 2. Never narrate a tool result you were not given
 
