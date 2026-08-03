@@ -718,7 +718,8 @@ python scripts/remediate_task_a_states.py apply \
 > they now demonstrate). It regenerates each **retained** row's `messages[0]` from
 > current prompt code, after every repair gate has passed: the corrected rule-2 worked
 > example, the default-on stay rule, and the retry budget for that row's own
-> `complexity_level` (L1–L2 no-retry, L3–L4 two attempts, L5 three). It also refreshes
+> `complexity_level` (L1–L4 two attempts, L5 three; a row with no `complexity_level`
+> degrades to the no-retry wording). It also refreshes
 > the embedded workflow script from the **repaired** messages. Omitting the flag leaves
 > system messages byte-identical to the input.
 >

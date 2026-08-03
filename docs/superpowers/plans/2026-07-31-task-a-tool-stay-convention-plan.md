@@ -1986,8 +1986,8 @@ from llm_workflow_agents.config.schema import COMPLEXITY_SPECS
 
 
 def test_complexity_specs_have_retry_fields():
-    assert COMPLEXITY_SPECS["L1"].retry_budget == 1
-    assert COMPLEXITY_SPECS["L1"].retry_exhaustion == "none"
+    assert COMPLEXITY_SPECS["L1"].retry_budget == 2
+    assert COMPLEXITY_SPECS["L1"].retry_exhaustion == "error_path"
     assert COMPLEXITY_SPECS["L3"].retry_budget == 2
     assert COMPLEXITY_SPECS["L3"].retry_exhaustion == "error_path"
     assert COMPLEXITY_SPECS["L5"].retry_budget == 3
@@ -2019,6 +2019,19 @@ Expected: FAIL — `AttributeError: 'ComplexitySpec' object has no attribute 're
 
 - [ ] **Step 3: Add the fields to `ComplexitySpec`**
 
+> **Amended in the final review wave (2026-08-03), superseding decision D4.** D4 as
+> originally confirmed set L1/L2 to `retry_budget=1, retry_exhaustion="none"`, which
+> renders the "do NOT retry it" form of the tool-error rule. The final whole-branch
+> review measured that the existing corpus already contains same-tool retries after a
+> tool error at those levels — 200 of 1,251 retained L1 conversations and 783 of 1,305
+> L2 — so a budget-1 prompt would ship paired with data demonstrating a retry.
+> L1/L2 were therefore raised to `retry_budget=2, retry_exhaustion="error_path"`,
+> matching L3/L4: complexity level describes graph *shape*, not whether a failed call
+> may be retried. Final table: **L1–L4 = 2 / `error_path`, L5 = 3 / `error_path`.**
+> The code blocks below carry the amended values; the `retry_budget: int = 1` dataclass
+> *default* is unchanged (it reproduces pre-Task-9 behaviour for bare constructions and
+> is the prompt-side degradation path for a sample with no `complexity_level`).
+
 ```python
 # src/llm_workflow_agents/config/schema.py
 @dataclass
@@ -2035,8 +2048,8 @@ class ComplexitySpec:
 
 
 COMPLEXITY_SPECS = {
-    "L1": ComplexitySpec("L1", (3,4),   (0,0), (0,0), False, 1, 0, retry_budget=1, retry_exhaustion="none"),
-    "L2": ComplexitySpec("L2", (5,7),   (1,1), (0,0), False, 2, 1, retry_budget=1, retry_exhaustion="none"),
+    "L1": ComplexitySpec("L1", (3,4),   (0,0), (0,0), False, 1, 0, retry_budget=2, retry_exhaustion="error_path"),
+    "L2": ComplexitySpec("L2", (5,7),   (1,1), (0,0), False, 2, 1, retry_budget=2, retry_exhaustion="error_path"),
     "L3": ComplexitySpec("L3", (8,12),  (2,3), (0,1), True,  4, 2, retry_budget=2, retry_exhaustion="error_path"),
     "L4": ComplexitySpec("L4", (12,16), (3,5), (1,1), True,  6, 3, retry_budget=2, retry_exhaustion="error_path"),
     "L5": ComplexitySpec("L5", (16,20), (0,99),(1,2), True,  7, 4, retry_budget=3, retry_exhaustion="error_path"),
