@@ -3,7 +3,7 @@
   "checkpoint_id": "e1a20f8c8cb1",
   "strategy": "manual-commit",
   "branch": "task-a-tool-stay-convention",
-  "checkpoints_count": 0,
+  "checkpoints_count": 4,
   "files_touched": [
     "CLAUDE.md",
     "configs/training/sft_cat_a.yaml",
@@ -35,13 +35,19 @@
       "transcript": "/e1/a20f8c8cb1/3/full.jsonl",
       "content_hash": "/e1/a20f8c8cb1/3/content_hash.txt",
       "prompt": "/e1/a20f8c8cb1/3/prompt.txt"
+    },
+    {
+      "metadata": "/e1/a20f8c8cb1/4/metadata.json",
+      "transcript": "/e1/a20f8c8cb1/4/full.jsonl",
+      "content_hash": "/e1/a20f8c8cb1/4/content_hash.txt",
+      "prompt": "/e1/a20f8c8cb1/4/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 22,
-    "cache_creation_tokens": 161862,
-    "cache_read_tokens": 437182,
-    "output_tokens": 21185,
-    "api_call_count": 11
+    "input_tokens": 981,
+    "cache_creation_tokens": 3558540,
+    "cache_read_tokens": 164890494,
+    "output_tokens": 528850,
+    "api_call_count": 510
   }
 }
