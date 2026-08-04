@@ -32,6 +32,16 @@ training:
   # quadratic and Gemma-4's head_dim=512 disables FA2, so SDPA dominates
   # step time. Drop to 4096 for ~4× attention speedup; bump back to 8192
   # only if eval shows truncation hurting the long-conversation tail.
+  #
+  # MEASURED 2026-08-04 — that condition is met, and it is not a tail.
+  # 56% of task_a_splits/train.jsonl conversations exceed 4096 tokens
+  # (median 4,264; the enriched system prompt alone is a median 3,016), and
+  # the all_tokens render path truncates RIGHT, so those rows lost their
+  # ENDING: the terminal [STATE: X -> TERMINAL] transition and the final
+  # tool calls. 8192 covers 99% of conversations, 16384 covers all.
+  # NOT changed here yet — it is a factorial-cell variable, see
+  # docs/cat_a_loss_mask_and_truncation_analysis.md §3.
+  # Reproduce: python scripts/measure_sft_token_budget.py
   max_seq_length: 4096
   gradient_checkpointing: true
   # Sample packing disabled. Our pre-packer concatenates with an EOS
@@ -44,6 +54,16 @@ training:
   # all_tokens: loss on every non-pad token (default; preserves baseline).
   # response_only: loss only on assistant-turn tokens; system/user/tool → -100.
   # See docs/fine_tuning_recipes.md "Loss Masking: Two Recipes".
+  #
+  # MEASURED 2026-08-04 — response_only is the recommended recipe for Cat A.
+  # Token share is system 71.4% / assistant 21.2% / user 4.9% / tool 2.5%, so
+  # all_tokens spends 78.8% of its gradient on tokens the model never emits;
+  # response_only is a 4.72x gradient-density increase at equal compute. The
+  # 2.5% tool span also trains the model to GENERATE tool results, i.e. toward
+  # the hallucination this corpus work suppresses.
+  # Left at all_tokens so cell C0 reproduces the ckpt-500/1770 baseline; see
+  # docs/cat_a_loss_mask_and_truncation_analysis.md §3 for the C0/C1/C2 design
+  # and why eval_loss cannot rank the cells.
   loss_mask: "all_tokens"
 
 data:
