@@ -1,0 +1,29 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "e1a20f8c8cb1",
+  "strategy": "manual-commit",
+  "branch": "task-a-tool-stay-convention",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "CLAUDE.md",
+    "configs/training/sft_cat_a.yaml",
+    "docs/cat_a_loss_mask_and_truncation_analysis.md",
+    "docs/fine_tuning_recipes.md",
+    "scripts/measure_sft_token_budget.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e1/a20f8c8cb1/0/metadata.json",
+      "transcript": "/e1/a20f8c8cb1/0/full.jsonl",
+      "content_hash": "/e1/a20f8c8cb1/0/content_hash.txt",
+      "prompt": "/e1/a20f8c8cb1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 32662,
+    "cache_read_tokens": 64084,
+    "output_tokens": 802,
+    "api_call_count": 2
+  }
+}
