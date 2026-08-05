@@ -671,3 +671,11 @@ quota is back
 <status>completed</status>
 <summary>Background command "Author the final 140 inserts" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+tag the remediated corpus and push, then merge commits to main and push
+
+---
+
+if you do `dvc repro task_a_sft_remediate`, you would repeat all steps we already done, would you? Can't you just `dvc commit` current corpus, tag and push?
