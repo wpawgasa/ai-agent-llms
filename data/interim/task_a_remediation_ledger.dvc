@@ -1,0 +1,6 @@
+outs:
+- md5: c8d31a3dd31948c2b73fa05d36a5ed92.dir
+  size: 21379822
+  nfiles: 919
+  hash: md5
+  path: task_a_remediation_ledger
