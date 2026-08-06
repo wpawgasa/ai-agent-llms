@@ -171,8 +171,8 @@ stages:
     deps:
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
-      size: 109983413
+      md5: b6ac65a4ceae2f6fceb0abb2dd727804.dir
+      size: 178497572
       nfiles: 5
     - path: scripts/split_task_a_sft.py
       hash: md5
@@ -182,8 +182,8 @@ stages:
     outs:
     - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
-      size: 109983413
+      md5: 21e33e25d7bbae63e97a89029b3b4705.dir
+      size: 178497572
       nfiles: 3
   task_a_sft_generate:
     cmd: ./scripts/generate_sft_data.sh
@@ -212,16 +212,17 @@ stages:
       size: 220921413
       nfiles: 11
   task_a_sft_clean:
-    cmd: python scripts/clean_task_a_sft.py --input-dir data/output/sft/task_a 
-      --output-dir data/output/sft/task_a_cleaned --quiet && python 
+    cmd: python scripts/clean_task_a_sft.py --input-dir 
+      data/output/sft/task_a_remediated --output-dir 
+      data/output/sft/task_a_cleaned --quiet && python 
       scripts/clean_corrupted_conversations.py 
       data/output/sft/task_a_cleaned/*.jsonl --no-backup --quiet
     deps:
-    - path: data/output/sft/task_a
+    - path: data/output/sft/task_a_remediated
       hash: md5
-      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
-      size: 220921413
-      nfiles: 11
+      md5: c6e77238c17e5e55a132ce6a76771f38.dir
+      size: 178495622
+      nfiles: 5
     - path: scripts/clean_corrupted_conversations.py
       hash: md5
       md5: ee78878bfdadd1e6a1d8e3d713cb00d2
@@ -232,13 +233,13 @@ stages:
       size: 7212
     - path: src/llm_workflow_agents/data/data_validator.py
       hash: md5
-      md5: 755f7073bcca31c6991fd39549ac66aa
-      size: 14647
+      md5: ff85112aafa0ba5f9cb64a90cd5af3b1
+      size: 15383
     outs:
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
-      size: 109983413
+      md5: b6ac65a4ceae2f6fceb0abb2dd727804.dir
+      size: 178497572
       nfiles: 5
   task_a_sft_remediate:
     cmd: python scripts/remediate_task_a_states.py apply --input-dir 
