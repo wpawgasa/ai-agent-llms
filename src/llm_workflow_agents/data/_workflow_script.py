@@ -50,6 +50,63 @@ _STATE_RE = re.compile(
     r"\[STATE:\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:→|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]"
 )
 
+# tool_turn_semantics=True templates (opt-in; see build_workflow_script). These
+# rewrite the plain "On success: proceed to [Y]" line for tool-bearing states so
+# it cannot be read as "advance on the turn that calls the tool" — the exact
+# misreading a design review traced a real defect to. The turn that issues the
+# tool call stays in the current state; advancing to the next state happens on
+# a LATER turn, after the tool result has come back.
+_TOOL_TURN_NOTE: dict[str, str] = {
+    "en": "- The turn that issues the <tool_call> stays in [{name}]: [STATE: {name} → {name}]",
+    "th": "- เทิร์นที่เรียกใช้เครื่องมือ <tool_call> จะคงอยู่ที่ [{name}]: [STATE: {name} → {name}]",
+}
+_PRIMARY_BRANCH_TOOL: dict[str, str] = {
+    "en": "- On success: proceed to [{to}] — on a LATER turn, after the tool result has come back",
+    "th": "- เมื่อสำเร็จ: ดำเนินการต่อที่ [{to}] — ในเทิร์นถัดไป หลังได้รับผลลัพธ์จากเครื่องมือแล้ว",
+}
+_FALLBACK_TEXT: dict[str, str] = {
+    "en": "follow the workflow's error path, or state plainly the step cannot be completed and hand off",
+    "th": "ดำเนินการตามเส้นทางข้อผิดพลาดของขั้นตอนงาน หรือแจ้งตรงๆ ว่าไม่สามารถทำขั้นตอนนี้ให้เสร็จได้และส่งต่อ",
+}
+# Branches on retry_budget == 1 vs >= 2 for the same reason system_prompt.py's
+# _retry_rule() does (see _RETRY_RULE_NO_RETRY / _RETRY_RULE_WITH_RETRIES
+# there): a budget of 1 means "no retry at all", and phrasing that as "retry at
+# most 1 time(s)" is both ungrammatical and semantically backwards. This is a
+# small, deliberate duplication rather than an import from system_prompt.py —
+# that module's rule is English-only and renders a multi-line system-prompt
+# paragraph (with its own "[STATE: X → X]" framing); this one needs a single
+# script line in both "en" and "th". The retry_budget<=1 branch point mirrors
+# _retry_rule exactly; keep the two in sync if either wording changes.
+#
+# NUMBER semantics must also match: retry_budget is N TOTAL attempts including
+# the first (see build_workflow_script's docstring and _RETRY_RULE_WITH_RETRIES's
+# "in total, counting the first"). "retry at most N times" would mean N retries
+# *after* the first (N+1 total) and was a bug fixed in fix-round-1 of Task 8 —
+# _RETRY_NOTE_WITH_RETRIES must render the same attempt count as _retry_rule at
+# a given retry_budget, not N+1.
+_RETRY_NOTE_NO_RETRY: dict[str, str] = {
+    "en": "- On tool error: stay in [{name}] and do NOT retry — this workflow allows only one attempt per call; after that, {fallback}",
+    "th": "- หากเครื่องมือผิดพลาด: คงอยู่ที่ [{name}] และห้ามลองใหม่ — ขั้นตอนนี้อนุญาตให้ลองได้เพียงครั้งเดียว; หลังจากนั้น {fallback}",
+}
+_RETRY_NOTE_WITH_RETRIES: dict[str, str] = {
+    "en": "- On tool error: stay in [{name}] and retry — up to {n} attempts total, counting the first; after that, {fallback}",
+    "th": "- หากเครื่องมือผิดพลาด: คงอยู่ที่ [{name}] และลองใหม่ได้ — รวมทั้งหมดไม่เกิน {n} ครั้ง (นับครั้งแรกด้วย); หลังจากนั้น {fallback}",
+}
+
+
+def _retry_note(language: str, name: str, retry_budget: int) -> str:
+    """Render the tool-error retry note for one tool-bearing state.
+
+    Mirrors ``system_prompt.py::_retry_rule``'s branch on ``retry_budget <= 1``
+    (see the comment above ``_RETRY_NOTE_NO_RETRY``/``_RETRY_NOTE_WITH_RETRIES``).
+    """
+    fallback = _FALLBACK_TEXT.get(language, _FALLBACK_TEXT["en"])
+    if retry_budget <= 1:
+        template = _RETRY_NOTE_NO_RETRY.get(language, _RETRY_NOTE_NO_RETRY["en"])
+        return template.format(name=name, fallback=fallback)
+    template = _RETRY_NOTE_WITH_RETRIES.get(language, _RETRY_NOTE_WITH_RETRIES["en"])
+    return template.format(name=name, n=retry_budget, fallback=fallback)
+
 
 def humanise_condition(condition: str) -> str:
     """Convert a snake_case condition name to a readable phrase."""
@@ -276,6 +333,9 @@ def build_workflow_script(
     tool_schemas: list[dict[str, Any]] | None = None,
     language: str = "en",
     messages: list[dict[str, Any]] | None = None,
+    *,
+    tool_turn_semantics: bool = False,
+    retry_budget: int = 1,
 ) -> str:
     """Build the per-state workflow script.
 
@@ -288,6 +348,18 @@ def build_workflow_script(
         messages: Optional ground-truth conversation. When provided, tools
             inferred from actual GT tool calls override the (possibly wrong)
             ``state_details[i].tools`` field.
+        tool_turn_semantics: When ``True``, tool-bearing states get an extra
+            "the turn that issues the tool call stays here" line, the primary
+            success branch is reworded to say the advance happens on a LATER
+            turn (after the tool result comes back, not the turn that calls
+            it), and a retry-budget note is appended. Defaults to ``False`` so
+            the byte-identical output Task C's teacher-API pipeline depends on
+            (via ``_playbook_render.py``) is untouched. Task A call sites pass
+            ``True``.
+        retry_budget: Max total attempts (including the first) for a failing
+            tool call in a tool-bearing state, used only when
+            ``tool_turn_semantics`` is ``True``. A budget of 1 means no retry;
+            see :func:`_retry_note`.
     """
     t = _SCRIPT_TEMPLATES.get(language, _SCRIPT_TEMPLATES["en"])
     state_details = workflow_graph.get("state_details") or []
@@ -336,10 +408,23 @@ def build_workflow_script(
         else:
             lines.append(t["no_tools"])
 
+        has_tools = bool(tools)
+        stay_convention = has_tools and tool_turn_semantics
+        if stay_convention:
+            lines.append(
+                _TOOL_TURN_NOTE.get(language, _TOOL_TURN_NOTE["en"]).format(name=name)
+            )
+
         for tr in sorted(outgoing.get(name, []), key=lambda x: x.get("priority", 0)):
             to_name = tr.get("to", "")
             if tr.get("priority", 0) == 0:
-                lines.append(t["primary_branch"].format(to=to_name))
+                if stay_convention:
+                    lines.append(
+                        _PRIMARY_BRANCH_TOOL.get(language, _PRIMARY_BRANCH_TOOL["en"]).format(to=to_name)
+                    )
+                    lines.append(_retry_note(language, name, retry_budget))
+                else:
+                    lines.append(t["primary_branch"].format(to=to_name))
             else:
                 cond = humanise_condition(tr.get("condition", "")) or t["condition_fallback"]
                 lines.append(t["alt_branch"].format(condition=cond, to=to_name))

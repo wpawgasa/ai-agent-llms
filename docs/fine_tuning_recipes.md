@@ -133,7 +133,14 @@ Loss is computed **only on assistant-turn tokens**. System, user, and tool turns
 
 #### Choosing between them
 
-`response_only` is expected to be the better recipe for Task A — the system prompt is long and boilerplate-heavy, so `all_tokens` spends most of each step re-fitting text the model will never generate. It is **not** a settled win, however; treat it as a hypothesis to A/B test.
+**Measured 2026-08-04 — use `response_only` for Cat A.** The intuition above is right, and larger than it reads. On 250 real `task_a_splits/train.jsonl` conversations with the system message rebuilt as training rebuilds it: **system 71.4% of tokens, assistant 21.2%, user 4.9%, tool 2.5%.** So `all_tokens` spends **78.8%** of its gradient on tokens the model never emits, and `response_only` is a **4.72× gradient-density increase** on assistant tokens at identical compute. Reproduce with `scripts/measure_sft_token_budget.py`.
+
+Two consequences worth knowing before A/B-ing:
+
+- The 2.5% tool-result span trains the model to *generate* `{"status": "success", ...}` payloads — i.e. toward tool-result hallucination, the failure mode the Task A convention work exists to suppress. `response_only` masks it away for free.
+- **An A/B at `max_seq_length: 4096` is confounded.** 56% of Cat A conversations exceed 4096 tokens, and the two recipes truncate in *opposite directions* — `all_tokens` right (losing the conversation's ending), `response_only` left (preserving it). Raise `max_seq_length` to 8192 before comparing, and include an `all_tokens` @ 8192 cell so the loss mask and the truncation change stay attributable.
+
+Full analysis, the truncation finding, and the recommended three-cell design: [`cat_a_loss_mask_and_truncation_analysis.md`](cat_a_loss_mask_and_truncation_analysis.md).
 
 > **`eval_loss` is not comparable across recipes.** `all_tokens` averages loss over easy boilerplate (numerically lower); `response_only` averages only over harder assistant tokens (numerically higher). `metric_for_best_model: eval_loss` still selects the best checkpoint *within* a single run, but you cannot rank the two recipes by `eval_loss`. Compare them only via the downstream `eval/agent_benchmark.py` `weighted_workflow_score`.
 

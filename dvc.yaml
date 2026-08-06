@@ -38,15 +38,46 @@ stages:
     # Levels L1–L5, seed=42, behavior=adversarial (87.5%) + cooperative_only (12.5%)
     # Legs: en/gpt-5.4-mini, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
 
+  task_a_sft_remediate:
+    desc: >-
+      Bring the raw Task A corpus onto the tool-call state convention (a turn
+      that emits <tool_call> annotates [STATE: X -> X]; the advance moves to
+      a later turn). Deterministic: relabels the trajectory (never moving a
+      tool call to a different state), then replays the DVC-tracked
+      authoring ledger produced
+      out-of-band by scripts/build_remediation_ledger.py. Every repaired row
+      is re-validated and dropped on any violation. No API keys, no LLM
+      calls at repro time. Produces task-a-sft-v2. See
+      docs/task_a_state_convention_remediation_playbook.md. NOTE:
+      --rebuild-prompts (below) hard-fails this stage if TASK_A_STAY_RULE=0
+      is set in the ambient environment `dvc repro` inherits -- unset it (or
+      leave it unset; default is on) before reproducing this stage.
+    cmd: >-
+      python scripts/remediate_task_a_states.py apply
+      --input-dir data/output/sft/task_a
+      --output-dir data/output/sft/task_a_remediated
+      --ledger-dir data/interim/task_a_remediation_ledger
+      --rebuild-prompts
+      --on-unrepairable drop
+    deps:
+      - data/output/sft/task_a
+      - data/interim/task_a_remediation_ledger
+      - scripts/remediate_task_a_states.py
+      - src/llm_workflow_agents/data/state_convention.py
+      - src/llm_workflow_agents/data/state_convention_repair.py
+    outs:
+      - data/output/sft/task_a_remediated
+
   task_a_sft_clean:
     desc: >-
-      Deterministic cleaning pass over the raw Task A corpus (4 450 raw ->
-      4 445 at last run, predates the corruption pass below): structural
-      fixes (clean_task_a_sft.py), then garbled-Thai removal
-      (clean_corrupted_conversations.py). No API keys required.
+      Deterministic cleaning pass over the remediated (task-a-sft-v2) Task A
+      corpus: structural fixes (clean_task_a_sft.py), then garbled-Thai
+      removal (clean_corrupted_conversations.py). No API keys required. Row
+      counts below predate the task_a_sft_remediate repoint (Task 13) and
+      need re-verifying after the next `dvc repro`.
     cmd: >-
       python scripts/clean_task_a_sft.py
-      --input-dir data/output/sft/task_a
+      --input-dir data/output/sft/task_a_remediated
       --output-dir data/output/sft/task_a_cleaned
       --quiet &&
       python scripts/clean_corrupted_conversations.py
@@ -54,7 +85,7 @@ stages:
       --no-backup
       --quiet
     deps:
-      - data/output/sft/task_a
+      - data/output/sft/task_a_remediated
       - scripts/clean_task_a_sft.py
       - scripts/clean_corrupted_conversations.py
       - src/llm_workflow_agents/data/data_validator.py

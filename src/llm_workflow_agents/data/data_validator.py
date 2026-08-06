@@ -174,7 +174,7 @@ def _check_workflow_rationality(
 ) -> list[str]:
     """Enforce that workflow data is semantically coherent.
 
-    Four checks (see ``.claude/rules/02-data-generation.md``):
+    Five checks (see ``.claude/rules/02-data-generation.md``):
 
     1. Tool-state coherence — every tool listed in a state exists in the
        sample's ``tool_schemas``, and every tool *called* in the ground-truth
@@ -185,6 +185,10 @@ def _check_workflow_rationality(
     4. State-sequence continuity — annotations chain turn-to-turn, start at
        the initial state, end at a terminal, and every assistant turn carries
        exactly one leading ``[STATE:]`` marker.
+    5. Tool-stay convention — a tool-call turn must annotate a self-loop
+       (``[STATE: X -> X]``); the advance to a new state happens on a later
+       turn, after the tool result comes back (see
+       ``llm_workflow_agents.data.state_convention``).
     """
     errors: list[str] = []
 
@@ -236,6 +240,17 @@ def _check_workflow_rationality(
         )
 
         for violation in find_continuity_violations(messages, initial, terminals):
+            errors.append(f"Sample {idx}: {violation}")
+
+    # 5. Tool-call turns must self-loop (state_convention gate): an assistant
+    # turn that emits <tool_call> but annotates an advancing transition is a
+    # hard error, mirroring how profile_task_a treats the same violation.
+    if messages:
+        from llm_workflow_agents.data.state_convention import (
+            find_tool_stay_violations,
+        )
+
+        for violation in find_tool_stay_violations(messages):
             errors.append(f"Sample {idx}: {violation}")
 
     # 3. Terminal reachability via BFS over transitions (state names).

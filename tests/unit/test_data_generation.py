@@ -706,6 +706,127 @@ class TestPostGenerationRepair:
         val = validate_dataset(result.output_files[0], "workflow")
         assert val.valid, val.errors
 
+    @staticmethod
+    def _advancing_tool_call_conversation(workflow, *args, **kwargs):
+        """A draft with a genuine graph edge and a tool the from-state is
+        allowed to call, but whose tool-call turn advances the state instead
+        of staying -- violates find_tool_stay_violations only. Picks the
+        first (from, to) transition where `from` has an allowed tool, so
+        find_tool_placement_violations (real tool, real state) and
+        _find_transition_violations (real edge) both see nothing wrong."""
+        id_to_name = {s.id: s.name for s in workflow.states}
+        tools_by_name = {s.name: list(s.tools) for s in workflow.states}
+        for t in workflow.transitions:
+            a = id_to_name.get(t.from_state, t.from_state)
+            b = id_to_name.get(t.to_state, t.to_state)
+            if a != b and tools_by_name.get(a):
+                tool_name = tools_by_name[a][0]
+                return [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": f"[STATE: {a} → {b}]\n"
+                        f'<tool_call>{{"name": "{tool_name}", "arguments": {{}}}}</tool_call>',
+                    },
+                    {"role": "tool", "content": '{"status": "ok"}'},
+                ]
+        raise AssertionError(
+            "expected some legal edge whose from-state has an allowed tool"
+        )
+
+    def test_repair_loop_rejects_advancing_tool_turn(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """A draft whose tool-execution turn advances the state (instead of
+        annotating a self-loop) is rejected by find_tool_stay_violations, the
+        third check in the or-chain -- even though it uses a real edge and a
+        tool the from-state is allowed to call, so the two referential checks
+        ahead of it (find_tool_placement_violations, _find_transition_
+        violations) both pass it through clean, so the stay check is what
+        produces the feedback asserted below.
+
+        Note (corrected 2026-08-02, Task 10): an earlier version of this
+        docstring claimed the draft "satisfies every remaining check" and would
+        be accepted with repair_retries == 0 if the stay check were removed.
+        That is not so -- measured by running this exact draft with
+        require_tool_stay=False, find_continuity_violations still rejects it
+        (the single turn neither starts at the initial state nor ends at a
+        terminal one); the or-chain short-circuits at the stay check, hiding
+        that. The regression this test actually pins is the stay-specific
+        FEEDBACK text, which no other check produces -- see
+        test_require_tool_stay_false_drops_the_stay_check_from_the_or_chain for
+        the negative case."""
+        calls = {"n": 0}
+        feedback_seen: list[list[str]] = []
+
+        def advancing_then_coherent(workflow, *args, **kwargs):
+            calls["n"] += 1
+            if "repair_feedback" in kwargs:
+                feedback_seen.append(kwargs["repair_feedback"])
+            if calls["n"] == 1:
+                return TestPostGenerationRepair._advancing_tool_call_conversation(workflow)
+            return TestPostGenerationRepair._coherent_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", advancing_then_coherent)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+        )
+        assert calls["n"] >= 2, "expected the repair loop to retry after the first draft"
+        assert feedback_seen, "expected at least one repair retry to carry feedback"
+        assert any(
+            "tool-execution turn must annotate" in v
+            for feedback in feedback_seen
+            for v in feedback
+        ), feedback_seen
+        # The second (coherent) draft was accepted in-attempt -- no fresh
+        # sample redraw or placeholder fallback was needed.
+        assert result.stats["repair_fallbacks"] == 0
+        assert result.stats["sample_fallbacks"] == 0
+        val = validate_dataset(result.output_files[0], "workflow")
+        assert val.valid, val.errors
+
+    def test_require_tool_stay_false_drops_the_stay_check_from_the_or_chain(
+        self, tmp_output_dir: Path, monkeypatch
+    ) -> None:
+        """Task 10: ``require_tool_stay=False`` stops an advancing tool-call turn
+        from counting as a coherence violation (v1-comparable regeneration).
+
+        Uses the exact draft ``test_repair_loop_rejects_advancing_tool_turn``
+        feeds in, and asserts the complement of what that test asserts: the
+        stay-specific repair feedback must NOT appear. The draft is still
+        repaired (it independently violates continuity), so the assertion is
+        about the REASON, not about acceptance — asserting acceptance would be
+        wrong here, and that mistake is what surfaced the stale claim corrected
+        in the sibling test's docstring.
+        """
+        feedback_seen: list[list[str]] = []
+
+        def always_advancing(workflow, *args, **kwargs):
+            if "repair_feedback" in kwargs:
+                feedback_seen.append(kwargs["repair_feedback"])
+            return TestPostGenerationRepair._advancing_tool_call_conversation(workflow)
+
+        monkeypatch.setattr(gw, "_generate_teacher_conversation", always_advancing)
+        result = generate_workflow_dataset(
+            complexity_level="L2",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_output_dir,
+            seed=5,
+            require_tool_stay=False,
+        )
+        assert feedback_seen, "expected the repair loop to run (continuity still fails)"
+        assert not any(
+            "tool-execution turn must annotate" in v
+            for feedback in feedback_seen
+            for v in feedback
+        ), f"stay check still firing with require_tool_stay=False: {feedback_seen}"
+        assert result.stats["require_tool_stay"] is False
+
     def test_placeholder_path_needs_no_repair(self, tmp_output_dir: Path) -> None:
         result = generate_workflow_dataset(
             complexity_level="L3",
@@ -2033,3 +2154,251 @@ class TestValidatorOutbound:
         ]
         errs = _validate_workflow_sample(self._base(msgs, "user"), 0)
         assert any("first message role" in e for e in errs)
+
+
+class TestRetryBudget:
+    """Per-level retry budget + retry-exhaustion policy (Task 9)."""
+
+    def test_complexity_specs_have_retry_fields(self) -> None:
+        # L1/L2 raised from 1/"none" to 2/"error_path" in the final review wave:
+        # the existing corpus already retries at those levels (200/1,251 L1,
+        # 783/1,305 L2), so a "do NOT retry it" prompt would contradict the data
+        # it ships with. Supersedes design decision D4.
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L1].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L2].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L3].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L4].retry_budget == 2
+        assert COMPLEXITY_SPECS[ComplexityLevel.L4].retry_exhaustion == "error_path"
+        assert COMPLEXITY_SPECS[ComplexityLevel.L5].retry_budget == 3
+        assert COMPLEXITY_SPECS[ComplexityLevel.L5].retry_exhaustion == "error_path"
+
+    def test_retry_arc_is_deterministic_across_max_workers(
+        self, tmp_output_dir: Path
+    ) -> None:
+        common = dict(
+            complexity_level="L3", num_samples=6, teacher_model=None,
+            seed=123, language="en",
+        )
+        serial = generate_workflow_dataset(
+            output_dir=tmp_output_dir / "serial", max_workers=1, **common
+        )
+        parallel = generate_workflow_dataset(
+            output_dir=tmp_output_dir / "parallel", max_workers=4, **common
+        )
+        assert (
+            Path(serial.output_files[0]).read_text()
+            == Path(parallel.output_files[0]).read_text()
+        ), "retry-arc output must be byte-identical across max_workers"
+
+    def test_error_path_resolves_to_handoff_without_a_tool_error_arc(self) -> None:
+        """`error_path` is only honoured when the SELECTED SUBGRAPH carries a
+        tool_error transition. 10 of the 18 domains define no tool_error edge at
+        all, and subgraph selection can drop the ones that exist, so the policy
+        must degrade rather than promise an arc that isn't there."""
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        assert spec.retry_exhaustion == "error_path"
+        seen = set()
+        for seed in range(200):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            has_arc = any(t.trigger == "tool_error" for t in wf.transitions)
+            seen.add("error_path" if has_arc else "handoff_in_state")
+        assert seen == {"error_path", "handoff_in_state"}, (
+            "both resolutions must occur across the domain registry"
+        )
+
+    def test_budget_one_emits_no_retry(self) -> None:
+        """At budget 1 the generator makes one attempt per state visit and never
+        a second call from the same state.
+
+        No shipped level uses budget 1 any more (L1-L4: 2, L5: 3), but budget 1
+        is still reachable via the ``--retry-budget 1`` override and is the
+        prompt-side degradation default, so the generator must honour it.
+        """
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L2].model_copy(
+            update={"retry_budget": 1, "retry_exhaustion": "none"}
+        )
+        assert spec.retry_budget == 1
+        for seed in range(60):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+            )
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                if m.get("role") != "assistant" or "<tool_call>" not in (m.get("content") or ""):
+                    continue
+                src = (m.get("annotations") or {})["state_transition"]["from"]
+                per_state[src] = per_state.get(src, 0) + 1
+            assert not [s for s, n in per_state.items() if n > 1], per_state
+
+    @pytest.mark.parametrize("level", [ComplexityLevel.L1, ComplexityLevel.L2])
+    def test_l1_l2_emit_retries_and_reach_the_exhaustion_arc(self, level) -> None:
+        """The point of raising L1/L2 off budget 1.
+
+        Their prompts now say "you may retry"; the data they ship with has to
+        demonstrate that, and the exhaustion arc has to be reachable — otherwise
+        we have simply moved the train-time contradiction to the other side.
+        """
+        import random
+
+        from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+
+        spec = COMPLEXITY_SPECS[level]
+        assert (spec.retry_budget, spec.retry_exhaustion) == (2, "error_path")
+        retried = 0
+        handoffs = 0
+        for seed in range(120):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            resolved = spec.retry_exhaustion
+            if not any(t.trigger == "tool_error" for t in wf.transitions):
+                resolved = "handoff_in_state"
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+                resolved_retry_exhaustion=resolved,
+            )
+            assert find_tool_stay_violations(msgs) == []
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                if m.get("role") != "assistant" or "<tool_call>" not in (m.get("content") or ""):
+                    continue
+                src = (m.get("annotations") or {})["state_transition"]["from"]
+                per_state[src] = per_state.get(src, 0) + 1
+            if any(n > 1 for n in per_state.values()):
+                retried += 1
+            for i, m in enumerate(msgs):
+                if "hand this over" not in (m.get("content") or ""):
+                    continue
+                handoffs += 1
+                st = m["annotations"]["state_transition"]
+                assert st["from"] == st["to"], "hand-off must stay in state"
+                assert msgs[i - 1]["role"] == "tool" and "error" in msgs[i - 1]["content"]
+            # never more than the budget's worth of attempts from one state
+            assert max(per_state.values(), default=0) <= spec.retry_budget
+        assert retried > 0, f"{level} never retried a failing call"
+        assert handoffs > 0, f"{level} never reached the exhaustion hand-off arc"
+
+    def test_each_retry_attempt_owns_its_tool_call_dict(self) -> None:
+        """No aliasing between attempt annotations.
+
+        The retry loop used to annotate every attempt with the SAME dict object,
+        so one dict was reachable from up to ``retry_budget`` messages at once
+        and any later in-place edit (an arg-normalisation pass, a remediation
+        script) would fan out silently. Serialised output is unaffected — this
+        pins object identity, not bytes.
+
+        Note the separate, PRE-EXISTING aliasing this does not touch:
+        ``_extract_ground_truth`` ``extend``s the annotation dicts themselves
+        into ``ground_truth.tool_calls``, for every conversation at every level,
+        long before the retry loop existed.
+        """
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        multi_attempt_states = 0
+        for seed in range(60):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, list(dom.tools), "cooperative", spec, rng, dom, "en", "service",
+                resolved_retry_exhaustion="handoff_in_state",
+            )
+            ids: list[int] = []
+            per_state: dict[str, int] = {}
+            for m in msgs:
+                tcs = (m.get("annotations") or {}).get("tool_calls") or []
+                ids.extend(id(tc) for tc in tcs)
+                if tcs:
+                    src = m["annotations"]["state_transition"]["from"]
+                    per_state[src] = per_state.get(src, 0) + 1
+            multi_attempt_states += sum(1 for n in per_state.values() if n > 1)
+            assert len(set(ids)) == len(ids), (
+                "a tool_call dict is shared between attempt annotations"
+            )
+        assert multi_attempt_states, "no state was visited with more than one attempt"
+
+    def test_retry_and_handoff_output_passes_every_validator(self) -> None:
+        """The placeholder path is the offline reference AND the teacher-failure
+        fallback, so its retry/hand-off output must satisfy all four coherence
+        gates the generator's repair loop enforces."""
+        import random
+
+        from llm_workflow_agents.data._workflow_script import (
+            find_continuity_violations,
+            find_shape_violations,
+            find_tool_placement_violations,
+        )
+        from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        handoffs = 0
+        for seed in range(150):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            tools = [t for t in dom.tools]
+            msgs = gw._generate_placeholder_conversation(
+                wf, tools, "cooperative", spec, rng, dom, "en", "service",
+                # force the branch under test rather than waiting for the
+                # subgraph-dependent resolution to pick it
+                resolved_retry_exhaustion="handoff_in_state",
+            )
+            id_to_name = {s.id: s.name for s in wf.states}
+            allowed = {s.name: set(s.tools) for s in wf.states}
+            names = {t["function"]["name"] for t in tools}
+            assert find_tool_stay_violations(msgs) == []
+            assert find_continuity_violations(
+                msgs,
+                id_to_name[wf.initial_state],
+                {id_to_name[t] for t in wf.terminal_states},
+            ) == []
+            assert find_shape_violations(msgs, "user") == []
+            assert find_tool_placement_violations(allowed, msgs, names) == []
+            handoffs += sum(
+                1 for m in msgs
+                if m.get("role") == "assistant" and "hand this over" in (m.get("content") or "")
+            )
+        assert handoffs > 0, "the hand-off branch was never exercised"
+
+    def test_handoff_turn_stays_in_state_and_reaches_terminal(self) -> None:
+        """A hand-off must not invent a transition, and must not dead-end the
+        conversation short of a terminal."""
+        import random
+
+        spec = COMPLEXITY_SPECS[ComplexityLevel.L5]
+        checked = 0
+        for seed in range(150):
+            rng = random.Random(seed)
+            _key, dom = gw._select_domain(rng, None, spec)
+            wf = gw.select_subgraph(dom, spec, rng, "service")
+            msgs = gw._generate_placeholder_conversation(
+                wf, [t for t in dom.tools], "cooperative", spec, rng, dom, "en",
+                "service", resolved_retry_exhaustion="handoff_in_state",
+            )
+            terminals = {s.name for s in wf.states if s.id in set(wf.terminal_states)}
+            for i, m in enumerate(msgs):
+                if "hand this over" not in (m.get("content") or ""):
+                    continue
+                checked += 1
+                st = m["annotations"]["state_transition"]
+                assert st["from"] == st["to"], "hand-off must stay in state"
+                # the hand-off is preceded by a failing tool result ...
+                assert msgs[i - 1]["role"] == "tool"
+                assert "error" in msgs[i - 1]["content"]
+                # ... and the conversation still runs on to a terminal
+                last = [x for x in msgs if x.get("role") == "assistant"][-1]
+                assert last["annotations"]["state_transition"]["to"] in terminals
+        assert checked > 0

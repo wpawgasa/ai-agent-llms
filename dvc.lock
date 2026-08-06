@@ -240,3 +240,38 @@ stages:
       md5: 3d6a4d3eed110546eccb46a94c5d68cd.dir
       size: 109983413
       nfiles: 5
+  task_a_sft_remediate:
+    cmd: python scripts/remediate_task_a_states.py apply --input-dir 
+      data/output/sft/task_a --output-dir data/output/sft/task_a_remediated 
+      --ledger-dir data/interim/task_a_remediation_ledger --rebuild-prompts 
+      --on-unrepairable drop
+    deps:
+    - path: data/interim/task_a_remediation_ledger
+      hash: md5
+      md5: c8d31a3dd31948c2b73fa05d36a5ed92.dir
+      size: 21379822
+      nfiles: 919
+    - path: data/output/sft/task_a
+      hash: md5
+      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
+      size: 220921413
+      nfiles: 11
+    - path: scripts/remediate_task_a_states.py
+      hash: md5
+      md5: e97ff7d711291eb9df51e204d8d7b56d
+      size: 18521
+      isexec: true
+    - path: src/llm_workflow_agents/data/state_convention.py
+      hash: md5
+      md5: 0086a92d59ea7d78cb1e48e7475da855
+      size: 4493
+    - path: src/llm_workflow_agents/data/state_convention_repair.py
+      hash: md5
+      md5: f93217bc2a8734ab5f80ed3657625f04
+      size: 26393
+    outs:
+    - path: data/output/sft/task_a_remediated
+      hash: md5
+      md5: c6e77238c17e5e55a132ce6a76771f38.dir
+      size: 178495622
+      nfiles: 5

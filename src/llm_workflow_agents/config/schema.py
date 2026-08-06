@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -203,6 +204,27 @@ class ComplexitySpec(BaseModel):
     - ``num_loops``: retry / escalation back-edges to add.
     - ``include_recovery``: whether to include ``tool_error`` recovery arcs.
 
+    Retry policy fields drive the tool-error arc in both the teacher prompt and
+    the offline placeholder generator:
+    - ``retry_budget``: max TOTAL attempts at a failing tool call, *counting the
+      first*. A budget of 1 therefore permits no retry at all. This matches the
+      wording rendered by ``data.system_prompt._retry_rule`` and the note
+      rendered by ``data._workflow_script.build_workflow_script``. Shipped
+      per-level values: **L1-L4 = 2, L5 = 3** (see the registry below). The
+      dataclass default stays 1 so that any caller constructing a bare
+      ``ComplexitySpec`` reproduces the pre-Task-9 implicit no-retry behavior.
+    - ``retry_exhaustion``: what the agent does once the budget is spent.
+      ``"none"`` — no retry policy is stated. No level uses this after the final
+      review raised L1/L2 to budget 2; it survives for bare ``ComplexitySpec``
+      construction, ``--retry-exhaustion none``, and unlabelled samples.
+      ``"error_path"`` — follow the workflow's ``tool_error`` arc.
+      ``"handoff_in_state"`` — stay in the current state, say the step cannot be
+      completed and that a hand-off will happen, then continue on a later turn.
+      ``"error_path"`` is a *request*, not a guarantee: only 8 of the 18 domains
+      define any ``tool_error`` edge, and a selected subgraph may exclude the
+      ones that exist, so callers resolve it down to ``"handoff_in_state"``
+      per-sample when the chosen subgraph carries no ``tool_error`` transition.
+
     Legacy fields are kept for backward compatibility with the old random-walk
     generator and will be removed in Task 10 once the generator is rewritten.
     """
@@ -214,6 +236,9 @@ class ComplexitySpec(BaseModel):
     num_loops: tuple[int, int] = (0, 0)
     include_recovery: bool = False
     num_tools: int = 1
+    # Retry policy (defaults reproduce the pre-Task-9 implicit no-retry behavior)
+    retry_budget: int = 1
+    retry_exhaustion: Literal["none", "error_path", "handoff_in_state"] = "none"
     # Legacy fields (backward compat — superseded by the fields above)
     num_states: tuple[int, int] = (0, 0)
     branching_factor: tuple[int, int] = (0, 0)
@@ -252,6 +277,14 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(0, 0),
         include_recovery=False,
         num_tools=1,
+        # Supersedes design decision D4 (L1/L2 = 1/"none"). The existing corpus
+        # already demonstrates same-tool retries after a tool error at every
+        # level — 200 of 1,251 retained L1 conversations and 783 of 1,305 L2 —
+        # so a budget-1 prompt ("do NOT retry it") would ship paired with data
+        # that retries. Complexity level describes graph SHAPE, not whether a
+        # failed call may be retried, so L1-L4 share one retry policy.
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(3, 4),
         branching_factor=(1, 2),
@@ -266,6 +299,9 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(0, 0),
         include_recovery=False,
         num_tools=2,
+        # See the L1 note above (supersedes D4).
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(5, 7),
         branching_factor=(1, 2),
@@ -280,6 +316,8 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(0, 1),
         include_recovery=True,
         num_tools=4,
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(8, 12),
         branching_factor=(2, 4),
@@ -294,6 +332,8 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(1, 1),
         include_recovery=True,
         num_tools=6,
+        retry_budget=2,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(12, 16),
         branching_factor=(3, 5),
@@ -308,6 +348,8 @@ COMPLEXITY_SPECS: dict[ComplexityLevel, ComplexitySpec] = {
         num_loops=(1, 2),
         include_recovery=True,
         num_tools=7,
+        retry_budget=3,
+        retry_exhaustion="error_path",
         # Legacy fields
         num_states=(16, 20),
         branching_factor=(5, 99),

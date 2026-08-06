@@ -246,6 +246,18 @@ class TestValidatorContinuityAndShape:
         assert not result.valid
         assert any("first message role" in e for e in result.errors)
 
+    def test_validate_workflow_sample_flags_advancing_tool_turn(self, tmp_path: Path) -> None:
+        # Same shape as the profiler's advancing-tool-turn fixture: a tool-call
+        # turn that annotates an advancing transition instead of a self-loop.
+        sample = _rational_workflow_sample()
+        sample["messages"][4]["content"] = (
+            "[STATE: PROCESS_CHANGE → TERMINAL]\n"
+            '<tool_call>{"name": "change_plan", "arguments": {}}</tool_call>'
+        )
+        result = validate_dataset(self._write(tmp_path, sample), "workflow")
+        assert not result.valid
+        assert any("tool-execution turn must annotate" in e for e in result.errors)
+
 
 class TestFindToolPlacementViolations:
     """Unit tests for the shared coherence helper used by the validator and the
