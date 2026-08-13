@@ -763,6 +763,56 @@ class TestLossMaskResponseOnly:
         assert "I need to reset my password" not in unmasked_text  # user-only
         assert '"status":"sent"' not in unmasked_text  # tool-only
 
+    def test_batchencoding_return_is_unwrapped(self) -> None:
+        """apply_chat_template(tokenize=True) returns a BatchEncoding mapping on
+        transformers>=5, not a list of ids.
+
+        Without an explicit unwrap, `list(out)` yields the mapping's KEYS —
+        ['input_ids', 'attention_mask'] — so every _encode call returns the same
+        2 entries, every per-turn delta is empty, and the sample renders as 2
+        tokens with nothing unmasked. That is a silent, total loss of training
+        signal: the run completes normally having learned nothing.
+
+        The stub mimics a fast tokenizer, where integer indexing yields a
+        tokenizers `Encoding` object rather than raising — which is what makes
+        the failure silent rather than loud.
+        """
+        from llm_workflow_agents.training.sft import render_response_only_sample
+
+        class _FakeBatchEncoding(dict):
+            def __getitem__(self, key):
+                if isinstance(key, int):
+                    return object()  # tokenizers.Encoding, not a list
+                return super().__getitem__(key)
+
+        class _BatchEncodingTok:
+            def apply_chat_template(
+                self, msgs, tokenize=True, add_generation_prompt=False
+            ):
+                text = "".join(f"{m['role']}|{m['content']}\n" for m in msgs)
+                ids = [ord(c) % 256 for c in text]
+                return _FakeBatchEncoding(
+                    {"input_ids": ids, "attention_mask": [1] * len(ids)}
+                )
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "world"},
+        ]
+        expected_len = len(
+            "".join(f"{m['role']}|{m['content']}\n" for m in messages)
+        )
+
+        sample = render_response_only_sample(
+            messages, _BatchEncodingTok(), max_seq_length=10_000
+        )
+
+        assert len(sample["input_ids"]) == expected_len
+        assert all(isinstance(tok_id, int) for tok_id in sample["input_ids"])
+        assert any(lab != -100 for lab in sample["labels"]), "no unmasked labels"
+        assert sample["labels"][0] == -100, "system prefix must be masked"
+
     def test_qwen_chatml_template(self) -> None:
         from llm_workflow_agents.training.sft import render_response_only_sample
 

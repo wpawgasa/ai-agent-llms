@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,14 @@ def render_response_only_sample(
             msgs, tokenize=True, add_generation_prompt=False
         )
         # Some processors / wrappers return BatchEncoding; normalize to list.
+        # Unwrap the mapping FIRST: on transformers>=5 apply_chat_template
+        # returns a BatchEncoding, and `list(mapping)` yields its KEYS
+        # (['input_ids', 'attention_mask']). That makes every _encode call
+        # return the same 2 entries, so every per-turn delta is empty and the
+        # sample renders as 2 tokens with nothing unmasked — a silent, total
+        # loss of training signal rather than a crash.
+        if isinstance(out, Mapping):
+            out = out["input_ids"]
         if hasattr(out, "tolist"):
             out = out.tolist()
         if out and isinstance(out[0], list):
