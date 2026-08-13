@@ -177,6 +177,39 @@ stages:
     outs:
       - checkpoints/sft_cat_a/gemma-4-26B-A4B-it
 
+  task_a_sft_gemma4_26b_a4b_c2:
+    desc: >-
+      Phase 2 SFT — cell C2 (response_only @ 8192) on the task-a-sft-v2 corpus.
+      Probes whether the tool-call stay convention survives a better-trained
+      cell, after C0 regressed held-out
+      (docs/cat_a_corpus_v2_heldout_regression.md). Two variables move versus
+      C0 — loss mask and sequence length — so this cell cannot attribute the
+      corpus effect on its own; run C1 to separate them.
+
+      Writes to checkpoints/sft_cat_a_c2/ via the config's output_dir key so it
+      does not overwrite the C0 lineage (CLAUDE.md R13,
+      docs/data_and_model_versioning.md §4).
+
+      eval_loss is NOT comparable across loss_mask recipes — rank cells with
+      scripts/heldout_composite_audit.py on a contamination-free set.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_26b_a4b_c2
+          dvc push  task_a_sft_gemma4_26b_a4b_c2
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_26b_a4b.yaml
+      --sft-config configs/training/sft_cat_a_c2.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_26b_a4b.yaml
+      - configs/training/sft_cat_a_c2.yaml
+      - data/output/sft/task_a_splits
+    outs:
+      - checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+
   # ---------------------------------------------------------------------------
   # Phase 2 — GRPO RL fine-tuning
   # ---------------------------------------------------------------------------

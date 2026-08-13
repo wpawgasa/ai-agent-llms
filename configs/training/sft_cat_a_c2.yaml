@@ -1,0 +1,88 @@
+# Cat A SFT — cell C2: response_only @ 8192, on the task-a-sft-v2 corpus.
+#
+# Factorial design from docs/cat_a_loss_mask_and_truncation_analysis.md §3:
+#   C0  all_tokens    @ 4096  — the baseline (sft-gemma4-v3 on v1, v4 on v2)
+#   C1  all_tokens    @ 8192  — isolates truncation
+#   C2  response_only @ 8192  — this cell: loss mask + truncation together
+#
+# Why this cell runs next: docs/cat_a_corpus_v2_heldout_regression.md found the
+# v2 corpus REGRESSES held-out under C0 (composite 0.5709 -> 0.5120). Before
+# blaming the corpus, rule out the cell — C0 spends 78.8% of its gradient on
+# tokens the model never emits and right-truncates 56% of conversations, so the
+# stay convention may simply be under-trained rather than wrong.
+#
+# TWO variables change at once versus v4 (loss mask AND sequence length), so
+# this cell CANNOT attribute the corpus effect on its own. It answers only
+# "does the convention survive a better-trained cell?" Run C1 if the loss mask
+# and truncation need separating.
+#
+# eval_loss is NOT comparable to C0's 0.17148 — response_only averages over a
+# different denominator (sft.py logs sft_loss_mask_response_only warning about
+# exactly this). Rank cells with the held-out audit, never eval_loss.
+#
+# output_dir keeps this cell off C0's checkpoint path (CLAUDE.md R13;
+# docs/data_and_model_versioning.md §4). Without it a C2 run overwrites v4.
+output_dir: "sft_cat_a_c2"
+
+stage: "sft"
+framework: "unsloth"
+
+model:
+  config_path: null
+
+lora:
+  # Unchanged from C0 so LoRA capacity is not a confound.
+  rank: 16
+  alpha: 16
+  dropout: 0
+  target_modules: "auto"   # ignored for Gemma-4 (toggle-flag form used)
+  freeze_router: true
+  seed: 3407
+
+training:
+  precision: "bf16"
+  learning_rate: 5.0e-5
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.05
+  per_device_train_batch_size: 1
+  effective_batch_size: 8
+  optim: "adamw_8bit"
+  weight_decay: 0.001
+  num_epochs: 3
+  # 8192 covers 99% of Task A conversations (median 4,264 / p90 6,055 / max
+  # 9,108 tokens; scripts/measure_sft_token_budget.py). At 4096 the all_tokens
+  # path right-truncated 56% of rows, removing the terminal
+  # [STATE: X -> TERMINAL] transition and the final tool calls — the exact
+  # region the low terminal-state metrics measure. Attention is quadratic and
+  # Gemma-4's head_dim=512 disables FA2, so expect a materially slower step
+  # than C0's ~3.6 s/it.
+  max_seq_length: 8192
+  gradient_checkpointing: true
+  packing: false
+  # Loss only on assistant spans; system/user/tool -> -100. Token share is
+  # system 71.4% / assistant 21.2% / user 4.9% / tool 2.5%, so this is a 4.72x
+  # gradient-density increase on assistant tokens at equal compute. It also
+  # stops training the model to GENERATE tool results (the 2.5% tool span),
+  # which is the hallucination the corpus work exists to suppress.
+  #
+  # NOTE: this path was silently broken until bac1d98 — apply_chat_template
+  # returns a BatchEncoding on transformers 5.x and the sample rendered as 2
+  # tokens with 0 unmasked labels. Verify a render before trusting a run:
+  #   unmasked share should land near 21-25% on real conversations.
+  loss_mask: "response_only"
+
+data:
+  # task-a-sft-v2. Expected: 21e33e25d7bbae63e97a89029b3b4705.dir (3 files),
+  # 4,711 train / 554 validation / 278 test.
+  source: "data/output/sft/task_a_splits"
+  format: "chatml"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+logging:
+  wandb_project: "llm-workflow-agents-sft"
+  save_steps: 500
+  eval_steps: 500
+  metric_for_best_model: "eval_loss"
