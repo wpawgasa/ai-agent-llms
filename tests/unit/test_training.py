@@ -879,3 +879,41 @@ class TestLossMaskResponseOnly:
         assert result.error is not None
         assert "loss_mask" in result.error
         assert "bogus_mode" in result.error
+
+
+class TestTrainerMaxLength:
+    """TRL's collator truncates every batch to SFTConfig.max_length with
+    truncation_mode='keep_start', independently of how long the pre-tokenized
+    input_ids are. Its default is 1024.
+
+    Leaving it unset silently trained every Cat A run on the first 1024 tokens
+    — which, given a median 3,016-token enriched system prompt, is pure system
+    prompt. Under response_only that masks to -100 everywhere and the loss is
+    exactly 0; under all_tokens it merely trains the model to recite the
+    system prompt. The config's max_seq_length must reach SFTConfig.
+    """
+
+    def test_configured_max_seq_length_reaches_sft_config(self, tmp_path: Path) -> None:
+        from trl import SFTConfig
+
+        from llm_workflow_agents.training.sft import _sft_length_kwargs
+
+        cfg = SFTConfig(
+            output_dir=str(tmp_path), **_sft_length_kwargs({"max_seq_length": 8192})
+        )
+
+        assert cfg.max_length == 8192, (
+            f"collator would truncate to {cfg.max_length}, not the configured 8192"
+        )
+
+    def test_does_not_silently_fall_back_to_trl_default(self, tmp_path: Path) -> None:
+        from trl import SFTConfig
+
+        from llm_workflow_agents.training.sft import _sft_length_kwargs
+
+        cfg = SFTConfig(
+            output_dir=str(tmp_path), **_sft_length_kwargs({"max_seq_length": 4096})
+        )
+
+        assert cfg.max_length == 4096
+        assert cfg.truncation_mode == "keep_start"

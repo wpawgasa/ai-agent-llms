@@ -25,6 +25,40 @@ _LOSS_MASK_RESPONSE_ONLY = "response_only"
 _VALID_LOSS_MASKS = (_LOSS_MASK_ALL_TOKENS, _LOSS_MASK_RESPONSE_ONLY)
 
 
+def _sft_length_kwargs(training_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Sequence-length kwargs for ``SFTConfig``, keyed to the installed TRL.
+
+    Pre-tokenizing to ``max_seq_length`` in ``_render_chat`` is NOT sufficient.
+    TRL builds ``DataCollatorForLanguageModeling(max_length=args.max_length,
+    truncation_mode=args.truncation_mode)`` and re-truncates every batch, and
+    ``SFTConfig.max_length`` defaults to **1024**. With the default
+    ``truncation_mode='keep_start'`` that keeps the first 1024 tokens of each
+    sample.
+
+    For Task A the enriched system prompt alone is a median 3,016 tokens, so
+    that window is pure system prompt:
+
+    - under ``all_tokens`` the run trains on a near-identical prefix across all
+      examples — cheap loss, high token accuracy, little transferable skill;
+    - under ``response_only`` every retained token is masked to -100, there are
+      no valid targets, and loss/grad/accuracy are exactly 0.
+
+    ``max_seq_length`` was a ``SFTConfig`` kwarg through TRL 0.22 and was
+    renamed to ``max_length`` in 0.23+, so pass whichever the installed version
+    accepts rather than assuming either.
+    """
+    from trl import SFTConfig
+
+    max_seq = training_cfg.get("max_seq_length", 8192)
+    params = inspect.signature(SFTConfig).parameters
+    kwargs: dict[str, Any] = {}
+    if "max_length" in params:
+        kwargs["max_length"] = max_seq
+    if "max_seq_length" in params:  # TRL <= 0.22
+        kwargs["max_seq_length"] = max_seq
+    return kwargs
+
+
 def render_response_only_sample(
     messages: list[dict[str, str]],
     tokenizer: Any,
@@ -840,16 +874,10 @@ def train_sft(
         gradient_checkpointing_kwargs={"use_reentrant": False},
         optim=training_cfg.get("optim", "adamw_8bit"),
         weight_decay=training_cfg.get("weight_decay", 0.001),
-        # max_seq_length was a SFTConfig kwarg through TRL 0.22 and removed
-        # from SFTConfig in 0.23+ (it's now controlled by dataset preparation).
-        # We already truncate in _render_chat and pre-pack to max_seq_length,
-        # so the trainer doesn't need it. Pass via SFTConfig only when
-        # supported, otherwise rely on the pre-tokenized lengths.
-        **(
-            {"max_seq_length": training_cfg.get("max_seq_length", 8192)}
-            if "max_seq_length" in inspect.signature(SFTConfig).parameters
-            else {}
-        ),
+        # Sequence-length ceiling. MUST be passed: TRL's collator re-truncates
+        # every batch to its own max_length regardless of the pre-tokenized
+        # lengths we produce. See _sft_length_kwargs.
+        **_sft_length_kwargs(training_cfg),
         # We pre-pack the dataset ourselves above when training_cfg.packing
         # is True, so the trainer-level packing must be off — otherwise it
         # would either re-pack (under TRL) or be silently ignored (under
