@@ -1,0 +1,6 @@
+outs:
+- md5: 110bb1bf2ee349a2cffc515254ca53fe.dir
+  size: 139996001
+  nfiles: 12
+  hash: md5
+  path: sft_cat_a_c2_step500
