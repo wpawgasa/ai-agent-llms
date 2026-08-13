@@ -59,6 +59,25 @@ def _sft_length_kwargs(training_cfg: dict[str, Any]) -> dict[str, Any]:
     return kwargs
 
 
+def _sft_eval_batch_size(
+    training_cfg: dict[str, Any], per_device_train_bs: int
+) -> int:
+    """Per-device eval batch size. TRL defaults this to 8; we default to the
+    train batch size.
+
+    The eval forward materializes fp32 logits of shape
+    ``(batch, seq, vocab)``. Gemma-4's vocab is 262,144, so at 8192 tokens a
+    batch of 8 needs ``8 * 8192 * 262144 * 4B`` ~= 68 GiB in a single
+    allocation — an instant OOM on an 80GB card, and it would not surface
+    until the first eval at save_steps, hours into a run.
+
+    This never bit historically only because the collator was silently
+    truncating every sample to 1024 tokens (see R16 / _sft_length_kwargs),
+    making the same tensor 8x smaller.
+    """
+    return int(training_cfg.get("per_device_eval_batch_size", per_device_train_bs))
+
+
 def render_response_only_sample(
     messages: list[dict[str, str]],
     tokenizer: Any,
@@ -867,6 +886,7 @@ def train_sft(
         lr_scheduler_type=training_cfg.get("lr_scheduler", "cosine"),
         warmup_ratio=training_cfg.get("warmup_ratio", 0.05),
         per_device_train_batch_size=per_device_bs,
+        per_device_eval_batch_size=_sft_eval_batch_size(training_cfg, per_device_bs),
         gradient_accumulation_steps=grad_accum,
         num_train_epochs=training_cfg.get("num_epochs", 3),
         bf16=training_cfg.get("precision", "bf16") != "fp16",

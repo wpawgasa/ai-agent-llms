@@ -917,3 +917,24 @@ class TestTrainerMaxLength:
 
         assert cfg.max_length == 4096
         assert cfg.truncation_mode == "keep_start"
+
+
+class TestEvalBatchSize:
+    """TRL defaults per_device_eval_batch_size to 8.
+
+    The eval forward materializes fp32 logits of shape (batch x seq x vocab).
+    Gemma-4's vocab is 262,144, so at 8192 tokens that is
+    8 x 8192 x 262144 x 4B ~= 68 GiB — an instant OOM on an 80GB card. It only
+    survived historically because the collator was silently truncating every
+    sample to 1024 tokens (R16). Eval must default to the train batch size.
+    """
+
+    def test_defaults_to_train_batch_size(self) -> None:
+        from llm_workflow_agents.training.sft import _sft_eval_batch_size
+
+        assert _sft_eval_batch_size({}, per_device_train_bs=1) == 1
+
+    def test_explicit_override_is_respected(self) -> None:
+        from llm_workflow_agents.training.sft import _sft_eval_batch_size
+
+        assert _sft_eval_batch_size({"per_device_eval_batch_size": 4}, 1) == 4

@@ -55,6 +55,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Environment ───────────────────────────────────────────────────────────────
+# Gemma-4's vocab is 262,144, so the fp32 logits tensor cross-entropy builds is
+# the single largest allocation at full sequence length (~7.7 GiB at 8k tokens)
+# and it must be contiguous. A run that OOMs there typically still has GiB of
+# reserved-but-unallocated blocks; expandable_segments lets the allocator grow
+# into them instead of demanding one unbroken span.
+# See CLAUDE.md R16 / docs/sft_max_length_truncation_bug.md.
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
 # Activate .venv-train if it exists; otherwise assume the current environment
 # already has Unsloth installed (e.g. .devcontainer/Dockerfile.unsloth image).
