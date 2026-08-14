@@ -16,6 +16,11 @@ env/
 # Unsloth on-disk JIT cache
 unsloth_compiled_cache/
 
+# Rendered-SFT-dataset cache (training/sft.py::_render_cache_dir). Derived
+# from the DVC-tracked corpus; keyed by corpus bytes + recipe + tokenizer +
+# render code, so it is always rebuildable and never a source of truth.
+.cache/
+
 # Local run scratch (patched configs, etc.)
 .runs/
 

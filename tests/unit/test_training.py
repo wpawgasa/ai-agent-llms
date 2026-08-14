@@ -938,3 +938,325 @@ class TestEvalBatchSize:
         from llm_workflow_agents.training.sft import _sft_eval_batch_size
 
         assert _sft_eval_batch_size({"per_device_eval_batch_size": 4}, 1) == 4
+
+
+class _FakeTokenizer:
+    """Minimal stand-in carrying only the attributes the render fingerprint
+    reads. Real Gemma-4 hands us a Processor, not a tokenizer, so the
+    fingerprint must work off plain attribute lookups."""
+
+    def __init__(self, chat_template: str = "{{ messages }}", name: str = "fake/tok") -> None:
+        self.chat_template = chat_template
+        self.name_or_path = name
+
+
+def _write_split(path: Path, n_rows: int = 2) -> Path:
+    import json
+
+    path.write_text(
+        "\n".join(
+            json.dumps({"messages": [{"role": "user", "content": f"hi {i}"}]})
+            for i in range(n_rows)
+        )
+        + "\n"
+    )
+    return path
+
+
+class TestRenderCacheFingerprint:
+    """Rendering a Task A split is expensive — response_only re-tokenizes every
+    conversation prefix per turn — and it is redone from scratch on every
+    resume. Caching it is only safe if the key covers everything that changes
+    the rendered bytes: the split contents, the recipe (loss mask, sequence
+    length), the tokenizer/chat template, and the rendering code itself.
+    """
+
+    def test_same_inputs_give_same_fingerprint(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_fingerprint
+
+        split = _write_split(tmp_path / "train.jsonl")
+        kwargs = dict(
+            split_path=split,
+            loss_mask="response_only",
+            max_seq_length=8192,
+            tokenizer=_FakeTokenizer(),
+        )
+
+        assert _render_cache_fingerprint(**kwargs) == _render_cache_fingerprint(**kwargs)
+
+    def test_loss_mask_changes_fingerprint(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_fingerprint
+
+        split = _write_split(tmp_path / "train.jsonl")
+        base = dict(split_path=split, max_seq_length=8192, tokenizer=_FakeTokenizer())
+
+        assert _render_cache_fingerprint(loss_mask="all_tokens", **base) != (
+            _render_cache_fingerprint(loss_mask="response_only", **base)
+        )
+
+    def test_max_seq_length_changes_fingerprint(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_fingerprint
+
+        split = _write_split(tmp_path / "train.jsonl")
+        base = dict(split_path=split, loss_mask="response_only", tokenizer=_FakeTokenizer())
+
+        assert _render_cache_fingerprint(max_seq_length=4096, **base) != (
+            _render_cache_fingerprint(max_seq_length=8192, **base)
+        )
+
+    def test_split_contents_change_fingerprint(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_fingerprint
+
+        split = _write_split(tmp_path / "train.jsonl", n_rows=2)
+        kwargs = dict(
+            split_path=split,
+            loss_mask="response_only",
+            max_seq_length=8192,
+            tokenizer=_FakeTokenizer(),
+        )
+        before = _render_cache_fingerprint(**kwargs)
+
+        _write_split(split, n_rows=3)
+
+        assert _render_cache_fingerprint(**kwargs) != before
+
+    def test_chat_template_changes_fingerprint(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_fingerprint
+
+        split = _write_split(tmp_path / "train.jsonl")
+        base = dict(split_path=split, loss_mask="response_only", max_seq_length=8192)
+
+        assert _render_cache_fingerprint(
+            tokenizer=_FakeTokenizer(chat_template="{{ a }}"), **base
+        ) != _render_cache_fingerprint(
+            tokenizer=_FakeTokenizer(chat_template="{{ b }}"), **base
+        )
+
+    def test_render_code_change_invalidates_fingerprint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The system prompt is rebuilt from live code at load time
+        # (build_enriched_system_prompt(force_rebuild=True)), so a prompt or
+        # renderer edit changes the rendered bytes with the corpus untouched.
+        from llm_workflow_agents.training import sft as sft_mod
+
+        split = _write_split(tmp_path / "train.jsonl")
+        kwargs = dict(
+            split_path=split,
+            loss_mask="response_only",
+            max_seq_length=8192,
+            tokenizer=_FakeTokenizer(),
+        )
+        before = sft_mod._render_cache_fingerprint(**kwargs)
+
+        monkeypatch.setattr(sft_mod, "_render_code_version", lambda: "deadbeef")
+
+        assert sft_mod._render_cache_fingerprint(**kwargs) != before
+
+
+class TestRenderCacheRoundTrip:
+    """The cache must return byte-identical rows and must never serve a
+    half-written entry — a run killed mid-save would otherwise poison every
+    later resume with a truncated dataset."""
+
+    def _dataset(self, values: list[int]):
+        from datasets import Dataset
+
+        return Dataset.from_list([{"input_ids": [v], "labels": [v]} for v in values])
+
+    def test_second_call_reuses_cache_without_rebuilding(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_split_cached
+
+        calls = []
+
+        def build():
+            calls.append(1)
+            return self._dataset([1, 2, 3])
+
+        first = _render_split_cached(
+            name="train", fingerprint="abc", cache_dir=tmp_path, build=build
+        )
+        second = _render_split_cached(
+            name="train", fingerprint="abc", cache_dir=tmp_path, build=build
+        )
+
+        assert len(calls) == 1
+        assert first.to_list() == second.to_list() == self._dataset([1, 2, 3]).to_list()
+
+    def test_new_fingerprint_rebuilds(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_split_cached
+
+        calls = []
+
+        def build():
+            calls.append(1)
+            return self._dataset([len(calls)])
+
+        _render_split_cached(name="train", fingerprint="abc", cache_dir=tmp_path, build=build)
+        out = _render_split_cached(
+            name="train", fingerprint="xyz", cache_dir=tmp_path, build=build
+        )
+
+        assert len(calls) == 2
+        assert out.to_list() == [{"input_ids": [2], "labels": [2]}]
+
+    def test_splits_do_not_collide(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_split_cached
+
+        _render_split_cached(
+            name="train", fingerprint="abc", cache_dir=tmp_path, build=lambda: self._dataset([1])
+        )
+        out = _render_split_cached(
+            name="validation",
+            fingerprint="abc",
+            cache_dir=tmp_path,
+            build=lambda: self._dataset([9]),
+        )
+
+        assert out.to_list() == [{"input_ids": [9], "labels": [9]}]
+
+    def test_disabled_cache_always_rebuilds(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_split_cached
+
+        calls = []
+
+        def build():
+            calls.append(1)
+            return self._dataset([1])
+
+        _render_split_cached(name="train", fingerprint="abc", cache_dir=None, build=build)
+        _render_split_cached(name="train", fingerprint="abc", cache_dir=None, build=build)
+
+        assert len(calls) == 2
+        assert not list(tmp_path.iterdir())
+
+    def test_corrupt_entry_falls_back_to_rebuild(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_split_cached
+
+        _render_split_cached(
+            name="train", fingerprint="abc", cache_dir=tmp_path, build=lambda: self._dataset([1])
+        )
+        entry = next(p for p in tmp_path.iterdir() if p.is_dir())
+        for f in entry.iterdir():
+            f.unlink()
+
+        out = _render_split_cached(
+            name="train", fingerprint="abc", cache_dir=tmp_path, build=lambda: self._dataset([7])
+        )
+
+        assert out.to_list() == [{"input_ids": [7], "labels": [7]}]
+
+
+class TestRenderCacheDir:
+    """Caching is on by default but must be switchable off — a suspect cache
+    should never be the reason a run is unreproducible."""
+
+    def test_enabled_by_default(self) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_dir
+
+        assert _render_cache_dir({}) is not None
+
+    def test_disabled_by_config(self) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_dir
+
+        assert _render_cache_dir({"render_cache": False}) is None
+
+    def test_disabled_by_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_dir
+
+        monkeypatch.setenv("SFT_RENDER_CACHE", "0")
+
+        assert _render_cache_dir({}) is None
+
+    def test_env_overrides_location(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _render_cache_dir
+
+        monkeypatch.setenv("SFT_RENDER_CACHE_DIR", str(tmp_path / "elsewhere"))
+
+        assert _render_cache_dir({}) == tmp_path / "elsewhere"
+
+
+class TestPrepareSplit:
+    """A cache hit must skip the raw load as well as the tokenize pass —
+    `_load_split` re-reads a 151MB JSONL and rebuilds every enriched system
+    prompt from live code, so keying the cache off the file on disk (rather
+    than off the loaded rows) is what makes a resume cheap."""
+
+    def _tokenizer(self) -> _FakeTokenizer:
+        return _FakeTokenizer()
+
+    def test_renders_then_reuses_without_reloading_raw(self, tmp_path: Path) -> None:
+        from datasets import Dataset
+
+        from llm_workflow_agents.training.sft import _prepare_split
+
+        _write_split(tmp_path / "train.jsonl", n_rows=3)
+        loads: list[str] = []
+
+        def load_split(name: str) -> Dataset:
+            loads.append(name)
+            return Dataset.from_list([{"messages": []}] * 3)
+
+        def render_fn(batch: dict) -> dict:
+            return {"input_ids": [[1, 2]] * len(batch["messages"])}
+
+        kwargs = dict(
+            name="train",
+            data_source=tmp_path,
+            loss_mask="response_only",
+            max_seq_length=8192,
+            tokenizer=self._tokenizer(),
+            cache_dir=tmp_path / "cache",
+            load_split=load_split,
+            render_fn=render_fn,
+        )
+        first = _prepare_split(**kwargs)
+        second = _prepare_split(**kwargs)
+
+        assert loads == ["train"]
+        assert first.to_list() == second.to_list() == [{"input_ids": [1, 2]}] * 3
+
+    def test_edited_corpus_bypasses_the_cache(self, tmp_path: Path) -> None:
+        from datasets import Dataset
+
+        from llm_workflow_agents.training.sft import _prepare_split
+
+        _write_split(tmp_path / "train.jsonl", n_rows=1)
+        rows = [1]
+
+        def load_split(name: str) -> Dataset:
+            return Dataset.from_list([{"messages": []}] * len(rows))
+
+        def render_fn(batch: dict) -> dict:
+            return {"input_ids": [[len(rows)]] * len(batch["messages"])}
+
+        kwargs = dict(
+            name="train",
+            data_source=tmp_path,
+            loss_mask="response_only",
+            max_seq_length=8192,
+            tokenizer=self._tokenizer(),
+            cache_dir=tmp_path / "cache",
+            load_split=load_split,
+            render_fn=render_fn,
+        )
+        _prepare_split(**kwargs)
+        rows = [1, 2]
+        _write_split(tmp_path / "train.jsonl", n_rows=2)
+
+        assert _prepare_split(**kwargs).to_list() == [{"input_ids": [2]}] * 2
+
+    def test_missing_split_names_the_path(self, tmp_path: Path) -> None:
+        from llm_workflow_agents.training.sft import _prepare_split
+
+        with pytest.raises(FileNotFoundError, match=r"train\.jsonl"):
+            _prepare_split(
+                name="train",
+                data_source=tmp_path,
+                loss_mask="all_tokens",
+                max_seq_length=4096,
+                tokenizer=self._tokenizer(),
+                cache_dir=None,
+                load_split=lambda name: None,
+                render_fn=lambda batch: batch,
+            )

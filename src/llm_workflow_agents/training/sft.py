@@ -155,6 +155,206 @@ def render_response_only_sample(
     }
 
 
+#: Bump to invalidate every cached render at once, e.g. when the cache
+#: format itself changes rather than the rendering code.
+_RENDER_CACHE_VERSION = 1
+
+_RENDER_CACHE_DEFAULT_DIR = Path(".cache/sft_render")
+
+_FALSEY = {"0", "false", "no", "off"}
+
+
+def _render_code_version() -> str:
+    """Digest of the code that decides what a rendered sample looks like.
+
+    Two sources beyond the corpus file change the rendered bytes:
+
+    - ``render_response_only_sample`` — the per-turn tokenize/mask walk;
+    - ``data/system_prompt.py`` — ``_load_split`` rebuilds ``messages[0]`` with
+      ``build_enriched_system_prompt(force_rebuild=True)``, so a prompt edit
+      re-renders every sample with the corpus byte-identical.
+
+    Hashing them keeps a stale cache from silently outliving the code that
+    produced it. Editing the prompt builder invalidates every entry, which is
+    the intended trade: a spurious re-render costs minutes, a wrong one costs
+    a training run.
+    """
+    import hashlib
+    import inspect
+
+    from llm_workflow_agents.data import system_prompt as _system_prompt
+
+    h = hashlib.blake2b(digest_size=16)
+    h.update(str(_RENDER_CACHE_VERSION).encode())
+    h.update(inspect.getsource(render_response_only_sample).encode())
+    h.update(Path(_system_prompt.__file__).read_bytes())
+    return h.hexdigest()
+
+
+def _tokenizer_identity(tokenizer: Any) -> str:
+    """Identity string for the tokenizer/processor driving the render.
+
+    Gemma-4's ``FastLanguageModel`` hands back a multimodal Processor whose
+    chat template and vocabulary live on a nested ``.tokenizer``, so read both
+    levels and tolerate either being absent.
+    """
+    parts: list[str] = []
+    for obj in (tokenizer, getattr(tokenizer, "tokenizer", None)):
+        if obj is None:
+            continue
+        parts.append(str(getattr(obj, "name_or_path", "")))
+        parts.append(str(getattr(obj, "chat_template", "") or ""))
+        parts.append(str(getattr(obj, "vocab_size", "")))
+    return "\x00".join(parts)
+
+
+def _render_cache_fingerprint(
+    *,
+    split_path: Path,
+    loss_mask: str,
+    max_seq_length: int,
+    tokenizer: Any,
+) -> str:
+    """Hex key over everything that changes a split's rendered output.
+
+    Covers the split's full contents (not mtime/size — a regenerated corpus can
+    land at the same size), the recipe, the tokenizer, and the render code.
+    """
+    import hashlib
+
+    h = hashlib.blake2b(digest_size=16)
+
+    def _field(value: Any) -> None:
+        h.update(str(value).encode())
+        h.update(b"\x00")
+
+    _field(_render_code_version())
+    _field(loss_mask)
+    _field(max_seq_length)
+    _field(_tokenizer_identity(tokenizer))
+    _field(Path(split_path).name)
+
+    with open(split_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(4 << 20), b""):
+            h.update(chunk)
+
+    return h.hexdigest()
+
+
+def _render_cache_dir(data_cfg: dict[str, Any]) -> Path | None:
+    """Where rendered splits are cached, or ``None`` when caching is off.
+
+    On by default. ``data.render_cache: false`` or ``SFT_RENDER_CACHE=0``
+    disables it; ``SFT_RENDER_CACHE_DIR`` relocates it.
+    """
+    if os.environ.get("SFT_RENDER_CACHE", "1").strip().lower() in _FALSEY:
+        return None
+    if not data_cfg.get("render_cache", True):
+        return None
+    override = os.environ.get("SFT_RENDER_CACHE_DIR")
+    return Path(override) if override else _RENDER_CACHE_DEFAULT_DIR
+
+
+def _render_split_cached(
+    *,
+    name: str,
+    fingerprint: str,
+    cache_dir: Path | None,
+    build: Any,
+) -> Any:
+    """Return the rendered split, reusing a cached copy when the key matches.
+
+    ``response_only`` re-tokenizes every conversation prefix once per turn, so
+    rendering Task A costs tens of minutes and is paid again on every resume.
+
+    Writes go to a staging directory and are renamed into place, so a run
+    killed mid-save leaves no entry that a later resume would read as complete.
+    A cache that cannot be read or written is a warning, never a failure —
+    training falls back to rendering.
+    """
+    if cache_dir is None:
+        return build()
+
+    import shutil
+
+    from datasets import load_from_disk
+
+    entry = Path(cache_dir) / f"{name}-{fingerprint}"
+    if entry.exists():
+        try:
+            cached = load_from_disk(str(entry))
+            logger.info(
+                "sft_render_cache_hit", split=name, path=str(entry), rows=len(cached)
+            )
+            return cached
+        except Exception as exc:  # cache is advisory — never fail a run on it
+            logger.warning(
+                "sft_render_cache_unreadable",
+                split=name,
+                path=str(entry),
+                error=str(exc),
+            )
+
+    rendered = build()
+    staging = Path(cache_dir) / f".{name}-{fingerprint}.tmp-{os.getpid()}"
+    try:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+        rendered.save_to_disk(str(staging))
+        shutil.rmtree(entry, ignore_errors=True)
+        staging.rename(entry)
+        logger.info(
+            "sft_render_cache_store",
+            split=name,
+            path=str(entry),
+            rows=len(rendered),
+        )
+    except Exception as exc:  # cache is advisory — never fail a run on it
+        shutil.rmtree(staging, ignore_errors=True)
+        logger.warning(
+            "sft_render_cache_store_failed", split=name, path=str(entry), error=str(exc)
+        )
+    return rendered
+
+
+def _prepare_split(
+    *,
+    name: str,
+    data_source: Path | str,
+    loss_mask: str,
+    max_seq_length: int,
+    tokenizer: Any,
+    cache_dir: Path | None,
+    load_split: Any,
+    render_fn: Any,
+) -> Any:
+    """Load and render one split, serving a cached render when the key matches.
+
+    The fingerprint comes from the JSONL on disk, not from the loaded rows, so
+    a hit skips the raw load and the system-prompt rebuild as well as the
+    tokenize pass.
+    """
+    path = Path(data_source) / f"{name}.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(f"SFT split missing: {path}")
+
+    fingerprint = _render_cache_fingerprint(
+        split_path=path,
+        loss_mask=loss_mask,
+        max_seq_length=max_seq_length,
+        tokenizer=tokenizer,
+    )
+
+    def _build() -> Any:
+        return load_split(name).map(
+            render_fn, batched=True, remove_columns=["messages"]
+        )
+
+    return _render_split_cached(
+        name=name, fingerprint=fingerprint, cache_dir=cache_dir, build=_build
+    )
+
+
 @dataclass(frozen=True)
 class SFTResult:
     """Result of an SFT training run."""
@@ -708,9 +908,6 @@ def train_sft(
             raise ValueError(f"SFT split is empty: {path}")
         return Dataset.from_list(rows)
 
-    train_ds = _load_split("train")
-    eval_ds = _load_split("validation")
-
     # Render chat template AND pre-tokenize. TRL 0.23 + transformers 5.7's
     # SFTTrainer no longer auto-tokenizes a `text` column reliably under
     # Unsloth's wrapper — the default collator ends up trying to pad raw
@@ -768,9 +965,31 @@ def train_sft(
         if loss_mask == _LOSS_MASK_RESPONSE_ONLY
         else _render_chat
     )
-    logger.info("sft_dataset_render", loss_mask=loss_mask)
-    train_ds = train_ds.map(_render_fn, batched=True, remove_columns=["messages"])
-    eval_ds = eval_ds.map(_render_fn, batched=True, remove_columns=["messages"])
+    # Rendering is the single most expensive pre-training step under
+    # response_only (one tokenize per conversation prefix per turn) and it is
+    # paid again on every resume, so cache it on disk keyed by corpus bytes +
+    # recipe + tokenizer + render code. Disable with data.render_cache: false
+    # or SFT_RENDER_CACHE=0.
+    render_cache_dir = _render_cache_dir(data_cfg)
+    logger.info(
+        "sft_dataset_render",
+        loss_mask=loss_mask,
+        render_cache=str(render_cache_dir) if render_cache_dir else "disabled",
+    )
+    def _split(split_name: str) -> Dataset:
+        return _prepare_split(
+            name=split_name,
+            data_source=data_source,
+            loss_mask=loss_mask,
+            max_seq_length=max_seq_length_for_tokenize,
+            tokenizer=tokenizer,
+            cache_dir=render_cache_dir,
+            load_split=_load_split,
+            render_fn=_render_fn,
+        )
+
+    train_ds = _split("train")
+    eval_ds = _split("validation")
 
     # Manual sample packing. Unsloth disables its native packing for
     # vision-language model classes (Gemma-4 here), even though our
