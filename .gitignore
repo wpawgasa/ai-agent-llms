@@ -32,6 +32,9 @@ unsloth_compiled_cache/
 
 # Data outputs — managed by DVC, not git
 results/raw/
+# Rebuilt on demand from two tagged corpora by scripts/build_heldout_clean_set.py
+# (verified against a stored audit), so the set itself is not stored.
+data/output/heldout/
 
 # Model checkpoints — subdirs tracked individually by DVC after each training run
 # checkpoints/ itself is committed (contains .gitignore + .gitkeep)

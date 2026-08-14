@@ -163,13 +163,35 @@ just did not include "tool calls must remain reachable when the annotation is wr
 
 ## 7. Reproducing
 
+The clean set is **not** stored — it is rebuilt from the two tagged corpora. The original was
+built ad-hoc and lost, which left this section pointing at a `<clean-set-dir>` placeholder for a
+week; `scripts/build_heldout_clean_set.py` now pins the construction, and `--verify-against`
+proves a rebuild is the same set before any composite is compared to the ones in §1.
+
 ```bash
-# Contamination-free set: v2 test conversations absent from v1 train/val, keyed on a
-# fingerprint of user turns (conversation_id is not unique).
-# Then, per checkpoint:
+# 1. Materialize the v1 corpus out-of-place (the working copy is v2).
+.venv-train/bin/python scripts/materialize_dvc_lineage.py \
+    --dir-hash 6bb5eb6f7c48356ca05078c537ae68b1 --out /tmp/v1_splits
+
+# 2. Rebuild the contamination-free set: v2 test conversations absent from v1 train/val,
+#    keyed on a fingerprint of user turns (conversation_id is not unique).
+#    --expect-clean fails loudly if either side is the wrong revision;
+#    --verify-against replays the sampler and compares per-row GT to a stored audit.
+.venv-train/bin/python scripts/build_heldout_clean_set.py \
+    --candidate-split data/output/sft/task_a_splits/test.jsonl \
+    --exclusion-split /tmp/v1_splits/train.jsonl \
+    --exclusion-split /tmp/v1_splits/validation.jsonl \
+    --out-dir data/output/heldout/cat_a_v2_test_not_in_v1 \
+    --expect-clean 206 \
+    --verify-against runs/audit/heldout_ckpt1767_v2corpus.json
+# -> 278 candidates, 63 in v1 train + 9 in v1 val excluded, 206 clean
+# -> [verify] OK — 206/206 rows match heldout_ckpt1767_v2corpus.json
+
+# 3. Then, per checkpoint:
 .venv-train/bin/python scripts/heldout_composite_audit.py \
     --checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1767 \
-    --data-dir <clean-set-dir> --split test --n-prompts 206 --seed 42 \
+    --data-dir data/output/heldout/cat_a_v2_test_not_in_v1 \
+    --split test --n-prompts 206 --seed 42 \
     --output runs/audit/heldout_ckpt1767_v2corpus.json
 
 # v3 must be materialized out-of-place — v3 and v4 share the checkpoint path and both
@@ -178,3 +200,9 @@ python3 scripts/materialize_dvc_lineage.py --rev sft-gemma4-v3 --out /tmp/sft_v3
 ```
 
 Wall time ≈ 24 min (v4) and ≈ 17 min (v3) for 206 greedy generations on an H100 80GB.
+
+**A caveat that applies to every number in this document:** the audit loads checkpoints with
+`load_in_4bit=True` (`preflight_entropy_diag._generate_for_checkpoint`), while Cat A SFT trains in
+bf16. Every composite here is therefore a 4-bit measurement of a bf16 model. It is applied
+identically to every checkpoint, so comparisons hold — but the absolute values are not the bf16
+serving quality, and the pre-registered ≥0.75 composite bar was not set under this constraint.
