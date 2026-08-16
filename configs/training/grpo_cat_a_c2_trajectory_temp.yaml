@@ -1,0 +1,128 @@
+# EXPLORATION PROBE — identical to grpo_cat_a_c2_trajectory.yaml except the two
+# sampling knobs. Tests the one hypothesis left standing after that run.
+#
+# That run measured, at step 5: 8 of 8 genuinely distinct trajectories (lengths
+# 77-113) all scoring EXACTLY the same reward, with frac_reward_zero_std pinned
+# at 1.0 for all 10 steps. Diversity was present and the reward still could not
+# separate the rollouts, which rules out both "the policy is too deterministic"
+# and "the per-turn discrete lattice is the cause" (this IS the aggregated
+# trajectory reward).
+#
+# Leading explanation: the trajectories differ LEXICALLY, not BEHAVIOURALLY —
+# same state path, same stall point, different wording — so the reward
+# correctly reports one outcome. If so, the blocker is exploration, not reward
+# shaping, and raising temperature should move reward_std off zero.
+#
+#   reward_std > 0        -> exploration is the lever; tune sampling, not the reward
+#   reward_std still 0    -> the reward components are genuinely too coarse and
+#                            need finer within-turn credit; temperature cannot help
+#
+# Only temperature and top_p differ. Everything else — seed data, geometry,
+# optimizer, reward, step count — is held fixed so the comparison is clean.
+#
+# Trajectory-GRPO validation run on the C2 SFT base — CLAUDE.md R17.
+#
+# PURPOSE: measure `frac_reward_zero_std`. That single number decides whether
+# trajectory mode fixes the reward-resolution failure the per-turn setup hit.
+# It is not a training run — 10 steps, then read the metric.
+#
+# The problem being tested: scored on 206 real C2 completions, the PER-TURN
+# reward takes only 11 distinct values and is exactly 1.0 on 81.1% of them, so
+# a GRPO group ties and the advantage is identically zero. The 2026-08-16
+# diagnostic confirmed it live — `reward_std 0, frac_reward_zero_std 1` at
+# every step, on an otherwise perfectly stable optimizer (grad_norm <= 0.39
+# against a kill line of 50; KL <= 1.94 against 10).
+#
+# reward_business_logic_trajectory aggregates coverage / tool-F1 / terminal /
+# legality over a whole replayed conversation, which is the project's own
+# designed answer: "turns the per-turn discrete reward lattice into a
+# near-continuous distribution, restoring the within-group variance GRPO's
+# advantage needs".
+#
+# PASS  : frac_reward_zero_std materially below 1.0, reward_std > 0
+# FAIL  : still pinned at 1.0 -> the lattice is not the (only) cause, and the
+#         reward components themselves need reshaping before any 1000-step run
+#
+# output_dir keeps this off both checkpoints/grpo_cat_a/ (the abandoned
+# 2026-07-09 run) and the c2_diagnostic path — grpo.py auto-resumes from the
+# highest checkpoint it finds in output_dir, so a shared directory silently
+# continues someone else's trajectory (R13).
+output_dir: "grpo_cat_a_c2_trajectory_temp"
+
+stage: "grpo"
+framework: "unsloth"
+
+model:
+  sft_checkpoint: null  # populated at runtime by run_phase2_grpo.sh
+
+rollout:
+  mode: "trajectory"
+  max_turns: 24                 # gold p90 conversation length ~21
+  per_turn_max_new_tokens: 256
+  stall_turn_limit: 2           # consecutive no-transition turns before stop
+
+grpo:
+  algorithm: "GRPO"
+  normalization: "DAPO"
+  # Deliberately smaller than the per-turn diagnostic's 16. A trajectory
+  # rollout generates up to 24 turns per sample, so concurrent memory is far
+  # higher per generation; the per-turn run already OOM'd at 16 concurrent
+  # sequences once completions lengthened. 8 still gives a usable within-group
+  # std estimate for a pass/fail read on reward variance.
+  num_generations: 8
+  generation_batch_size: 8      # 1 unique prompt-group per round
+                                #   8 % per_device_train_batch_size(2) == 0  ok
+                                #   8 % num_generations(8)            == 0  ok
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 1
+  beta: 0.05
+  epsilon: 0.2
+  learning_rate: 1.0e-6
+  max_grad_norm: 0.2
+  scale_rewards: "none"
+  loss_type: "dr_grpo"
+  training_steps: 10            # measurement only
+  warmup_ratio: 0.05
+  # Whole-trajectory budget. grpo.py passes this straight into
+  # TrajectoryRolloutConfig.max_completion_tokens so the rollout and the
+  # trainer cannot disagree about the budget.
+  max_completion_length: 4096
+  log_completions: true
+  num_completions_to_print: 2
+  save_steps: 10
+  save_total_limit: 1
+  sampling:
+    temperature: 1.4   # was 0.8 — the probe
+    top_p: 1.0         # was 0.95 — do not re-truncate the widened tail
+  generation_backend: "vllm"    # auto-falls back to HF for Gemma-4 (R9)
+  vllm_gpu_memory_utilization: 0.55
+  fp8_rl: true
+
+reward:
+  # MUST be the trajectory variant — grpo.py hard-fails otherwise, because the
+  # trajectory adapter calls reward_fn with 4 args and a per-turn reward takes 3.
+  function: "reward_business_logic_trajectory"
+  weights:
+    coverage: 0.40
+    tool_call_f1: 0.40
+    task_completion: 0.10
+    transition_legality: 0.10
+
+data:
+  source: "data/output/grpo/task_a"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+monitoring:
+  # OFF for this run. The held-out callback is currently broken on Gemma-4
+  # ("num_kv_shared_layers is 0 ... layer_types[:-0] == []") and its extra
+  # generation pass is what tipped the per-turn diagnostic into OOM at step 10.
+  # This run measures reward variance; the R5 guardrail is not what is under
+  # test and must be fixed before any real run, not this one.
+  reward_hacking_detector: false
+  kl_divergence_log: true
+
+logging:
+  wandb_project: "llm-workflow-agents-grpo-diagnostic"
