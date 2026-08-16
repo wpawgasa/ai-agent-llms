@@ -6,10 +6,40 @@ All heavy imports (torch, transformers) are deferred to function bodies.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from llm_workflow_agents.config.schema import TrainingModelConfig
+
+
+def normalize_chat_template_ids(out: Any) -> list[int]:
+    """Normalize ``apply_chat_template(tokenize=True)`` output to ``list[int]``.
+
+    transformers 5.x returns a ``BatchEncoding`` where 4.x returned a plain
+    list, and processors may return a batched tensor. This has broken two call
+    sites in two different ways — silently in
+    ``sft.py::render_response_only_sample`` (``list(mapping)`` yields the KEYS,
+    so samples rendered as 2 tokens with 0 unmasked labels and training signal
+    vanished without a crash; bac1d98) and loudly in
+    ``trajectory_rollout.py::_derive_turn_end_id`` (``int(ids[-1])`` raising on
+    a ``tokenizers.Encoding``, which disabled trajectory rollouts entirely).
+
+    The second happened because the first was fixed in place instead of shared.
+    Both now call this.
+
+    Order is load-bearing: unwrap the mapping **before** any list coercion,
+    because ``list(BatchEncoding)`` succeeds and returns key names rather than
+    raising. A mapping without ``input_ids`` raises ``KeyError`` — failing
+    loudly beats silently returning something list-shaped and wrong.
+    """
+    if isinstance(out, Mapping):
+        out = out["input_ids"]
+    if hasattr(out, "tolist"):
+        out = out.tolist()
+    if len(out) and isinstance(out[0], (list, tuple)):
+        out = out[0]
+    return [int(x) for x in out]
 
 
 def _build_training_arguments(config: TrainingModelConfig, output_dir: Path) -> dict[str, Any]:

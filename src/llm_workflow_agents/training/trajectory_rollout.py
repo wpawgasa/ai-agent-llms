@@ -22,6 +22,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from llm_workflow_agents.training._utils import normalize_chat_template_ids
 from llm_workflow_agents.training.reward_utils import extract_state_annotations
 
 _SUPPORT_CHECKED = False
@@ -246,10 +247,12 @@ def _derive_turn_end_id(tokenizer: Any) -> int:
     prompt — the last token is the assistant turn terminator (``<|im_end|>`` for
     Qwen ChatML, ``<end_of_turn>`` for Gemma). Tokenizer-agnostic.
     """
-    ids = tokenizer.apply_chat_template(
-        [{"role": "user", "content": "u"}, {"role": "assistant", "content": "a"}],
-        add_generation_prompt=False,
-        tokenize=True,
+    ids = normalize_chat_template_ids(
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": "u"}, {"role": "assistant", "content": "a"}],
+            add_generation_prompt=False,
+            tokenize=True,
+        )
     )
     return int(ids[-1])
 
@@ -267,11 +270,15 @@ def _segment_suffix_ids(tokenizer: Any, segment_msgs: list[dict[str, str]]) -> l
         {"role": "user", "content": "x"},
         {"role": "assistant", "content": "y"},
     ]
-    prefix = tokenizer.apply_chat_template(
-        dummy, add_generation_prompt=False, tokenize=True
+    prefix = normalize_chat_template_ids(
+        tokenizer.apply_chat_template(
+            dummy, add_generation_prompt=False, tokenize=True
+        )
     )
-    full = tokenizer.apply_chat_template(
-        dummy + list(segment_msgs), add_generation_prompt=True, tokenize=True
+    full = normalize_chat_template_ids(
+        tokenizer.apply_chat_template(
+            dummy + list(segment_msgs), add_generation_prompt=True, tokenize=True
+        )
     )
     n = len(prefix)
     if full[:n] != prefix:  # template not exactly prefix-stable — trim the common run
@@ -365,12 +372,11 @@ def run_replay_rollout(
     states = [
         _RolloutState(
             script=sc,
-            prompt_ids=[
-                int(t)
-                for t in tokenizer.apply_chat_template(
+            prompt_ids=normalize_chat_template_ids(
+                tokenizer.apply_chat_template(
                     sc.prompt_messages, add_generation_prompt=True, tokenize=True
                 )
-            ],
+            ),
         )
         for sc in scripts
     ]

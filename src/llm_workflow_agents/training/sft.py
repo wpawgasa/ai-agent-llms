@@ -9,7 +9,6 @@ from __future__ import annotations
 import inspect
 import os
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -97,29 +96,24 @@ def render_response_only_sample(
 
     Returns {"input_ids", "attention_mask", "labels"} for a single sample.
     """
+    from llm_workflow_agents.training._utils import normalize_chat_template_ids
+
     ids: list[int] = []
     labels: list[int] = []
 
     def _encode(msgs: list[dict[str, str]]) -> list[int]:
         if not msgs:
             return []
-        out = tokenizer.apply_chat_template(
-            msgs, tokenize=True, add_generation_prompt=False
+        # Normalization lives in _utils so sft.py and trajectory_rollout.py
+        # share one implementation. Keeping a private copy here is what let
+        # transformers 5.x break the rollout path months after bac1d98 fixed
+        # the identical issue in this function. See the helper's docstring for
+        # why the mapping must be unwrapped before any list coercion.
+        return normalize_chat_template_ids(
+            tokenizer.apply_chat_template(
+                msgs, tokenize=True, add_generation_prompt=False
+            )
         )
-        # Some processors / wrappers return BatchEncoding; normalize to list.
-        # Unwrap the mapping FIRST: on transformers>=5 apply_chat_template
-        # returns a BatchEncoding, and `list(mapping)` yields its KEYS
-        # (['input_ids', 'attention_mask']). That makes every _encode call
-        # return the same 2 entries, so every per-turn delta is empty and the
-        # sample renders as 2 tokens with nothing unmasked — a silent, total
-        # loss of training signal rather than a crash.
-        if isinstance(out, Mapping):
-            out = out["input_ids"]
-        if hasattr(out, "tolist"):
-            out = out.tolist()
-        if out and isinstance(out[0], list):
-            out = out[0]
-        return list(out)
 
     prev_encoded: list[int] = []
     for i, msg in enumerate(messages):
