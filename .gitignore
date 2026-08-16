@@ -35,6 +35,9 @@ results/raw/
 # Rebuilt on demand from two tagged corpora by scripts/build_heldout_clean_set.py
 # (verified against a stored audit), so the set itself is not stored.
 data/output/heldout/
+# Derived preference pairs: rebuilt deterministically by
+# scripts/build_preference_pairs.py from the DVC-tracked GRPO splits.
+data/output/preference/
 
 # Model checkpoints — subdirs tracked individually by DVC after each training run
 # checkpoints/ itself is committed (contains .gitignore + .gitkeep)

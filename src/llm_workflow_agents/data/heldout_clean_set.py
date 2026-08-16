@@ -41,6 +41,40 @@ def user_turn_fingerprint(conversation: dict[str, Any]) -> str:
     return hashlib.blake2b(joined, digest_size=16).hexdigest()
 
 
+def user_turn_prefix_fingerprints(conversation: dict[str, Any]) -> set[str]:
+    """Fingerprints of every user-turn *prefix* of one conversation.
+
+    :func:`user_turn_fingerprint` hashes a conversation's complete user-turn
+    list. Per-turn training rows carry only a prefix of it (messages up to the
+    turn being predicted), so their fingerprint can never equal the whole
+    conversation's — a contamination guard comparing the two is inert and will
+    silently pass everything.
+
+    Expanding each excluded conversation into all of its prefixes makes the
+    comparison meaningful: any turn row derived from that conversation matches
+    one of them.
+    """
+    users = [
+        str(m.get("content", "") or "")
+        for m in (conversation.get("messages") or [])
+        if m.get("role") == "user"
+    ]
+    out: set[str] = set()
+    for k in range(1, len(users) + 1):
+        joined = "\x00".join(users[:k]).encode("utf-8", errors="replace")
+        out.add(hashlib.blake2b(joined, digest_size=16).hexdigest())
+    return out
+
+
+def load_prefix_fingerprints(splits: list[Path]) -> set[str]:
+    """Union of :func:`user_turn_prefix_fingerprints` over every conversation."""
+    out: set[str] = set()
+    for split in splits:
+        for conv in _read_jsonl(Path(split)):
+            out |= user_turn_prefix_fingerprints(conv)
+    return out
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with open(path) as fh:
