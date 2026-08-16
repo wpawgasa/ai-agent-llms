@@ -1,3 +1,23 @@
+# 50-step GRPO diagnostic on the C2 SFT base — CLAUDE.md R17.
+#
+# Identical optimizer settings to grpo_cat_a_diagnostic.yaml. Two things differ,
+# both about WHICH policy and WHICH data, not how the optimizer behaves:
+#
+#   1. Seeded from checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767
+#      (held-out composite 0.7595) instead of the old sft_cat_a checkpoint-500.
+#      Every prior GRPO attempt sat on an SFT base that trained at a 1024-token
+#      window and therefore never saw a tool-calling turn (R16), so the
+#      stability envelope measured then does not transfer — re-run the gate.
+#   2. output_dir keeps this off checkpoints/grpo_cat_a/, which still holds the
+#      abandoned 2026-07-09 run (checkpoint-50/-100/-150, v1 data, old SFT
+#      base). grpo.py auto-resumes from the highest checkpoint it finds in
+#      output_dir, so sharing a directory would silently continue that run's
+#      trajectory and adapter instead of starting from C2. See R13.
+#
+# The go/no-go gate below is unchanged and still governs promotion to 1000
+# steps. Do NOT promote on a passing grad_norm/KL alone — read reward_std too.
+output_dir: "grpo_cat_a_c2_diagnostic"
+
 # 50-step GRPO diagnostic — see docs/grpo_diagnosis_gemma4_26b.md addendum
 # "Full Per-Step Re-Audit (2026-05-29)" for what to read off this run and why
 # these settings changed.
@@ -38,15 +58,31 @@ grpo:
   normalization: "DAPO"
   num_generations: 16          # was 8 — better within-group std estimate, fewer
                                #   near-zero-std groups that triggered amplification
-  generation_batch_size: 32    # 32/16 = 2 unique prompt-groups per generation
-                               #   round (was 1) — halves prompt-draw noise.
+  # VRAM-corrected geometry for the C2 base. The inherited 32/8 pair OOM'd
+  # during *generation* (not the backward): TRL issues one HF generate() call
+  # for the whole generation_batch_size, so 32 concurrent sequences at these
+  # prompt lengths asked for 8.51 GiB with 6.84 GiB free (72.33/79.18 GiB in
+  # use, 4-bit weights). Task A GRPO prompts measure median 4,408 / p90 6,109 /
+  # max 7,738 tokens, so 32 x ~8k-token KV is simply too much on one H100 —
+  # exactly the "closer to the VRAM ceiling" R16 predicted for full-length runs.
+  #
+  # num_generations stays at 16: it is the PRIMARY statistical fix (within-group
+  # std estimation) and the thing this gate exists to test. What gives instead
+  # is generation_batch_size, whose only role was 2 unique prompts per round
+  # rather than 1 — a secondary prompt-draw-noise property, not a correctness
+  # one. Halving concurrent sequences 32 -> 16 is the smallest change that
+  # preserves the diagnostic's purpose.
+  generation_batch_size: 16    # 16/16 = 1 unique prompt-group per round
                                #   TRL constraints (num_processes=1):
-                               #     32 % per_device_train_batch_size(8) == 0  ✓
-                               #     32 % num_generations(16)            == 0  ✓
-                               #   → steps_per_generation = 32/8 = 4
-  per_device_train_batch_size: 8   # explicit (matches prior run's train-side VRAM);
-                                   #   advantages are computed over full 16-gen groups
-                                   #   at generation time, so the 4 micro-steps are safe
+                               #     16 % per_device_train_batch_size(4) == 0  ✓
+                               #     16 % num_generations(16)            == 0  ✓
+                               #   → steps_per_generation = 16/4 = 4
+  # 8 -> 4. Pure memory/compute split, NOT a change to the optimizer math:
+  # grpo_config.py:892 derives steps_per_generation = generation_batch_size /
+  # (per_device_train_batch_size * num_processes) and takes one optimizer step
+  # per generation batch, and advantages are computed over full 16-gen groups
+  # at generation time. So 4 micro-steps of 4 == 1 step of 16, gradient-wise.
+  per_device_train_batch_size: 4
   gradient_accumulation_steps: 1
   beta: 0.05                   # was 0.1 — safe to relax once advantages are bounded
   epsilon: 0.2
@@ -81,8 +117,8 @@ reward:
     transition_legality: 0.10
 
 data:
-  # L3-L5 filtered GRPO prompts (R17). Was "data/output/task_a", a directory
-  # that does not exist; run_phase2_grpo.sh masked it by overriding data.source.
+  # v2-derived L3-L5 GRPO prompts (R17). Was "data/output/task_a", which does
+  # not exist; run_phase2_grpo.sh masked it by overriding data.source.
   source: "data/output/grpo/task_a"
   splits:
     train: 0.85

@@ -634,6 +634,33 @@ def _is_reward_hacking(
     )
 
 
+def _filter_grpo_config_kwargs(
+    kwargs: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop kwargs the installed TRL ``GRPOConfig`` does not accept.
+
+    TRL moves fields between releases — 1.0.0 removed ``max_prompt_length``,
+    which turned a config written against 0.23.x into a ``TypeError`` at
+    ``GRPOConfig(**kwargs)``, i.e. after the model and both dataset splits had
+    already loaded. Filtering keeps a config launchable across versions.
+
+    Returns ``(kept, dropped)``; the caller must log ``dropped``. Silence is the
+    failure mode that matters here: R16 happened because a length parameter was
+    dropped quietly (``max_seq_length`` → ``max_length`` in TRL 0.23+ turned a
+    guarded branch into a no-op), and every Cat A SFT run trained on a
+    1024-token window for months with no warning. Prefer a loud, harmless
+    warning over a silent, invisible behaviour change.
+    """
+    import dataclasses
+
+    from trl import GRPOConfig
+
+    supported = {f.name for f in dataclasses.fields(GRPOConfig)}
+    kept = {k: v for k, v in kwargs.items() if k in supported}
+    dropped = sorted(set(kwargs) - set(kept))
+    return kept, dropped
+
+
 _RUN_STAMP_RE = re.compile(r"_\d{8}T\d{6}Z$")
 
 
@@ -864,6 +891,20 @@ def train_grpo(config_path: Path) -> GRPOResult:
             vllm_gpu_memory_utilization=vllm_gpu_util,
             vllm_tensor_parallel_size=1,
             vllm_importance_sampling_correction=True,
+        )
+    # Drop anything the installed TRL doesn't accept, but name it loudly —
+    # a silently-dropped length knob is exactly how R16 went unnoticed.
+    grpo_kwargs, dropped_kwargs = _filter_grpo_config_kwargs(grpo_kwargs)
+    if dropped_kwargs:
+        logger.warning(
+            "grpo_config_kwargs_unsupported",
+            dropped=dropped_kwargs,
+            trl_version=getattr(importlib.import_module("trl"), "__version__", "?"),
+            note=(
+                "These keys are set in the YAML but do not exist on this TRL's "
+                "GRPOConfig, so they have NO effect. If a dropped key bounds a "
+                "length or a gradient, verify the run is still within budget."
+            ),
         )
     grpo_config = GRPOConfig(**grpo_kwargs)
 
