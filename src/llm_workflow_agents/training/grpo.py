@@ -397,6 +397,125 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
 _LATEST_INSTRUMENTATION: dict[str, float] = {}
 
 
+def _load_grpo_trajectory_dataset(
+    data_dir: Path, split: str = "train"
+) -> tuple["Dataset", dict[str, Any]]:
+    """Load a split as ONE row per conversation, plus its gold-script index.
+
+    The per-turn loader (:func:`_load_grpo_jsonl`) emits a row per assistant
+    turn, which is what leaves the reward on its ceiling: measured on 206 real
+    C2 completions the per-turn reward takes 11 distinct values and is exactly
+    1.0 on 81.1% of them, so a GRPO group ties and the advantage is zero.
+    Trajectory mode scores a whole replayed conversation instead, which is what
+    ``reward_business_logic_trajectory`` aggregates into a near-continuous
+    distribution.
+
+    Returns ``(dataset, script_index)`` where ``script_index`` maps
+    :func:`prompt_key` to the conversation's :class:`GoldScript`. The rollout
+    looks scripts up by that key and treats a miss as a hard ``KeyError``, so
+    the key must be computed from the exact prompt stored on the row — hence
+    both are built here, together, rather than by two functions that could
+    drift.
+
+    Conversations that violate ``build_gold_script``'s one-transition-per-turn
+    invariant are skipped and counted, not fatal — one bad row must not take
+    down a load of thousands. An entirely empty result *is* fatal, because a
+    silently empty training set would start a run that cannot learn.
+    """
+    from datasets import Dataset
+
+    from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
+    from llm_workflow_agents.training.trajectory_rollout import (
+        build_gold_script,
+        prompt_key,
+    )
+
+    path = Path(data_dir) / f"{split}.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(f"GRPO split missing: {path}")
+
+    rows: list[dict[str, Any]] = []
+    script_index: dict[str, Any] = {}
+    n_convs = n_skipped = n_dup = 0
+    with open(path) as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            n_convs += 1
+            msgs = raw.get("messages") or []
+            enriched = ""
+            if msgs and msgs[0].get("role") == "system":
+                enriched = (
+                    build_enriched_system_prompt(
+                        raw, msgs[0].get("content") or "", force_rebuild=True
+                    )
+                    if raw.get("workflow_graph")
+                    else (msgs[0].get("content") or "")
+                )
+            try:
+                script = build_gold_script(raw, enriched)
+            except ValueError as exc:
+                n_skipped += 1
+                logger.debug(
+                    "grpo_trajectory_conv_skipped",
+                    conversation_id=raw.get("conversation_id"),
+                    error=str(exc),
+                )
+                continue
+
+            key = prompt_key(script.prompt_messages)
+            if key in script_index:
+                # Two conversations share a prompt prefix. The rollout resolves
+                # scripts by this key, so a dict would keep only the last one and
+                # every earlier colliding row would replay a DIFFERENT
+                # conversation's gold segments and be scored against its
+                # transitions and tool calls — silent per-row reward corruption.
+                # Real corpus: 2,558 conversations -> 2,420 keys, so 138 rows
+                # (5.4%) were affected, one key colliding 8 ways. Keep the first
+                # and drop the rest so rows and index agree exactly.
+                n_dup += 1
+                continue
+
+            script_index[key] = script
+            rows.append(
+                {
+                    "prompt": script.prompt_messages,
+                    "ground_truth": json.dumps(
+                        {
+                            "state_sequence": [
+                                {"from": f, "to": t} for f, t in script.gold_transitions
+                            ],
+                            "tool_calls": script.gold_tool_calls,
+                            "terminal_state": script.terminal_state,
+                            "terminal_reached": script.terminal_reached,
+                            "valid_transitions": script.valid_transitions,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+
+    if not rows:
+        raise ValueError(
+            f"No usable conversations in {path} ({n_convs} read, {n_skipped} "
+            f"skipped on the gold-transition/assistant-turn invariant, {n_dup} "
+            "on prompt collisions). Refusing to start a run on an empty "
+            "training set."
+        )
+
+    logger.info(
+        "grpo_trajectory_data_loaded",
+        split=split,
+        conversations=n_convs,
+        rows=len(rows),
+        skipped_invariant=n_skipped,
+        skipped_prompt_collision=n_dup,
+        indexed_scripts=len(script_index),
+    )
+    return Dataset.from_list(rows), script_index
+
+
 def _make_reward_adapter(reward_fn: Callable) -> Callable:
     """Bridge project reward signature to TRL 0.23.1's keyword-only call.
 
@@ -848,14 +967,73 @@ def train_grpo(config_path: Path) -> GRPOResult:
         **fast_inference_kwargs,
     )
 
+    # Re-arm the Gemma-4 proxy unwrap. It ran before this load, but
+    # FastLanguageModel.from_pretrained re-applies unsloth_zoo's temporary
+    # patches, which reinstalls `_Gemma4KVSharedSafeProxy` on top of ours — so
+    # the pre-load call is undone exactly when it starts to matter. Everything
+    # that later builds or validates a config hits the proxy's deliberate
+    # `num_kv_shared_layers` AttributeError: it is what made every held-out eval
+    # fail with `grpo_heldout_eval_failed` (silently disabling the R5
+    # reward-hacking guardrail while training continued) and what killed the
+    # first trajectory-rollout run outright.
+    _unwrap_unsloth_gemma4_kv_zero_proxy()
+
     data_source = data_cfg.get("source", "")
-    train_ds = _load_grpo_jsonl(Path(data_source), split="train")
+
+    # Rollout mode. "turn" (default) scores one assistant turn per row.
+    # "trajectory" replays a whole conversation, injecting the gold user/tool
+    # segments between the model's own turns, and scores the aggregate — the
+    # designed fix for the per-turn reward's ceiling (11 distinct values, 81.1%
+    # exactly 1.0 on real completions => tied groups => zero GRPO advantage).
+    rollout_cfg = config.get("rollout", {}) or {}
+    rollout_mode = str(rollout_cfg.get("mode", "turn")).lower()
+    if rollout_mode not in ("turn", "trajectory"):
+        raise ValueError(
+            f"rollout.mode must be 'turn' or 'trajectory', got {rollout_mode!r}"
+        )
+    use_trajectory = rollout_mode == "trajectory"
+
+    script_index: dict[str, Any] = {}
+    if use_trajectory:
+        from llm_workflow_agents.training.trajectory_rollout import (
+            TrajectoryRolloutConfig,
+            assert_trajectory_rollout_support,
+            make_replay_rollout_func,
+        )
+
+        # Fail before the (expensive) data load if this TRL can't do it.
+        assert_trajectory_rollout_support()
+        # The trajectory adapter calls reward_fn(prompts, trajectories, metas,
+        # gts) — four args. A per-turn reward takes three, so a mismatched pair
+        # would blow up mid-training with an arity TypeError instead of here.
+        if not reward_fn_name.endswith("_trajectory"):
+            raise ValueError(
+                f"rollout.mode=trajectory requires a trajectory reward "
+                f"(e.g. 'reward_business_logic_trajectory'), got "
+                f"{reward_fn_name!r}. A per-turn reward has a 3-arg signature "
+                "and cannot score replayed trajectories."
+            )
+        train_ds, script_index = _load_grpo_trajectory_dataset(
+            Path(data_source), split="train"
+        )
+    else:
+        train_ds = _load_grpo_jsonl(Path(data_source), split="train")
 
     # Optional tool-bearing rebalance. Applied to the TRAINING set only — the
     # held-out rows below must keep the corpus's natural distribution, because
     # they measure real capability for the R5 guardrail and would otherwise
     # report a metric on a distribution nothing else uses.
     tool_ratio = data_cfg.get("tool_bearing_ratio")
+    if tool_ratio is not None and use_trajectory:
+        # The mix is a per-TURN notion; trajectory rows are whole conversations,
+        # nearly all of which contain at least one tool call, so applying it here
+        # would be a no-op dressed up as a control. Refuse rather than mislead.
+        logger.warning(
+            "grpo_tool_bearing_mix_ignored",
+            reason="rollout.mode=trajectory scores whole conversations, not turns",
+            requested_ratio=float(tool_ratio),
+        )
+        tool_ratio = None
     if tool_ratio is not None:
         gts = train_ds["ground_truth"]
         has_tool = [bool(json.loads(g).get("tool_calls")) for g in gts]
@@ -1078,6 +1256,19 @@ def train_grpo(config_path: Path) -> GRPOResult:
                                 **enc,
                                 max_new_tokens=held_out_max_new,
                                 do_sample=False,
+                                # Explicit config is required on Gemma-4 +
+                                # Unsloth. Left None, transformers takes the
+                                # `self.config._get_generation_parameters()`
+                                # branch, which re-validates the model config,
+                                # and unsloth_zoo's Gemma-4 proxy deliberately
+                                # hides `num_kv_shared_layers` -> AttributeError.
+                                # That is what made every held-out eval fail with
+                                # `grpo_heldout_eval_failed`, silently disabling
+                                # the R5 reward-hacking guardrail for the whole
+                                # run while training carried on regardless.
+                                generation_config=getattr(
+                                    model, "generation_config", None
+                                ),
                             )
                             gen = tok.decode(
                                 out[0][enc["input_ids"].shape[1] :],
@@ -1133,13 +1324,44 @@ def train_grpo(config_path: Path) -> GRPOResult:
             _HeldOutEvalCallback(model, tokenizer, held_out_rows)
         )
 
+    trainer_kwargs: dict[str, Any] = {}
+    if use_trajectory:
+        traj_cfg = TrajectoryRolloutConfig(
+            max_turns=int(rollout_cfg.get("max_turns", 24)),
+            per_turn_max_new_tokens=int(
+                rollout_cfg.get("per_turn_max_new_tokens", 256)
+            ),
+            # Must equal GRPOConfig.max_completion_length or the rollout and the
+            # trainer disagree about the budget; take it from the resolved
+            # GRPOConfig rather than the YAML so there is one source of truth.
+            max_completion_tokens=int(grpo_config.max_completion_length),
+            stall_turn_limit=int(rollout_cfg.get("stall_turn_limit", 2)),
+            temperature=float(grpo_config.temperature),
+            top_p=float(grpo_config.top_p),
+        )
+        trainer_kwargs["rollout_func"] = make_replay_rollout_func(
+            script_index, traj_cfg
+        )
+        reward_adapter = _make_trajectory_reward_adapter(reward_fn)
+        logger.info(
+            "grpo_trajectory_rollout_enabled",
+            reward_function=reward_fn_name,
+            scripts=len(script_index),
+            max_turns=traj_cfg.max_turns,
+            per_turn_max_new_tokens=traj_cfg.per_turn_max_new_tokens,
+            max_completion_tokens=traj_cfg.max_completion_tokens,
+        )
+    else:
+        reward_adapter = _make_reward_adapter(reward_fn)
+
     trainer = GRPOTrainer(
         model=model,
-        reward_funcs=_make_reward_adapter(reward_fn),
+        reward_funcs=reward_adapter,
         args=grpo_config,
         train_dataset=train_ds,
         processing_class=tokenizer,
         callbacks=callbacks,
+        **trainer_kwargs,
     )
 
     # Auto-resume from the highest-numbered checkpoint in output_dir if one

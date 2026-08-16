@@ -381,6 +381,19 @@ def run_replay_rollout(
         for sc in scripts
     ]
 
+    # Resolve a concrete GenerationConfig once. Prefer the model's own (it
+    # carries the checkpoint's eos/pad defaults); fall back to a bare one.
+    # Never leave it None — see the note on gen_kwargs below for why that is a
+    # hard failure on Gemma-4 + Unsloth rather than a style preference.
+    gen_config = getattr(model, "generation_config", None)
+    if gen_config is None:
+        try:
+            from transformers import GenerationConfig
+
+            gen_config = GenerationConfig()
+        except Exception:  # pragma: no cover - transformers always present
+            gen_config = None
+
     was_training = getattr(model, "training", False)
     if hasattr(model, "eval"):
         model.eval()
@@ -399,6 +412,16 @@ def run_replay_rollout(
                 "do_sample": cfg.do_sample,
                 "eos_token_id": list(turn_end_ids),
                 "pad_token_id": pad_id,
+                # An explicit generation_config is REQUIRED on Gemma-4 + Unsloth,
+                # not a nicety. With it None, transformers takes the
+                # `self.config._get_generation_parameters()` branch
+                # (generation/utils.py:1726), which rebuilds and re-validates the
+                # model config — and unsloth_zoo's Gemma-4 proxy deliberately
+                # hides `num_kv_shared_layers` from the cache constructor, so
+                # validation raises AttributeError and generation dies. Passing a
+                # config skips that branch entirely. Same root cause as the
+                # broken held-out eval callback in grpo.py.
+                "generation_config": gen_config,
             }
             if cfg.do_sample:
                 gen_kwargs["temperature"] = cfg.temperature
