@@ -132,6 +132,76 @@ stages:
     # Filter only — L3-L5 of train.jsonl + validation.jsonl. test.jsonl is
     # reserved for final evaluation and is intentionally not included.
 
+  task_a_preference_pairs:
+    desc: >-
+      Cat A contrastive preference pairs (DPO/ORPO), SYNTHETIC negatives.
+      Built because GRPO cannot learn on this task — the reward is exactly 1.0
+      on 81.1% of real completions, so groups tie and the advantage is zero
+      (CLAUDE.md R18, docs/grpo_reward_resolution_investigation.md). A
+      preference objective needs no reward variance.
+
+      Each gold turn is paired against a corruption drawn from the failures the
+      C2 policy actually makes: dropped tool call (announce-but-don't-call),
+      self-loop/advance flip, and right-tool-wrong-arguments. Balanced to equal
+      shares of the three.
+
+      PREREQUISITE: the held-out set must be materialized first, because the
+      contamination guard reads it —
+          python scripts/build_heldout_clean_set.py ... \
+              --out-dir data/output/heldout/cat_a_v2_test_not_in_v1
+      It is deliberately not a dep: it is gitignored and rebuilt on demand from
+      two git tags (see cee970a). Without it this stage fails loudly rather
+      than silently skipping the guard.
+
+      Outs are the two files, NOT the directory, so `dvc repro` does not delete
+      model_negatives.jsonl produced alongside them by the GPU stage below.
+    cmd: >-
+      python scripts/build_preference_pairs.py --split train
+        --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl
+        --out data/output/preference/task_a/train.jsonl &&
+      python scripts/build_preference_pairs.py --split validation
+        --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl
+        --out data/output/preference/task_a/validation.jsonl
+    deps:
+      - scripts/build_preference_pairs.py
+      - src/llm_workflow_agents/data/preference_pairs.py
+      - src/llm_workflow_agents/data/heldout_clean_set.py
+      - data/output/grpo/task_a
+    outs:
+      - data/output/preference/task_a/train.jsonl
+      - data/output/preference/task_a/validation.jsonl
+
+  task_a_preference_model_negatives:
+    desc: >-
+      On-distribution negatives mined from the policy's OWN greedy generations,
+      to complement the synthetic corruptions above. R18: synthetic-only
+      negatives teach the model to discriminate against the corruption function
+      rather than to get the task right — the same trap R15 documents at corpus
+      level.
+
+      Requires a GPU (~35 min on an H100 for 400 prompts). Selection is biased
+      75% toward tool-bearing turns because greedy decoding is wrong on 38.0%
+      of those versus 8.9% of no-tool turns, so the yield per GPU-minute is far
+      higher and lands on the current bottleneck.
+
+      Mines from TRAIN only. The script hard-refuses --split test, and the
+      prefix-fingerprint contamination guard is applied, because the held-out
+      conversations are the only contamination-free measuring stick for this
+      lineage.
+    cmd: >-
+      python scripts/mine_model_negatives.py
+        --checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767
+        --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl
+        --n-prompts 400 --tool-share 0.75
+        --out data/output/preference/task_a/model_negatives.jsonl
+    deps:
+      - scripts/mine_model_negatives.py
+      - src/llm_workflow_agents/data/heldout_clean_set.py
+      - data/output/grpo/task_a
+      - checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+    outs:
+      - data/output/preference/task_a/model_negatives.jsonl
+
   task_a_eval:
     desc: >-
       500 validation + 500 test held-out conversations.

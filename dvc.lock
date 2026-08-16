@@ -313,3 +313,35 @@ stages:
       md5: 50ed6597b51c313f06231ec6f13653d0.dir
       size: 563078376
       nfiles: 48
+  task_a_preference_pairs:
+    cmd: "python scripts/build_preference_pairs.py --split train\n  --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl\n\
+      \  --out data/output/preference/task_a/train.jsonl &&\npython scripts/build_preference_pairs.py
+      --split validation\n  --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl\n\
+      \  --out data/output/preference/task_a/validation.jsonl"
+    deps:
+    - path: data/output/grpo/task_a
+      hash: md5
+      md5: 7a66777ca98751f5368b1e503e8da894.dir
+      size: 117698684
+      nfiles: 2
+    - path: scripts/build_preference_pairs.py
+      hash: md5
+      md5: 21a7bf0b8a537a3aa65c9b887d3d4bbc
+      size: 8979
+    - path: src/llm_workflow_agents/data/heldout_clean_set.py
+      hash: md5
+      md5: 04de68b8d0f6e2ca39d2e8520395170a
+      size: 5019
+    - path: src/llm_workflow_agents/data/preference_pairs.py
+      hash: md5
+      md5: e38228e50cf94226fceb08dc70176e3f
+      size: 8084
+    outs:
+    - path: data/output/preference/task_a/train.jsonl
+      hash: md5
+      md5: e17149736a6f58208906b4978693f192
+      size: 674749564
+    - path: data/output/preference/task_a/validation.jsonl
+      hash: md5
+      md5: e17606c075f642479bca85be84f8fc82
+      size: 81718979
