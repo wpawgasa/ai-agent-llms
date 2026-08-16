@@ -134,13 +134,17 @@ fi
 
 # ── Patch GRPO config ─────────────────────────────────────────────────────────
 # Inject the resolved SFT checkpoint + data dir so grpo.py picks them up.
-# Preserve the original config's stem in the patched file path — grpo.py derives
-# the checkpoint dir from Path(config_path).stem, so renaming here would route
-# every run into checkpoints/grpo_cat_a/ regardless of --grpo-config.
+#
+# RUN_TS makes the patched config run-specific: a fixed filename here would be
+# silently overwritten by the next invocation (even --dry-run), leaving no
+# reliable record of what config actually produced a given checkpoint. The
+# checkpoint path is held stable independently via the explicit output_dir key
+# below, so the timestamp cannot leak into it. See CLAUDE.md R13.
 GRPO_STEM=$(basename "${GRPO_CONFIG%.*}")
+RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 PATCHED_DIR="$PROJECT_ROOT/.runs/$GRPO_STEM"
 mkdir -p "$PATCHED_DIR"
-PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}.yaml"
+PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}_${RUN_TS}.yaml"
 
 python3 -c "
 from pathlib import Path
@@ -150,12 +154,24 @@ cfg = yaml.safe_load(open('${GRPO_CONFIG}'))
 cfg.setdefault('model', {})['sft_checkpoint'] = str(Path('${SFT_CHECKPOINT}').resolve())
 cfg.setdefault('model', {})['config_path']    = str(Path('${MODEL_CONFIG}').resolve())
 cfg.setdefault('data', {})['source']          = str(Path('${GRPO_DATA_DIR}').resolve())
+# Pin the checkpoint directory to the *base* config stem, not the timestamped
+# patched-config stem. grpo.py would otherwise derive it from the patched
+# filename and write outside the DVC-tracked path. Set output_dir in the base
+# config to give a run its own directory (e.g. one per SFT lineage).
+cfg.setdefault('output_dir', Path('${GRPO_CONFIG}').stem)
 if ${NO_WANDB}:
     cfg.setdefault('logging', {}).pop('wandb_project', None)
 
 with open('${PATCHED_CFG}', 'w') as f:
     yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
 "
+
+# Read back the resolved run name from the patched config so CKPT_DIR below is
+# exactly what grpo.py will use — the SFT pair drifted apart once already.
+RUN_NAME=$(python3 -c "
+import yaml
+print(yaml.safe_load(open('${PATCHED_CFG}'))['output_dir'])
+")
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo "=== Task A GRPO — Phase 2 ==="
@@ -164,7 +180,7 @@ echo "  GRPO config    : $GRPO_CONFIG"
 echo "  Patched cfg    : $PATCHED_CFG"
 echo "  SFT checkpoint : $SFT_CHECKPOINT"
 echo "  Data dir       : $GRPO_DATA_DIR (levels: ${GRPO_LEVELS[*]})"
-echo "  Checkpoint     : $PROJECT_ROOT/checkpoints/$GRPO_STEM/$MODEL_BASENAME/"
+echo "  Checkpoint     : $PROJECT_ROOT/checkpoints/$RUN_NAME/$MODEL_BASENAME/"
 echo "  W&B            : $([ "$NO_WANDB" -eq 1 ] && echo disabled || echo enabled)"
 echo "============================="
 
@@ -174,10 +190,15 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 # ── Train ─────────────────────────────────────────────────────────────────────
-CKPT_DIR="$PROJECT_ROOT/checkpoints/$GRPO_STEM/$MODEL_BASENAME"
+CKPT_DIR="$PROJECT_ROOT/checkpoints/$RUN_NAME/$MODEL_BASENAME"
 mkdir -p "$CKPT_DIR"
 LOG_FILE="$CKPT_DIR/train.log"
 echo "Logs: $LOG_FILE"
+
+# Co-locate the frozen config with train.log so per-run provenance doesn't
+# require knowing about .runs/ at all. Timestamped for the same reason as
+# PATCHED_CFG above.
+cp "$PATCHED_CFG" "$CKPT_DIR/frozen_grpo_config_${RUN_TS}.yaml"
 
 python3 -c "
 import sys

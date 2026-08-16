@@ -88,7 +88,12 @@ reward:
     transition_legality: 0.10
 
 data:
-  source: "data/output/task_a"
+  # L3-L5 filtered GRPO prompts derived from the canonical SFT splits by
+  # scripts/filter_grpo_data.py. This pointed at "data/output/task_a" — a
+  # directory that does not exist — so any direct train_grpo() call failed at
+  # data load; run_phase2_grpo.sh masked it by overriding data.source with its
+  # own --data-dir default, which is this same path.
+  source: "data/output/grpo/task_a"
   splits:
     train: 0.85
     val: 0.10

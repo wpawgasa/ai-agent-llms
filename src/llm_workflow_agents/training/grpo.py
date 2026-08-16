@@ -634,6 +634,30 @@ def _is_reward_hacking(
     )
 
 
+_RUN_STAMP_RE = re.compile(r"_\d{8}T\d{6}Z$")
+
+
+def _resolve_output_dir(
+    config: dict[str, Any], config_path: Path, model_name: str
+) -> Path:
+    """Resolve the checkpoint output directory for a GRPO run.
+
+    Precedence:
+      1. Explicit ``output_dir`` in the config — the only way to give a run a
+         distinct directory (otherwise a second run overwrites the first).
+      2. The config filename stem, with any trailing run stamp removed.
+
+    Mirrors ``sft.py::_resolve_output_dir``. The stamp strip is what keeps a
+    run-stamped patched config (R13) from silently relocating checkpoints to a
+    per-run path the DVC stage does not track — the 2026-07-22 fault on the SFT
+    side, which left the declared output weightless. Provenance belongs in the
+    config filename; the checkpoint path stays stable unless asked to change.
+    """
+    explicit = config.get("output_dir")
+    run_name = str(explicit) if explicit else _RUN_STAMP_RE.sub("", config_path.stem)
+    return Path("checkpoints") / run_name / Path(model_name).name
+
+
 def train_grpo(config_path: Path) -> GRPOResult:
     """Run Unsloth GRPO RL pipeline.
 
@@ -772,7 +796,7 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     sampling_cfg = grpo_cfg.get("sampling", {}) or {}
     grpo_kwargs: dict[str, Any] = dict(
-        output_dir=f"checkpoints/{Path(config_path).stem}/{model_basename}",
+        output_dir=str(_resolve_output_dir(config, Path(config_path), model_basename)),
         num_generations=grpo_cfg.get("num_generations", 8),
         max_steps=grpo_cfg.get("training_steps", 1000),
         learning_rate=grpo_cfg.get("learning_rate", 5e-6),

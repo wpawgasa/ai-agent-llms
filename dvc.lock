@@ -95,8 +95,8 @@ stages:
     deps:
     - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 6bb5eb6f7c48356ca05078c537ae68b1.dir
-      size: 109983413
+      md5: 21e33e25d7bbae63e97a89029b3b4705.dir
+      size: 178497572
       nfiles: 3
     - path: scripts/filter_grpo_data.py
       hash: md5
@@ -106,8 +106,8 @@ stages:
     outs:
     - path: data/output/grpo/task_a
       hash: md5
-      md5: 9a961d65540830849d7d2241ad1c367b.dir
-      size: 73590933
+      md5: 7a66777ca98751f5368b1e503e8da894.dir
+      size: 117698684
       nfiles: 2
   task_a_grpo_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_grpo.sh --model-config 
