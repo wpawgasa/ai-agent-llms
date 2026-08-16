@@ -345,3 +345,31 @@ stages:
       hash: md5
       md5: e17606c075f642479bca85be84f8fc82
       size: 81718979
+  task_a_preference_model_negatives:
+    cmd: "python scripts/mine_model_negatives.py\n  --checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767\n\
+      \  --heldout data/output/heldout/cat_a_v2_test_not_in_v1/test.jsonl\n  --n-prompts
+      400 --tool-share 0.75\n  --out data/output/preference/task_a/model_negatives.jsonl"
+    deps:
+    - path: checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 50ed6597b51c313f06231ec6f13653d0.dir
+      size: 563078376
+      nfiles: 48
+    - path: data/output/grpo/task_a
+      hash: md5
+      md5: 7a66777ca98751f5368b1e503e8da894.dir
+      size: 117698684
+      nfiles: 2
+    - path: scripts/mine_model_negatives.py
+      hash: md5
+      md5: 44956e6d6b28a161c62cc8f88a3380c2
+      size: 9386
+    - path: src/llm_workflow_agents/data/heldout_clean_set.py
+      hash: md5
+      md5: 04de68b8d0f6e2ca39d2e8520395170a
+      size: 5019
+    outs:
+    - path: data/output/preference/task_a/model_negatives.jsonl
+      hash: md5
+      md5: b48fe2140f35da9d8f5efa546d595438
+      size: 936556
