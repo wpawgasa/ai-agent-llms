@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import random
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -634,6 +636,65 @@ def _is_reward_hacking(
     )
 
 
+def _tool_bearing_mix_indices(
+    has_tool: "Sequence[bool]",
+    ratio: float | None,
+    seed: int = 42,
+) -> list[int]:
+    """Pick row indices so tool-bearing turns are ``ratio`` of the training set.
+
+    GRPO learns from *within-group* reward variance. On Task A, 63.9% of turns
+    carry no ground-truth tool call (9,771 of 27,056 are tool-bearing) and
+    ``tool_call_f1([], []) == 1.0`` hands those rows 0.40 of the reward for
+    free; combined with C2's 0.9369 state accuracy, ~59% of prompts score
+    exactly 1.0 and the whole group ties. The 2026-08-16 diagnostic measured
+    the consequence directly: ``reward_std 0, frac_reward_zero_std 1`` at every
+    step, on an otherwise perfectly stable optimizer.
+
+    **This is a partial mitigation, not a fix.** Scoring C2's real held-out
+    completions through this same reward, a greedy score below 1.0 — the proxy
+    for a prompt whose group can vary at all — occurs on 38.0% of tool-bearing
+    rows but only 8.9% of no-tool rows. So the expected share of informative
+    prompts moves 19.4% (natural) → 23.5% (ratio 0.5) → 29.3% (ratio 0.7) →
+    38.0% (ratio 1.0). Even a pure tool-only slice leaves ~62% of groups tied,
+    because the graded training reward also saturates on tool-bearing rows
+    (mean 0.886 here versus a strict held-out ``tool_f1`` of 0.636). Reward
+    resolution is the other half of the problem and is not addressed here.
+
+    Rebalances, never eliminates. Keeps **all** tool-bearing rows (the scarce,
+    informative ones) and downsamples non-tool rows to hit the target. A pure
+    tool-only slice is available at ``ratio=1.0`` but is the R15-shaped
+    setting: that risk analysis showed a structurally unconditional behaviour
+    gets learned as an unconditional habit, so removing every no-tool turn
+    invites "always call a tool" and would regress C2's 1.5% spurious-call
+    rate on turns that need none.
+
+    Returns sorted indices to keep. ``ratio=None`` is a passthrough, so runs
+    that don't set the key are byte-identical to before. A ratio at or below
+    the corpus's natural rate is also a passthrough — the goal is to raise the
+    tool share, never to discard data to hit a number the corpus already beats.
+    """
+    if ratio is None:
+        return list(range(len(has_tool)))
+    if not 0.0 <= ratio <= 1.0:
+        raise ValueError(f"tool_bearing_ratio must be in [0, 1], got {ratio}")
+
+    tool_idx = [i for i, t in enumerate(has_tool) if t]
+    other_idx = [i for i, t in enumerate(has_tool) if not t]
+    if not tool_idx or not other_idx:
+        return list(range(len(has_tool)))
+
+    if ratio >= 1.0:
+        return tool_idx
+    # keep all tool rows; solve n_other for tool/(tool + n_other) == ratio
+    n_other = int(round(len(tool_idx) * (1.0 - ratio) / ratio))
+    if n_other >= len(other_idx):
+        return list(range(len(has_tool)))  # already at or above target
+
+    rng = random.Random(seed)
+    return sorted(tool_idx + rng.sample(other_idx, n_other))
+
+
 def _filter_grpo_config_kwargs(
     kwargs: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
@@ -789,6 +850,34 @@ def train_grpo(config_path: Path) -> GRPOResult:
 
     data_source = data_cfg.get("source", "")
     train_ds = _load_grpo_jsonl(Path(data_source), split="train")
+
+    # Optional tool-bearing rebalance. Applied to the TRAINING set only — the
+    # held-out rows below must keep the corpus's natural distribution, because
+    # they measure real capability for the R5 guardrail and would otherwise
+    # report a metric on a distribution nothing else uses.
+    tool_ratio = data_cfg.get("tool_bearing_ratio")
+    if tool_ratio is not None:
+        gts = train_ds["ground_truth"]
+        has_tool = [bool(json.loads(g).get("tool_calls")) for g in gts]
+        keep = _tool_bearing_mix_indices(
+            has_tool, float(tool_ratio), seed=int(data_cfg.get("tool_bearing_seed", 42))
+        )
+        before_n, before_tool = len(has_tool), sum(has_tool)
+        train_ds = train_ds.select(keep)
+        after_tool = sum(has_tool[i] for i in keep)
+        logger.info(
+            "grpo_tool_bearing_mix",
+            requested_ratio=float(tool_ratio),
+            rows_before=before_n,
+            rows_after=len(keep),
+            tool_share_before=round(before_tool / before_n, 4) if before_n else 0.0,
+            tool_share_after=round(after_tool / len(keep), 4) if keep else 0.0,
+            note=(
+                "Rebalances toward turns where the policy has headroom; a "
+                "no-tool-heavy mix ties every group's reward and yields zero "
+                "GRPO advantage. Held-out eval keeps the natural distribution."
+            ),
+        )
 
     # Held-out subset for the R5 reward-hacking guardrail. Loaded once; the
     # callback generates greedy completions on these prompts every
