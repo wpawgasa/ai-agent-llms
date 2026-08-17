@@ -127,3 +127,69 @@ class TestSelectPrompts:
         data_dir = self._write_grpo_split(tmp_path, n_tool=2, n_other=2)
         picked = _select_prompts(data_dir, "train", n=100, tool_share=0.75, seed=1)
         assert len(picked) == 4
+
+
+class TestExcludedFingerprints:
+    def _write_validation_split(self, tmp_path: Path, n: int) -> Path:
+        from llm_workflow_agents.data.heldout_clean_set import user_turn_fingerprint
+
+        rows = [TestSelectPrompts._conv(f"c{i}", tool_calls=[]) for i in range(n)]
+        path = tmp_path / "validation.jsonl"
+        with open(path, "w") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        return tmp_path
+
+    def test_train_split_has_no_guardrail_exclusion(self, tmp_path):
+        from mine_model_negatives import _excluded_fingerprints
+
+        data_dir = self._write_validation_split(tmp_path, n=20)
+        excluded = _excluded_fingerprints(
+            data_dir,
+            split="train",
+            heldout=[],
+            guardrail_reserved_fraction=0.2,
+            guardrail_reserved_seed=42,
+        )
+        assert excluded == set()
+
+    def test_validation_split_excludes_the_reserved_slice(self, tmp_path):
+        from mine_model_negatives import _excluded_fingerprints
+
+        data_dir = self._write_validation_split(tmp_path, n=20)
+        excluded = _excluded_fingerprints(
+            data_dir,
+            split="validation",
+            heldout=[],
+            guardrail_reserved_fraction=0.2,
+            guardrail_reserved_seed=42,
+        )
+        assert len(excluded) > 0
+
+        from llm_workflow_agents.data.heldout_clean_set import reserve_guardrail_slice
+
+        assert excluded == reserve_guardrail_slice(
+            data_dir, split="validation", reserved_fraction=0.2, seed=42
+        )
+
+    def test_validation_split_combines_heldout_and_guardrail_exclusions(self, tmp_path):
+        from mine_model_negatives import _excluded_fingerprints
+        from llm_workflow_agents.data.heldout_clean_set import user_turn_fingerprint
+
+        data_dir = self._write_validation_split(tmp_path, n=20)
+        heldout_path = tmp_path / "heldout_test.jsonl"
+        heldout_conv = TestSelectPrompts._conv("heldout-c", tool_calls=[])
+        with open(heldout_path, "w") as fh:
+            fh.write(json.dumps(heldout_conv) + "\n")
+
+        excluded = _excluded_fingerprints(
+            data_dir,
+            split="validation",
+            heldout=[heldout_path],
+            guardrail_reserved_fraction=0.2,
+            guardrail_reserved_seed=42,
+        )
+        heldout_fp = user_turn_fingerprint(
+            {"messages": [{"role": "user", "content": "hello from heldout-c"}]}
+        )
+        assert heldout_fp in excluded
