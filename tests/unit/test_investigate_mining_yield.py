@@ -17,8 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 from investigate_mining_yield import (  # noqa: E402
     _gt_from_audit_row,
     classify_rate_from_audit_json,
+    classify_rate_from_split,
     print_decomposition_table,
 )
+import investigate_mining_yield  # noqa: E402
 
 
 def _audit_row(
@@ -143,3 +145,85 @@ class TestPrintDecompositionTable:
         )
         out = capsys.readouterr().out
         assert out.count("not run") == 2
+
+
+class TestClassifyRateFromSplit:
+    def test_refuses_test_split(self):
+        import pytest
+
+        with pytest.raises(SystemExit, match="test split"):
+            classify_rate_from_split(
+                checkpoint="fake", data_dir=Path("unused"), split="test",
+                n_prompts=1, tool_share=0.75, seed=1,
+                max_new_tokens=8, max_seq_length=64, batch_size=1,
+            )
+
+    def test_scores_generations_with_classify_and_skips_empty_or_identical(
+        self, monkeypatch
+    ):
+        fake_rows = [
+            {
+                "prompt_messages": [{"role": "user", "content": "q1"}],
+                "ground_truth": json.dumps(
+                    {
+                        "tool_calls": [{"name": "x", "arguments": {"a": 1}}],
+                        "state_sequence": [],
+                        "messages": [{"content": "gold answer one"}],
+                    }
+                ),
+            },
+            {
+                "prompt_messages": [{"role": "user", "content": "q2"}],
+                "ground_truth": json.dumps(
+                    {
+                        "tool_calls": [{"name": "x", "arguments": {"a": 1}}],
+                        "state_sequence": [],
+                        "messages": [{"content": "gold answer two"}],
+                    }
+                ),
+            },
+            {
+                "prompt_messages": [{"role": "user", "content": "q3"}],
+                "ground_truth": json.dumps(
+                    {
+                        "tool_calls": [{"name": "x", "arguments": {"a": 1}}],
+                        "state_sequence": [],
+                        "messages": [{"content": "gold answer three"}],
+                    }
+                ),
+            },
+        ]
+
+        def fake_select_prompts(data_dir, split, n, tool_share, seed):
+            return fake_rows
+
+        def fake_generate_for_checkpoint(**kwargs):
+            # row 1: wrong (no tool call) -> counted
+            # row 2: identical to gold -> skipped, not scored
+            # row 3: empty -> skipped, not scored
+            return [["not a tool call"], ["gold answer two"], [""]]
+
+        monkeypatch.setattr(investigate_mining_yield, "_select_prompts", fake_select_prompts)
+        import types
+
+        fake_module = types.SimpleNamespace(
+            _generate_for_checkpoint=fake_generate_for_checkpoint
+        )
+        monkeypatch.setitem(sys.modules, "preflight_entropy_diag", fake_module)
+
+        result = classify_rate_from_split(
+            checkpoint="fake-checkpoint",
+            data_dir=Path("unused"),
+            split="validation",
+            n_prompts=3,
+            tool_share=0.75,
+            seed=1,
+            max_new_tokens=8,
+            max_seq_length=64,
+            batch_size=1,
+        )
+        assert result["n_prompts_sampled"] == 3
+        assert result["n_scored"] == 1
+        assert result["n_wrong"] == 1
+        assert result["wrong_rate"] == 1.0
+        assert result["by_kind"] == {"model_no_tool_call": 1}
