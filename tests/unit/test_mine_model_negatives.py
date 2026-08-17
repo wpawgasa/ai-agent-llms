@@ -131,8 +131,6 @@ class TestSelectPrompts:
 
 class TestExcludedFingerprints:
     def _write_validation_split(self, tmp_path: Path, n: int) -> Path:
-        from llm_workflow_agents.data.heldout_clean_set import user_turn_fingerprint
-
         rows = [TestSelectPrompts._conv(f"c{i}", tool_calls=[]) for i in range(n)]
         path = tmp_path / "validation.jsonl"
         with open(path, "w") as fh:

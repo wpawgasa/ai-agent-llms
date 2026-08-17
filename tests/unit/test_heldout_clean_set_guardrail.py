@@ -58,11 +58,8 @@ def test_reserved_and_minable_conversations_are_disjoint(tmp_path):
     _write_split(tmp_path, conversations)
     reserved = reserve_guardrail_slice(tmp_path, reserved_fraction=0.2, seed=7)
 
-    reserved_convs = [c for c in conversations if user_turn_fingerprint(c) in
-                       {fp for c2 in conversations if user_turn_fingerprint(c2) in reserved
-                        for fp in [user_turn_fingerprint(c2)]}]
-    # Simpler, direct check: every conversation is either fully inside
-    # `reserved` (all its prefixes present) or fully outside (none present).
+    # Every conversation is either fully inside `reserved` (all its prefixes
+    # present) or fully outside (none present).
     for c in conversations:
         prefixes = user_turn_prefix_fingerprints(c)
         overlap = prefixes & reserved

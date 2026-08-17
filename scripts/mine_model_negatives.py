@@ -173,10 +173,30 @@ def main() -> int:
         default=0.2,
         help=(
             "Fraction of --split validation reserved for dpo.py's R5 held-out "
-            "guardrail and excluded from mining. Ignored for --split train."
+            "guardrail and excluded from mining. Ignored for --split train. "
+            "MUST MATCH data.guardrail_reserved_fraction in "
+            "configs/training/dpo_cat_a.yaml, which is where "
+            "dpo.py::_build_heldout_callback reads its value from. The two "
+            "call sites invoke reserve_guardrail_slice independently and "
+            "nothing enforces agreement: a mismatch here, in "
+            "--guardrail-reserved-seed, or in the corpus path (--data-dir vs "
+            "that config's data.heldout_data_source) silently produces two "
+            "DIFFERENT reserved sets, reintroducing the guardrail/mining "
+            "overlap this flag exists to prevent."
         ),
     )
-    ap.add_argument("--guardrail-reserved-seed", type=int, default=42)
+    ap.add_argument(
+        "--guardrail-reserved-seed",
+        type=int,
+        default=42,
+        help=(
+            "Seed for the guardrail reservation. MUST MATCH "
+            "data.guardrail_reserved_seed in configs/training/dpo_cat_a.yaml — "
+            "see --guardrail-reserved-fraction: a differing seed produces a "
+            "different reserved set and silently defeats the disjointness "
+            "guarantee."
+        ),
+    )
     ap.add_argument("--n-prompts", type=int, default=400)
     ap.add_argument(
         "--tool-share",
