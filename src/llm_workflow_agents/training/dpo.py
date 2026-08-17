@@ -45,6 +45,10 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from llm_workflow_agents.data.heldout_clean_set import (
+    reserve_guardrail_slice,
+    user_turn_fingerprint,
+)
 from llm_workflow_agents.training._utils import (
     unwrap_unsloth_gemma4_kv_zero_proxy,
 )
@@ -533,12 +537,32 @@ def _build_heldout_callback(
     )
     eval_held_out_every = int(monitoring_cfg.get("eval_held_out_every", 50))
     n_held_out = int(monitoring_cfg.get("eval_held_out_num_prompts", 50))
+    guardrail_reserved_fraction = float(data_cfg.get("guardrail_reserved_fraction", 0.2))
+    guardrail_reserved_seed = int(data_cfg.get("guardrail_reserved_seed", 42))
 
     held_out_rows: list[dict[str, Any]] = []
     try:
+        reserved_fps = reserve_guardrail_slice(
+            Path(heldout_data_source),
+            split="validation",
+            reserved_fraction=guardrail_reserved_fraction,
+            seed=guardrail_reserved_seed,
+        )
         val_ds = _load_grpo_jsonl(Path(heldout_data_source), split="validation")
-        held_out_rows = [val_ds[i] for i in range(min(n_held_out, len(val_ds)))]
-        logger.info("dpo_heldout_loaded", n_prompts=len(held_out_rows))
+        # Restricted to the reserved slice, NOT "first N rows of validation" —
+        # this is what keeps the guardrail independent of anything mined as a
+        # DPO negative from the rest of validation (see the reserved-slice
+        # design in docs/superpowers/specs/2026-08-17-mining-yield-investigation-design.md).
+        held_out_rows = [
+            row
+            for row in val_ds
+            if user_turn_fingerprint({"messages": row["prompt"]}) in reserved_fps
+        ][:n_held_out]
+        logger.info(
+            "dpo_heldout_loaded",
+            n_prompts=len(held_out_rows),
+            reserved_fraction=guardrail_reserved_fraction,
+        )
     except FileNotFoundError:
         logger.warning(
             "dpo_heldout_split_missing",
@@ -550,6 +574,7 @@ def _build_heldout_callback(
         def __init__(self) -> None:
             self.metric_history: list[float] = []
             self.held_out_history: list[float] = []
+            self.held_out_rows = held_out_rows
 
         def _evaluate(self) -> float | None:
             if not held_out_rows:

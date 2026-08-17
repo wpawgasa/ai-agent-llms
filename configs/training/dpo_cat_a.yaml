@@ -46,6 +46,15 @@ data:
   train_sources:
     - "data/output/preference/task_a/train.jsonl"
     - "data/output/preference/task_a/model_negatives.jsonl"
+  # DPO's own eval split. Built by dvc.yaml's task_a_preference_pairs stage
+  # (build_preference_pairs.py --split validation) from the SAME GRPO
+  # validation conversations that guardrail_reserved_fraction below
+  # partitions. CAVEAT: that reserved slice protects ONLY the R5 held-out
+  # guardrail, not this file. If mining is ever switched to
+  # --split validation, its negatives would come from the ~80% non-reserved
+  # population that also produced these eval pairs, contaminating eval_loss
+  # and checkpoint selection — so flipping the mining source also requires
+  # re-deriving this file from a partition disjoint from the minable pool.
   validation_source: "data/output/preference/task_a/validation.jsonl"
   # Mined negatives are on-distribution but scarce (51 of 399 sampled prompts
   # in the first mining run vs 29,256 synthetic pairs — well under 1% of a
@@ -55,6 +64,23 @@ data:
   # is also a passthrough. Revisit once the mining run investigates why yield
   # (12.8%) came in well under the 38.0% predicted from the held-out audit.
   model_negative_share: 0.2
+  # Fraction of the GRPO validation split reserved for the R5 held-out
+  # guardrail (dpo.py::_build_heldout_callback) and excluded from mining
+  # (scripts/mine_model_negatives.py --split validation). Only meaningful if
+  # mining is ever switched to --split validation — see
+  # docs/superpowers/specs/2026-08-17-mining-yield-investigation-design.md.
+  # Defaults to 0.2 if omitted; present here for discoverability.
+  #
+  # THESE TWO VALUES MUST MATCH mine_model_negatives.py's
+  # --guardrail-reserved-fraction / --guardrail-reserved-seed (defaults
+  # 0.2 / 42, invoked by dvc.yaml's task_a_preference_model_negatives stage).
+  # Both sides call reserve_guardrail_slice independently and nothing enforces
+  # agreement: a mismatch in EITHER value — or in the underlying corpus path
+  # (heldout_data_source below vs that script's --data-dir) — silently yields
+  # two DIFFERENT reserved sets, reintroducing the exact guardrail/mining
+  # overlap this mechanism exists to prevent. Change one, change both.
+  guardrail_reserved_fraction: 0.2
+  guardrail_reserved_seed: 42
   # Held-out guardrail (below) scores greedy generations from this GRPO-format
   # corpus, not the preference-pair files — it needs whole prompts + ground
   # truth, not (chosen, rejected) pairs.

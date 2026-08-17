@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,55 @@ def user_turn_prefix_fingerprints(conversation: dict[str, Any]) -> set[str]:
     for k in range(1, len(users) + 1):
         joined = "\x00".join(users[:k]).encode("utf-8", errors="replace")
         out.add(hashlib.blake2b(joined, digest_size=16).hexdigest())
+    return out
+
+
+def reserve_guardrail_slice(
+    data_dir: Path,
+    split: str = "validation",
+    reserved_fraction: float = 0.2,
+    seed: int = 42,
+) -> set[str]:
+    """Deterministically partition one split's conversations for a guardrail.
+
+    A downstream mining process and a downstream training guardrail can both
+    read from the same split (typically the GRPO ``validation`` split) without
+    risking overlap: this reserves ``reserved_fraction`` of the split's
+    conversations, by a stable hash of each conversation's own content (not
+    file row order, which can change across a corpus regeneration), and
+    returns every reserved conversation's full set of PREFIX fingerprints
+    (:func:`user_turn_prefix_fingerprints`) — not whole-conversation
+    fingerprints.
+
+    Prefix fingerprints are the right return shape because every real
+    consumer of this set fingerprints a per-turn row's *prompt*, which is only
+    a prefix of its conversation's user turns — a per-turn row's prompt after
+    turn 2 of a 5-turn conversation can never equal that conversation's whole
+    fingerprint. Returning whole-conversation fingerprints here would silently
+    match nothing, the exact bug commit 165f2cc fixed for the held-out
+    contamination guard.
+
+    Deterministic and order-independent: sorts fingerprints before shuffling,
+    so a corpus regeneration that reorders ``<split>.jsonl`` rows without
+    changing their content produces the identical partition.
+    """
+    if not 0.0 < reserved_fraction < 1.0:
+        raise ValueError(
+            f"reserved_fraction must be in (0, 1), got {reserved_fraction}"
+        )
+    path = Path(data_dir) / f"{split}.jsonl"
+    conversations = _read_jsonl(path)
+
+    whole_fingerprints = sorted({user_turn_fingerprint(c) for c in conversations})
+    rng = random.Random(seed)
+    rng.shuffle(whole_fingerprints)
+    n_reserved = max(1, round(len(whole_fingerprints) * reserved_fraction))
+    reserved_whole = set(whole_fingerprints[:n_reserved])
+
+    out: set[str] = set()
+    for conv in conversations:
+        if user_turn_fingerprint(conv) in reserved_whole:
+            out |= user_turn_prefix_fingerprints(conv)
     return out
 
 

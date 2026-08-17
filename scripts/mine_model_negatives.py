@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from llm_workflow_agents.data.heldout_clean_set import (  # noqa: E402
     load_prefix_fingerprints,
+    reserve_guardrail_slice,
     user_turn_fingerprint,
 )
 
@@ -94,6 +95,32 @@ def _select_prompts(
     picked = tool_rows[:n_tool] + other_rows[:n_other]
     rng.shuffle(picked)
     return picked
+
+
+def _excluded_fingerprints(
+    data_dir: Path,
+    split: str,
+    heldout: list[Path],
+    guardrail_reserved_fraction: float,
+    guardrail_reserved_seed: int,
+) -> set[str]:
+    """Union of the held-out contamination guard and, for --split validation
+    only, the guardrail-reserved slice dpo.py's R5 callback depends on.
+
+    Gated to validation only: mining from --split train has no overlap risk
+    with the guardrail, which only ever reads from validation (dpo.py
+    ::_build_heldout_callback, Task 6) — computing the reservation for train
+    would just waste a file read and could never exclude anything relevant.
+    """
+    excluded = load_prefix_fingerprints(heldout or [])
+    if split == "validation":
+        excluded = excluded | reserve_guardrail_slice(
+            data_dir,
+            split="validation",
+            reserved_fraction=guardrail_reserved_fraction,
+            seed=guardrail_reserved_seed,
+        )
+    return excluded
 
 
 def _classify(completion: str, gt: dict[str, Any]) -> str | None:
@@ -140,6 +167,36 @@ def main() -> int:
     ap.add_argument("--data-dir", type=Path, default=Path("data/output/grpo/task_a"))
     ap.add_argument("--split", default="train")
     ap.add_argument("--heldout", type=Path, action="append", default=None)
+    ap.add_argument(
+        "--guardrail-reserved-fraction",
+        type=float,
+        default=0.2,
+        help=(
+            "Fraction of --split validation reserved for dpo.py's R5 held-out "
+            "guardrail and excluded from mining. Ignored for --split train. "
+            "MUST MATCH data.guardrail_reserved_fraction in "
+            "configs/training/dpo_cat_a.yaml, which is where "
+            "dpo.py::_build_heldout_callback reads its value from. The two "
+            "call sites invoke reserve_guardrail_slice independently and "
+            "nothing enforces agreement: a mismatch here, in "
+            "--guardrail-reserved-seed, or in the corpus path (--data-dir vs "
+            "that config's data.heldout_data_source) silently produces two "
+            "DIFFERENT reserved sets, reintroducing the guardrail/mining "
+            "overlap this flag exists to prevent."
+        ),
+    )
+    ap.add_argument(
+        "--guardrail-reserved-seed",
+        type=int,
+        default=42,
+        help=(
+            "Seed for the guardrail reservation. MUST MATCH "
+            "data.guardrail_reserved_seed in configs/training/dpo_cat_a.yaml — "
+            "see --guardrail-reserved-fraction: a differing seed produces a "
+            "different reserved set and silently defeats the disjointness "
+            "guarantee."
+        ),
+    )
     ap.add_argument("--n-prompts", type=int, default=400)
     ap.add_argument(
         "--tool-share",
@@ -162,7 +219,13 @@ def main() -> int:
 
     from preflight_entropy_diag import _generate_for_checkpoint
 
-    contaminated = load_prefix_fingerprints(args.heldout or [])
+    contaminated = _excluded_fingerprints(
+        args.data_dir,
+        args.split,
+        args.heldout or [],
+        args.guardrail_reserved_fraction,
+        args.guardrail_reserved_seed,
+    )
     rows = _select_prompts(
         args.data_dir, args.split, args.n_prompts, args.tool_share, args.seed
     )

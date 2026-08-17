@@ -188,6 +188,41 @@ stages:
       prefix-fingerprint contamination guard is applied, because the held-out
       conversations are the only contamination-free measuring stick for this
       lineage.
+
+      Mining source is --split train, deliberately: the split-effect
+      hypothesis for why this yields far fewer negatives than the held-out
+      audit's 38.0% error rate (see docs/superpowers/specs/
+      2026-08-17-mining-yield-investigation-design.md and
+      scripts/investigate_mining_yield.py) has not been confirmed with a
+      real measurement.
+
+      DO NOT simply flip --split to "validation" here if it is confirmed.
+      mine_model_negatives.py does support it and does exclude the R5
+      guardrail's reserved slice automatically, but that reserved slice
+      protects ONLY dpo.py's R5 held-out guardrail — it does NOT protect
+      DPO's own eval split. configs/training/dpo_cat_a.yaml's
+      data.validation_source (data/output/preference/task_a/validation.jsonl)
+      is built by the task_a_preference_pairs stage above from the SAME GRPO
+      validation conversations, so mining validation would draw negatives
+      from the ~80% non-reserved population that also feeds DPO's eval pairs,
+      contaminating eval_loss and checkpoint selection with rows that are
+      simultaneously training-mix negatives. Flipping the mining source
+      therefore ALSO requires re-deriving
+      data/output/preference/task_a/validation.jsonl from a partition
+      disjoint from the minable pool (i.e. a three-way minable / DPO-eval /
+      R5-guardrail partition, which does not exist yet).
+
+      PARAMETER-MATCH REQUIREMENT: --guardrail-reserved-fraction and
+      --guardrail-reserved-seed (defaults 0.2 / 42, not passed in cmd below)
+      MUST match data.guardrail_reserved_fraction and
+      data.guardrail_reserved_seed in configs/training/dpo_cat_a.yaml, which
+      is where dpo.py::_build_heldout_callback reads them from. The two call
+      sites invoke reserve_guardrail_slice independently and nothing enforces
+      agreement: a mismatch in EITHER the fraction/seed OR the underlying
+      corpus path (--data-dir here vs data.heldout_data_source there)
+      silently produces two DIFFERENT reserved sets, reintroducing the exact
+      guardrail/mining overlap this mechanism exists to prevent. Change one,
+      change both.
     cmd: >-
       python scripts/mine_model_negatives.py
         --checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767
