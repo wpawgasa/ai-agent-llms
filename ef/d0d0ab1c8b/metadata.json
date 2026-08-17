@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "efd0d0ab1c8b",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/specs/2026-08-17-mining-yield-investigation-design.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ef/d0d0ab1c8b/0/metadata.json",
+      "transcript": "/ef/d0d0ab1c8b/0/full.jsonl",
+      "content_hash": "/ef/d0d0ab1c8b/0/content_hash.txt",
+      "prompt": "/ef/d0d0ab1c8b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 38,
+    "cache_creation_tokens": 42105,
+    "cache_read_tokens": 6542375,
+    "output_tokens": 34253,
+    "api_call_count": 19
+  }
+}
