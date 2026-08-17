@@ -17,6 +17,22 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import structlog
 
+# Shared with dpo.py, not redefined per entry point — see the imported names'
+# own modules for why duplicating either previously caused a regression to go
+# unnoticed. `_utils.py` holds the Gemma-4 KV-zero-proxy workaround every
+# Unsloth `FastLanguageModel.from_pretrained` call needs first; `reward_utils.py`
+# holds the held-out composite scorer and reward-hacking test the guardrail
+# callback uses, aliased back to this module's existing private names.
+from llm_workflow_agents.training._utils import (
+    unwrap_unsloth_gemma4_kv_zero_proxy as _unwrap_unsloth_gemma4_kv_zero_proxy,
+)
+from llm_workflow_agents.training.reward_utils import (
+    heldout_composite_score as _heldout_composite_score,
+)
+from llm_workflow_agents.training.reward_utils import (
+    is_reward_hacking as _is_reward_hacking,
+)
+
 if TYPE_CHECKING:
     from datasets import Dataset
 
@@ -39,62 +55,6 @@ _REWARD_REGISTRY: dict[str, str] = {
 UNSLOTH_VLLM_INCOMPATIBLE_FAMILIES: frozenset[str] = frozenset({
     "gemma4",  # SigLIP + Gemma4 multimodal stack; not in VLLM_SUPPORTED_VLM.
 })
-
-
-def _unwrap_unsloth_gemma4_kv_zero_proxy() -> None:
-    """Disarm the Unsloth-Zoo Gemma-4 ``_Gemma4KVSharedSafeProxy`` wrapper.
-
-    Why: unsloth_zoo 2026.5.4's ``patch_Gemma4{,Text}Config_kv_shared_zero``
-    wraps ``get_text_config`` so it returns a proxy whose ``__getattr__``
-    raises ``AttributeError`` for ``num_kv_shared_layers`` (to trick
-    ``hasattr`` checks in transformers' ``cache_utils`` into skipping a
-    ``layer_types[:-0] == []`` slice). transformers 5.9.0's
-    ``PreTrainedConfig.validate_token_ids`` iterates the text config and
-    calls raw ``getattr`` on every attribute — the proxy's raise escapes
-    and breaks ``AutoConfig.from_pretrained("google/gemma-4-26B-A4B-it")``
-    entirely. Both ``_detect_model_family`` (this file) and Unsloth's own
-    ``get_transformers_model_type`` then fail to resolve the base model,
-    surfacing as ``TypeError: Unsloth: Cannot determine model type for
-    config file: None``.
-
-    Fix: replace the wrapper with one that strips the proxy off the result
-    before returning. The companion ``_make_kv_shared_zero_safe_init``
-    wrappers on ``DynamicCache.__init__`` / ``StaticCache.__init__`` (same
-    unsloth_zoo module) already handle the original ``layer_types[:-0]``
-    bug via transient del/restore of the attribute, so dropping the proxy
-    does not regress cache construction.
-
-    Safe to remove once unsloth_zoo > 2026.5.4 ships a proxy compatible
-    with transformers 5.9.0's strict-dataclass validators.
-    """
-    try:
-        from transformers.models.gemma4.configuration_gemma4 import (
-            Gemma4Config,
-            Gemma4TextConfig,
-        )
-    except ImportError:
-        return  # transformers without Gemma-4 — nothing to unwrap.
-
-    _sentinel = "_unsloth_gemma4_proxy_unwrapped"
-
-    def _install(cls: type) -> None:
-        wrapped = cls.get_text_config
-        if getattr(wrapped, _sentinel, False):
-            return
-
-        def get_text_config(self, decoder=None, encoder=None):  # noqa: ANN001
-            result = wrapped(self, decoder=decoder, encoder=encoder)
-            if type(result).__name__ == "_Gemma4KVSharedSafeProxy":
-                return object.__getattribute__(result, "_real")
-            return result
-
-        setattr(get_text_config, _sentinel, True)
-        get_text_config.__qualname__ = wrapped.__qualname__
-        get_text_config.__doc__ = wrapped.__doc__
-        cls.get_text_config = get_text_config
-
-    _install(Gemma4Config)
-    _install(Gemma4TextConfig)
 
 
 def _detect_model_family(sft_checkpoint: str) -> str | None:
@@ -657,102 +617,6 @@ def _make_trajectory_reward_adapter(reward_fn: Callable) -> Callable:
         return reward_fn(prompts or [], trajectories, metas, gts)
 
     return adapter
-
-
-def _heldout_composite_score(
-    completions: list[str],
-    ground_truths: list[dict[str, Any]],
-) -> float:
-    """Deployment-aligned held-out quality score, computed with STRICT metrics.
-
-    Mirrors ``eval.composite_score.compute_weighted_workflow_score``
-    (``0.4 * state_transition_acc + 0.4 * strict_tool_f1 + 0.2 * task_completion``),
-    but scored **per-turn-fair**: GRPO held-out rows are single user->assistant
-    turns, so each term is included only when it is applicable to the turn and
-    the score is renormalized over the included weights — the tool term always
-    applies, the state term only when GT expects a transition, the task
-    (reached-terminal) term only on the terminal turn. Averaged over held-out
-    rows. This avoids charging the policy on terms it cannot satisfy on an
-    intermediate/abstention turn; see the ckpt-1000 audit
-    (runs/preflight/heldout_composite_audit_*) and
-    scripts/perturn_fair_composite.py.
-
-    Deliberately uses the *strict* scorers (``state_sequence_match``,
-    ``tool_call_f1`` = ``compute_ast_f1``, ``reached_terminal``) rather than the
-    graded components the training reward optimizes (``graded_tool_call_f1``,
-    ``_graded_state_match``, ``transition_legality``). Keeping the held-out metric
-    numerically independent of the training reward is what makes a reward-vs-
-    quality divergence (reward hacking, Risk R5) detectable — see
-    docs/grpo_diagnosis_gemma4_26b.md. Pure/CPU-only and unit-tested.
-    """
-    from llm_workflow_agents.training.reward_utils import (
-        extract_state_annotations,
-        extract_tool_calls,
-        reached_terminal,
-        state_sequence_match,
-        tool_call_f1,
-    )
-
-    if not completions:
-        return 0.0
-
-    scores: list[float] = []
-    for comp, gt in zip(completions, ground_truths):
-        gt = gt or {}
-        gt_seq = gt.get("state_sequence") or []
-        gt_trans = [
-            (s.get("from", ""), s.get("to", ""))
-            if isinstance(s, dict)
-            else tuple(s)
-            if isinstance(s, (list, tuple)) and len(s) == 2
-            else ("", "")
-            for s in gt_seq
-        ]
-        tool_f1 = tool_call_f1(extract_tool_calls(comp), gt.get("tool_calls") or [])
-
-        terminal = gt.get("terminal_state") or ""
-        task = 1.0 if terminal and reached_terminal(comp, terminal) else 0.0
-
-        # Per-turn-fair: GRPO rows are SINGLE user->assistant turns, so only
-        # charge the terms applicable to THIS turn, then renormalize over the
-        # included weights (whole-conv weights 0.4/0.4/0.2 preserved). See the
-        # ckpt-1000 audit (runs/preflight/heldout_composite_audit_*): applying
-        # all three terms per-turn punished the policy on terms it cannot
-        # satisfy on an intermediate/abstention turn (task=0 off the terminal
-        # turn; state=0 when the trained always-annotate habit meets an empty
-        # GT transition), depressing the metric ~0.19 below its honest level.
-        num, den = 0.4 * tool_f1, 0.4  # tool term always applies
-        if gt_trans:  # state only when a transition is expected this turn
-            state_acc = state_sequence_match(extract_state_annotations(comp), gt_trans)
-            num += 0.4 * state_acc
-            den += 0.4
-        _to = gt_trans[-1][1] if gt_trans else ""
-        if terminal and _to == terminal:  # task only on the terminal turn
-            num += 0.2 * task
-            den += 0.2
-        scores.append(num / den if den else 0.0)
-
-    return sum(scores) / len(scores)
-
-
-def _is_reward_hacking(
-    reward_history: list[float],
-    held_out_history: list[float],
-    lookback: int = 5,
-) -> bool:
-    """Reward-hacking test: training reward rising while held-out quality falls.
-
-    Returns True only when there is enough history AND the latest training
-    reward is above the reward ``lookback`` logs ago AND the latest held-out
-    composite is below the previous one. Pure/unit-tested — the callback wires
-    it to ``control.should_training_stop``.
-    """
-    if len(reward_history) < lookback or len(held_out_history) < 2:
-        return False
-    return (
-        reward_history[-1] > reward_history[-lookback]
-        and held_out_history[-1] < held_out_history[-2]
-    )
 
 
 def _tool_bearing_mix_indices(

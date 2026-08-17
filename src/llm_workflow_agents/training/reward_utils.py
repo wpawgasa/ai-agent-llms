@@ -175,6 +175,96 @@ def structural_validity(graph_dict: dict) -> float:
     return 1.0 if check_structural_validity(graph) else 0.0
 
 
+def heldout_composite_score(
+    completions: list[str],
+    ground_truths: list[dict[str, Any]],
+) -> float:
+    """Deployment-aligned held-out quality score, computed with STRICT metrics.
+
+    Mirrors ``eval.composite_score.compute_weighted_workflow_score``
+    (``0.4 * state_transition_acc + 0.4 * strict_tool_f1 + 0.2 * task_completion``),
+    but scored **per-turn-fair**: rows are single user->assistant turns, so each
+    term is included only when it is applicable to the turn and the score is
+    renormalized over the included weights — the tool term always applies, the
+    state term only when GT expects a transition, the task (reached-terminal)
+    term only on the terminal turn. Averaged over held-out rows. This avoids
+    charging the policy on terms it cannot satisfy on an intermediate/abstention
+    turn; see the ckpt-1000 audit (runs/preflight/heldout_composite_audit_*) and
+    scripts/perturn_fair_composite.py.
+
+    Deliberately uses the *strict* scorers (``state_sequence_match``,
+    ``tool_call_f1`` = ``compute_ast_f1``, ``reached_terminal``) rather than any
+    graded components a training reward might optimize (``graded_tool_call_f1``,
+    argument-graded matching). Keeping the held-out metric numerically
+    independent of whatever objective is training (GRPO reward or a DPO/ORPO
+    preference loss) is what makes a reward-vs-quality divergence (Risk R5)
+    detectable — see docs/grpo_diagnosis_gemma4_26b.md. Pure/CPU-only, shared by
+    ``grpo.py`` and ``dpo.py``'s held-out guardrail callbacks.
+    """
+    if not completions:
+        return 0.0
+
+    scores: list[float] = []
+    for comp, gt in zip(completions, ground_truths):
+        gt = gt or {}
+        gt_seq = gt.get("state_sequence") or []
+        gt_trans = [
+            (s.get("from", ""), s.get("to", ""))
+            if isinstance(s, dict)
+            else tuple(s)
+            if isinstance(s, (list, tuple)) and len(s) == 2
+            else ("", "")
+            for s in gt_seq
+        ]
+        tool_f1 = tool_call_f1(extract_tool_calls(comp), gt.get("tool_calls") or [])
+
+        terminal = gt.get("terminal_state") or ""
+        task = 1.0 if terminal and reached_terminal(comp, terminal) else 0.0
+
+        # Per-turn-fair: rows are SINGLE user->assistant turns, so only charge
+        # the terms applicable to THIS turn, then renormalize over the included
+        # weights (whole-conv weights 0.4/0.4/0.2 preserved). See the ckpt-1000
+        # audit (runs/preflight/heldout_composite_audit_*): applying all three
+        # terms per-turn punished the policy on terms it cannot satisfy on an
+        # intermediate/abstention turn (task=0 off the terminal turn; state=0
+        # when the trained always-annotate habit meets an empty GT transition),
+        # depressing the metric ~0.19 below its honest level.
+        num, den = 0.4 * tool_f1, 0.4  # tool term always applies
+        if gt_trans:  # state only when a transition is expected this turn
+            state_acc = state_sequence_match(extract_state_annotations(comp), gt_trans)
+            num += 0.4 * state_acc
+            den += 0.4
+        _to = gt_trans[-1][1] if gt_trans else ""
+        if terminal and _to == terminal:  # task only on the terminal turn
+            num += 0.2 * task
+            den += 0.2
+        scores.append(num / den if den else 0.0)
+
+    return sum(scores) / len(scores)
+
+
+def is_reward_hacking(
+    reward_history: list[float],
+    held_out_history: list[float],
+    lookback: int = 5,
+) -> bool:
+    """Reward-hacking test: training reward rising while held-out quality falls.
+
+    Returns True only when there is enough history AND the latest training
+    reward is above the reward ``lookback`` logs ago AND the latest held-out
+    composite is below the previous one. Pure/unit-tested — the callback wires
+    it to ``control.should_training_stop``. "Reward" here is whatever scalar
+    the training loop reports per log step (a GRPO reward or a DPO/ORPO
+    accuracy/margin metric) — the function itself is objective-agnostic.
+    """
+    if len(reward_history) < lookback or len(held_out_history) < 2:
+        return False
+    return (
+        reward_history[-1] > reward_history[-lookback]
+        and held_out_history[-1] < held_out_history[-2]
+    )
+
+
 def normalized_graph_edit_distance(pred_dict: dict, gold_dict: dict) -> float:
     """Compute normalized graph edit distance."""
     from llm_workflow_agents.eval.graph_extraction_eval import (

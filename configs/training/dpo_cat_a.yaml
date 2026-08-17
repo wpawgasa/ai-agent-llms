@@ -1,0 +1,69 @@
+# Cat A preference learning — DPO on the C2 checkpoint.
+#
+# WHY THIS FILE EXISTS: R18 / docs/grpo_reward_resolution_investigation.md.
+# GRPO cannot learn on this task — the per-turn reward is exactly 1.0 on 81.1%
+# of real completions, so groups tie and the advantage is zero. Three
+# independent fixes (tool-bearing mix, trajectory aggregation, temperature)
+# each moved the needle and none produced a usable signal. A preference
+# objective needs no reward variance: every pair carries a guaranteed margin.
+#
+# Set dpo.method: "orpo" for the ORPO variant (no reference model, no `beta`).
+#
+# output_dir keeps this run off any SFT/GRPO checkpoint path (CLAUDE.md R13).
+output_dir: "dpo_cat_a"
+
+stage: "dpo"
+framework: "unsloth"
+
+model:
+  # C2 is the best Cat A checkpoint to date (R17): response_only @ a real 8192
+  # window, task-a-sft-v2 corpus, held-out composite 0.7595.
+  sft_checkpoint: "checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767"
+
+dpo:
+  method: "dpo"
+  training_steps: 500
+  learning_rate: 5.0e-6
+  # KL penalty against the implicit reference (TRL's `model.disable_adapter()`
+  # fallback on this PEFT checkpoint — no second full model copy). DPO-only;
+  # dropped by _filter_dpo_config_kwargs under method: orpo.
+  beta: 0.1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  warmup_ratio: 0.05
+  max_seq_length: 8192
+  max_completion_length: 512
+  save_steps: 100
+  save_total_limit: 3
+  eval_steps: 100
+  seed: 42
+
+data:
+  # scripts/build_preference_pairs.py (SYNTHETIC — corrupted gold turns) plus
+  # scripts/mine_model_negatives.py (on-distribution — the checkpoint's own
+  # greedy errors). See dvc.yaml: task_a_preference_pairs,
+  # task_a_preference_model_negatives.
+  train_sources:
+    - "data/output/preference/task_a/train.jsonl"
+    - "data/output/preference/task_a/model_negatives.jsonl"
+  validation_source: "data/output/preference/task_a/validation.jsonl"
+  # Mined negatives are on-distribution but scarce (51 of 399 sampled prompts
+  # in the first mining run vs 29,256 synthetic pairs — well under 1% of a
+  # plain concat). Oversample them (with replacement) to 20% of the merged
+  # training set so the higher-value on-distribution rows are not drowned out.
+  # None (the default) is a plain concat; a share at or below the natural rate
+  # is also a passthrough. Revisit once the mining run investigates why yield
+  # (12.8%) came in well under the 38.0% predicted from the held-out audit.
+  model_negative_share: 0.2
+  # Held-out guardrail (below) scores greedy generations from this GRPO-format
+  # corpus, not the preference-pair files — it needs whole prompts + ground
+  # truth, not (chosen, rejected) pairs.
+  heldout_data_source: "data/output/grpo/task_a"
+
+monitoring:
+  eval_held_out_every: 50
+  eval_held_out_num_prompts: 50
+  reward_hacking_detector: true
+
+logging:
+  wandb_project: "llm-workflow-agents-dpo"
