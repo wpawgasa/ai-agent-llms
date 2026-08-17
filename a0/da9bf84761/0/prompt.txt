@@ -1,0 +1,9 @@
+/using-superpowers and /simplified-technical-english read the last few commits that determine what should we do next? what can be done without GPU?
+
+---
+
+/using-superpowers and /model-training-eval and /model-routing write the DPO/ORPO trainer and tests. Remember to use /simplified-technical-english skill to every response
+
+---
+
+build the launcher

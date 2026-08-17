@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "a0da9bf84761",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/dpo_cat_a.yaml",
+    "src/llm_workflow_agents/training/_utils.py",
+    "src/llm_workflow_agents/training/dpo.py",
+    "src/llm_workflow_agents/training/grpo.py",
+    "src/llm_workflow_agents/training/reward_utils.py",
+    "tests/unit/test_dpo_config.py",
+    "tests/unit/test_dpo_config_kwargs.py",
+    "tests/unit/test_dpo_dataset.py",
+    "tests/unit/test_dpo_output_dir.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a0/da9bf84761/0/metadata.json",
+      "transcript": "/a0/da9bf84761/0/full.jsonl",
+      "content_hash": "/a0/da9bf84761/0/content_hash.txt",
+      "prompt": "/a0/da9bf84761/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 216,
+    "cache_creation_tokens": 290907,
+    "cache_read_tokens": 24811375,
+    "output_tokens": 102264,
+    "api_call_count": 108
+  }
+}

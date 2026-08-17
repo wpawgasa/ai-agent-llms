@@ -1,0 +1,42 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "a0da9bf84761",
+  "session_id": "21f6f478-7747-4293-94a7-d86a3411f3c4",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-17T05:15:06.479758105Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/dpo_cat_a.yaml",
+    "src/llm_workflow_agents/training/_utils.py",
+    "src/llm_workflow_agents/training/dpo.py",
+    "src/llm_workflow_agents/training/grpo.py",
+    "src/llm_workflow_agents/training/reward_utils.py",
+    "tests/unit/test_dpo_config.py",
+    "tests/unit/test_dpo_config_kwargs.py",
+    "tests/unit/test_dpo_dataset.py",
+    "tests/unit/test_dpo_output_dir.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "9277382cd698",
+  "token_usage": {
+    "input_tokens": 216,
+    "cache_creation_tokens": 290907,
+    "cache_read_tokens": 24811375,
+    "output_tokens": 102264,
+    "api_call_count": 108
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-17T05:15:05.28961643Z",
+    "agent_lines": 1283,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1283,
+    "agent_percentage": 100
+  }
+}
