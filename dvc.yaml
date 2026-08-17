@@ -188,6 +188,15 @@ stages:
       prefix-fingerprint contamination guard is applied, because the held-out
       conversations are the only contamination-free measuring stick for this
       lineage.
+
+      Mining source is --split train, deliberately: the split-effect
+      hypothesis for why this yields far fewer negatives than the held-out
+      audit's 38.0% error rate (see docs/superpowers/specs/
+      2026-08-17-mining-yield-investigation-design.md and
+      scripts/investigate_mining_yield.py) has not been confirmed with a
+      real measurement. If it is confirmed, switch --split to "validation"
+      here — mine_model_negatives.py already supports it and excludes the
+      R5 guardrail's reserved slice automatically — and re-run this stage.
     cmd: >-
       python scripts/mine_model_negatives.py
         --checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767

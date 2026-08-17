@@ -55,6 +55,14 @@ data:
   # is also a passthrough. Revisit once the mining run investigates why yield
   # (12.8%) came in well under the 38.0% predicted from the held-out audit.
   model_negative_share: 0.2
+  # Fraction of the GRPO validation split reserved for the R5 held-out
+  # guardrail (dpo.py::_build_heldout_callback) and excluded from mining
+  # (scripts/mine_model_negatives.py --split validation). Only meaningful if
+  # mining is ever switched to --split validation — see
+  # docs/superpowers/specs/2026-08-17-mining-yield-investigation-design.md.
+  # Defaults to 0.2 if omitted; present here for discoverability.
+  guardrail_reserved_fraction: 0.2
+  guardrail_reserved_seed: 42
   # Held-out guardrail (below) scores greedy generations from this GRPO-format
   # corpus, not the preference-pair files — it needs whole prompts + ground
   # truth, not (chosen, rejected) pairs.
