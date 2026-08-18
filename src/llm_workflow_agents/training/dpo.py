@@ -284,6 +284,95 @@ def _load_dpo_dataset(
     return _to_dataset(merged), _to_dataset(eval_rows)
 
 
+def _dpo_trainer_kwargs(
+    dpo_cfg: dict[str, Any], method: str, output_dir: str
+) -> dict[str, Any]:
+    """Build the kwargs for TRL's ``DPOConfig``/``ORPOConfig``.
+
+    Two of these bounds are load-bearing and neither has a safe TRL default.
+
+    ``max_length`` — R16, one objective further down the pipeline. TRL's
+    ``DataCollatorForPreference`` concatenates ``prompt_ids + chosen_ids`` (and
+    the rejected counterpart) and slices to ``max_length``, which defaults to
+    **1024** with ``truncation_mode='keep_start'``. Cat A prompts are median
+    ~4,400 tokens and never shorter than ~2,400, while ``chosen`` and
+    ``rejected`` differ ONLY in the trailing assistant turn. At the default the
+    retained window is pure system prompt, both sequences truncate to identical
+    token ids, ``completion_mask`` is all zeros, the implicit margin is exactly
+    0 and the gradient is exactly 0 — the DPO analogue of the tied-group
+    failure that made GRPO unlearnable (R18), and just as silent.
+
+    ``per_device_eval_batch_size`` — TRL defaults it to 8, and DPO scores
+    chosen and rejected both, so that is 16 sequences of up to ``max_length``
+    against a 262,144-token vocab. It only ever survived because the collator
+    was truncating to 1024; pinning ``max_length`` without pinning this trades
+    a silent no-op run for an OOM at the first eval. Follows the train batch
+    size unless set explicitly, as ``sft.py::_sft_eval_batch_size`` does.
+
+    Note ``max_prompt_length`` and ``max_completion_length`` are NOT fields of
+    TRL 1.0.0's ``DPOConfig``; ``dpo.max_completion_length`` bounds the
+    held-out guardrail's generation only, never training.
+    """
+    per_device_bs = int(dpo_cfg.get("per_device_train_batch_size", 1))
+    kwargs: dict[str, Any] = dict(
+        output_dir=output_dir,
+        max_steps=dpo_cfg.get("training_steps", 500),
+        learning_rate=dpo_cfg.get("learning_rate", 5e-6),
+        per_device_train_batch_size=per_device_bs,
+        per_device_eval_batch_size=int(
+            dpo_cfg.get("per_device_eval_batch_size", per_device_bs)
+        ),
+        gradient_accumulation_steps=dpo_cfg.get("gradient_accumulation_steps", 8),
+        warmup_ratio=dpo_cfg.get("warmup_ratio", 0.05),
+        max_length=int(dpo_cfg.get("max_seq_length", 8192)),
+        save_steps=int(dpo_cfg.get("save_steps", 100)),
+        save_total_limit=int(dpo_cfg.get("save_total_limit", 3)),
+        eval_strategy="steps",
+        eval_steps=int(dpo_cfg.get("eval_steps", 100)),
+        bf16=True,
+        report_to="wandb",
+    )
+    if method == "dpo":
+        kwargs["beta"] = dpo_cfg.get("beta", 0.1)
+        # No explicit ref_model: TRL falls back to `model.disable_adapter()`
+        # on a PEFT model, avoiding a second full copy of a 26B+ checkpoint.
+    return kwargs
+
+
+def _resolve_trl_classes(method: str) -> tuple[type, type]:
+    """Return the ``(Config, Trainer)`` pair the installed TRL provides.
+
+    Called before the model loads. TRL 1.0.0 ships ``DPOConfig``/``DPOTrainer``
+    but no ``ORPOConfig``/``ORPOTrainer``, and these used to be imported lazily
+    at trainer-construction time — i.e. after a 26B checkpoint had been pulled
+    onto the GPU and ~650 MB of preference pairs read. Resolving up front turns
+    a ~10-minute walk to a bare ``ImportError`` into an immediate one that says
+    what to do about it.
+    """
+    if method not in _VALID_METHODS:
+        raise ValueError(
+            f"dpo.method must be one of {_VALID_METHODS}, got {method!r}"
+        )
+    try:
+        if method == "orpo":
+            from trl import ORPOConfig, ORPOTrainer
+
+            return ORPOConfig, ORPOTrainer
+        from trl import DPOConfig, DPOTrainer
+
+        return DPOConfig, DPOTrainer
+    except ImportError as exc:
+        import trl
+
+        raise RuntimeError(
+            f"dpo.method={method!r} is not available: the installed TRL "
+            f"({getattr(trl, '__version__', 'unknown')}) provides no "
+            f"{method.upper()}Config/{method.upper()}Trainer. Set "
+            f"dpo.method: \"dpo\" (supported on this TRL), or pin a TRL "
+            f"release that still ships {method.upper()}."
+        ) from exc
+
+
 def _filter_dpo_config_kwargs(
     kwargs: dict[str, Any], method: str
 ) -> tuple[dict[str, Any], list[str]]:
@@ -298,14 +387,9 @@ def _filter_dpo_config_kwargs(
     """
     import dataclasses
 
-    if method == "orpo":
-        from trl import ORPOConfig as ConfigCls
-    elif method == "dpo":
-        from trl import DPOConfig as ConfigCls
-    else:
-        raise ValueError(f"Unknown method {method!r}; expected one of {_VALID_METHODS}")
+    config_cls, _trainer_cls = _resolve_trl_classes(method)
 
-    supported = {f.name for f in dataclasses.fields(ConfigCls)}
+    supported = {f.name for f in dataclasses.fields(config_cls)}
     kept = {k: v for k, v in kwargs.items() if k in supported}
     dropped = sorted(set(kwargs) - set(kept))
     return kept, dropped
@@ -365,6 +449,8 @@ def train_dpo(config_path: Path) -> DPOResult:
     monitoring_cfg = config.get("monitoring", {})
 
     method = _resolve_method(dpo_cfg)
+    # Before the 26B load: an unavailable algorithm must not cost a model load.
+    config_cls, trainer_cls = _resolve_trl_classes(method)
 
     sft_checkpoint = config.get("model", {}).get("sft_checkpoint")
     if not sft_checkpoint:
@@ -402,24 +488,13 @@ def train_dpo(config_path: Path) -> DPOResult:
 
     model_basename = Path(sft_checkpoint).parent.name
 
-    trainer_kwargs: dict[str, Any] = dict(
-        output_dir=str(_resolve_output_dir(config, Path(config_path), model_basename)),
-        max_steps=dpo_cfg.get("training_steps", 500),
-        learning_rate=dpo_cfg.get("learning_rate", 5e-6),
-        per_device_train_batch_size=dpo_cfg.get("per_device_train_batch_size", 1),
-        gradient_accumulation_steps=dpo_cfg.get("gradient_accumulation_steps", 8),
-        warmup_ratio=dpo_cfg.get("warmup_ratio", 0.05),
-        save_steps=int(dpo_cfg.get("save_steps", 100)),
-        save_total_limit=int(dpo_cfg.get("save_total_limit", 3)),
-        eval_strategy="steps",
-        eval_steps=int(dpo_cfg.get("eval_steps", 100)),
-        bf16=True,
-        report_to="wandb",
+    trainer_kwargs = _dpo_trainer_kwargs(
+        dpo_cfg,
+        method,
+        output_dir=str(
+            _resolve_output_dir(config, Path(config_path), model_basename)
+        ),
     )
-    if method == "dpo":
-        trainer_kwargs["beta"] = dpo_cfg.get("beta", 0.1)
-        # No explicit ref_model: TRL falls back to `model.disable_adapter()`
-        # on a PEFT model, avoiding a second full copy of a 26B+ checkpoint.
 
     trainer_kwargs, dropped_kwargs = _filter_dpo_config_kwargs(trainer_kwargs, method)
     if dropped_kwargs:
@@ -435,28 +510,14 @@ def train_dpo(config_path: Path) -> DPOResult:
             ),
         )
 
-    if method == "orpo":
-        from trl import ORPOConfig, ORPOTrainer
-
-        trainer_config = ORPOConfig(**trainer_kwargs)
-        trainer = ORPOTrainer(
-            model=model,
-            args=trainer_config,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            processing_class=tokenizer,
-        )
-    else:
-        from trl import DPOConfig, DPOTrainer
-
-        trainer_config = DPOConfig(**trainer_kwargs)
-        trainer = DPOTrainer(
-            model=model,
-            args=trainer_config,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            processing_class=tokenizer,
-        )
+    trainer_config = config_cls(**trainer_kwargs)
+    trainer = trainer_cls(
+        model=model,
+        args=trainer_config,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
+        processing_class=tokenizer,
+    )
 
     callbacks = []
     if monitoring_cfg.get("reward_hacking_detector", False):
