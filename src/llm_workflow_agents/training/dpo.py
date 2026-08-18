@@ -562,6 +562,7 @@ def _build_heldout_callback(
             "dpo_heldout_loaded",
             n_prompts=len(held_out_rows),
             reserved_fraction=guardrail_reserved_fraction,
+            reserved_seed=guardrail_reserved_seed,
         )
     except FileNotFoundError:
         logger.warning(

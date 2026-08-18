@@ -183,6 +183,14 @@ def classify_rate_from_split(
     `tool_share_scored` reveals whether the requested `tool_share` was
     actually achievable — on validation (~289 conversations, R17) one-row-per-
     conversation dedup can make it not be.
+
+    On ``split="validation"`` this samples from the FULL split, including
+    rows `reserve_guardrail_slice` would reserve for `dpo.py`'s R5 guardrail
+    (unlike `mine_model_negatives.py --split validation`, which excludes
+    them). That's deliberate here — a read-only diagnostic measurement, not a
+    negative-mining run, so there is nothing to exclude reserved rows from;
+    excluding them would only shrink the sample for no benefit, since the
+    partition is a content hash and so an unbiased subsample either way.
     """
     if split == "test":
         raise SystemExit(

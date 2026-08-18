@@ -21,7 +21,7 @@ Decompose the gap into the split effect and the classifier effect, each measured
 **Acceptance criteria:**
 1. `scripts/investigate_mining_yield.py` exists, runs its classifier-effect probe against a stored audit JSON with **zero new GPU generation**, and its split-effect probe reuses `mine_model_negatives.py`'s own `_select_prompts`/`_classify` code path unchanged except for the `--split` argument.
 2. `reserve_guardrail_slice()` exists, is unit-tested, and both `mine_model_negatives.py` (when run with `--split validation`) and `dpo.py`'s `_build_heldout_callback` consult it, so the two can never draw from an overlapping fingerprint set.
-3. All new logic is unit-testable without a GPU. The one thing that is genuinely out of scope for this implementation pass is *running* the split-effect probe for real — that needs `.venv-train` and either a GPU or a pre-existing cached audit JSON, neither available in this environment.
+3. All new logic is unit-testable without a GPU. The one thing that is genuinely out of scope for this implementation pass is *running the split-effect probe (Probe 2)* for real — that needs `.venv-train` and a GPU. The classifier-effect probe (Probe 1) needs neither: it was run for real against `runs/audit/heldout_c2_ckpt1767_v2corpus.json` during this plan's final review and found `_classify()` stricter, not looser, than the composite scorer (39.4% vs 38.0% on the same 71 tool-bearing rows) — the classifier-effect hypothesis is refuted, leaving the split effect as the sole open question.
 4. `dvc.yaml`'s `task_a_preference_model_negatives` stage keeps `--split train` as its actual `cmd` — the validation-mining path is documented as available, contingent on the probe's real-world result, not switched on.
 
 ## 3. Architecture
@@ -99,4 +99,4 @@ dpo.py::_build_heldout_callback
 2. Build `investigate_mining_yield.py` + tests.
 3. Wire `dpo.py`'s guardrail to the reserved slice (safe regardless of mining source — it only narrows which validation rows the guardrail can see, a strict subset of its current behavior).
 4. Update `dvc.yaml`'s stage `desc` with the contingency note. Do not change its `cmd`.
-5. **Out of scope for this implementation pass:** running `investigate_mining_yield.py` for real, reading its result, and — only if it confirms the split effect — flipping `dvc.yaml`'s `cmd` to `--split validation` and re-running the mining stage.
+5. **Out of scope for this implementation pass:** running Probe 2 (the split effect, needs a GPU) for real, reading its result, and — only if it confirms the split effect — flipping `dvc.yaml`'s `cmd` to `--split validation` and re-running the mining stage. Probe 1 (the classifier effect) does not need this exclusion — it already ran for real during final review; see §2 AC#3.
