@@ -119,3 +119,47 @@ def test_reserved_fraction_config_key_is_passed_through(tmp_path):
         reserved_fraction=0.35,
         seed=7,
     )
+
+
+def test_evaluate_releases_cuda_cache_so_the_next_step_can_allocate():
+    """The guardrail generates mid-training, on the same GPU as the optimizer.
+
+    `model.generate()` allocates a KV cache per prompt. Without an explicit
+    release those blocks stay in PyTorch's caching allocator, so the training
+    step that follows the eval starts with less memory than the one before it.
+    Measured 2026-08-18 (checkpoints/dpo_cat_a_smoke7/): three DPO steps ran,
+    the guardrail fired at step 3, and step 4 then died asking for 52 MiB with
+    31.9 MiB free and 525 MiB "reserved but unallocated". The real config
+    generates 50 prompts per eval, not the 2 that produced that failure.
+    """
+    rows = [_row("c0")]
+    with (
+        patch(
+            "llm_workflow_agents.training.grpo._load_grpo_jsonl",
+            return_value=_FakeDataset(rows),
+        ),
+        patch(
+            "llm_workflow_agents.training.dpo.reserve_guardrail_slice",
+            return_value={user_turn_fingerprint({"messages": rows[0]["prompt"]})},
+        ),
+    ):
+        callback = _build_heldout_callback(
+            model=MagicMock(),
+            tokenizer=MagicMock(),
+            data_cfg={"heldout_data_source": "data/output/grpo/task_a"},
+            monitoring_cfg={"eval_held_out_num_prompts": 1},
+            max_new_tokens=8,
+        )
+
+    with (
+        patch("torch.cuda.empty_cache") as empty_cache,
+        patch(
+            "llm_workflow_agents.training.dpo.heldout_composite_score",
+            return_value=0.5,
+        ),
+    ):
+        callback._evaluate()
+
+    assert empty_cache.called, (
+        "guardrail must release its generation KV cache before training resumes"
+    )

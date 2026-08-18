@@ -708,6 +708,14 @@ def _build_heldout_callback(
             finally:
                 if was_training:
                     model.train()
+                # Release the per-prompt KV caches before the optimizer runs
+                # again. They are freed by refcount but stay in PyTorch's
+                # caching allocator, so without this the step after an eval
+                # starts with less memory than the step before it — measured
+                # as an OOM asking for 52 MiB with 31.9 MiB free and 525 MiB
+                # reserved-but-unallocated (checkpoints/dpo_cat_a_smoke7/).
+                enc = out = None
+                torch.cuda.empty_cache()
             return heldout_composite_score(completions, gts)
 
         def on_log(self, args, state, control, logs=None, **kwargs):
