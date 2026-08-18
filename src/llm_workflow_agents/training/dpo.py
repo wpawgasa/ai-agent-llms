@@ -309,6 +309,26 @@ def _dpo_trainer_kwargs(
     a silent no-op run for an OOM at the first eval. Follows the train batch
     size unless set explicitly, as ``sft.py::_sft_eval_batch_size`` does.
 
+    ``precompute_ref_log_probs`` — Unsloth's compiled DPO trainer materializes
+    four full ``[2, S, 262144]`` **fp32** logits tensors per step: policy
+    (line 1568) and reference (line 1605), each ``.contiguous()``-copied while
+    the original is still live. That is ~33 GiB at this corpus's median prompt
+    length and ~64 GiB at ``max_length=8192`` — an OOM on an 80 GB H100 before
+    step 1. Precomputing makes the trainer read cached reference logps from the
+    batch, dropping the reference forward and its two tensors. It front-loads
+    one pass over the train split, so pair it with a train set sized to what
+    the run will actually consume (``training_steps`` x effective batch).
+
+    ``use_liger_kernel`` — plumbed through but **not usable on this project's
+    checkpoints**. It would be the real fix (a fused chunked loss that never
+    builds ``[2, S, 262144]`` in either direction), but
+    ``_compute_loss_liger`` raises ``NotImplementedError: Liger DPO loss is not
+    implemented for PEFT models.`` and every Cat A DPO run starts from a LoRA
+    adapter. It is also mutually exclusive with ``precompute_ref_log_probs``
+    (TRL raises at trainer ``__init__``). Kept wired so it flips on the day
+    upstream supports PEFT; ``liger-kernel`` is not a declared dependency until
+    then.
+
     Note ``max_prompt_length`` and ``max_completion_length`` are NOT fields of
     TRL 1.0.0's ``DPOConfig``; ``dpo.max_completion_length`` bounds the
     held-out guardrail's generation only, never training.
@@ -325,6 +345,14 @@ def _dpo_trainer_kwargs(
         gradient_accumulation_steps=dpo_cfg.get("gradient_accumulation_steps", 8),
         warmup_ratio=dpo_cfg.get("warmup_ratio", 0.05),
         max_length=int(dpo_cfg.get("max_seq_length", 8192)),
+        # Cache the reference logps up front instead of re-deriving them every
+        # step. See the note below on why this is the difference between an
+        # OOM and a run.
+        precompute_ref_log_probs=bool(
+            dpo_cfg.get("precompute_ref_log_probs", False)
+        ),
+        # Fused chunked DPO loss — never materializes the logits tensor at all.
+        use_liger_kernel=bool(dpo_cfg.get("use_liger_kernel", False)),
         save_steps=int(dpo_cfg.get("save_steps", 100)),
         save_total_limit=int(dpo_cfg.get("save_total_limit", 3)),
         eval_strategy="steps",
@@ -332,6 +360,10 @@ def _dpo_trainer_kwargs(
         bf16=True,
         report_to="wandb",
     )
+    if dpo_cfg.get("precompute_ref_batch_size") is not None:
+        kwargs["precompute_ref_batch_size"] = int(
+            dpo_cfg["precompute_ref_batch_size"]
+        )
     if method == "dpo":
         kwargs["beta"] = dpo_cfg.get("beta", 0.1)
         # No explicit ref_model: TRL falls back to `model.disable_adapter()`

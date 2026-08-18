@@ -93,3 +93,63 @@ def test_beta_is_set_for_dpo_but_not_for_orpo(tmp_path):
 def test_max_length_is_a_real_dpoconfig_field(tmp_path):
     """Guards the assertion above against a TRL rename making it vacuous."""
     assert "max_length" in {f.name for f in dataclasses.fields(DPOConfig)}
+
+
+def test_precompute_ref_log_probs_reaches_dpo_config(tmp_path):
+    """The reference forward is what OOMs a 26B Gemma-4 DPO step.
+
+    Unsloth's compiled trainer materializes four full [2, S, 262144] fp32
+    logits tensors per step — policy and reference, each `.contiguous()`-copied
+    while the original is live. That is ~33 GiB at this corpus's median prompt
+    length. `precompute_ref_log_probs` makes the trainer read cached reference
+    logps from the batch instead, removing the reference forward and its two
+    tensors entirely.
+    """
+    cfg = _built({"precompute_ref_log_probs": True}, str(tmp_path))
+    assert cfg.precompute_ref_log_probs is True
+
+
+def test_precompute_ref_log_probs_defaults_to_off(tmp_path):
+    assert _built({}, str(tmp_path)).precompute_ref_log_probs is False
+
+
+def test_precompute_ref_batch_size_is_forwarded(tmp_path):
+    cfg = _built(
+        {"precompute_ref_log_probs": True, "precompute_ref_batch_size": 4},
+        str(tmp_path),
+    )
+    assert cfg.precompute_ref_batch_size == 4
+
+
+def test_use_liger_kernel_reaches_dpo_config(tmp_path):
+    """The fused Liger DPO loss is the only lever that removes the [2,S,262144]
+    fp32 logits tensor from BOTH forward and backward.
+
+    precompute_ref_log_probs deletes the reference half; the policy half still
+    OOMs a 26B Gemma-4 at 6144 tokens in `autograd.backward`. Unsloth's compiled
+    trainer branches to `_compute_loss_liger` on this flag, which computes the
+    loss without ever materializing logits.
+    """
+    cfg = _built({"use_liger_kernel": True}, str(tmp_path))
+    assert cfg.use_liger_kernel is True
+
+
+def test_use_liger_kernel_defaults_to_off(tmp_path):
+    assert _built({}, str(tmp_path)).use_liger_kernel is False
+
+
+def test_shipped_cat_a_config_does_not_enable_liger_and_precompute_together():
+    """TRL rejects the combination at trainer __init__ — after the 26B load.
+
+    `Liger DPO loss does not support precomputing reference log probabilities.`
+    Liger derives the reference inside its fused kernel without materializing
+    logits, so precompute is redundant there, not additive. Enabling both is
+    always a mistake, and it costs a model load to find out.
+    """
+    import yaml
+
+    with open("configs/training/dpo_cat_a.yaml") as fh:
+        dpo = yaml.safe_load(fh)["dpo"]
+    assert not (
+        dpo.get("use_liger_kernel") and dpo.get("precompute_ref_log_probs")
+    ), "use_liger_kernel and precompute_ref_log_probs are mutually exclusive"

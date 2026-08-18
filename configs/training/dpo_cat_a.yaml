@@ -28,6 +28,41 @@ dpo:
   # fallback on this PEFT checkpoint — no second full model copy). DPO-only;
   # dropped by _filter_dpo_config_kwargs under method: orpo.
   beta: 0.1
+  # Cache reference logps before training instead of re-deriving them each step.
+  # Without this the run OOMs before step 1: Unsloth's compiled DPO trainer
+  # materializes four full [2, S, 262144] fp32 logits tensors per step (policy
+  # and reference, each .contiguous()-copied while the original is live) —
+  # ~33 GiB at this corpus's median prompt length, ~64 GiB at max_seq_length
+  # 8192. Precomputing drops the reference forward and its two tensors, and
+  # removes a forward pass per step. Verified 2026-08-18; see the smoke logs
+  # under checkpoints/dpo_cat_a_smoke*/.
+  #
+  # COST: one pass over the train split up front. The merged mix is 36,570 rows
+  # but a 500-step run at effective batch 8 consumes only 4,000 — so this
+  # front-loads ~9x more reference forwards than the run needs. Size the train
+  # set to the run, or accept the wait.
+  # MUTUALLY EXCLUSIVE with use_liger_kernel below — TRL raises at trainer
+  # __init__ (after the 26B load) if both are set.
+  #
+  # This is the only memory lever available to us: liger is ruled out on PEFT
+  # (see below). It removes the REFERENCE logits and their .contiguous() copy.
+  # NOT SUFFICIENT ON ITS OWN at 8192 — the policy logits and their backward
+  # gradient still OOM (measured: 6144 clears the forward pass, then
+  # autograd.backward wants 5.78 GiB with 0.49 GiB free —
+  # checkpoints/dpo_cat_a_smoke4/). max_seq_length must come down and the pair
+  # set be length-filtered to match; see docs/ or the smoke logs.
+  precompute_ref_log_probs: true
+  # Fused chunked DPO loss. It WOULD be the right fix — it never materializes
+  # the [2, S, 262144] logits tensor in either direction — but it is
+  # UNAVAILABLE TO US: `_compute_loss_liger` raises
+  #   NotImplementedError: Liger DPO loss is not implemented for PEFT models.
+  # (UnslothDPOTrainer.py:1491), and every Cat A DPO run starts from a LoRA
+  # adapter on the C2 checkpoint. Verified 2026-08-18,
+  # checkpoints/dpo_cat_a_smoke6/. The kwarg is still plumbed through so this
+  # flips to true the day TRL/Unsloth supports PEFT — it then also needs
+  # `uv pip install liger-kernel`, which is deliberately NOT in pyproject's
+  # [train] extra while the path is unusable.
+  use_liger_kernel: false
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   warmup_ratio: 0.05
