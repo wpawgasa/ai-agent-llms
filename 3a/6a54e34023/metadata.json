@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "3a6a54e34023",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/superpowers/specs/2026-08-17-mining-yield-investigation-design.md",
+    "src/llm_workflow_agents/training/dpo.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3a/6a54e34023/0/metadata.json",
+      "transcript": "/3a/6a54e34023/0/full.jsonl",
+      "content_hash": "/3a/6a54e34023/0/content_hash.txt",
+      "prompt": "/3a/6a54e34023/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 320,
+    "cache_creation_tokens": 2225674,
+    "cache_read_tokens": 84536822,
+    "output_tokens": 98003,
+    "api_call_count": 160
+  }
+}
