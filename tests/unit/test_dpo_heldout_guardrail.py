@@ -163,3 +163,61 @@ def test_evaluate_releases_cuda_cache_so_the_next_step_can_allocate():
     assert empty_cache.called, (
         "guardrail must release its generation KV cache before training resumes"
     )
+
+
+def test_evaluate_restores_use_cache_after_generate_flips_it():
+    """model.generate() turns use_cache back on; the callback must undo that.
+
+    HF Trainer sets ``model.config.use_cache = False`` at train start under
+    gradient checkpointing. ``model.generate()`` flips it back to ``True`` to
+    speed up decoding and, on a bare model, leaves it there. If the callback
+    does not restore it, every training step after the first guardrail eval
+    runs with a KV cache gradient checkpointing had disabled — the leading
+    hypothesis for R19 / docs/dpo_memory_ceiling_investigation.md §5.
+    """
+    rows = [_row("c0")]
+
+    class _FakeConfig:
+        def __init__(self) -> None:
+            self.use_cache = False  # what HF Trainer sets under grad checkpointing
+
+    model = MagicMock()
+    model.config = _FakeConfig()
+
+    def _generate(**kwargs):
+        model.config.use_cache = True  # what model.generate() does in real HF
+        return MagicMock()
+
+    model.generate.side_effect = _generate
+
+    with (
+        patch(
+            "llm_workflow_agents.training.grpo._load_grpo_jsonl",
+            return_value=_FakeDataset(rows),
+        ),
+        patch(
+            "llm_workflow_agents.training.dpo.reserve_guardrail_slice",
+            return_value={user_turn_fingerprint({"messages": rows[0]["prompt"]})},
+        ),
+    ):
+        callback = _build_heldout_callback(
+            model=model,
+            tokenizer=MagicMock(),
+            data_cfg={"heldout_data_source": "data/output/grpo/task_a"},
+            monitoring_cfg={"eval_held_out_num_prompts": 1},
+            max_new_tokens=8,
+        )
+
+    with (
+        patch("torch.cuda.empty_cache"),
+        patch(
+            "llm_workflow_agents.training.dpo.heldout_composite_score",
+            return_value=0.5,
+        ),
+    ):
+        callback._evaluate()
+
+    assert model.config.use_cache is False, (
+        "guardrail left use_cache=True after generate() — the next training "
+        "step would allocate a KV cache it didn't before the eval"
+    )
