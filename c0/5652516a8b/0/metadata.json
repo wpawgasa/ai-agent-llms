@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c05652516a8b",
+  "session_id": "c52a727b-14a3-45ef-9057-3b6c5b7c917d",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-19T08:25:19.474649729Z",
+  "branch": "ci/skip-trl-tests-when-unavailable",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_training.py",
+    "tests/unit/test_dpo_method_availability.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "a2b1fec02532",
+  "checkpoint_transcript_start": 419,
+  "transcript_lines_at_start": 419,
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 22940,
+    "cache_read_tokens": 3235418,
+    "output_tokens": 5336,
+    "api_call_count": 15
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-19T08:25:18.733394387Z",
+    "agent_lines": 0,
+    "human_added": 4,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4,
+    "agent_percentage": 0
+  }
+}

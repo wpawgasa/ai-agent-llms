@@ -1,0 +1,8 @@
+<task-notification>
+<task-id>b28zf4xwx</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/c52a727b-14a3-45ef-9057-3b6c5b7c917d/tasks/b28zf4xwx.output</output-file>
+<status>failed</status>
+<summary>Background command "gh pr merge 52 --auto --squash 2&gt;&amp;1
+gh pr checks 52 --watch 2&gt;&amp;1" failed with exit code 1</summary>
+</task-notification>

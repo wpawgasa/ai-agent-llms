@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "c05652516a8b",
+  "strategy": "manual-commit",
+  "branch": "ci/skip-trl-tests-when-unavailable",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_dpo_method_availability.py",
+    "tests/unit/test_training.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c0/5652516a8b/0/metadata.json",
+      "transcript": "/c0/5652516a8b/0/full.jsonl",
+      "content_hash": "/c0/5652516a8b/0/content_hash.txt",
+      "prompt": "/c0/5652516a8b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 22940,
+    "cache_read_tokens": 3235418,
+    "output_tokens": 5336,
+    "api_call_count": 15
+  }
+}
