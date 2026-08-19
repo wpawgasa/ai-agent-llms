@@ -1,0 +1,37 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cda33a322243",
+  "session_id": "c52a727b-14a3-45ef-9057-3b6c5b7c917d",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-19T07:39:07.439676925Z",
+  "branch": "fix/dpo-guardrail-use-cache-leak",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_dpo_heldout_guardrail.py",
+    "src/llm_workflow_agents/training/dpo.py",
+    "CLAUDE.md",
+    "docs/dpo_memory_ceiling_investigation.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "88c8c3edef32",
+  "token_usage": {
+    "input_tokens": 74,
+    "cache_creation_tokens": 236118,
+    "cache_read_tokens": 4965000,
+    "output_tokens": 28456,
+    "api_call_count": 38
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-19T07:39:06.954763486Z",
+    "agent_lines": 88,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 88,
+    "agent_percentage": 100
+  }
+}

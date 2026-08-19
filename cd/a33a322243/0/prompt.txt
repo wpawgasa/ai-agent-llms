@@ -1,0 +1,9 @@
+/brainstorming and /simplified-technical-english and /model-training-eval Yesterday, we did DPO smoke runs but encountered OOM and must reduce sequence length. Some samples are skipped as they are longer than the max safe length. Investigate this issue or should we move to the next step.
+
+---
+
+yes
+
+---
+
+Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.

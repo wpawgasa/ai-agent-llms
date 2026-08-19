@@ -1,0 +1,28 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cda33a322243",
+  "strategy": "manual-commit",
+  "branch": "fix/dpo-guardrail-use-cache-leak",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "CLAUDE.md",
+    "docs/dpo_memory_ceiling_investigation.md",
+    "src/llm_workflow_agents/training/dpo.py",
+    "tests/unit/test_dpo_heldout_guardrail.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cd/a33a322243/0/metadata.json",
+      "transcript": "/cd/a33a322243/0/full.jsonl",
+      "content_hash": "/cd/a33a322243/0/content_hash.txt",
+      "prompt": "/cd/a33a322243/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 74,
+    "cache_creation_tokens": 236118,
+    "cache_read_tokens": 4965000,
+    "output_tokens": 28456,
+    "api_call_count": 38
+  }
+}
