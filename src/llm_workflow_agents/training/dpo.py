@@ -676,6 +676,13 @@ def _build_heldout_callback(
             import torch
 
             was_training = model.training
+            # HF Trainer sets this False at train start under gradient
+            # checkpointing; model.generate() below flips it back True to
+            # speed up decoding and, left alone, leaves it there — so the
+            # training step right after this eval would allocate a KV cache
+            # gradient checkpointing had disabled (R19 / see the finally
+            # block below).
+            use_cache_before_eval = getattr(model.config, "use_cache", None)
             model.eval()
             completions: list[str] = []
             gts: list[dict[str, Any]] = []
@@ -708,6 +715,12 @@ def _build_heldout_callback(
             finally:
                 if was_training:
                     model.train()
+                # Undo generate()'s use_cache=True before training resumes —
+                # see the note above _evaluate. Untested prior to this fix;
+                # leading hypothesis for the OOM that always hit the training
+                # step immediately after a guardrail eval
+                # (docs/dpo_memory_ceiling_investigation.md §5).
+                model.config.use_cache = use_cache_before_eval
                 # Release the per-prompt KV caches before the optimizer runs
                 # again. They are freed by refcount but stay in PyTorch's
                 # caching allocator, so without this the step after an eval

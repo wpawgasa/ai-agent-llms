@@ -160,15 +160,28 @@ This is a hypothesis, not a finding. It is cheap to test: save
 `finally` block alongside the existing `empty_cache()`, and re-run smoke14's
 config. If it completes 6/6, that is the fix.
 
+**Code side implemented 2026-08-19, GPU side still open.** `_evaluate` now
+snapshots `model.config.use_cache` right before `model.eval()` and restores
+that snapshot in the `finally` block, after `model.train()` and before
+`empty_cache()`. `tests/unit/test_dpo_heldout_guardrail.py::test_evaluate_restores_use_cache_after_generate_flips_it`
+covers it with a fake model whose `generate()` sets `use_cache = True` as a
+side effect (mirroring real HF behavior) — the test fails against the
+pre-fix code and passes against the fix. No GPU was available in that
+session, so §6 step 1 (re-run smoke14's config) is still outstanding; the
+hypothesis is implemented, not confirmed.
+
 ---
 
 ## 6. Next state
 
 In order:
 
-1. **Test the `use_cache` hypothesis** (§5). Smallest possible change to the
-   callback's `finally` block, then re-run the smoke14 config — guardrail on,
-   trainer eval off, cap 5120. Pass = 6/6 steps. ~8 min.
+1. ~~**Test the `use_cache` hypothesis**~~ (§5). **Code change done
+   2026-08-19** (see above) — the callback's `finally` block now
+   save/restores `use_cache`, with a unit test proving the leak and the fix.
+   **Still outstanding: re-run the smoke14 config on GPU** — guardrail on,
+   trainer eval off, cap 5120. Pass = 6/6 steps. ~8 min. This has not run;
+   do not treat the hypothesis as confirmed until it does.
 2. **If it passes, re-run smoke13's config** (both evals on, cap 5120) to
    confirm the two paths compose.
 3. **Walk the cap back up** toward the real config's 8192, and raise
