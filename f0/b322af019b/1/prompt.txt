@@ -1,0 +1,15 @@
+<task-notification>
+<task-id>bsxr7u2ru</task-id>
+<tool-use-id>toolu_01E6MsjwSMjS3BP12YVjb4ck</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/c52a727b-14a3-45ef-9057-3b6c5b7c917d/tasks/bsxr7u2ru.output</output-file>
+<status>failed</status>
+<summary>Background command "gh pr checks 51 --watch 2&gt;&amp;1" failed with exit code 1</summary>
+</task-notification>
+
+---
+
+follow-up on failed tests
+
+---
+
+yes

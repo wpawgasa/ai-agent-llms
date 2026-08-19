@@ -1,0 +1,38 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f0b322af019b",
+  "session_id": "c52a727b-14a3-45ef-9057-3b6c5b7c917d",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-19T08:19:19.21697368Z",
+  "branch": "ci/skip-trl-tests-when-unavailable",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tests/unit/test_dpo_config_kwargs.py",
+    "tests/unit/test_dpo_trainer_kwargs.py",
+    "tests/unit/test_grpo_config_kwargs.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "5086892d53f8",
+  "checkpoint_transcript_start": 245,
+  "transcript_lines_at_start": 245,
+  "token_usage": {
+    "input_tokens": 62,
+    "cache_creation_tokens": 29000,
+    "cache_read_tokens": 5773797,
+    "output_tokens": 16516,
+    "api_call_count": 31
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-19T08:19:18.636863574Z",
+    "agent_lines": 19,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 19,
+    "agent_percentage": 100
+  }
+}
