@@ -16,12 +16,14 @@ from llm_workflow_agents.training.dpo import _resolve_trl_classes
 
 
 def _trl_has_orpo() -> bool:
+    pytest.importorskip("trl")
     import trl
 
     return hasattr(trl, "ORPOConfig") and hasattr(trl, "ORPOTrainer")
 
 
 def test_dpo_resolves_to_the_trl_dpo_pair():
+    pytest.importorskip("trl")
     from trl import DPOConfig, DPOTrainer
 
     assert _resolve_trl_classes("dpo") == (DPOConfig, DPOTrainer)

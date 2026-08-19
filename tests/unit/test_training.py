@@ -894,6 +894,7 @@ class TestTrainerMaxLength:
     """
 
     def test_configured_max_seq_length_reaches_sft_config(self, tmp_path: Path) -> None:
+        pytest.importorskip("trl")
         from trl import SFTConfig
 
         from llm_workflow_agents.training.sft import _sft_length_kwargs
@@ -907,6 +908,7 @@ class TestTrainerMaxLength:
         )
 
     def test_does_not_silently_fall_back_to_trl_default(self, tmp_path: Path) -> None:
+        pytest.importorskip("trl")
         from trl import SFTConfig
 
         from llm_workflow_agents.training.sft import _sft_length_kwargs

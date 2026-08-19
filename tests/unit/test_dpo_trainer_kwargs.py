@@ -15,11 +15,18 @@ log 2, and the gradient is exactly 0 for every step of the run.
 That is the DPO analogue of the tied-group failure that made GRPO unlearnable
 (R18) — and, like R16, it fails silently rather than crashing. The configured
 ceiling must reach `DPOConfig`.
+
+Requires a real `trl` import, so — like `test_dpo_config_kwargs.py` — this
+only collects under an environment with `trl` installed (`.venv-train`), not
+CI's lightweight `dev` extra.
 """
 
 import dataclasses
 
-from trl import DPOConfig
+import pytest
+
+pytest.importorskip("trl")
+from trl import DPOConfig  # noqa: E402
 
 from llm_workflow_agents.training.dpo import (
     _dpo_trainer_kwargs,

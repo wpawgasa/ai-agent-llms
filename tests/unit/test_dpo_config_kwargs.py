@@ -21,7 +21,9 @@ hiding all 1,500+ unrelated tests. The ORPO cases skip instead.
 import dataclasses
 
 import pytest
-from trl import DPOConfig
+
+pytest.importorskip("trl")
+from trl import DPOConfig  # noqa: E402
 
 from llm_workflow_agents.training.dpo import _filter_dpo_config_kwargs
 
