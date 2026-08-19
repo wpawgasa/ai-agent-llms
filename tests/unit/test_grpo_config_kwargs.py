@@ -11,11 +11,18 @@ caused by a length parameter being dropped silently (`max_seq_length` became
 `max_length` in TRL 0.23+, the guarded branch turned into a no-op, and every Cat
 A run trained on a 1024-token window for months without a single warning). A
 dropped length knob must always name itself in the log.
+
+Requires a real `trl` import, so — like `test_dpo_config_kwargs.py` — this
+only collects under an environment with `trl` installed (`.venv-train`), not
+CI's lightweight `dev` extra.
 """
 
 import dataclasses
 
-from trl import GRPOConfig
+import pytest
+
+pytest.importorskip("trl")
+from trl import GRPOConfig  # noqa: E402
 
 from llm_workflow_agents.training.grpo import _filter_grpo_config_kwargs
 
