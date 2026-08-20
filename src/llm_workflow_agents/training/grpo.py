@@ -287,7 +287,11 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
             ]
             valid_pairs = [
                 i for i in asst_indices
-                if i > 0 and raw_msgs[i - 1].get("role") in ("user", "system")
+                if i > 0
+                and raw_msgs[i - 1].get("role") in ("user", "system")
+                # A loss:false turn stays in the prompt prefix but never
+                # becomes a training row. See sft.py for why.
+                and raw_msgs[i].get("loss", True) is not False
             ]
             n_skipped_tool_preceded += len(asst_indices) - len(valid_pairs)
 
