@@ -65,6 +65,9 @@ Outbound samples reuse each domain's canonical graph: the agent opens at the exi
 ### Output Format (per sample)
 Each sample includes: conversation_id, complexity_level, domain, workflow_graph, tool_schemas, messages (with `[STATE: X → Y]` and `<tool_call>` annotations), user_behavior, ground_truth (state_sequence, tool_chain_dependencies, terminal_state), `conversation_initiator` ("user" | "agent"), and `outbound_reason` (reason key | null). Outbound message shape: `[system, assistant(opener), user, assistant, …]`.
 
+### Voice Modality
+`generate_workflow_dataset`'s `modality_preset` draws each conversation's modality: `"default"` (100% text), `"voice_mix"` (70/30), `"voice_heavy"` (40/60), `"voice_only"` (100% voice) — see `MODALITY_PRESETS`. `barge_in_rate` sets the share of VOICE conversations that carry one `<unspoken>` interruption. The format contract lives in `data/voice_convention.py`, checked by `find_voice_violations`, and covers five rules: (1) the `[STATE: X → Y]` marker never sits inside a `<S>...</S>` chunk; (2) a `<tool_call>` block never sits inside a chunk; (3) every spoken word sits inside a chunk — nothing unspoken outside one; (4) `<S>` and `</S>` tags are balanced; (5) `[END_CONVERSATION]` never shares a turn with a tool call, never sits inside a chunk, and always follows the last `</S>`.
+
 ## Task B: generate_tool_call_data.py
 
 ### Interface

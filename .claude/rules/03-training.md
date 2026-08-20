@@ -54,6 +54,9 @@ model = FastLanguageModel.get_peft_model(
 )
 ```
 
+### Per-Message `loss` Flag
+A message may carry `"loss": false` to opt it out of training (e.g. a voice conversation's `<unspoken>` barge-in marker, replayed into the model's own past turn). Only the `response_only` recipe (`render_response_only_sample`) can honour it — `all_tokens` has no per-message masking, so any corpus with a `loss:false` message must use `response_only`.
+
 ## grpo.py — Unsloth GRPO RL
 
 ### Pipeline
