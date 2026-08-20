@@ -2481,3 +2481,66 @@ class TestModality:
         with open(voice_meta.stats_file) as f:
             voice_stats = json.load(f)["stats"]
         assert voice_stats["modality_distribution"] == {"text": 0, "voice": 4}
+
+
+class TestVoiceTeacherPrompt:
+    """The teacher model must be told the voice rules, and only for voice."""
+
+    def test_text_system_prompt_is_unchanged(self):
+        from llm_workflow_agents.data.generate_workflows import (
+            _TEACHER_SYSTEM_PROMPT,
+            _teacher_system_prompt,
+        )
+
+        assert _teacher_system_prompt("text") == _TEACHER_SYSTEM_PROMPT
+
+    def test_voice_system_prompt_states_the_chunk_rule(self):
+        from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+
+        prompt = _teacher_system_prompt("voice")
+        assert "<S>" in prompt
+        assert "</S>" in prompt
+
+    def test_voice_system_prompt_keeps_markers_outside_chunks(self):
+        from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+
+        prompt = _teacher_system_prompt("voice")
+        assert "outside" in prompt.lower()
+
+    def test_text_rich_prompt_still_forbids_voice_markers(self):
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        assert "Do NOT include" in _rich_prompt_system("text")
+
+    def test_voice_rich_prompt_requires_chunked_dialogue(self):
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        assert "<S>" in _rich_prompt_system("voice")
+
+    def test_voice_teacher_prompt_states_the_length_limits(self):
+        from llm_workflow_agents.data.generate_workflows import _build_teacher_prompt
+        from llm_workflow_agents.data.voice_convention import CHUNK_MAX_CHARS
+
+        graph = WorkflowGraph(
+            states=[WorkflowState(id="s0", name="A"), WorkflowState(id="s1", name="B")],
+            transitions=[WorkflowTransition(from_state="s0", to_state="s1", condition="")],
+            initial_state="s0", terminal_states=["s1"],
+        )
+        prompt = _build_teacher_prompt(
+            graph, [], "cooperative", COMPLEXITY_SPECS[ComplexityLevel.L1], None,
+            modality="voice",
+        )
+        assert str(CHUNK_MAX_CHARS) in prompt
+
+    def test_text_teacher_prompt_mentions_no_voice_marker(self):
+        from llm_workflow_agents.data.generate_workflows import _build_teacher_prompt
+
+        graph = WorkflowGraph(
+            states=[WorkflowState(id="s0", name="A"), WorkflowState(id="s1", name="B")],
+            transitions=[WorkflowTransition(from_state="s0", to_state="s1", condition="")],
+            initial_state="s0", terminal_states=["s1"],
+        )
+        prompt = _build_teacher_prompt(
+            graph, [], "cooperative", COMPLEXITY_SPECS[ComplexityLevel.L1], None,
+        )
+        assert "<S>" not in prompt

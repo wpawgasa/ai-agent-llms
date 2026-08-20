@@ -43,6 +43,7 @@ from llm_workflow_agents.data._workflow_script import (
     find_tool_placement_violations,
 )
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+from llm_workflow_agents.data.voice_convention import find_voice_violations
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     CROSS_CUTTING_INTENTS,
@@ -1203,6 +1204,75 @@ RULES:
 """
 
 
+_VOICE_RULES = """\
+
+VOICE MODE — this conversation is spoken aloud through a text-to-speech engine.
+The orchestrator reads your output as a stream, finds each <S>...</S> chunk, and
+sends it to the engine in order. Six extra rules apply:
+
+- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>. The
+  agent never speaks it.
+- V2. Put every <tool_call> block OUTSIDE every <S>. The agent never speaks it.
+- V3. Put every spoken word INSIDE a chunk. No spoken text may sit outside
+  <S>...</S>.
+- V4. Split at natural pause points. Keep a chunk to {chunk_target} characters
+  and never above {chunk_max}. Keep a turn to {turn_target} chunks and never
+  above {turn_max}.
+- V5. Keep replies short. A spoken reply is one or two sentences. Use no
+  markdown, no bullet points, no numbered lists, no headers.
+- V6. End a terminal turn with [END_CONVERSATION] after the last </S>, outside
+  the chunks. Never put it on a turn that also calls a tool.
+
+Worked example of one voice assistant turn:
+    [STATE: VERIFY_PATIENT → VERIFY_PATIENT]
+    <S>ได้เลยค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูลสักครู่นะคะ</S>
+    <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345"}}}}</tool_call>
+"""
+
+
+_BARGE_IN_RULES = """\
+
+BARGE-IN — this conversation contains exactly one interruption. Write all three
+turns of it, somewhere in the middle of the call:
+
+- B1. One assistant turn is cut off. Put the marker <unspoken> at the exact word
+  where the voice stopped. Keep the rest of the turn after the marker. The
+  caller never heard it.
+- B2. The next user turn is the caller cutting in.
+- B3. The next assistant turn opens with a short acknowledgement, then repeats
+  what the caller never heard. Use one of these openers: {openers}.
+- B4. That recovery turn annotates the SAME state as the interrupted turn. An
+  interruption completes nothing, so the workflow does not advance.
+- B5. Use the <unspoken> marker exactly once in the whole conversation, and
+  never in the last assistant turn.
+"""
+
+
+def _teacher_system_prompt(modality: str) -> str:
+    """Return the teacher system prompt for one modality.
+
+    The text branch returns the frozen constant byte for byte. Rendering the
+    voice rules here rather than appending them to the user prompt matters: the
+    constant's OUTPUT FORMAT example shows unchunked content, so an appended
+    block would contradict an example the teacher model can see.
+    """
+    if modality != "voice":
+        return _TEACHER_SYSTEM_PROMPT
+    from llm_workflow_agents.data.voice_convention import (
+        CHUNK_MAX_CHARS,
+        CHUNK_TARGET_CHARS,
+        TURN_MAX_CHUNKS,
+        TURN_TARGET_CHUNKS,
+    )
+
+    return _TEACHER_SYSTEM_PROMPT + _VOICE_RULES.format(
+        chunk_target=CHUNK_TARGET_CHARS,
+        chunk_max=CHUNK_MAX_CHARS,
+        turn_target=TURN_TARGET_CHUNKS,
+        turn_max=TURN_MAX_CHUNKS,
+    )
+
+
 _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
     "en": "Language: English — generate the entire conversation in English.",
     "th": (
@@ -1231,6 +1301,8 @@ def _build_teacher_prompt(
     intent_category: str = "service",
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
+    modality: str = "text",
+    barge_in: bool = False,
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
@@ -1253,6 +1325,28 @@ def _build_teacher_prompt(
             f"themselves and stating the reason for reaching out — {outbound_reason.description}. "
             "The customer responds only after that. The workflow must still reach a terminal state.\n"
         )
+    voice_line = ""
+    if modality == "voice":
+        from llm_workflow_agents.data.voice_convention import (
+            ACKNOWLEDGEMENTS,
+            CHUNK_MAX_CHARS,
+            CHUNK_TARGET_CHARS,
+            TURN_MAX_CHUNKS,
+            TURN_TARGET_CHUNKS,
+        )
+
+        voice_line = (
+            f"Conversation modality: VOICE. A text-to-speech engine speaks every "
+            f"assistant turn. Split each turn into <S>...</S> chunks: at most "
+            f"{TURN_MAX_CHUNKS} chunks per turn (aim for {TURN_TARGET_CHUNKS}), "
+            f"at most {CHUNK_MAX_CHARS} characters per chunk (aim for "
+            f"{CHUNK_TARGET_CHARS}). Keep every reply to one or two sentences.\n"
+        )
+        if barge_in:
+            openers = ", ".join(
+                f'"{o}"' for o in ACKNOWLEDGEMENTS.get(language, ACKNOWLEDGEMENTS["en"])
+            )
+            voice_line += _BARGE_IN_RULES.format(openers=openers)
     transition_key = (
         "Transition trigger types: "
         "'always'=unconditional spine, 'tool_success'=after successful tool call, "
@@ -1266,6 +1360,7 @@ def _build_teacher_prompt(
         f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
         f"{outbound_line}"
+        f"{voice_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"{contract_block}\n\n"
@@ -1318,6 +1413,24 @@ RULES:
 """
 
 
+_RICH_VOICE_OVERRIDE = """\
+
+VOICE MODE — this prompt drives a spoken agent. Override rule 4 above: every
+quoted dialogue line MUST be split into <S>...</S> chunks at natural pause
+points, exactly as a text-to-speech engine needs. Example:
+"<S>สวัสดีค่ะ</S><S>ไม่ทราบว่าสะดวกสนทนาสักครู่ไหมคะ</S>"
+Do include [END_CONVERSATION] after the final chunk of a closing section.
+Still do NOT include <F> or [TRANSFER].
+"""
+
+
+def _rich_prompt_system(modality: str) -> str:
+    """Return the rich-prompt authoring instructions for one modality."""
+    if modality != "voice":
+        return _RICH_PROMPT_SYSTEM
+    return _RICH_PROMPT_SYSTEM + _RICH_VOICE_OVERRIDE
+
+
 def _build_rich_prompt_request(
     workflow: WorkflowGraph,
     tool_schemas: list[dict[str, Any]],
@@ -1344,6 +1457,7 @@ def _generate_rich_system_prompt(
     domain_spec: DomainSpec | None,
     language: str,
     teacher_model: str,
+    modality: str = "text",
 ) -> str:
     """Ask the teacher model to author a natural-language system prompt.
 
@@ -1352,7 +1466,7 @@ def _generate_rich_system_prompt(
     """
     user_prompt = _build_rich_prompt_request(workflow, tool_schemas, domain_spec, language)
     try:
-        raw = call_teacher_model(teacher_model, _RICH_PROMPT_SYSTEM, user_prompt)
+        raw = call_teacher_model(teacher_model, _rich_prompt_system(modality), user_prompt)
         data = json.loads(raw)
         text = str(data.get("system_prompt", "")).strip()
         if not text:
@@ -1395,6 +1509,8 @@ def _generate_teacher_conversation(
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
     repair_feedback: list[str] | None = None,
+    modality: str = "text",
+    barge_in: bool = False,
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
@@ -1411,7 +1527,7 @@ def _generate_teacher_conversation(
     """
     user_prompt = _build_teacher_prompt(
         workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
-        initiator, outbound_reason,
+        initiator, outbound_reason, modality=modality, barge_in=barge_in,
     )
     if repair_feedback:
         feedback_lines = "\n".join(f"- {v}" for v in repair_feedback)
@@ -1424,7 +1540,9 @@ def _generate_teacher_conversation(
             f"{feedback_lines}"
         )
     try:
-        raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
+        raw = call_teacher_model(
+            teacher_model, _teacher_system_prompt(modality), user_prompt
+        )
         messages = _parse_messages_response(raw)
         # The generator owns messages[0]: the caller applies a rich or bare
         # system prompt. Drop any system turn the teacher emitted so its own
@@ -1777,6 +1895,7 @@ def generate_workflow_dataset(
                 messages = _generate_teacher_conversation(
                     workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
                     sample_language, intent_category, initiator, outbound_reason,
+                    modality=modality, barge_in=barge_in,
                 )
             except Exception:
                 # API/parse failure (already logged as teacher_model_fallback).
@@ -1824,6 +1943,7 @@ def generate_workflow_dataset(
                             msgs, initial_name, terminal_names
                         )
                         or find_shape_violations(msgs, initiator)
+                        or find_voice_violations(msgs, modality)
                     )
                     if violations:
                         logger.debug(
@@ -1849,6 +1969,7 @@ def generate_workflow_dataset(
                             teacher_model, sample_language, intent_category,
                             initiator, outbound_reason,
                             repair_feedback=violations,
+                            modality=modality, barge_in=barge_in,
                         )
                     except Exception:
                         _teacher_call_failures += 1
@@ -1952,7 +2073,8 @@ def generate_workflow_dataset(
         use_rich_prompt = bool(teacher_model) and rng.random() < rich_prompt_rate
         if use_rich_prompt:
             rich_prompt = _generate_rich_system_prompt(
-                workflow, tool_schemas, domain_spec, sample_language, teacher_model
+                workflow, tool_schemas, domain_spec, sample_language, teacher_model,
+                modality=modality,
             )
             if rich_prompt:
                 rich_used = 1
