@@ -402,3 +402,24 @@ New breakage: none.
 Deferred: none.</result>
 <usage><subagent_tokens>82016</subagent_tokens><tool_uses>10</tool_uses><duration_ms>57286</duration_ms></usage>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>a21bf72e705cf82db</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a21bf72e705cf82db.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 6: per-message loss flag" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Report written. Summary for you:
+
+Status: DONE_WITH_CONCERNS
+Commit: `52625ff` on `feat/voice-conversation-generation`
+Test summary: 4/4 new tests pass; full `test_training.py` + new file = 83 passed / 2 failed (pre-existing GPU-bf16 env failures, confirmed via git-stash diff, unrelated to this change).
+
+Concerns:
+- Step 6's warning couldn't literally use the brief's `dataset`-iterating snippet — no such variable exists where `loss_mask` is selected, and even later `_prepare_split` drops the `messages` column post-render. I placed the warning at the same site but backed it with a new `_corpus_has_loss_false()` helper that scans the raw JSONL directly.
+- Discovered `_load_split` in `sft.py` (not in the brief's file list) was stripping the `loss` key from every message, which would make the step-3 masking fix inert in real training runs and the step-6 warning permanently silent. I fixed that too (preserves `loss:False` only, byte-identical for existing rows) since without it the feature doesn't actually work outside unit tests — flagged prominently in the report for review since it's beyond the brief's literal scope.</result>
+<usage><subagent_tokens>135837</subagent_tokens><tool_uses>42</tool_uses><duration_ms>645815</duration_ms></usage>
+</task-notification>
