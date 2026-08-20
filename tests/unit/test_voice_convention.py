@@ -198,3 +198,45 @@ def test_unspoken_marker_in_the_last_turn_is_a_violation():
         {"role": "assistant", "content": "[STATE: A → A]\n<S>ราคา<unspoken>ค่ะ</S>"},
     ]
     assert any("last" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_non_string_recovery_content_does_not_crash():
+    msgs = [
+        {"role": "user", "content": "สวัสดีค่ะ"},
+        {
+            "role": "assistant",
+            "content": "[STATE: A → A]\n<S>ราคาแพ็คเกจ<unspoken>อยู่ที่ 5999 บาทค่ะ</S>",
+        },
+        {"role": "user", "content": "เดี๋ยวก่อนค่ะ"},
+        {"role": "assistant", "content": [{"type": "text", "text": "hello"}]},
+    ]
+    result = find_voice_violations(msgs, "voice")
+    assert isinstance(result, list)
+
+
+def test_marker_in_user_message_is_a_violation():
+    msgs = [
+        {"role": "user", "content": "สวัสดีค่ะ<unspoken>test"},
+        {
+            "role": "assistant",
+            "content": "[STATE: A → A]\n<S>ราคาอยู่ที่ 5999 บาทค่ะ</S>",
+        },
+    ]
+    violations = find_voice_violations(msgs, "voice")
+    assert any("user" in v for v in violations)
+
+
+def test_marker_in_tool_message_is_a_violation():
+    msgs = [
+        {"role": "user", "content": "สวัสดีค่ะ"},
+        {
+            "role": "assistant",
+            "content": "[STATE: A → A]\n<S>ราคา</S>",
+        },
+        {
+            "role": "tool",
+            "content": "result<unspoken>",
+        },
+    ]
+    violations = find_voice_violations(msgs, "voice")
+    assert any("tool" in v for v in violations)

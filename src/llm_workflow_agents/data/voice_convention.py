@@ -178,24 +178,42 @@ def find_barge_in_violations(messages: list[dict[str, Any]]) -> list[str]:
     Fact 4 has a reason. A barge-in completes nothing, so the workflow does not
     advance. A conversation with no marker is valid and returns an empty list.
     """
-    marked = [
-        index
-        for index, msg in enumerate(messages)
-        if msg.get("role") == "assistant"
-        and _UNSPOKEN_MARKER in (msg.get("content") or "")
-    ]
+    # Count marker across ALL messages to detect it in wrong roles
     total = sum(
         (msg.get("content") or "").count(_UNSPOKEN_MARKER)
+        if isinstance(msg.get("content"), str)
+        else 0
         for msg in messages
-        if msg.get("role") == "assistant"
     )
+
     if total == 0:
         return []
+
+    # Check if marker is in a non-assistant message
+    for index, msg in enumerate(messages):
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        role = msg.get("role")
+        if role != "assistant" and _UNSPOKEN_MARKER in content:
+            return [
+                f"the {_UNSPOKEN_MARKER} marker sits in a {role} message at index {index}; "
+                f"it may only sit in an assistant turn"
+            ]
+
     if total > 1:
         return [
             f"the {_UNSPOKEN_MARKER} marker appears {total} times; it must "
             f"appear exactly once in a conversation"
         ]
+
+    marked = [
+        index
+        for index, msg in enumerate(messages)
+        if msg.get("role") == "assistant"
+        and isinstance(msg.get("content"), str)
+        and _UNSPOKEN_MARKER in msg.get("content")
+    ]
 
     marker_index = marked[0]
     later = [
@@ -212,6 +230,11 @@ def find_barge_in_violations(messages: list[dict[str, Any]]) -> list[str]:
     violations: list[str] = []
     interrupted = _STATE_RE.search(messages[marker_index].get("content") or "")
     recovery_content = messages[later[0]].get("content") or ""
+
+    # Guard recovery_content read - if not a string, treat as empty
+    if not isinstance(recovery_content, str):
+        recovery_content = ""
+
     recovery = _STATE_RE.search(recovery_content)
 
     spoken = "".join(iter_chunks(recovery_content)).lstrip()
