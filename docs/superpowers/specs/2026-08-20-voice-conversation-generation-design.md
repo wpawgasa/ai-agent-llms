@@ -249,8 +249,11 @@ Four call sites must honour the flag.
 3. `scripts/build_preference_pairs.py` never uses such a turn as a chosen turn.
    `scripts/mine_model_negatives.py` never uses it as a gold turn.
 4. `scripts/clean_task_a_sft.py` and `src/llm_workflow_agents/data/data_validator.py`
-   must keep the key. Risk R12 made the cleaner delete an unknown role. It must
-   not start deleting an unknown field.
+   must keep the key. Both keep it today. `clean_record` filters the message
+   list. It does not rebuild the message dicts. `data_validator` holds no
+   allowlist of message keys. This point therefore needs a regression test, not
+   a code change. Risk R12 made the cleaner delete an unknown role, so the
+   guard is worth its one test.
 
 One limit is real. The `all_tokens` recipe cannot express a per-turn opt-out.
 Under that recipe the code ignores the flag and logs a warning. The `response_only`
@@ -315,8 +318,11 @@ the voice rows. A blended score would move the pre-registered bar of 0.75 withou
 a decision.
 
 One contamination rule applies. Compute `user_turn_fingerprint` on the output of
-`strip_voice_markup`. The same user turn in two modalities must hash to one
-value. Otherwise it can land on both sides of a split.
+`strip_voice_markup`.
+
+This change is a no-op today. `user_turn_fingerprint` hashes user turns only, and
+only an assistant turn carries markup. The change is defensive. It keeps the
+fingerprint correct if a user turn ever carries a marker.
 
 ### Voice format compliance is a guardrail
 
