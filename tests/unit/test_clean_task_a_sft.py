@@ -158,3 +158,29 @@ class TestCleanRecord:
         cleaned, reason = clean_record(record)
         assert reason is None
         assert len(cleaned["messages"]) == len(record["messages"])
+
+    def test_cleaner_preserves_the_loss_flag(self):
+        """Risk R12 made the cleaner delete an unknown role. It must not start
+        deleting an unknown field."""
+        record = {
+            "messages": [
+                {"role": "system", "content": "s"},
+                {"role": "user", "content": "u"},
+                {"role": "assistant", "content": "a", "loss": False},
+            ],
+        }
+        cleaned, reason = clean_record(record)
+        assert reason is None
+        assert cleaned["messages"][-1]["loss"] is False
+
+    def test_cleaner_preserves_the_modality_field(self):
+        record = {
+            "modality": "voice",
+            "messages": [
+                {"role": "system", "content": "s"},
+                {"role": "user", "content": "u"},
+                {"role": "assistant", "content": "a"},
+            ],
+        }
+        cleaned, _ = clean_record(record)
+        assert cleaned["modality"] == "voice"

@@ -30,11 +30,13 @@ import random
 from pathlib import Path
 from typing import Any
 
+from llm_workflow_agents.data.voice_convention import strip_voice_markup
+
 
 def user_turn_fingerprint(conversation: dict[str, Any]) -> str:
     """Stable cross-corpus key for one conversation, from its user turns only."""
     users = [
-        str(m.get("content", "") or "")
+        strip_voice_markup(str(m.get("content", "") or ""))
         for m in (conversation.get("messages") or [])
         if m.get("role") == "user"
     ]
@@ -56,7 +58,7 @@ def user_turn_prefix_fingerprints(conversation: dict[str, Any]) -> set[str]:
     one of them.
     """
     users = [
-        str(m.get("content", "") or "")
+        strip_voice_markup(str(m.get("content", "") or ""))
         for m in (conversation.get("messages") or [])
         if m.get("role") == "user"
     ]
