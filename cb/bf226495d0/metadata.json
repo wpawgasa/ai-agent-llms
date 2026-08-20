@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "cbbf226495d0",
+  "strategy": "manual-commit",
+  "branch": "feat/voice-conversation-generation",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "scripts/split_task_a_sft.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cb/bf226495d0/0/metadata.json",
+      "transcript": "/cb/bf226495d0/0/full.jsonl",
+      "content_hash": "/cb/bf226495d0/0/content_hash.txt",
+      "prompt": "/cb/bf226495d0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 344,
+    "cache_creation_tokens": 331389,
+    "cache_read_tokens": 42388709,
+    "output_tokens": 159050,
+    "api_call_count": 172
+  }
+}
