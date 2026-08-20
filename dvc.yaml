@@ -128,7 +128,13 @@ stages:
     desc: >-
       Deterministic 85/10/5 train/validation/test split of the cleaned Task A
       SFT corpus. Seed=42. Reused across SFT training, GRPO training, and
-      held-out evaluation.
+      held-out evaluation. The shuffle runs per modality, so adding the voice
+      batch does not reassign a single existing text conversation -- a
+      positional shuffle over the concatenated pool moved 7 of the 278 pinned
+      held-out candidates into train. Verify it after any merge with
+      `--assert-unmoved <prior splits dir>`; that check is deliberately NOT in
+      the cmd below, because the prior splits are this stage's own output and
+      depending on them would make the stage irreproducible from scratch.
     cmd: >-
       python scripts/split_task_a_sft.py
       --input-dir data/output/sft/task_a_cleaned
