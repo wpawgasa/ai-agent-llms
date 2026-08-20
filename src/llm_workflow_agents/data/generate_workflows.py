@@ -173,6 +173,16 @@ INITIATION_PRESETS: dict[str, dict[str, float]] = {
     "outbound_heavy":  {"user": 0.40, "agent": 0.60},
 }
 
+MODALITY_PRESETS: dict[str, dict[str, float]] = {
+    # Text-only by default. A modality draw consumes randomness, so any other
+    # default would shift every existing config's random stream and change the
+    # data it reproduces from the same seed.
+    "default":     {"text": 1.00, "voice": 0.00},
+    "voice_mix":   {"text": 0.70, "voice": 0.30},
+    "voice_heavy": {"text": 0.40, "voice": 0.60},
+    "voice_only":  {"text": 0.00, "voice": 1.00},
+}
+
 
 @dataclass
 class DatasetMetadata:
@@ -184,6 +194,13 @@ class DatasetMetadata:
     output_files: list[Path] = field(default_factory=list)
     stats: dict[str, Any] = field(default_factory=dict)
     stats_file: Path | None = None
+
+    @property
+    def output_file(self) -> Path:
+        """Convenience accessor for the single-file case (every call today
+        produces exactly one JSONL). Prefer ``output_files`` for code that
+        must handle multiple output files."""
+        return self.output_files[0]
 
 
 @dataclass
@@ -774,6 +791,12 @@ class ConversationSample:
     ground_truth: dict[str, Any] = field(default_factory=dict)
     conversation_initiator: str = "user"
     outbound_reason: str | None = None
+    # "text" (written conversation) or "voice" (spoken, <S>-chunked). See
+    # data/voice_convention.py for the voice format.
+    modality: str = "text"
+    # True when this conversation carries one <unspoken> barge-in. Always
+    # False for a text conversation.
+    barge_in: bool = False
     # Provenance: "teacher" (live teacher output), "placeholder" (no teacher
     # configured), or "placeholder_fallback" (teacher path that exhausted the
     # redraw budget — exclude from quality metrics).
@@ -796,6 +819,8 @@ class ConversationSample:
             "ground_truth": self.ground_truth,
             "conversation_initiator": self.conversation_initiator,
             "outbound_reason": self.outbound_reason,
+            "modality": self.modality,
+            "barge_in": self.barge_in,
             "generation_source": self.generation_source,
         }
 
@@ -826,6 +851,16 @@ def _select_initiator(
     distribution: dict[str, float],
 ) -> str:
     """Select who opens the conversation ('user' inbound | 'agent' outbound)."""
+    cats = list(distribution.keys())
+    weights = list(distribution.values())
+    return rng.choices(cats, weights=weights, k=1)[0]
+
+
+def _select_modality(
+    rng: random.Random,
+    distribution: dict[str, float],
+) -> str:
+    """Select the conversation modality ('text' written | 'voice' spoken)."""
     cats = list(distribution.keys())
     weights = list(distribution.values())
     return rng.choices(cats, weights=weights, k=1)[0]
@@ -1435,6 +1470,8 @@ def generate_workflow_dataset(
     retry_budget: int | None = None,
     retry_exhaustion: Literal["none", "error_path", "handoff_in_state"] | None = None,
     require_tool_stay: bool = True,
+    modality_preset: str = "default",
+    barge_in_rate: float = 0.25,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1526,6 +1563,15 @@ def generate_workflow_dataset(
             v1-comparable data, where tool-call turns were free to advance.
             Only affects the teacher repair loop (``repair_incoherent=True``);
             the placeholder generator always emits conforming self-loops.
+        modality_preset: Share of spoken (voice) conversations. ``"default"``
+            is text-only and is the only preset that consumes no randomness,
+            so it reproduces every pre-existing seed exactly. ``"voice_mix"``
+            targets 30% voice, ``"voice_heavy"`` 60%, ``"voice_only"`` 100%.
+            A voice conversation splits each assistant turn into <S>...</S>
+            chunks; see data/voice_convention.py.
+        barge_in_rate: Share of VOICE conversations that carry one <unspoken>
+            barge-in and its recovery turn. Ignored for text conversations,
+            which never draw it. Must be within 0.0 and 1.0.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1547,6 +1593,15 @@ def generate_workflow_dataset(
             f"Unknown initiation_preset {initiation_preset!r}. "
             f"Valid options: {list(INITIATION_PRESETS)}"
         )
+    if modality_preset not in MODALITY_PRESETS:
+        raise ValueError(
+            f"Unknown modality_preset {modality_preset!r}. "
+            f"Valid options: {list(MODALITY_PRESETS)}"
+        )
+    if not 0.0 <= barge_in_rate <= 1.0:
+        raise ValueError(
+            f"barge_in_rate must be within 0.0 and 1.0, got {barge_in_rate}"
+        )
     if max_sample_attempts < 1:
         raise ValueError(
             f"max_sample_attempts must be >= 1, got {max_sample_attempts}"
@@ -1565,6 +1620,7 @@ def generate_workflow_dataset(
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
     active_initiation_dist = INITIATION_PRESETS[initiation_preset]
+    active_modality_dist = MODALITY_PRESETS[modality_preset]
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
@@ -1652,6 +1708,16 @@ def generate_workflow_dataset(
         _teacher_call_failures = 0
 
         behavior = _select_user_behavior(rng, active_distribution)
+
+        # Draw the modality ONLY for a non-default preset. The default path must
+        # consume no randomness, or every existing seed reproduces different
+        # data. tests/unit/test_data_generation.py guards this.
+        if modality_preset == "default":
+            modality = "text"
+            barge_in = False
+        else:
+            modality = _select_modality(rng, active_modality_dist)
+            barge_in = modality == "voice" and rng.random() < barge_in_rate
 
         # Select language (fixed or 50/50 mix per sample)
         sample_language = language if language is not None else rng.choice(["en", "th"])
@@ -1807,6 +1873,8 @@ def generate_workflow_dataset(
             "domain_key": domain_key,
             "domain_spec": domain_spec,
             "behavior": behavior,
+            "modality": modality,
+            "barge_in": barge_in,
             "sample_language": sample_language,
             "initiator": initiator,
             "outbound_reason": outbound_reason,
@@ -1875,6 +1943,8 @@ def generate_workflow_dataset(
         domain_key = result["domain_key"]
         domain_spec = result["domain_spec"]
         behavior = result["behavior"]
+        modality = result["modality"]
+        barge_in = result["barge_in"]
         sample_language = result["sample_language"]
         initiator = result["initiator"]
         outbound_reason = result["outbound_reason"]
@@ -1949,6 +2019,8 @@ def generate_workflow_dataset(
             ground_truth=_extract_ground_truth(messages, workflow),
             conversation_initiator=initiator,
             outbound_reason=(outbound_reason.key if outbound_reason else None),
+            modality=modality,
+            barge_in=barge_in,
             generation_source=generation_source,
         )
 

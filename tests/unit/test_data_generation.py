@@ -2402,3 +2402,66 @@ class TestRetryBudget:
                 last = [x for x in msgs if x.get("role") == "assistant"][-1]
                 assert last["annotations"]["state_transition"]["to"] in terminals
         assert checked > 0
+
+
+class TestModality:
+    """The modality axis: text or voice, drawn from a preset."""
+
+    def test_default_preset_is_text_only(self):
+        from llm_workflow_agents.data.generate_workflows import MODALITY_PRESETS
+
+        assert MODALITY_PRESETS["default"] == {"text": 1.00, "voice": 0.00}
+
+    def test_every_preset_sums_to_one(self):
+        from llm_workflow_agents.data.generate_workflows import MODALITY_PRESETS
+
+        for name, dist in MODALITY_PRESETS.items():
+            assert abs(sum(dist.values()) - 1.0) < 1e-9, name
+
+    def test_sample_defaults_to_text(self):
+        sample = ConversationSample(
+            conversation_id="x", complexity_level="L1", domain="banking",
+            num_states=3, num_tools=1, chain_depth=0, workflow_graph={},
+            workflow_script="", tool_schemas=[], messages=[], user_behavior="cooperative",
+        )
+        assert sample.modality == "text"
+        assert sample.to_dict()["modality"] == "text"
+
+    def test_unknown_preset_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="modality_preset"):
+            generate_workflow_dataset(
+                "L1", num_samples=1, output_dir=tmp_path, modality_preset="nope",
+            )
+
+    def test_negative_barge_in_rate_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="barge_in_rate"):
+            generate_workflow_dataset(
+                "L1", num_samples=1, output_dir=tmp_path, barge_in_rate=-0.1,
+            )
+
+    def test_default_preset_does_not_shift_the_random_stream(self, tmp_path):
+        """The core reproducibility guard.
+
+        Drawing a modality consumes randomness. If the default path drew one,
+        every existing config would produce different output from the same
+        seed. So the default path must draw nothing.
+        """
+        a = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "a", seed=42,
+        )
+        b = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "b", seed=42,
+            modality_preset="default",
+        )
+        rows_a = [json.loads(x) for x in a.output_file.read_text().splitlines()]
+        rows_b = [json.loads(x) for x in b.output_file.read_text().splitlines()]
+        assert [r["messages"] for r in rows_a] == [r["messages"] for r in rows_b]
+        assert all(r["modality"] == "text" for r in rows_a)
+
+    def test_voice_only_preset_marks_every_sample_voice(self, tmp_path):
+        meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path, seed=42,
+            modality_preset="voice_only",
+        )
+        rows = [json.loads(x) for x in meta.output_file.read_text().splitlines()]
+        assert all(r["modality"] == "voice" for r in rows)
