@@ -126,3 +126,29 @@ def test_plain_text_conversation_has_no_violations():
 def test_acknowledgements_cover_both_languages():
     assert set(ACKNOWLEDGEMENTS) == {"th", "en"}
     assert all(ACKNOWLEDGEMENTS[lang] for lang in ACKNOWLEDGEMENTS)
+
+
+def test_end_conversation_before_first_chunk_is_a_violation():
+    msgs = _voice_turn("[STATE: A → A]\n[END_CONVERSATION]<S>hello</S>")
+    assert any("before the final" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_end_conversation_between_chunks_is_a_violation():
+    msgs = _voice_turn(
+        "[STATE: A → A]\n<S>hello</S>[END_CONVERSATION]<S>world</S>"
+    )
+    assert any("before the final" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_end_conversation_after_final_chunk_is_accepted():
+    msgs = _voice_turn("[STATE: A → A]\n<S>hello</S><S>world</S>[END_CONVERSATION]")
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_non_string_content_does_not_crash():
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [{"type": "text", "text": "hello"}]},
+    ]
+    result = find_voice_violations(msgs, "voice")
+    assert isinstance(result, list)

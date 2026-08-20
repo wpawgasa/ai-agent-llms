@@ -135,6 +135,14 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
             f"{where}: [END_CONVERSATION] sits inside a chunk; it is never "
             f"spoken, so put it after the last </S>"
         )
+    if _END_MARKER in content:
+        last_close_tag_pos = content.rfind("</S>")
+        end_marker_pos = content.find(_END_MARKER)
+        if end_marker_pos < last_close_tag_pos:
+            violations.append(
+                f"{where}: [END_CONVERSATION] appears before the final </S>; "
+                f"it must follow the last chunk"
+            )
 
     # Rule 3: delete the markers that are allowed outside a chunk, then delete
     # the chunks themselves. Anything left is unspoken text the agent would
@@ -157,10 +165,10 @@ def find_voice_violations(
 ) -> list[str]:
     """Return every format violation in one conversation.
 
-    For a voice conversation this checks the five format rules, both length
-    limits, and the barge-in recovery. For a text conversation it checks that
-    no voice marker appears at all. Both directions matter. Without the second
-    the modality field is advisory.
+    For a voice conversation this checks the five format rules and both length
+    limits. For a text conversation it checks that no voice marker appears at
+    all. Both directions matter. Without the second the modality field is
+    advisory.
     """
     if modality == "text":
         return _find_text_violations(messages)
@@ -169,8 +177,11 @@ def find_voice_violations(
     for msg in messages:
         if msg.get("role") != "assistant":
             continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
         turn_index += 1
-        violations.extend(_check_voice_turn(msg.get("content") or "", turn_index))
+        violations.extend(_check_voice_turn(content, turn_index))
     return violations
 
 
