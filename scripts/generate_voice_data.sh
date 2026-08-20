@@ -35,17 +35,26 @@
 #                            (n / 15, remainder on the last leg).
 #   --teacher-model <name>   Teacher model (default: gemini-3.5-flash). Pass ""
 #                            (or "placeholder"/"none") for offline placeholder
-#                            generation -- no API, no key required.
+#                            generation -- no API, no key required. Passing
+#                            this explicitly always wins over --smoke-test's
+#                            own default, regardless of argument order.
 #   --barge-in-rate <f>      Share of voice conversations with one interruption
 #                            (default: 0.25)
-#   --smoke-test             Shorthand for --total 15 --teacher-model "" (a
-#                            fast, offline, no-API-key pipeline check)
+#   --smoke-test             Shorthand for --total 15. Also defaults the
+#                            teacher to the offline placeholder (fast, no API
+#                            key needed) UNLESS --teacher-model is passed
+#                            explicitly (in either order), in which case the
+#                            explicit model wins and a real, small, live-teacher
+#                            smoke run is performed instead -- useful for
+#                            cheaply checking <S> format compliance before
+#                            committing to the full 2400-conversation batch.
 #   --dry-run                Print the commands without running them
 #
 # Examples:
 #   GEMINI_API_KEY=... ./scripts/generate_voice_data.sh
 #   ./scripts/generate_voice_data.sh --smoke-test --dry-run
 #   ./scripts/generate_voice_data.sh --smoke-test --output-dir /tmp/voice_smoke
+#   ./scripts/generate_voice_data.sh --smoke-test --teacher-model gemini-3.5-flash
 
 set -euo pipefail
 
@@ -57,6 +66,8 @@ SEED=4242
 DRY_RUN=false
 TOTAL=2400
 TEACHER_MODEL="gemini-3.5-flash"
+TEACHER_MODEL_EXPLICIT=false
+SMOKE_TEST=false
 BARGE_IN_RATE=0.25
 
 # Load .env if present (mirrors python-dotenv behaviour in _teacher_client.py)
@@ -72,9 +83,9 @@ while [[ $# -gt 0 ]]; do
         --output-dir)     OUTPUT_DIR="$2";     shift 2 ;;
         --seed)           SEED="$2";           shift 2 ;;
         --total)          TOTAL="$2";          shift 2 ;;
-        --teacher-model)  TEACHER_MODEL="$2";  shift 2 ;;
+        --teacher-model)  TEACHER_MODEL="$2";  TEACHER_MODEL_EXPLICIT=true; shift 2 ;;
         --barge-in-rate)  BARGE_IN_RATE="$2";  shift 2 ;;
-        --smoke-test)     TOTAL=15; TEACHER_MODEL=""; shift ;;
+        --smoke-test)     TOTAL=15; SMOKE_TEST=true; shift ;;
         --dry-run)        DRY_RUN=true;        shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -83,14 +94,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --smoke-test defaults the teacher to the offline placeholder, but an
+# explicit --teacher-model always wins, regardless of which flag came first
+# on the command line -- this check runs only after the whole command line
+# has been parsed, so order cannot matter.
+if [[ "$SMOKE_TEST" == true && "$TEACHER_MODEL_EXPLICIT" == false ]]; then
+    TEACHER_MODEL=""
+fi
+
 if ! [[ "$TOTAL" =~ ^[0-9]+$ ]] || (( TOTAL < 1 )); then
     echo "Invalid --total: $TOTAL (expected an integer >= 1)" >&2; exit 1
 fi
 
 # "" / "placeholder" / "none" (case-insensitive) mean offline placeholder
 # generation (mirrors PLACEHOLDER_ALIASES in generate_sft_until_target.py):
-# no API, no key required. Normalize to "" so the emitted Python's
-# teacher_model='' is falsy, taking the same placeholder branch as None.
+# no API, no key required. Normalize to "" here so the emitted Python's
+# teacher_model=None takes the same placeholder branch generate_workflow_dataset
+# uses for teacher_model=None.
 case "${TEACHER_MODEL,,}" in
     ""|placeholder|none) TEACHER_MODEL=""; REQUIRED_KEY="" ;;
     gemini*) REQUIRED_KEY="GEMINI_API_KEY" ;;
@@ -101,6 +121,14 @@ esac
 
 if [[ "$DRY_RUN" = false && -n "$REQUIRED_KEY" ]]; then
     [[ -z "${!REQUIRED_KEY:-}" ]] && { echo "Error: $REQUIRED_KEY is not set (required for teacher model $TEACHER_MODEL)" >&2; exit 1; }
+fi
+
+# Python kwarg spelling: empty (placeholder) means "no teacher model", which
+# the library spells as None.
+if [[ -z "$TEACHER_MODEL" ]]; then
+    TEACHER_MODEL_PY="None"
+else
+    TEACHER_MODEL_PY="'$TEACHER_MODEL'"
 fi
 
 run() {
@@ -165,20 +193,15 @@ for LEVEL in "${LEVELS[@]}"; do
         esac
 
         echo "  [$LEVEL] ${TEACHER_MODEL:-placeholder} / $LANG / $N samples..."
-        # output_dir is bound via partial rather than passed directly in the
-        # generate_workflow_dataset(...) call: keeping the call itself
-        # all-literal-kwargs lets tooling parse it with ast.literal_eval
-        # without needing to special-case a Path(...) argument.
         run python3 -c "
-from functools import partial
 from pathlib import Path
-from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset as _gwd
-generate_workflow_dataset = partial(_gwd, output_dir=Path('$DEST'))
+from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
 meta = generate_workflow_dataset(
     complexity_level='$LEVEL',
     language=\"$LANG\",
     num_samples=$N,
-    teacher_model='$TEACHER_MODEL',
+    teacher_model=$TEACHER_MODEL_PY,
+    output_dir=Path('$DEST'),
     seed=$SEED,
     modality_preset=\"voice_only\",
     barge_in_rate=$BARGE_IN_RATE,

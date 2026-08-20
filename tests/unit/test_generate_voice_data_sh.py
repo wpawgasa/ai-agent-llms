@@ -17,9 +17,9 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "generate_voice_data.sh"
 
 
-def _dry_run() -> str:
+def _dry_run(*args: str) -> str:
     return subprocess.run(
-        ["bash", str(SCRIPT), "--dry-run"],
+        ["bash", str(SCRIPT), "--dry-run", *args],
         capture_output=True, text=True, check=True,
     ).stdout
 
@@ -54,5 +54,38 @@ def test_kwargs_bind_against_the_real_signature():
     out = _dry_run()
     for block in re.findall(r"(meta = generate_workflow_dataset\(.*?\n\))", out, re.S):
         call = ast.parse(block).body[-1].value
-        kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}
+        # output_dir is a Path(...) call, not a literal -- ast.literal_eval
+        # can't evaluate it. Mirrors test_generate_sft_data_sh.py's
+        # _kwargs_of/test_emitted_kwargs_match_the_real_signature, which
+        # excludes output_dir the same way and re-adds a stand-in before
+        # binding.
+        kwargs = {
+            kw.arg: ast.literal_eval(kw.value)
+            for kw in call.keywords
+            if kw.arg != "output_dir"
+        }
+        kwargs["output_dir"] = "."
         inspect.signature(generate_workflow_dataset).bind(**kwargs)
+
+
+# --- --smoke-test / --teacher-model precedence ------------------------------
+
+
+def test_smoke_test_defaults_to_offline_placeholder_teacher():
+    out = _dry_run("--smoke-test")
+    assert "teacher_model=None" in out
+    assert "teacher_model='gemini" not in out
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--smoke-test", "--teacher-model", "gemini-3.5-flash"),
+        ("--teacher-model", "gemini-3.5-flash", "--smoke-test"),
+    ],
+    ids=["smoke-then-teacher", "teacher-then-smoke"],
+)
+def test_explicit_teacher_model_overrides_smoke_test_default(args):
+    out = _dry_run(*args)
+    assert "teacher_model='gemini-3.5-flash'" in out
+    assert "teacher_model=None" not in out
