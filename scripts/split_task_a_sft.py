@@ -41,10 +41,12 @@ DEFAULT_SEED = 42
 DEFAULT_RATIOS = {"train": 0.85, "validation": 0.10, "test": 0.05}
 
 
-def _load_rows(input_dir: Path) -> list[dict]:
-    files = sorted(input_dir.glob("*.jsonl"))
+def _load_rows(input_dirs: list[Path]) -> list[dict]:
+    files: list[Path] = []
+    for input_dir in input_dirs:
+        files.extend(sorted(input_dir.glob("*.jsonl")))
     if not files:
-        sys.exit(f"Error: no *.jsonl files found in {input_dir}")
+        sys.exit(f"Error: no *.jsonl files found in {input_dirs}")
     rows: list[dict] = []
     for f in files:
         with open(f) as fh:
@@ -74,9 +76,13 @@ def main() -> None:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=DEFAULT_INPUT,
-        metavar="DIR",
-        help=f"Directory of cleaned *.jsonl files (default: {DEFAULT_INPUT}).",
+        action="append",
+        required=True,
+        help=(
+            "Directory of *.jsonl conversations. Repeat the flag to read more "
+            "than one directory, for example the text corpus and the voice "
+            "corpus."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -113,11 +119,12 @@ def main() -> None:
             f"(train={args.train}, validation={args.validation}, test={args.test})"
         )
 
-    input_dir: Path = args.input_dir
+    input_dirs: list[Path] = args.input_dir
     output_dir: Path = args.output_dir
 
-    if not input_dir.is_dir():
-        sys.exit(f"Error: input directory not found: {input_dir}")
+    for input_dir in input_dirs:
+        if not input_dir.is_dir():
+            sys.exit(f"Error: input directory not found: {input_dir}")
 
     existing = {
         s: (output_dir / f"{s}.jsonl") for s in ("train", "validation", "test")
@@ -129,7 +136,7 @@ def main() -> None:
         print("Pass --force to overwrite.")
         return
 
-    rows = _load_rows(input_dir)
+    rows = _load_rows(input_dirs)
     n = len(rows)
     random.Random(args.seed).shuffle(rows)
 
@@ -144,7 +151,7 @@ def main() -> None:
         "test": rows[n_train + n_val :],
     }
 
-    print(f"Input dir   : {input_dir}")
+    print(f"Input dirs  : {input_dirs}")
     print(f"Output dir  : {output_dir}")
     print(f"Seed        : {args.seed}")
     print(f"Ratios      : train={args.train}  validation={args.validation}  test={args.test}")

@@ -134,9 +134,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--input-dir",
+        type=Path,
+        action="append",
         required=True,
-        metavar="DIR",
-        help="Directory containing raw *.jsonl files.",
+        help=(
+            "Directory of *.jsonl conversations. Repeat the flag to read more "
+            "than one directory, for example the text corpus and the voice "
+            "corpus."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -156,15 +161,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    input_dir = Path(args.input_dir)
+    input_dirs: list[Path] = args.input_dir
     output_dir = Path(args.output_dir)
 
-    if not input_dir.is_dir():
-        sys.exit(f"Error: input directory not found: {input_dir}")
+    for input_dir in input_dirs:
+        if not input_dir.is_dir():
+            sys.exit(f"Error: input directory not found: {input_dir}")
 
-    src_files = sorted(input_dir.glob("*.jsonl"))
+    src_files: list[Path] = []
+    for input_dir in input_dirs:
+        src_files.extend(sorted(input_dir.glob("*.jsonl")))
     if not src_files:
-        sys.exit(f"Error: no *.jsonl files found in {input_dir}")
+        sys.exit(f"Error: no *.jsonl files found in {input_dirs}")
 
     if args.dry_run:
         print("[dry-run] No files will be written.")
