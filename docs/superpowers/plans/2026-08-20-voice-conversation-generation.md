@@ -1119,7 +1119,8 @@ The placeholder is the fallback when the teacher model fails. A voice sample tha
 
 **Files:**
 - Modify: `src/llm_workflow_agents/data/generate_workflows.py:916-1137` (`_generate_placeholder_conversation`)
-- Test: `tests/unit/test_data_generation.py`
+- Modify: `src/llm_workflow_agents/data/voice_convention.py` (adds `chunk_spoken_text`)
+- Test: `tests/unit/test_data_generation.py`, `tests/unit/test_voice_convention.py`
 
 **Interfaces:**
 - Consumes: `find_voice_violations` (Task 1), `modality` (Task 3).
@@ -1301,12 +1302,13 @@ import pytest
 
 from llm_workflow_agents.training.sft import render_response_only_sample
 
-transformers = pytest.importorskip("transformers")
-
-
 @pytest.fixture(scope="module")
 def tokenizer():
-    return transformers.AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
+    # Reuse the repo's existing helper: it skips cleanly on an offline machine
+    # instead of erroring. Qwen/Qwen2.5-0.5B-Instruct is in the local HF cache.
+    from tests.unit.test_training import _load_tokenizer_or_skip
+
+    return _load_tokenizer_or_skip("Qwen/Qwen2.5-0.5B-Instruct")
 
 
 def _messages(loss_flag):
@@ -1970,8 +1972,11 @@ Apply `filter_by_modality(candidates, args.modality)` immediately after the cand
 This is the gate on the whole task. Run the rebuild from
 `docs/cat_a_c2_heldout_result.md:241`, unchanged:
 
+This machine has no `.venv-train`, and `build_heldout_clean_set.py` runs fine in
+`.venv`. Run it there:
+
 ```bash
-.venv-train/bin/python scripts/build_heldout_clean_set.py \
+source .venv/bin/activate && python scripts/build_heldout_clean_set.py \
     --candidate-split data/output/sft/task_a_splits/test.jsonl \
     --exclusion-split /tmp/v1_splits/train.jsonl \
     --exclusion-split /tmp/v1_splits/validation.jsonl \
@@ -1992,12 +1997,29 @@ failed to preserve the old path, and that breaks the only link to cell C2's
 
 - [ ] **Step 6: Add the compliance guardrail to the audit**
 
-In `scripts/heldout_composite_audit.py`, compute one extra number and report it beside the composite. Do not add it to the composite:
+In `scripts/heldout_composite_audit.py`, compute one extra number and report it beside the composite. Do not add it to the composite.
+
+Two facts about that file, verified: the per-row list is named `rows`, not
+`results`, and it is built at line 135 as
+`rows.append({"row_index": i, "completion": comp, **comps})`. That dict does not
+carry the modality. Add it there first, reading it from the source conversation
+and defaulting to `"text"`:
+
+```python
+        rows.append({
+            "row_index": i,
+            "completion": comp,
+            "modality": (conv.get("modality") or "text"),
+            **comps,
+        })
+```
+
+Then compute the guardrail:
 
 ```python
     # A guardrail, never a composite term. Adding a term would change what
     # cell C2's 0.7595 means.
-    voice_rows = [r for r in results if (r.get("modality") or "text") == "voice"]
+    voice_rows = [r for r in rows if r.get("modality") == "voice"]
     if voice_rows:
         clean = sum(
             1 for r in voice_rows
