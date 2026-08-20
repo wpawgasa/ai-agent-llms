@@ -397,3 +397,42 @@ def test_apply_barge_in_loss_flag_ignores_a_marker_in_a_user_turn():
     messages = [{"role": "user", "content": "<unspoken>"}]
     assert apply_barge_in_loss_flag(messages) is False
     assert not any("loss" in m for m in messages)
+
+
+def test_placeholder_generator_never_trips_the_chunker_limit():
+    """The raise must not be reachable from the only production caller.
+
+    ``chunk_spoken_text`` raises rather than truncating (silent data loss in a
+    corpus builder is the R12/R13 shape). Its sole production caller is
+    ``generate_workflows._render_turn``, which passes placeholder prose. If any
+    placeholder line ever exceeded SPOKEN_CHARS_MAX the generator would crash
+    mid-batch, so pin it: every spoken turn the offline generator writes must
+    fit, at every level.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
+    from llm_workflow_agents.data.voice_convention import (
+        SPOKEN_CHARS_MAX,
+        iter_chunks,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for level in ("L1", "L3", "L5"):
+            meta = generate_workflow_dataset(
+                level,
+                num_samples=2,
+                output_dir=Path(tmp) / level,
+                seed=4242,
+                modality_preset="voice_only",
+            )
+            with open(meta.output_files[0]) as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    for msg in json.loads(line)["messages"]:
+                        if msg.get("role") != "assistant":
+                            continue
+                        spoken = "".join(iter_chunks(msg.get("content") or ""))
+                        assert len(spoken) <= SPOKEN_CHARS_MAX
