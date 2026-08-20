@@ -1628,7 +1628,8 @@ Keep the rest of the function body as it is. Change the argument definition:
         "--input-dir",
         type=Path,
         action="append",
-        required=True,
+        default=None,   # NOT default=DEFAULT_INPUT: with action="append" argparse
+                        # returns the default PLUS every appended value.
         help=(
             "Directory of *.jsonl conversations. Repeat the flag to read more "
             "than one directory, for example the text corpus and the voice "
@@ -1636,7 +1637,16 @@ Keep the rest of the function body as it is. Change the argument definition:
         ),
 ```
 
-Change `input_dir: Path = args.input_dir` to `input_dirs: list[Path] = args.input_dir`, change the `is_dir()` guard to a loop over `input_dirs`, and pass the list to `_load_rows`.
+Change `input_dir: Path = args.input_dir` to
+`input_dirs: list[Path] = sorted(args.input_dir or [DEFAULT_INPUT])`. The
+`or [DEFAULT_INPUT]` fallback preserves the zero-argument call form that
+`scripts/run_phase2_sft.sh:89` and `README.md:519` both use. The `sorted()`
+makes the result independent of flag order, and cannot change single-directory
+behaviour. Then change the `is_dir()` guard to a loop over `input_dirs`, and
+pass the list to `_load_rows`.
+
+Note `clean_task_a_sft.py` was always `required=True` and has no default to
+preserve; only `split_task_a_sft.py` needs the fallback.
 
 Apply the same three changes to `scripts/clean_task_a_sft.py`: `action="append"`, a loop for the `is_dir()` guard, and a loop that extends `src_files` across the directories.
 
