@@ -1,0 +1,21 @@
+/using-superpowers and /model-training-eval and /model-routing and /simplified-technical-english Cat A models will also be used for Voicebot system. Previously, we only generated written-based conversations. The `1_voice_agent_guidelines` in  @data/templates/monomax_prompt_parts.json and @data/templates/oceanlife_prompt_parts.json provide examples of specific guidelines for a voicebot. Specifically, a voicebot LLM is required to split the response into chunks and wrap each chunk with <S>...</S> tag. An orchestrator see this tag in response stream from LLM, then it send chunk sequentially to TTS. We'll need to generate more conversation similar to this and response should fit voice conversations (short) rather than text conversation (long). Modify teacher data generation script so it can additionally generate voice conversations.
+
+---
+
+yes
+
+---
+
+yes
+
+---
+
+yes
+
+---
+
+yes
+
+---
+
+go

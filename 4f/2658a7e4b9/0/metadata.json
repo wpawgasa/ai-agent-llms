@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4f2658a7e4b9",
+  "session_id": "799b50a9-397e-4e27-9357-aacf22452d98",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-20T07:29:16.704963508Z",
+  "branch": "feat/voice-conversation-generation",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/specs/2026-08-20-voice-conversation-generation-design.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "18b84a6b08d3",
+  "token_usage": {
+    "input_tokens": 84,
+    "cache_creation_tokens": 140775,
+    "cache_read_tokens": 5748162,
+    "output_tokens": 35909,
+    "api_call_count": 42
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-20T07:29:16.128617336Z",
+    "agent_lines": 363,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 363,
+    "agent_percentage": 100
+  }
+}
