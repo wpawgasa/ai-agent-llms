@@ -127,6 +127,16 @@ def main() -> int:
                    help="Stored audit JSON to check the rebuild against.")
     p.add_argument("--n-prompts", type=int, default=206)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--modality",
+        choices=("text", "voice", "all"),
+        default="all",
+        help=(
+            "Keep only conversations of this modality. The default of 'all' "
+            "keeps today's behaviour, so the pinned 206-row set of risk R17 "
+            "rebuilds unchanged."
+        ),
+    )
     args = p.parse_args()
 
     stats = build_clean_set(
@@ -134,6 +144,7 @@ def main() -> int:
         exclusion_splits=args.exclusion_split,
         out_dir=args.out_dir,
         split_name=args.split_name,
+        modality=args.modality,
     )
     print(json.dumps(stats, indent=2))
 

@@ -31,6 +31,8 @@
 #                              service_only, upsell_heavy (default: default)
 #   --initiation <preset>      Inbound/outbound mix: default (100% inbound),
 #                              balanced (70/30 user/agent), outbound_heavy (40/60) (default: default)
+#   --modality-preset <preset> Text/voice mix: default (100% text), voice_mix,
+#                              voice_heavy, voice_only (default: default)
 #   --retry-budget <n>         Override the tool-error retry budget for ALL levels: TOTAL
 #                              attempts at a failing call, counting the first (so 1 = no
 #                              retry). Must be >= 1. Default: per-level from
@@ -66,6 +68,7 @@ TEACHER_MODEL="gemini-3.5-flash"
 BEHAVIOR_PRESET="adversarial"
 INTENT_CATEGORY="default"
 INITIATION="default"
+MODALITY_PRESET="default"
 RETRY_BUDGET=""            # empty = per-level from COMPLEXITY_SPECS
 RETRY_EXHAUSTION="auto"    # auto = per-level from COMPLEXITY_SPECS
 REQUIRE_TOOL_STAY=true
@@ -88,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         --behavior-preset)  BEHAVIOR_PRESET="$2"; shift 2 ;;
         --intent-category)  INTENT_CATEGORY="$2"; shift 2 ;;
         --initiation)       INITIATION="$2";      shift 2 ;;
+        --modality-preset)  MODALITY_PRESET="$2"; shift 2 ;;
         --retry-budget)     RETRY_BUDGET="$2";    shift 2 ;;
         --retry-exhaustion) RETRY_EXHAUSTION="$2"; shift 2 ;;
         --require-tool-stay)    REQUIRE_TOOL_STAY=true;  shift ;;
@@ -108,6 +112,11 @@ esac
 case "$INITIATION" in
     default|balanced|outbound_heavy) ;;
     *) echo "Unknown --initiation: $INITIATION (expected default, balanced, outbound_heavy)" >&2; exit 1 ;;
+esac
+
+case "$MODALITY_PRESET" in
+    default|voice_mix|voice_heavy|voice_only) ;;
+    *) echo "Unknown --modality-preset: $MODALITY_PRESET (expected default, voice_mix, voice_heavy, voice_only)" >&2; exit 1 ;;
 esac
 
 case "$RETRY_EXHAUSTION" in
@@ -240,6 +249,7 @@ echo "Teacher model: $TEACHER_MODEL"
 echo "Behavior:      $BEHAVIOR_PRESET"
 echo "Intent mix:    $INTENT_CATEGORY"
 echo "Initiation:    $INITIATION"
+echo "Modality:      $MODALITY_PRESET"
 echo "Retry budget:  ${RETRY_BUDGET:-per-level}   Exhaustion: $RETRY_EXHAUSTION"
 echo "Tool-stay:     $([[ "$REQUIRE_TOOL_STAY" == true ]] && echo "on" || echo "OFF (v1-comparable)")"
 echo "Totals:        $TOTALS_MSG"
@@ -266,6 +276,7 @@ meta = generate_workflow_dataset(
     behavior_preset='$BEHAVIOR_PRESET',
     intent_category_preset='$INTENT_CATEGORY',
     initiation_preset='$INITIATION',
+    modality_preset='$MODALITY_PRESET',
     retry_budget=$RETRY_BUDGET_PY,
     retry_exhaustion=$RETRY_EXHAUSTION_PY,
     require_tool_stay=$REQUIRE_TOOL_STAY_PY,
@@ -287,6 +298,7 @@ meta = generate_workflow_dataset(
     behavior_preset='$BEHAVIOR_PRESET',
     intent_category_preset='$INTENT_CATEGORY',
     initiation_preset='$INITIATION',
+    modality_preset='$MODALITY_PRESET',
     retry_budget=$RETRY_BUDGET_PY,
     retry_exhaustion=$RETRY_EXHAUSTION_PY,
     require_tool_stay=$REQUIRE_TOOL_STAY_PY,
@@ -308,6 +320,7 @@ meta = generate_workflow_dataset(
     behavior_preset='$BEHAVIOR_PRESET',
     intent_category_preset='$INTENT_CATEGORY',
     initiation_preset='$INITIATION',
+    modality_preset='$MODALITY_PRESET',
     retry_budget=$RETRY_BUDGET_PY,
     retry_exhaustion=$RETRY_EXHAUSTION_PY,
     require_tool_stay=$REQUIRE_TOOL_STAY_PY,

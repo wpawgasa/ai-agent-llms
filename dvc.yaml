@@ -38,6 +38,29 @@ stages:
     # Levels L1–L5, seed=42, behavior=adversarial (87.5%) + cooperative_only (12.5%)
     # Legs: en/gpt-5.4-mini, th/gemini-3-flash-preview, code_switch/gpt-5.4-nano
 
+  task_a_sft_generate_voice:
+    desc: >-
+      Voice (spoken) Task A conversations, 2400 at 20/50/30 en/th/code_switch.
+      Every assistant turn splits into <S>...</S> chunks for a text-to-speech
+      engine. Skips task_a_sft_remediate: that stage replays an authoring
+      ledger keyed to specific existing conversations, and this batch needs no
+      repair because require_tool_stay is on at generation time. Joins the
+      chain at task_a_sft_clean. Requires a teacher API key.
+      The runner ends with scripts/check_voice_batch.py, which fails the stage
+      when the batch is mostly placeholder rows (spec risk 2) -- placeholder
+      output is format-perfect, so without that gate a total teacher failure
+      is indistinguishable from success.
+    cmd: ./scripts/generate_voice_data.sh
+    deps:
+      - scripts/generate_voice_data.sh
+      - scripts/check_voice_batch.py
+      - src/llm_workflow_agents/data/generate_workflows.py
+      - src/llm_workflow_agents/data/voice_convention.py
+      - data/templates/workflow_prompt_template.txt
+      - data/templates/tool_schemas_L1_to_L5.json
+    outs:
+      - data/output/sft/task_a_voice
+
   task_a_sft_remediate:
     desc: >-
       Bring the raw Task A corpus onto the tool-call state convention (a turn
@@ -78,6 +101,7 @@ stages:
     cmd: >-
       python scripts/clean_task_a_sft.py
       --input-dir data/output/sft/task_a_remediated
+      --input-dir data/output/sft/task_a_voice
       --output-dir data/output/sft/task_a_cleaned
       --quiet &&
       python scripts/clean_corrupted_conversations.py
@@ -86,6 +110,7 @@ stages:
       --quiet
     deps:
       - data/output/sft/task_a_remediated
+      - data/output/sft/task_a_voice
       - scripts/clean_task_a_sft.py
       - scripts/clean_corrupted_conversations.py
       - src/llm_workflow_agents/data/data_validator.py
@@ -103,7 +128,13 @@ stages:
     desc: >-
       Deterministic 85/10/5 train/validation/test split of the cleaned Task A
       SFT corpus. Seed=42. Reused across SFT training, GRPO training, and
-      held-out evaluation.
+      held-out evaluation. The shuffle runs per modality, so adding the voice
+      batch does not reassign a single existing text conversation -- a
+      positional shuffle over the concatenated pool moved 7 of the 278 pinned
+      held-out candidates into train. Verify it after any merge with
+      `--assert-unmoved <prior splits dir>`; that check is deliberately NOT in
+      the cmd below, because the prior splits are this stage's own output and
+      depending on them would make the stage irreproducible from scratch.
     cmd: >-
       python scripts/split_task_a_sft.py
       --input-dir data/output/sft/task_a_cleaned

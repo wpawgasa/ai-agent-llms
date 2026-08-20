@@ -119,6 +119,54 @@ class TestWorkflowGeneration:
         with open(r1.output_files[0]) as f1, open(r2.output_files[0]) as f2:
             assert f1.read() == f2.read()
 
+    def test_seed_determinism_across_processes(self, tmp_output_dir: Path) -> None:
+        """Same seed, two SEPARATE processes, DIFFERENT PYTHONHASHSEED values.
+
+        test_seed_determinism above runs both generations in one interpreter, so
+        it cannot see hash randomisation. Iterating a ``set[str]`` and handing
+        the result to ``rng.shuffle`` made the generator's output depend on
+        ``PYTHONHASHSEED``, which meant every DVC "reproducible" generation
+        stage was conditional on an environment variable nobody sets. This test
+        pins nothing: it launches two subprocesses with deliberately different
+        hash seeds and demands byte-identical output.
+        """
+        import os
+        import subprocess
+        import sys
+
+        # The digest goes to a file, not to stdout: the generator logs a
+        # structlog line to stdout that carries the (differing) temp path.
+        script = (
+            "import sys, pathlib, hashlib\n"
+            "sys.path.insert(0, %r)\n"
+            "from llm_workflow_agents.data.generate_workflows import "
+            "generate_workflow_dataset\n"
+            "meta = generate_workflow_dataset('L3', num_samples=6, seed=99, "
+            "language='en', output_dir=pathlib.Path(sys.argv[1]))\n"
+            "pathlib.Path(sys.argv[2]).write_text(hashlib.sha256("
+            "meta.output_files[0].read_bytes()).hexdigest())\n"
+        ) % str(Path(__file__).resolve().parents[2] / "src")
+
+        digests = []
+        for hashseed in ("0", "12345"):
+            env = dict(os.environ, PYTHONHASHSEED=hashseed)
+            out_dir = tmp_output_dir / f"hs{hashseed}"
+            digest_file = tmp_output_dir / f"digest{hashseed}.txt"
+            subprocess.run(
+                [sys.executable, "-c", script, str(out_dir), str(digest_file)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            digests.append(digest_file.read_text().strip())
+
+        assert digests[0] == digests[1], (
+            "generator output differs across PYTHONHASHSEED values: "
+            f"{digests[0]} vs {digests[1]} — some set iteration order is "
+            "leaking into the output"
+        )
+
     def test_messages_start_with_system(self, tmp_output_dir: Path) -> None:
         result = generate_workflow_dataset(
             complexity_level="L1",
@@ -2402,3 +2450,363 @@ class TestRetryBudget:
                 last = [x for x in msgs if x.get("role") == "assistant"][-1]
                 assert last["annotations"]["state_transition"]["to"] in terminals
         assert checked > 0
+
+
+class TestModality:
+    """The modality axis: text or voice, drawn from a preset."""
+
+    def test_default_preset_is_text_only(self):
+        from llm_workflow_agents.data.generate_workflows import MODALITY_PRESETS
+
+        assert MODALITY_PRESETS["default"] == {"text": 1.00, "voice": 0.00}
+
+    def test_every_preset_sums_to_one(self):
+        from llm_workflow_agents.data.generate_workflows import MODALITY_PRESETS
+
+        for name, dist in MODALITY_PRESETS.items():
+            assert abs(sum(dist.values()) - 1.0) < 1e-9, name
+
+    def test_sample_defaults_to_text(self):
+        sample = ConversationSample(
+            conversation_id="x", complexity_level="L1", domain="banking",
+            num_states=3, num_tools=1, chain_depth=0, workflow_graph={},
+            workflow_script="", tool_schemas=[], messages=[], user_behavior="cooperative",
+        )
+        assert sample.modality == "text"
+        assert sample.to_dict()["modality"] == "text"
+
+    def test_unknown_preset_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="modality_preset"):
+            generate_workflow_dataset(
+                "L1", num_samples=1, output_dir=tmp_path, modality_preset="nope",
+            )
+
+    def test_negative_barge_in_rate_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="barge_in_rate"):
+            generate_workflow_dataset(
+                "L1", num_samples=1, output_dir=tmp_path, barge_in_rate=-0.1,
+            )
+
+    def test_default_preset_does_not_shift_the_random_stream(self, tmp_path):
+        """The core reproducibility guard.
+
+        Drawing a modality consumes randomness. If the default path drew one,
+        every existing config would produce different output from the same
+        seed. So the default path must draw nothing.
+        """
+        a = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "a", seed=42,
+        )
+        b = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "b", seed=42,
+            modality_preset="default",
+        )
+        rows_a = [json.loads(x) for x in a.output_files[0].read_text().splitlines()]
+        rows_b = [json.loads(x) for x in b.output_files[0].read_text().splitlines()]
+        assert [r["messages"] for r in rows_a] == [r["messages"] for r in rows_b]
+        assert all(r["modality"] == "text" for r in rows_a)
+
+    def test_voice_only_preset_marks_every_sample_voice(self, tmp_path):
+        meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path, seed=42,
+            modality_preset="voice_only",
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert all(r["modality"] == "voice" for r in rows)
+
+    def test_stats_sidecar_reports_modality_distribution(self, tmp_path):
+        default_meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "default", seed=42,
+        )
+        with open(default_meta.stats_file) as f:
+            default_stats = json.load(f)["stats"]
+        assert default_stats["modality_distribution"] == {"text": 4, "voice": 0}
+
+        voice_meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "voice", seed=42,
+            modality_preset="voice_only",
+        )
+        with open(voice_meta.stats_file) as f:
+            voice_stats = json.load(f)["stats"]
+        assert voice_stats["modality_distribution"] == {"text": 0, "voice": 4}
+
+
+class TestVoiceTeacherPrompt:
+    """The teacher model must be told the voice rules, and only for voice."""
+
+    def test_text_system_prompt_is_unchanged(self):
+        from llm_workflow_agents.data.generate_workflows import (
+            _TEACHER_SYSTEM_PROMPT,
+            _teacher_system_prompt,
+        )
+
+        assert _teacher_system_prompt("text") == _TEACHER_SYSTEM_PROMPT
+
+    def test_voice_system_prompt_states_the_chunk_rule(self):
+        from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+
+        prompt = _teacher_system_prompt("voice")
+        assert "<S>" in prompt
+        assert "</S>" in prompt
+
+    def test_voice_system_prompt_keeps_markers_outside_chunks(self):
+        from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+
+        prompt = _teacher_system_prompt("voice")
+        assert "outside" in prompt.lower()
+
+    def test_text_rich_prompt_still_forbids_voice_markers(self):
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        assert "Do NOT include" in _rich_prompt_system("text")
+
+    def test_voice_rich_prompt_requires_chunked_dialogue(self):
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        assert "<S>" in _rich_prompt_system("voice")
+
+    def test_voice_teacher_prompt_states_the_length_limits(self):
+        from llm_workflow_agents.data.generate_workflows import _build_teacher_prompt
+        from llm_workflow_agents.data.voice_convention import CHUNK_MAX_CHARS
+
+        graph = WorkflowGraph(
+            states=[WorkflowState(id="s0", name="A"), WorkflowState(id="s1", name="B")],
+            transitions=[WorkflowTransition(from_state="s0", to_state="s1", condition="")],
+            initial_state="s0", terminal_states=["s1"],
+        )
+        prompt = _build_teacher_prompt(
+            graph, [], "cooperative", COMPLEXITY_SPECS[ComplexityLevel.L1], None,
+            modality="voice",
+        )
+        assert str(CHUNK_MAX_CHARS) in prompt
+
+    def test_text_teacher_prompt_mentions_no_voice_marker(self):
+        from llm_workflow_agents.data.generate_workflows import _build_teacher_prompt
+
+        graph = WorkflowGraph(
+            states=[WorkflowState(id="s0", name="A"), WorkflowState(id="s1", name="B")],
+            transitions=[WorkflowTransition(from_state="s0", to_state="s1", condition="")],
+            initial_state="s0", terminal_states=["s1"],
+        )
+        prompt = _build_teacher_prompt(
+            graph, [], "cooperative", COMPLEXITY_SPECS[ComplexityLevel.L1], None,
+        )
+        assert "<S>" not in prompt
+
+
+class TestPlaceholderVoice:
+    def test_placeholder_voice_output_passes_the_voice_checker(self, tmp_path):
+        """A fallback keeps its sample's modality, so it must obey the format."""
+        from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+        meta = generate_workflow_dataset(
+            "L3", num_samples=6, output_dir=tmp_path, seed=42,
+            modality_preset="voice_only",
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        for row in rows:
+            assert row["modality"] == "voice"
+            assert find_voice_violations(row["messages"], "voice") == []
+
+    def test_placeholder_text_output_holds_no_voice_marker(self, tmp_path):
+        from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+        meta = generate_workflow_dataset("L3", num_samples=6, output_dir=tmp_path, seed=42)
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        for row in rows:
+            assert find_voice_violations(row["messages"], "text") == []
+
+
+class TestBargeInLossFlagProducer:
+    """The `loss` flag must have a producer, and `barge_in` must be a fact.
+
+    Every consumer of the per-message `loss` key was built, tested and
+    documented while nothing anywhere wrote it — the R18(c) shape, a guardrail
+    wired but never armed. These tests fail if the producer is removed again.
+    """
+
+    _MARKER_CONVERSATION = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n"
+                "<S>Hello there</S><S>let me <unspoken>pull up your file</S>",
+            },
+            {"role": "user", "content": "sorry, one thing first"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n"
+                "<S>Of course</S><S>I was saying I would pull up your file</S>",
+            },
+        ]
+    }
+
+    _PLAIN_CONVERSATION = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n<S>Hello there</S>",
+            },
+        ]
+    }
+
+    def _generate(self, tmp_path, payload, monkeypatch, **kwargs):
+        monkeypatch.setattr(
+            gw, "call_teacher_model", lambda m, s, u: json.dumps(payload)
+        )
+        meta = generate_workflow_dataset(
+            "L1",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_path,
+            seed=5,
+            modality_preset="voice_only",
+            barge_in_rate=1.0,
+            rich_prompt_rate=0.0,
+            repair_incoherent=False,
+            **kwargs,
+        )
+        return json.loads(meta.output_files[0].read_text().splitlines()[0])
+
+    def test_marker_turn_carries_loss_false_and_nothing_else_does(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        row = self._generate(tmp_path, self._MARKER_CONVERSATION, monkeypatch)
+        flagged = [m for m in row["messages"] if m.get("loss") is False]
+        assert len(flagged) == 1, row["messages"]
+        assert "<unspoken>" in flagged[0]["content"]
+        assert flagged[0]["role"] == "assistant"
+        # No other message carries the key at all, so the absent-key default
+        # (True) governs every real training target.
+        assert sum(1 for m in row["messages"] if "loss" in m) == 1
+
+    def test_marker_conversation_records_barge_in_true(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        row = self._generate(tmp_path, self._MARKER_CONVERSATION, monkeypatch)
+        assert row["barge_in"] is True
+
+    def test_conversation_without_marker_has_no_loss_key_and_barge_in_false(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """barge_in_rate=1.0 asks for an interruption; this teacher writes none.
+
+        The stored flag must follow the content, not the request. A label that
+        disagrees with its own conversation is the R12 shape.
+        """
+        row = self._generate(tmp_path, self._PLAIN_CONVERSATION, monkeypatch)
+        assert row["barge_in"] is False
+        assert not any("loss" in m for m in row["messages"]), row["messages"]
+
+    def test_placeholder_fallback_never_claims_a_barge_in(self, tmp_path) -> None:
+        """The placeholder cannot write a three-turn interruption, so it must
+        not be labelled as carrying one."""
+        meta = generate_workflow_dataset(
+            "L2",
+            num_samples=4,
+            output_dir=tmp_path,
+            seed=7,
+            modality_preset="voice_only",
+            barge_in_rate=1.0,
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        assert all(r["barge_in"] is False for r in rows)
+        assert all(not any("loss" in m for m in r["messages"]) for r in rows)
+        # The gap is visible in the sidecar so a teacher that silently drops
+        # every interruption is detectable.
+        assert meta.stats["barge_in_requested"] == 4
+        assert meta.stats["barge_in_realized"] == 0
+
+    def test_stale_loss_key_from_the_teacher_is_deleted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The teacher is told to emit no extra keys, so a `loss` key on a turn
+        with no marker can only be a hallucination — honouring it would
+        silently drop a real training target."""
+        payload = json.loads(json.dumps(self._PLAIN_CONVERSATION))
+        payload["messages"][1]["loss"] = False
+        row = self._generate(tmp_path, payload, monkeypatch)
+        assert not any("loss" in m for m in row["messages"]), row["messages"]
+
+
+class TestRichPromptMarkerScrub:
+    """An authored system prompt must never carry a runtime control marker.
+
+    The rich prompt is generated AFTER the coherence-repair loop, so
+    find_voice_violations never sees it. _RICH_VOICE_OVERRIDE used to instruct
+    the teacher to put [END_CONVERSATION] into the system prompt, which at
+    rich_prompt_rate=0.30 would have manufactured ~720 copies of the L4_061_6
+    anomaly in the 2,400-conversation batch.
+    """
+
+    def test_voice_override_no_longer_asks_for_end_conversation(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        voice = _rich_prompt_system("voice")
+        assert "<S>" in voice  # chunked dialogue lines are still required
+        assert "Do include [END_CONVERSATION]" not in voice
+        assert "do NOT include [END_CONVERSATION]" in voice
+
+    def test_scrub_deletes_control_markers_from_a_voice_prompt(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        authored = 'Say "<S>ขอบคุณค่ะ</S>" [END_CONVERSATION] then stop.'
+        out = _scrub_rich_prompt(authored, "voice")
+        assert "[END_CONVERSATION]" not in out
+        assert "<S>ขอบคุณค่ะ</S>" in out  # chunking survives in voice
+
+    def test_scrub_deletes_chunk_markers_from_a_text_prompt(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        out = _scrub_rich_prompt('Say "<S>hello</S>" [END_CONVERSATION]', "text")
+        assert "<S>" not in out and "</S>" not in out
+        assert "[END_CONVERSATION]" not in out
+
+    def test_scrub_leaves_a_clean_prompt_untouched(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        authored = 'Say "<S>hello</S>" and wait.'
+        assert _scrub_rich_prompt(authored, "voice") == authored
+
+    def test_generated_voice_system_prompt_carries_no_control_marker(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """End to end: even a teacher that ignores the instruction cannot land
+        a control marker in messages[0]."""
+        rich = json.dumps(
+            {"system_prompt": 'Persona. Say "<S>สวัสดีค่ะ</S>" [END_CONVERSATION]'}
+        )
+        conversation = json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": "[STATE: GREETING → GREETING]\n<S>Hello</S>",
+                    },
+                ]
+            }
+        )
+
+        def fake_call(model, system_prompt, user_prompt):
+            return rich if "system_prompt" in system_prompt else conversation
+
+        monkeypatch.setattr(gw, "call_teacher_model", fake_call)
+        meta = generate_workflow_dataset(
+            "L1",
+            num_samples=2,
+            teacher_model="fake-teacher",
+            output_dir=tmp_path,
+            seed=5,
+            modality_preset="voice_only",
+            rich_prompt_rate=1.0,
+            repair_incoherent=False,
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        for row in rows:
+            assert "[END_CONVERSATION]" not in row["messages"][0]["content"]

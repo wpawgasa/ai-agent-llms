@@ -245,6 +245,7 @@ def generate_leg(
     retry_budget: int | None = None,
     retry_exhaustion: str | None = None,
     require_tool_stay: bool = True,
+    modality_preset: str = "default",
 ) -> dict:
     """Run the generate -> qualify -> accumulate loop for one level/language leg.
 
@@ -284,6 +285,7 @@ def generate_leg(
                 retry_budget=retry_budget,
                 retry_exhaustion=retry_exhaustion,  # type: ignore[arg-type]
                 require_tool_stay=require_tool_stay,
+                modality_preset=modality_preset,
             )
             batch = _read_jsonl(meta.output_files[0])
             gen += len(batch)
@@ -442,6 +444,9 @@ def main() -> int:
     p.add_argument("--behavior-preset", default="adversarial")
     p.add_argument("--intent-category", default="default")
     p.add_argument("--initiation", default="default")
+    p.add_argument("--modality-preset", default="default",
+                   help="Text/voice mix: default (100%% text), voice_mix, voice_heavy, "
+                        "voice_only (default: default).")
     p.add_argument("--retry-budget", type=int, default=None,
                    help="Override the retry budget for ALL selected levels: TOTAL attempts "
                         "at a failing tool call, counting the first (so 1 = no retry). "
@@ -577,6 +582,7 @@ def main() -> int:
                 retry_budget=args.retry_budget,
                 retry_exhaustion=retry_exhaustion,
                 require_tool_stay=args.require_tool_stay,
+                modality_preset=args.modality_preset,
             )
             all_stats.append(stats)
             # Reserve a disjoint seed band per leg so legs never share batches.
@@ -591,6 +597,7 @@ def main() -> int:
         "behavior_preset": args.behavior_preset,
         "intent_category": args.intent_category,
         "initiation": args.initiation,
+        "modality_preset": args.modality_preset,
         "base_seed": args.seed,
         "retry_budget": args.retry_budget,
         "retry_exhaustion": args.retry_exhaustion,

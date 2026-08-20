@@ -43,6 +43,11 @@ from llm_workflow_agents.data._workflow_script import (
     find_tool_placement_violations,
 )
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+from llm_workflow_agents.data.voice_convention import (
+    apply_barge_in_loss_flag,
+    chunk_spoken_text,
+    find_voice_violations,
+)
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     CROSS_CUTTING_INTENTS,
@@ -171,6 +176,16 @@ INITIATION_PRESETS: dict[str, dict[str, float]] = {
     "default":         {"user": 1.00, "agent": 0.00},  # 100% inbound (back-compat)
     "balanced":        {"user": 0.70, "agent": 0.30},
     "outbound_heavy":  {"user": 0.40, "agent": 0.60},
+}
+
+MODALITY_PRESETS: dict[str, dict[str, float]] = {
+    # Text-only by default. A modality draw consumes randomness, so any other
+    # default would shift every existing config's random stream and change the
+    # data it reproduces from the same seed.
+    "default":     {"text": 1.00, "voice": 0.00},
+    "voice_mix":   {"text": 0.70, "voice": 0.30},
+    "voice_heavy": {"text": 0.40, "voice": 0.60},
+    "voice_only":  {"text": 0.00, "voice": 1.00},
 }
 
 
@@ -331,7 +346,7 @@ def select_subgraph(
     # Step 2: add num_branches optional edges
     num_branches_target = rng.randint(*spec.num_branches)
     candidate_branch_edges = [
-        e for src in included_names
+        e for src in sorted(included_names)
         for e in branch_edges.get(src, [])
         if e.intent_category != "upsell_promo"
     ]
@@ -354,7 +369,7 @@ def select_subgraph(
     num_loops_target = rng.randint(*spec.num_loops)
     loops_added = 0
     all_loop_candidates = [
-        e for src in included_names
+        e for src in sorted(included_names)
         for e in branch_edges.get(src, [])
         if e.dst in included_names
         and e.dst != src
@@ -376,7 +391,7 @@ def select_subgraph(
     # Step 4: recovery arcs
     if spec.include_recovery:
         recovery_candidates = [
-            e for src in included_names
+            e for src in sorted(included_names)
             for e in branch_edges.get(src, [])
             if e.trigger == "tool_error" and e.dst in included_names
         ]
@@ -391,7 +406,7 @@ def select_subgraph(
     # Step 5: upsell arc
     if intent_category == "upsell_promo":
         upsell_candidates = [
-            e for src in included_names
+            e for src in sorted(included_names)
             for e in branch_edges.get(src, [])
             if e.intent_category == "upsell_promo" and e.dst in included_names
         ]
@@ -774,6 +789,12 @@ class ConversationSample:
     ground_truth: dict[str, Any] = field(default_factory=dict)
     conversation_initiator: str = "user"
     outbound_reason: str | None = None
+    # "text" (written conversation) or "voice" (spoken, <S>-chunked). See
+    # data/voice_convention.py for the voice format.
+    modality: str = "text"
+    # True when this conversation carries one <unspoken> barge-in. Always
+    # False for a text conversation.
+    barge_in: bool = False
     # Provenance: "teacher" (live teacher output), "placeholder" (no teacher
     # configured), or "placeholder_fallback" (teacher path that exhausted the
     # redraw budget — exclude from quality metrics).
@@ -796,6 +817,8 @@ class ConversationSample:
             "ground_truth": self.ground_truth,
             "conversation_initiator": self.conversation_initiator,
             "outbound_reason": self.outbound_reason,
+            "modality": self.modality,
+            "barge_in": self.barge_in,
             "generation_source": self.generation_source,
         }
 
@@ -826,6 +849,16 @@ def _select_initiator(
     distribution: dict[str, float],
 ) -> str:
     """Select who opens the conversation ('user' inbound | 'agent' outbound)."""
+    cats = list(distribution.keys())
+    weights = list(distribution.values())
+    return rng.choices(cats, weights=weights, k=1)[0]
+
+
+def _select_modality(
+    rng: random.Random,
+    distribution: dict[str, float],
+) -> str:
+    """Select the conversation modality ('text' written | 'voice' spoken)."""
     cats = list(distribution.keys())
     weights = list(distribution.values())
     return rng.choices(cats, weights=weights, k=1)[0]
@@ -925,6 +958,7 @@ def _generate_placeholder_conversation(
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
     resolved_retry_exhaustion: str = "none",
+    modality: str = "text",
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -944,10 +978,21 @@ def _generate_placeholder_conversation(
     Every random draw here must come from the caller's per-sample ``rng`` — the
     concurrent generation path relies on per-sample RNG isolation for
     byte-identical output at any ``max_workers``.
+
+    ``modality`` is the sample's assigned modality (Task 3). A fallback keeps
+    the sample's modality, so when it is ``"voice"`` every assistant turn's
+    spoken prose is run through ``chunk_spoken_text`` and the terminal turn
+    (when it holds no tool call) gets ``[END_CONVERSATION]`` appended. When it
+    is ``"text"`` (the default) output is byte-identical to before this
+    parameter existed.
     """
     messages: list[dict[str, Any]] = []
     domain_name = domain_spec.name if domain_spec else spec.level
     domain_intents = list(domain_spec.intents) if domain_spec else []
+
+    def _speak(prose: str) -> str:
+        """Render assistant prose for this sample's modality."""
+        return chunk_spoken_text(prose) if modality == "voice" else prose
 
     messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
@@ -959,11 +1004,11 @@ def _generate_placeholder_conversation(
     # before the customer says anything. Inbound is unchanged (user-first).
     if initiator == "agent" and outbound_reason is not None:
         initial_name = id_to_name.get(workflow.initial_state, workflow.initial_state)
-        opener = (
-            f"[STATE: {initial_name} → {initial_name}]\n"
+        opener_prose = (
             f"Hello, this is {domain_name} support reaching out. "
             f"I'm calling to {outbound_reason.description}."
         )
+        opener = f"[STATE: {initial_name} → {initial_name}]\n{_speak(opener_prose)}"
         messages.append({
             "role": "assistant",
             "content": opener,
@@ -1057,6 +1102,9 @@ def _generate_placeholder_conversation(
         if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
+            # Same content in every modality: a turn that only calls a tool
+            # is silent on the line (spec §2 rule 3) — no chunk is invented
+            # for it, in voice mode or otherwise.
             in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
             budget = max(1, spec.retry_budget)
             attempts = 0
@@ -1099,12 +1147,14 @@ def _generate_placeholder_conversation(
                     "role": "assistant",
                     "content": (
                         f"[STATE: {from_name} → {from_name}]\n"
-                        + handoff_tmpl.format(
-                            attempts=attempts,
-                            tool=tool_name,
-                            # Thai and code-switch use ครั้ง, which does not
-                            # inflect, so the key is simply unused there.
-                            times="time" if attempts == 1 else "times",
+                        + _speak(
+                            handoff_tmpl.format(
+                                attempts=attempts,
+                                tool=tool_name,
+                                # Thai and code-switch use ครั้ง, which does not
+                                # inflect, so the key is simply unused there.
+                                times="time" if attempts == 1 else "times",
+                            )
                         )
                     ),
                     "annotations": {
@@ -1120,10 +1170,22 @@ def _generate_placeholder_conversation(
                 )
                 messages.append({"role": "user", "content": ack_tmpl})
 
-        # Transition turn
+        # Transition turn. Same prose in every modality: when the state had
+        # no tools, text mode narrates "Handling ..." and voice mode speaks
+        # that same sentence (chunked). When the state had tools, text mode
+        # emits the bare marker and nothing else — voice mode does too; a
+        # turn with no spoken text is silent on the line (spec §2 rule 3),
+        # not a turn that needs invented filler.
         transition_content = f"[STATE: {from_name} → {to_name}]"
         if not (current_state and current_state.tools):
-            transition_content += f"\nHandling {domain_name} in state {from_name}."
+            transition_content += f"\n{_speak(f'Handling {domain_name} in state {from_name}.')}"
+        if modality == "voice" and step.to_state in terminal_ids:
+            # This turn never carries a tool call, so it is always eligible
+            # to close the conversation (rule V5). walk_path only lands on a
+            # terminal to_state on the final step of the path. A silent
+            # terminal turn (bare marker + this marker, no chunk) is legal
+            # under rule 3.
+            transition_content += "\n[END_CONVERSATION]"
         messages.append({
             "role": "assistant",
             "content": transition_content,
@@ -1175,6 +1237,75 @@ RULES:
 """
 
 
+_VOICE_RULES = """\
+
+VOICE MODE — this conversation is spoken aloud through a text-to-speech engine.
+The orchestrator reads your output as a stream, finds each <S>...</S> chunk, and
+sends it to the engine in order. Six extra rules apply:
+
+- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>. The
+  agent never speaks it.
+- V2. Put every <tool_call> block OUTSIDE every <S>. The agent never speaks it.
+- V3. Put every spoken word INSIDE a chunk. No spoken text may sit outside
+  <S>...</S>.
+- V4. Split at natural pause points. Keep a chunk to {chunk_target} characters
+  and never above {chunk_max}. Keep a turn to {turn_target} chunks and never
+  above {turn_max}.
+- V5. Keep replies short. A spoken reply is one or two sentences. Use no
+  markdown, no bullet points, no numbered lists, no headers.
+- V6. End a terminal turn with [END_CONVERSATION] after the last </S>, outside
+  the chunks. Never put it on a turn that also calls a tool.
+
+Worked example of one voice assistant turn:
+    [STATE: VERIFY_PATIENT → VERIFY_PATIENT]
+    <S>ได้เลยค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูลสักครู่นะคะ</S>
+    <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345"}}}}</tool_call>
+"""
+
+
+_BARGE_IN_RULES = """\
+
+BARGE-IN — this conversation contains exactly one interruption. Write all three
+turns of it, somewhere in the middle of the call:
+
+- B1. One assistant turn is cut off. Put the marker <unspoken> at the exact word
+  where the voice stopped. Keep the rest of the turn after the marker. The
+  caller never heard it.
+- B2. The next user turn is the caller cutting in.
+- B3. The next assistant turn opens with a short acknowledgement, then repeats
+  what the caller never heard. Use one of these openers: {openers}.
+- B4. That recovery turn annotates the SAME state as the interrupted turn. An
+  interruption completes nothing, so the workflow does not advance.
+- B5. Use the <unspoken> marker exactly once in the whole conversation, and
+  never in the last assistant turn.
+"""
+
+
+def _teacher_system_prompt(modality: str) -> str:
+    """Return the teacher system prompt for one modality.
+
+    The text branch returns the frozen constant byte for byte. Rendering the
+    voice rules here rather than appending them to the user prompt matters: the
+    constant's OUTPUT FORMAT example shows unchunked content, so an appended
+    block would contradict an example the teacher model can see.
+    """
+    if modality != "voice":
+        return _TEACHER_SYSTEM_PROMPT
+    from llm_workflow_agents.data.voice_convention import (
+        CHUNK_MAX_CHARS,
+        CHUNK_TARGET_CHARS,
+        TURN_MAX_CHUNKS,
+        TURN_TARGET_CHUNKS,
+    )
+
+    return _TEACHER_SYSTEM_PROMPT + _VOICE_RULES.format(
+        chunk_target=CHUNK_TARGET_CHARS,
+        chunk_max=CHUNK_MAX_CHARS,
+        turn_target=TURN_TARGET_CHUNKS,
+        turn_max=TURN_MAX_CHUNKS,
+    )
+
+
 _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
     "en": "Language: English — generate the entire conversation in English.",
     "th": (
@@ -1203,6 +1334,8 @@ def _build_teacher_prompt(
     intent_category: str = "service",
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
+    modality: str = "text",
+    barge_in: bool = False,
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
@@ -1225,6 +1358,28 @@ def _build_teacher_prompt(
             f"themselves and stating the reason for reaching out — {outbound_reason.description}. "
             "The customer responds only after that. The workflow must still reach a terminal state.\n"
         )
+    voice_line = ""
+    if modality == "voice":
+        from llm_workflow_agents.data.voice_convention import (
+            ACKNOWLEDGEMENTS,
+            CHUNK_MAX_CHARS,
+            CHUNK_TARGET_CHARS,
+            TURN_MAX_CHUNKS,
+            TURN_TARGET_CHUNKS,
+        )
+
+        voice_line = (
+            f"Conversation modality: VOICE. A text-to-speech engine speaks every "
+            f"assistant turn. Split each turn into <S>...</S> chunks: at most "
+            f"{TURN_MAX_CHUNKS} chunks per turn (aim for {TURN_TARGET_CHUNKS}), "
+            f"at most {CHUNK_MAX_CHARS} characters per chunk (aim for "
+            f"{CHUNK_TARGET_CHARS}). Keep every reply to one or two sentences.\n"
+        )
+        if barge_in:
+            openers = ", ".join(
+                f'"{o}"' for o in ACKNOWLEDGEMENTS.get(language, ACKNOWLEDGEMENTS["en"])
+            )
+            voice_line += _BARGE_IN_RULES.format(openers=openers)
     transition_key = (
         "Transition trigger types: "
         "'always'=unconditional spine, 'tool_success'=after successful tool call, "
@@ -1238,6 +1393,7 @@ def _build_teacher_prompt(
         f"(path_len={spec.target_path_len[0]}–{spec.target_path_len[1]}, chain_depth={spec.chain_depth})\n"
         f"User behavior: {behavior}\n"
         f"{outbound_line}"
+        f"{voice_line}"
         f"{promo_line}"
         f"{lang_instruction}\n\n"
         f"{contract_block}\n\n"
@@ -1290,6 +1446,61 @@ RULES:
 """
 
 
+_RICH_VOICE_OVERRIDE = """\
+
+VOICE MODE — this prompt drives a spoken agent. Override rule 4 above: every
+quoted dialogue line MUST be split into <S>...</S> chunks at natural pause
+points, exactly as a text-to-speech engine needs. Example:
+"<S>สวัสดีค่ะ</S><S>ไม่ทราบว่าสะดวกสนทนาสักครู่ไหมคะ</S>"
+Chunking is the ONLY change. Still do NOT include [END_CONVERSATION],
+<unspoken>, <F>, or [TRANSFER] — those are runtime control markers the agent
+emits during the call, never instructions written into this prompt.
+"""
+
+
+#: Markers that must never appear in an authored system prompt, by modality.
+#: `<S>` is legal in a voice system prompt because rule 4 above asks for
+#: chunked dialogue lines; the runtime control markers are legal in neither.
+_RICH_PROMPT_FORBIDDEN: dict[str, tuple[str, ...]] = {
+    "text": ("<S>", "</S>", "[END_CONVERSATION]", "<unspoken>", "[TRANSFER]"),
+    "voice": ("[END_CONVERSATION]", "<unspoken>", "[TRANSFER]"),
+}
+
+
+def _scrub_rich_prompt(text: str, modality: str) -> str:
+    """Delete runtime control markers from an authored system prompt.
+
+    The rich prompt is generated AFTER the coherence-repair loop
+    (`_build_one_sample`), so `find_voice_violations` never sees it. Telling
+    the teacher not to emit a marker is not the same as checking that it did
+    not, and an unchecked path is where L4_061_6 — the one existing corpus row
+    with a stray `[END_CONVERSATION]` in its system message — came from.
+
+    Scrubs rather than rejects: the authored text cost a paid API call and is
+    otherwise fine, and deleting a control marker from a prose instruction
+    changes nothing else about it. Loud either way — every scrub logs.
+    """
+    forbidden = _RICH_PROMPT_FORBIDDEN.get(modality, _RICH_PROMPT_FORBIDDEN["voice"])
+    found = [marker for marker in forbidden if marker in text]
+    if not found:
+        return text
+    for marker in found:
+        text = text.replace(marker, "")
+    logger.warning(
+        "rich_system_prompt_markers_scrubbed",
+        modality=modality,
+        markers=found,
+    )
+    return text
+
+
+def _rich_prompt_system(modality: str) -> str:
+    """Return the rich-prompt authoring instructions for one modality."""
+    if modality != "voice":
+        return _RICH_PROMPT_SYSTEM
+    return _RICH_PROMPT_SYSTEM + _RICH_VOICE_OVERRIDE
+
+
 def _build_rich_prompt_request(
     workflow: WorkflowGraph,
     tool_schemas: list[dict[str, Any]],
@@ -1316,6 +1527,7 @@ def _generate_rich_system_prompt(
     domain_spec: DomainSpec | None,
     language: str,
     teacher_model: str,
+    modality: str = "text",
 ) -> str:
     """Ask the teacher model to author a natural-language system prompt.
 
@@ -1324,12 +1536,12 @@ def _generate_rich_system_prompt(
     """
     user_prompt = _build_rich_prompt_request(workflow, tool_schemas, domain_spec, language)
     try:
-        raw = call_teacher_model(teacher_model, _RICH_PROMPT_SYSTEM, user_prompt)
+        raw = call_teacher_model(teacher_model, _rich_prompt_system(modality), user_prompt)
         data = json.loads(raw)
         text = str(data.get("system_prompt", "")).strip()
         if not text:
             raise ValueError("empty system_prompt in teacher response")
-        return text
+        return _scrub_rich_prompt(text, modality)
     except Exception as exc:
         logger.warning(
             "rich_system_prompt_fallback",
@@ -1367,6 +1579,8 @@ def _generate_teacher_conversation(
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
     repair_feedback: list[str] | None = None,
+    modality: str = "text",
+    barge_in: bool = False,
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
@@ -1383,7 +1597,7 @@ def _generate_teacher_conversation(
     """
     user_prompt = _build_teacher_prompt(
         workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
-        initiator, outbound_reason,
+        initiator, outbound_reason, modality=modality, barge_in=barge_in,
     )
     if repair_feedback:
         feedback_lines = "\n".join(f"- {v}" for v in repair_feedback)
@@ -1396,7 +1610,9 @@ def _generate_teacher_conversation(
             f"{feedback_lines}"
         )
     try:
-        raw = call_teacher_model(teacher_model, _TEACHER_SYSTEM_PROMPT, user_prompt)
+        raw = call_teacher_model(
+            teacher_model, _teacher_system_prompt(modality), user_prompt
+        )
         messages = _parse_messages_response(raw)
         # The generator owns messages[0]: the caller applies a rich or bare
         # system prompt. Drop any system turn the teacher emitted so its own
@@ -1435,6 +1651,8 @@ def generate_workflow_dataset(
     retry_budget: int | None = None,
     retry_exhaustion: Literal["none", "error_path", "handoff_in_state"] | None = None,
     require_tool_stay: bool = True,
+    modality_preset: str = "default",
+    barge_in_rate: float = 0.25,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1526,6 +1744,15 @@ def generate_workflow_dataset(
             v1-comparable data, where tool-call turns were free to advance.
             Only affects the teacher repair loop (``repair_incoherent=True``);
             the placeholder generator always emits conforming self-loops.
+        modality_preset: Share of spoken (voice) conversations. ``"default"``
+            is text-only and is the only preset that consumes no randomness,
+            so it reproduces every pre-existing seed exactly. ``"voice_mix"``
+            targets 30% voice, ``"voice_heavy"`` 60%, ``"voice_only"`` 100%.
+            A voice conversation splits each assistant turn into <S>...</S>
+            chunks; see data/voice_convention.py.
+        barge_in_rate: Share of VOICE conversations that carry one <unspoken>
+            barge-in and its recovery turn. Ignored for text conversations,
+            which never draw it. Must be within 0.0 and 1.0.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1547,6 +1774,15 @@ def generate_workflow_dataset(
             f"Unknown initiation_preset {initiation_preset!r}. "
             f"Valid options: {list(INITIATION_PRESETS)}"
         )
+    if modality_preset not in MODALITY_PRESETS:
+        raise ValueError(
+            f"Unknown modality_preset {modality_preset!r}. "
+            f"Valid options: {list(MODALITY_PRESETS)}"
+        )
+    if not 0.0 <= barge_in_rate <= 1.0:
+        raise ValueError(
+            f"barge_in_rate must be within 0.0 and 1.0, got {barge_in_rate}"
+        )
     if max_sample_attempts < 1:
         raise ValueError(
             f"max_sample_attempts must be >= 1, got {max_sample_attempts}"
@@ -1565,6 +1801,7 @@ def generate_workflow_dataset(
     active_distribution = BEHAVIOR_PRESETS[behavior_preset]
     active_intent_dist = INTENT_CATEGORY_PRESETS[intent_category_preset]
     active_initiation_dist = INITIATION_PRESETS[initiation_preset]
+    active_modality_dist = MODALITY_PRESETS[modality_preset]
 
     level = ComplexityLevel(complexity_level)
     spec = COMPLEXITY_SPECS[level]
@@ -1620,6 +1857,7 @@ def generate_workflow_dataset(
     language_counts: dict[str, int] = {}
     intent_category_counts: dict[str, int] = {c: 0 for c in active_intent_dist}
     initiator_counts: dict[str, int] = {"user": 0, "agent": 0}
+    modality_counts: dict[str, int] = {"text": 0, "voice": 0}
     outbound_reason_counts: dict[str, int] = {}
     outbound_fallback_inbound = 0
     tool_error_count = 0
@@ -1652,6 +1890,16 @@ def generate_workflow_dataset(
         _teacher_call_failures = 0
 
         behavior = _select_user_behavior(rng, active_distribution)
+
+        # Draw the modality ONLY for a non-default preset. The default path must
+        # consume no randomness, or every existing seed reproduces different
+        # data. tests/unit/test_data_generation.py guards this.
+        if modality_preset == "default":
+            modality = "text"
+            barge_in = False
+        else:
+            modality = _select_modality(rng, active_modality_dist)
+            barge_in = modality == "voice" and rng.random() < barge_in_rate
 
         # Select language (fixed or 50/50 mix per sample)
         sample_language = language if language is not None else rng.choice(["en", "th"])
@@ -1709,6 +1957,7 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
                 intent_category, initiator, outbound_reason,
                 resolved_retry_exhaustion=resolved_retry_exhaustion,
+                modality=modality,
             )
 
         fell_back = False
@@ -1717,6 +1966,7 @@ def generate_workflow_dataset(
                 messages = _generate_teacher_conversation(
                     workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
                     sample_language, intent_category, initiator, outbound_reason,
+                    modality=modality, barge_in=barge_in,
                 )
             except Exception:
                 # API/parse failure (already logged as teacher_model_fallback).
@@ -1764,6 +2014,7 @@ def generate_workflow_dataset(
                             msgs, initial_name, terminal_names
                         )
                         or find_shape_violations(msgs, initiator)
+                        or find_voice_violations(msgs, modality)
                     )
                     if violations:
                         logger.debug(
@@ -1789,6 +2040,7 @@ def generate_workflow_dataset(
                             teacher_model, sample_language, intent_category,
                             initiator, outbound_reason,
                             repair_feedback=violations,
+                            modality=modality, barge_in=barge_in,
                         )
                     except Exception:
                         _teacher_call_failures += 1
@@ -1807,6 +2059,8 @@ def generate_workflow_dataset(
             "domain_key": domain_key,
             "domain_spec": domain_spec,
             "behavior": behavior,
+            "modality": modality,
+            "barge_in": barge_in,
             "sample_language": sample_language,
             "initiator": initiator,
             "outbound_reason": outbound_reason,
@@ -1875,6 +2129,8 @@ def generate_workflow_dataset(
         domain_key = result["domain_key"]
         domain_spec = result["domain_spec"]
         behavior = result["behavior"]
+        modality = result["modality"]
+        barge_in = result["barge_in"]
         sample_language = result["sample_language"]
         initiator = result["initiator"]
         outbound_reason = result["outbound_reason"]
@@ -1888,7 +2144,8 @@ def generate_workflow_dataset(
         use_rich_prompt = bool(teacher_model) and rng.random() < rich_prompt_rate
         if use_rich_prompt:
             rich_prompt = _generate_rich_system_prompt(
-                workflow, tool_schemas, domain_spec, sample_language, teacher_model
+                workflow, tool_schemas, domain_spec, sample_language, teacher_model,
+                modality=modality,
             )
             if rich_prompt:
                 rich_used = 1
@@ -1916,6 +2173,18 @@ def generate_workflow_dataset(
                     "content": f"You are a customer service agent handling {domain_name} workflows.",
                 },
             )
+
+        # The ONLY producer of the per-message `loss` key, and the only place
+        # `barge_in` is decided. Both run here, after every teacher attempt,
+        # every repair retry, every redraw and every placeholder fallback have
+        # settled, so no path can skip them.
+        #
+        # `barge_in` is recorded from what the conversation actually contains,
+        # not from the draw that asked the teacher for an interruption. The
+        # draw is a request; a placeholder fallback never honours it and a
+        # teacher may ignore it, and a label that disagrees with its own
+        # content is the R12 shape.
+        barge_in = apply_barge_in_loss_flag(messages)
 
         # Count tool calls and errors
         tool_calls_d = 0
@@ -1949,6 +2218,8 @@ def generate_workflow_dataset(
             ground_truth=_extract_ground_truth(messages, workflow),
             conversation_initiator=initiator,
             outbound_reason=(outbound_reason.key if outbound_reason else None),
+            modality=modality,
+            barge_in=barge_in,
             generation_source=generation_source,
         )
 
@@ -1956,6 +2227,12 @@ def generate_workflow_dataset(
             "sample": sample,
             "generation_source": generation_source,
             "behavior": behavior,
+            "modality": modality,
+            # Requested vs realised, kept apart on purpose: the gap between
+            # them is exactly "the teacher was asked for an interruption and
+            # did not write one", which the batch gate reads.
+            "barge_in_requested": result["barge_in"],
+            "barge_in_realized": barge_in,
             "sample_language": sample_language,
             "domain_key": domain_key,
             "intent_category": intent_category,
@@ -2028,6 +2305,8 @@ def generate_workflow_dataset(
 
     # --- aggregate stat deltas (single-threaded reduction, sample-index order) ---
     redraws_used = 0
+    barge_in_requested = 0
+    barge_in_realized = 0
     for outcome in outcomes:
         samples.append(outcome["sample"])
         repair_retries += outcome["repair_retries"]
@@ -2043,6 +2322,9 @@ def generate_workflow_dataset(
             source_counts.get(outcome["generation_source"], 0) + 1
         )
         behavior_counts[outcome["behavior"]] += 1
+        modality_counts[outcome["modality"]] += 1
+        barge_in_requested += 1 if outcome["barge_in_requested"] else 0
+        barge_in_realized += 1 if outcome["barge_in_realized"] else 0
         language_counts[outcome["sample_language"]] = (
             language_counts.get(outcome["sample_language"], 0) + 1
         )
@@ -2068,6 +2350,11 @@ def generate_workflow_dataset(
 
     stats = {
         "behavior_distribution": behavior_counts,
+        "modality_distribution": modality_counts,
+        # A barge-in the teacher was asked for but did not write leaves
+        # requested > realized. The batch gate reads both.
+        "barge_in_requested": barge_in_requested,
+        "barge_in_realized": barge_in_realized,
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
         "intent_category_distribution": intent_category_counts,
