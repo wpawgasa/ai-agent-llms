@@ -66,7 +66,19 @@ Outbound samples reuse each domain's canonical graph: the agent opens at the exi
 Each sample includes: conversation_id, complexity_level, domain, workflow_graph, tool_schemas, messages (with `[STATE: X → Y]` and `<tool_call>` annotations), user_behavior, ground_truth (state_sequence, tool_chain_dependencies, terminal_state), `conversation_initiator` ("user" | "agent"), and `outbound_reason` (reason key | null). Outbound message shape: `[system, assistant(opener), user, assistant, …]`.
 
 ### Voice Modality
-`generate_workflow_dataset`'s `modality_preset` draws each conversation's modality: `"default"` (100% text), `"voice_mix"` (70/30), `"voice_heavy"` (40/60), `"voice_only"` (100% voice) — see `MODALITY_PRESETS`. `barge_in_rate` sets the share of VOICE conversations that carry one `<unspoken>` interruption. The format contract lives in `data/voice_convention.py`, checked by `find_voice_violations`, and covers five rules: (1) the `[STATE: X → Y]` marker never sits inside a `<S>...</S>` chunk; (2) a `<tool_call>` block never sits inside a chunk; (3) every spoken word sits inside a chunk — nothing unspoken outside one; (4) `<S>` and `</S>` tags are balanced; (5) `[END_CONVERSATION]` never shares a turn with a tool call, never sits inside a chunk, and always follows the last `</S>`.
+`generate_workflow_dataset`'s `modality_preset` draws each conversation's modality: `"default"` (100% text), `"voice_mix"` (70/30), `"voice_heavy"` (40/60), `"voice_only"` (100% voice) — see `MODALITY_PRESETS`. `barge_in_rate` sets the share of VOICE conversations for which the teacher model is **asked** for one `<unspoken>` interruption; whether one was actually written is recorded separately (see CLAUDE.md R20).
+
+The format contract lives in `data/voice_convention.py`, checked by `find_voice_violations`, and covers five rules:
+
+1. The `[STATE: X → Y]` marker sits **outside** every `<S>...</S>` chunk. The agent never speaks it.
+2. A `<tool_call>` block sits **outside** every chunk. The agent never speaks it.
+3. Every spoken character sits **inside** a chunk. Delete the state marker and each tool call; every remaining non-whitespace character must sit between an `<S>` and its `</S>`. **A turn with no spoken text at all is legal and carries no chunk** — a turn that only calls a tool is silent on the line. **Do not invent filler speech to give such a turn a chunk.** Uniform filler before every tool call is a structural edit of exactly the kind risk R15 records being learned as an unconditional habit, and it was deliberately removed from this branch once already.
+4. Chunks do not nest. The count of `<S>` equals the count of `</S>`, and each `<S>` precedes its `</S>`.
+5. `[END_CONVERSATION]` follows the last chunk of a terminal turn, sits outside every chunk, and never shares a turn with a tool call.
+
+Rules 1 and 2 are why the state and tool-call regexes, `eval/state_accuracy.py` and `eval/tool_call_f1.py` need no change for voice. Rule 3 is what makes rules 1 and 2 measurable.
+
+A text conversation is checked in the other direction: it must hold no `<S>`, no `[END_CONVERSATION]` and no `<unspoken>`. Without that direction the `modality` field would be advisory.
 
 ## Task B: generate_tool_call_data.py
 
