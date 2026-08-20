@@ -43,10 +43,11 @@ DEFAULT_RATIOS = {"train": 0.85, "validation": 0.10, "test": 0.05}
 
 def _load_rows(input_dirs: list[Path]) -> list[dict]:
     files: list[Path] = []
-    for input_dir in input_dirs:
+    for input_dir in sorted(input_dirs):
         files.extend(sorted(input_dir.glob("*.jsonl")))
     if not files:
-        sys.exit(f"Error: no *.jsonl files found in {input_dirs}")
+        dirs_str = ", ".join(str(d) for d in input_dirs)
+        sys.exit(f"Error: no *.jsonl files found in {dirs_str}")
     rows: list[dict] = []
     for f in files:
         with open(f) as fh:
@@ -77,11 +78,11 @@ def main() -> None:
         "--input-dir",
         type=Path,
         action="append",
-        required=True,
+        default=None,
         help=(
-            "Directory of *.jsonl conversations. Repeat the flag to read more "
-            "than one directory, for example the text corpus and the voice "
-            "corpus."
+            f"Directory of cleaned *.jsonl files (default: {DEFAULT_INPUT}). Repeat "
+            "the flag to read more than one directory, for example the text corpus "
+            "and the voice corpus."
         ),
     )
     parser.add_argument(
@@ -119,7 +120,7 @@ def main() -> None:
             f"(train={args.train}, validation={args.validation}, test={args.test})"
         )
 
-    input_dirs: list[Path] = args.input_dir
+    input_dirs: list[Path] = args.input_dir or [DEFAULT_INPUT]
     output_dir: Path = args.output_dir
 
     for input_dir in input_dirs:

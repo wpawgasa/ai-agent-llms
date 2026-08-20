@@ -172,7 +172,8 @@ def main() -> None:
     for input_dir in input_dirs:
         src_files.extend(sorted(input_dir.glob("*.jsonl")))
     if not src_files:
-        sys.exit(f"Error: no *.jsonl files found in {input_dirs}")
+        dirs_str = ", ".join(str(d) for d in input_dirs)
+        sys.exit(f"Error: no *.jsonl files found in {dirs_str}")
 
     if args.dry_run:
         print("[dry-run] No files will be written.")
