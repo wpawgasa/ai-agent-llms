@@ -195,13 +195,6 @@ class DatasetMetadata:
     stats: dict[str, Any] = field(default_factory=dict)
     stats_file: Path | None = None
 
-    @property
-    def output_file(self) -> Path:
-        """Convenience accessor for the single-file case (every call today
-        produces exactly one JSONL). Prefer ``output_files`` for code that
-        must handle multiple output files."""
-        return self.output_files[0]
-
 
 @dataclass
 class WorkflowState:
@@ -1676,6 +1669,7 @@ def generate_workflow_dataset(
     language_counts: dict[str, int] = {}
     intent_category_counts: dict[str, int] = {c: 0 for c in active_intent_dist}
     initiator_counts: dict[str, int] = {"user": 0, "agent": 0}
+    modality_counts: dict[str, int] = {"text": 0, "voice": 0}
     outbound_reason_counts: dict[str, int] = {}
     outbound_fallback_inbound = 0
     tool_error_count = 0
@@ -2028,6 +2022,7 @@ def generate_workflow_dataset(
             "sample": sample,
             "generation_source": generation_source,
             "behavior": behavior,
+            "modality": modality,
             "sample_language": sample_language,
             "domain_key": domain_key,
             "intent_category": intent_category,
@@ -2115,6 +2110,7 @@ def generate_workflow_dataset(
             source_counts.get(outcome["generation_source"], 0) + 1
         )
         behavior_counts[outcome["behavior"]] += 1
+        modality_counts[outcome["modality"]] += 1
         language_counts[outcome["sample_language"]] = (
             language_counts.get(outcome["sample_language"], 0) + 1
         )
@@ -2140,6 +2136,7 @@ def generate_workflow_dataset(
 
     stats = {
         "behavior_distribution": behavior_counts,
+        "modality_distribution": modality_counts,
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
         "intent_category_distribution": intent_category_counts,

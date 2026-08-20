@@ -2453,8 +2453,8 @@ class TestModality:
             "L1", num_samples=4, output_dir=tmp_path / "b", seed=42,
             modality_preset="default",
         )
-        rows_a = [json.loads(x) for x in a.output_file.read_text().splitlines()]
-        rows_b = [json.loads(x) for x in b.output_file.read_text().splitlines()]
+        rows_a = [json.loads(x) for x in a.output_files[0].read_text().splitlines()]
+        rows_b = [json.loads(x) for x in b.output_files[0].read_text().splitlines()]
         assert [r["messages"] for r in rows_a] == [r["messages"] for r in rows_b]
         assert all(r["modality"] == "text" for r in rows_a)
 
@@ -2463,5 +2463,21 @@ class TestModality:
             "L1", num_samples=4, output_dir=tmp_path, seed=42,
             modality_preset="voice_only",
         )
-        rows = [json.loads(x) for x in meta.output_file.read_text().splitlines()]
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         assert all(r["modality"] == "voice" for r in rows)
+
+    def test_stats_sidecar_reports_modality_distribution(self, tmp_path):
+        default_meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "default", seed=42,
+        )
+        with open(default_meta.stats_file) as f:
+            default_stats = json.load(f)["stats"]
+        assert default_stats["modality_distribution"] == {"text": 4, "voice": 0}
+
+        voice_meta = generate_workflow_dataset(
+            "L1", num_samples=4, output_dir=tmp_path / "voice", seed=42,
+            modality_preset="voice_only",
+        )
+        with open(voice_meta.stats_file) as f:
+            voice_stats = json.load(f)["stats"]
+        assert voice_stats["modality_distribution"] == {"text": 0, "voice": 4}
