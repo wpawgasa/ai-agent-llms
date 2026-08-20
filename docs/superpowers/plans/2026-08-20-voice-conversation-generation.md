@@ -1749,7 +1749,15 @@ def test_kwargs_bind_against_the_real_signature():
     out = _dry_run()
     for block in re.findall(r"(meta = generate_workflow_dataset\(.*?\n\))", out, re.S):
         call = ast.parse(block).body[-1].value
-        kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}
+        # Exclude output_dir: it is emitted as Path('...'), a call node that
+        # ast.literal_eval cannot evaluate. tests/unit/test_generate_sft_data_sh.py
+        # does exactly this, then re-adds it before binding.
+        kwargs = {
+            kw.arg: ast.literal_eval(kw.value)
+            for kw in call.keywords
+            if kw.arg != "output_dir"
+        }
+        kwargs["output_dir"] = "."
         inspect.signature(generate_workflow_dataset).bind(**kwargs)
 ```
 
