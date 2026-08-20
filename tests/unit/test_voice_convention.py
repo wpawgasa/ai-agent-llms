@@ -240,3 +240,25 @@ def test_marker_in_tool_message_is_a_violation():
     ]
     violations = find_voice_violations(msgs, "voice")
     assert any("tool" in v for v in violations)
+
+
+def test_chunk_spoken_text_splits_on_sentences():
+    from llm_workflow_agents.data.voice_convention import chunk_spoken_text
+
+    assert chunk_spoken_text("One. Two.") == "<S>One.</S><S>Two.</S>"
+
+
+def test_chunk_spoken_text_never_exceeds_the_limits():
+    from llm_workflow_agents.data.voice_convention import chunk_spoken_text
+
+    long_text = ". ".join("word " * 40 for _ in range(12))
+    result = chunk_spoken_text(long_text)
+    chunks = iter_chunks(result)
+    assert len(chunks) <= TURN_MAX_CHUNKS
+    assert all(len(c) <= CHUNK_MAX_CHARS for c in chunks)
+
+
+def test_chunk_spoken_text_handles_empty_input():
+    from llm_workflow_agents.data.voice_convention import chunk_spoken_text
+
+    assert iter_chunks(chunk_spoken_text("")) == ["..."]

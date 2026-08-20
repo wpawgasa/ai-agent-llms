@@ -2544,3 +2544,27 @@ class TestVoiceTeacherPrompt:
             graph, [], "cooperative", COMPLEXITY_SPECS[ComplexityLevel.L1], None,
         )
         assert "<S>" not in prompt
+
+
+class TestPlaceholderVoice:
+    def test_placeholder_voice_output_passes_the_voice_checker(self, tmp_path):
+        """A fallback keeps its sample's modality, so it must obey the format."""
+        from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+        meta = generate_workflow_dataset(
+            "L3", num_samples=6, output_dir=tmp_path, seed=42,
+            modality_preset="voice_only",
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        for row in rows:
+            assert row["modality"] == "voice"
+            assert find_voice_violations(row["messages"], "voice") == []
+
+    def test_placeholder_text_output_holds_no_voice_marker(self, tmp_path):
+        from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+        meta = generate_workflow_dataset("L3", num_samples=6, output_dir=tmp_path, seed=42)
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        for row in rows:
+            assert find_voice_violations(row["messages"], "text") == []

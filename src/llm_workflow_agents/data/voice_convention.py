@@ -60,6 +60,41 @@ def iter_chunks(text: str) -> list[str]:
     return _CHUNK_RE.findall(text)
 
 
+def chunk_spoken_text(text: str) -> str:
+    """Split plain spoken text into <S>...</S> chunks.
+
+    Splits on sentence-ending punctuation first. A piece still above
+    CHUNK_MAX_CHARS is split again on the last space before the limit, and
+    failing that at the limit itself, so the result always conforms.
+
+    Deterministic. The placeholder generator needs it, and the placeholder
+    generator must stay reproducible.
+    """
+    pieces = [p.strip() for p in re.split(r"(?<=[.!?。ฯ])\s+", text.strip()) if p.strip()]
+    if not pieces:
+        pieces = [text.strip() or "..."]
+
+    out: list[str] = []
+    for piece in pieces:
+        while len(piece) > CHUNK_MAX_CHARS:
+            cut = piece.rfind(" ", 0, CHUNK_MAX_CHARS)
+            if cut <= 0:
+                cut = CHUNK_MAX_CHARS
+            out.append(piece[:cut].strip())
+            piece = piece[cut:].strip()
+        if piece:
+            out.append(piece)
+
+    # A turn above TURN_MAX_CHUNKS is a violation, so merge the tail into the
+    # last legal chunk rather than emit an illegal turn.
+    if len(out) > TURN_MAX_CHUNKS:
+        head = out[: TURN_MAX_CHUNKS - 1]
+        tail = " ".join(out[TURN_MAX_CHUNKS - 1 :])
+        out = head + [tail[:CHUNK_MAX_CHARS]]
+
+    return "".join(f"<S>{c}</S>" for c in out)
+
+
 def strip_voice_markup(text: str) -> str:
     """Delete every voice marker, leaving the spoken words.
 

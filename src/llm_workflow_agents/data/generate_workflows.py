@@ -43,7 +43,10 @@ from llm_workflow_agents.data._workflow_script import (
     find_tool_placement_violations,
 )
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
-from llm_workflow_agents.data.voice_convention import find_voice_violations
+from llm_workflow_agents.data.voice_convention import (
+    chunk_spoken_text,
+    find_voice_violations,
+)
 from llm_workflow_agents.data.domain_registry import (
     ALL_DOMAIN_NAMES,
     CROSS_CUTTING_INTENTS,
@@ -941,6 +944,16 @@ _HANDOFF_ACK_TEMPLATES: dict[str, str] = {
     "code_switch": "ได้ค่ะ รบกวน follow up ให้ด้วยนะคะ",
 }
 
+# Voice-only: a short spoken acknowledgement before an in-state tool call, so
+# the turn has spoken prose (and therefore a chunk) instead of holding only a
+# <tool_call> block, which the voice checker rejects (every assistant turn
+# must carry at least one <S>...</S> chunk).
+_TOOL_CALL_ACK_TEMPLATES: dict[str, str] = {
+    "en": "One moment please.",
+    "th": "รอสักครู่นะคะ",
+    "code_switch": "รอสักครู่นะคะ",
+}
+
 
 def _generate_placeholder_conversation(
     workflow: WorkflowGraph,
@@ -954,6 +967,7 @@ def _generate_placeholder_conversation(
     initiator: str = "user",
     outbound_reason: "OutboundReason | None" = None,
     resolved_retry_exhaustion: str = "none",
+    modality: str = "text",
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -973,10 +987,21 @@ def _generate_placeholder_conversation(
     Every random draw here must come from the caller's per-sample ``rng`` — the
     concurrent generation path relies on per-sample RNG isolation for
     byte-identical output at any ``max_workers``.
+
+    ``modality`` is the sample's assigned modality (Task 3). A fallback keeps
+    the sample's modality, so when it is ``"voice"`` every assistant turn's
+    spoken prose is run through ``chunk_spoken_text`` and the terminal turn
+    (when it holds no tool call) gets ``[END_CONVERSATION]`` appended. When it
+    is ``"text"`` (the default) output is byte-identical to before this
+    parameter existed.
     """
     messages: list[dict[str, Any]] = []
     domain_name = domain_spec.name if domain_spec else spec.level
     domain_intents = list(domain_spec.intents) if domain_spec else []
+
+    def _speak(prose: str) -> str:
+        """Render assistant prose for this sample's modality."""
+        return chunk_spoken_text(prose) if modality == "voice" else prose
 
     messages.append({"role": "system", "content": f"You are a customer service agent handling {domain_name} workflows."})
 
@@ -988,11 +1013,11 @@ def _generate_placeholder_conversation(
     # before the customer says anything. Inbound is unchanged (user-first).
     if initiator == "agent" and outbound_reason is not None:
         initial_name = id_to_name.get(workflow.initial_state, workflow.initial_state)
-        opener = (
-            f"[STATE: {initial_name} → {initial_name}]\n"
+        opener_prose = (
             f"Hello, this is {domain_name} support reaching out. "
             f"I'm calling to {outbound_reason.description}."
         )
+        opener = f"[STATE: {initial_name} → {initial_name}]\n{_speak(opener_prose)}"
         messages.append({
             "role": "assistant",
             "content": opener,
@@ -1086,7 +1111,21 @@ def _generate_placeholder_conversation(
         if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
-            in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
+            if modality == "voice":
+                # A pure <tool_call> turn has no spoken prose, so it would
+                # hold no <S> chunk and fail the voice checker (every
+                # assistant turn must carry at least one chunk). Add a short
+                # spoken acknowledgement before the (unspoken) tool call.
+                ack_tmpl = _TOOL_CALL_ACK_TEMPLATES.get(
+                    language or "en", _TOOL_CALL_ACK_TEMPLATES["en"]
+                )
+                in_state_content = (
+                    f"[STATE: {from_name} → {from_name}]\n"
+                    f"{_speak(ack_tmpl)}\n"
+                    f"<tool_call>{json.dumps(tool_call)}</tool_call>"
+                )
+            else:
+                in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
             budget = max(1, spec.retry_budget)
             attempts = 0
             succeeded = False
@@ -1128,12 +1167,14 @@ def _generate_placeholder_conversation(
                     "role": "assistant",
                     "content": (
                         f"[STATE: {from_name} → {from_name}]\n"
-                        + handoff_tmpl.format(
-                            attempts=attempts,
-                            tool=tool_name,
-                            # Thai and code-switch use ครั้ง, which does not
-                            # inflect, so the key is simply unused there.
-                            times="time" if attempts == 1 else "times",
+                        + _speak(
+                            handoff_tmpl.format(
+                                attempts=attempts,
+                                tool=tool_name,
+                                # Thai and code-switch use ครั้ง, which does not
+                                # inflect, so the key is simply unused there.
+                                times="time" if attempts == 1 else "times",
+                            )
                         )
                     ),
                     "annotations": {
@@ -1151,7 +1192,21 @@ def _generate_placeholder_conversation(
 
         # Transition turn
         transition_content = f"[STATE: {from_name} → {to_name}]"
-        if not (current_state and current_state.tools):
+        if modality == "voice":
+            # Every voice turn needs at least one spoken chunk, even a
+            # transition that (in text mode) would carry no prose at all.
+            transition_prose = (
+                f"Handling {domain_name} in state {from_name}."
+                if not (current_state and current_state.tools)
+                else f"Moving on to {to_name}."
+            )
+            transition_content += f"\n{_speak(transition_prose)}"
+            # This turn never carries a tool call, so it is always eligible
+            # to close the conversation (rule V5). walk_path only lands on a
+            # terminal to_state on the final step of the path.
+            if step.to_state in terminal_ids:
+                transition_content += "\n[END_CONVERSATION]"
+        elif not (current_state and current_state.tools):
             transition_content += f"\nHandling {domain_name} in state {from_name}."
         messages.append({
             "role": "assistant",
@@ -1887,6 +1942,7 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
                 intent_category, initiator, outbound_reason,
                 resolved_retry_exhaustion=resolved_retry_exhaustion,
+                modality=modality,
             )
 
         fell_back = False
