@@ -1,0 +1,38 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "17265263f740",
+  "session_id": "799b50a9-397e-4e27-9357-aacf22452d98",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-20T09:22:09.486867162Z",
+  "branch": "feat/voice-conversation-generation",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "docs/superpowers/plans/2026-06-05-semantic-workflow-graph.md",
+    "docs/superpowers/plans/2026-06-08-outbound-support-initiated-conversations.md",
+    "docs/superpowers/plans/2026-06-08-strengthen-teacher-prompt-contract.md",
+    "docs/superpowers/plans/2026-06-11-teacher-pipeline-fallback-fixes.md",
+    "docs/superpowers/plans/2026-08-20-voice-conversation-generation.md",
+    "docs/superpowers/specs/2026-08-20-voice-conversation-generation-design.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "02ecfa874c5a",
+  "token_usage": {
+    "input_tokens": 304,
+    "cache_creation_tokens": 305450,
+    "cache_read_tokens": 35289317,
+    "output_tokens": 141700,
+    "api_call_count": 152
+  },
+  "session_metrics": {
+    "turn_count": 26
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-20T09:22:08.07021262Z",
+    "agent_lines": 4060,
+    "human_added": 862,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4922,
+    "agent_percentage": 82.48679398618448
+  }
+}
