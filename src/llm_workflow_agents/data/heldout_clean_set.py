@@ -33,6 +33,19 @@ from typing import Any
 from llm_workflow_agents.data.voice_convention import strip_voice_markup
 
 
+def filter_by_modality(
+    rows: list[dict[str, Any]], modality: str
+) -> list[dict[str, Any]]:
+    """Keep only the rows of one modality.
+
+    A row with no ``modality`` field counts as text. Every one of the 5,549
+    conversations that predate the field is a written conversation.
+    """
+    if modality == "all":
+        return list(rows)
+    return [r for r in rows if (r.get("modality") or "text") == modality]
+
+
 def user_turn_fingerprint(conversation: dict[str, Any]) -> str:
     """Stable cross-corpus key for one conversation, from its user turns only."""
     users = [
@@ -162,9 +175,16 @@ def build_clean_set(
     exclusion_splits: list[Path],
     out_dir: Path,
     split_name: str = "test",
+    modality: str = "all",
 ) -> dict[str, Any]:
-    """Write the clean subset of ``candidate_split`` to ``out_dir/<split_name>.jsonl``."""
+    """Write the clean subset of ``candidate_split`` to ``out_dir/<split_name>.jsonl``.
+
+    ``modality`` filters the candidate rows BEFORE contamination exclusion and
+    before the pinned 206-row set is derived, so the default of ``"all"``
+    reproduces today's set unchanged.
+    """
     candidates = _read_jsonl(Path(candidate_split))
+    candidates = filter_by_modality(candidates, modality)
     contaminated = load_fingerprints(exclusion_splits)
     clean = select_clean(candidates, contaminated)
 

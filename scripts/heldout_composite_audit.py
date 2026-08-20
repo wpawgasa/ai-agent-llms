@@ -130,9 +130,14 @@ def main() -> int:
     completions = [c[0] if c else "" for c in greedy]
 
     rows: list[dict[str, Any]] = []
-    for i, (comp, gt) in enumerate(zip(completions, gts, strict=True)):
+    for i, (comp, gt, conv) in enumerate(zip(completions, gts, prompts, strict=True)):
         comps = _components(comp, gt)
-        rows.append({"row_index": i, "completion": comp, **comps})
+        rows.append({
+            "row_index": i,
+            "completion": comp,
+            "modality": (conv.get("modality") or "text"),
+            **comps,
+        })
 
     rows_sorted = sorted(rows, key=lambda r: r["composite"])
     n = len(rows)
@@ -152,6 +157,21 @@ def main() -> int:
         "frac_gt_has_no_tools": sum(1 for r in rows if r["n_gt_tools"] == 0) / n,
         "wall_time_s": round(time.time() - t0, 1),
     }
+
+    # A guardrail, never a composite term. Adding a term would change what
+    # cell C2's 0.7595 means.
+    from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+    voice_rows = [r for r in rows if r.get("modality") == "voice"]
+    if voice_rows:
+        clean = sum(
+            1 for r in voice_rows
+            if not find_voice_violations(
+                [{"role": "assistant", "content": r.get("completion", "")}], "voice"
+            )
+        )
+        summary["voice_format_compliance"] = clean / len(voice_rows)
+        summary["voice_rows"] = len(voice_rows)
 
     args.output.write_text(
         json.dumps({"summary": summary, "rows": rows_sorted}, indent=2, ensure_ascii=False)
