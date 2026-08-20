@@ -1,0 +1,128 @@
+"""Tests for the voice conversation format convention."""
+
+from __future__ import annotations
+
+from llm_workflow_agents.data.voice_convention import (
+    ACKNOWLEDGEMENTS,
+    CHUNK_MAX_CHARS,
+    TURN_MAX_CHUNKS,
+    find_voice_violations,
+    iter_chunks,
+    strip_voice_markup,
+)
+
+
+def test_iter_chunks_returns_each_chunk_in_order():
+    assert iter_chunks("<S>one</S><S>two</S>") == ["one", "two"]
+
+
+def test_iter_chunks_returns_empty_list_when_no_chunks():
+    assert iter_chunks("plain text") == []
+
+
+def test_strip_voice_markup_deletes_chunk_tags():
+    assert strip_voice_markup("<S>one</S><S>two</S>") == "onetwo"
+
+
+def test_strip_voice_markup_deletes_end_conversation():
+    assert strip_voice_markup("<S>bye</S>[END_CONVERSATION]") == "bye"
+
+
+def test_strip_voice_markup_deletes_unspoken_marker():
+    assert strip_voice_markup("<S>hel<unspoken>lo</S>") == "hello"
+
+
+def test_strip_voice_markup_leaves_plain_text_alone():
+    assert strip_voice_markup("plain text") == "plain text"
+
+
+def _voice_turn(content: str) -> list[dict]:
+    return [
+        {"role": "user", "content": "สวัสดีค่ะ"},
+        {"role": "assistant", "content": content},
+    ]
+
+
+def test_conforming_voice_turn_has_no_violations():
+    msgs = _voice_turn("[STATE: GREET → GREET]\n<S>สวัสดีค่ะ</S><S>ยินดีให้บริการค่ะ</S>")
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_rule_1_state_marker_inside_a_chunk_is_a_violation():
+    msgs = _voice_turn("<S>[STATE: GREET → GREET]</S><S>สวัสดีค่ะ</S>")
+    assert any("state marker" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_rule_2_tool_call_inside_a_chunk_is_a_violation():
+    msgs = _voice_turn(
+        '[STATE: GREET → GREET]\n'
+        '<S>สักครู่นะคะ<tool_call>{"name": "f", "arguments": {}}</tool_call></S>'
+    )
+    assert any("tool call" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_rule_3_spoken_text_outside_a_chunk_is_a_violation():
+    msgs = _voice_turn("[STATE: GREET → GREET]\nสวัสดีค่ะ<S>ยินดีค่ะ</S>")
+    assert any("outside" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_rule_4_unbalanced_chunk_tags_are_a_violation():
+    msgs = _voice_turn("[STATE: GREET → GREET]\n<S>สวัสดีค่ะ<S>ยินดีค่ะ</S>")
+    assert any("balanced" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_rule_5_end_conversation_with_a_tool_call_is_a_violation():
+    msgs = _voice_turn(
+        '[STATE: GREET → GREET]\n<S>บายค่ะ</S>\n'
+        '<tool_call>{"name": "f", "arguments": {}}</tool_call>[END_CONVERSATION]'
+    )
+    assert any("END_CONVERSATION" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_assistant_turn_with_no_chunks_at_all_is_a_violation():
+    msgs = _voice_turn("[STATE: GREET → GREET]\nสวัสดีค่ะ")
+    assert find_voice_violations(msgs, "voice") != []
+
+
+def test_chunk_at_the_limit_is_accepted():
+    body = "ก" * CHUNK_MAX_CHARS
+    msgs = _voice_turn(f"[STATE: A → A]\n<S>{body}</S>")
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_chunk_one_over_the_limit_is_a_violation():
+    body = "ก" * (CHUNK_MAX_CHARS + 1)
+    msgs = _voice_turn(f"[STATE: A → A]\n<S>{body}</S>")
+    assert any("too long" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_turn_at_the_chunk_limit_is_accepted():
+    body = "<S>ok</S>" * TURN_MAX_CHUNKS
+    msgs = _voice_turn(f"[STATE: A → A]\n{body}")
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_turn_one_over_the_chunk_limit_is_a_violation():
+    body = "<S>ok</S>" * (TURN_MAX_CHUNKS + 1)
+    msgs = _voice_turn(f"[STATE: A → A]\n{body}")
+    assert any("too many chunks" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_text_conversation_with_a_chunk_tag_is_a_violation():
+    msgs = _voice_turn("[STATE: A → A]\n<S>hello</S>")
+    assert find_voice_violations(msgs, "text") != []
+
+
+def test_text_conversation_with_end_conversation_is_a_violation():
+    msgs = _voice_turn("[STATE: A → A]\nhello[END_CONVERSATION]")
+    assert find_voice_violations(msgs, "text") != []
+
+
+def test_plain_text_conversation_has_no_violations():
+    msgs = _voice_turn("[STATE: A → A]\nHello, how can I help you today?")
+    assert find_voice_violations(msgs, "text") == []
+
+
+def test_acknowledgements_cover_both_languages():
+    assert set(ACKNOWLEDGEMENTS) == {"th", "en"}
+    assert all(ACKNOWLEDGEMENTS[lang] for lang in ACKNOWLEDGEMENTS)
