@@ -46,9 +46,14 @@ stages:
       ledger keyed to specific existing conversations, and this batch needs no
       repair because require_tool_stay is on at generation time. Joins the
       chain at task_a_sft_clean. Requires a teacher API key.
+      The runner ends with scripts/check_voice_batch.py, which fails the stage
+      when the batch is mostly placeholder rows (spec risk 2) -- placeholder
+      output is format-perfect, so without that gate a total teacher failure
+      is indistinguishable from success.
     cmd: ./scripts/generate_voice_data.sh
     deps:
       - scripts/generate_voice_data.sh
+      - scripts/check_voice_batch.py
       - src/llm_workflow_agents/data/generate_workflows.py
       - src/llm_workflow_agents/data/voice_convention.py
       - data/templates/workflow_prompt_template.txt

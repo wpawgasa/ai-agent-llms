@@ -40,6 +40,18 @@
 #                            own default, regardless of argument order.
 #   --barge-in-rate <f>      Share of voice conversations with one interruption
 #                            (default: 0.25)
+#   --max-placeholder-share <f>
+#                            Quality gate. After generation, scripts/check_voice_batch.py
+#                            aggregates the per-leg .stats.json sidecars and FAILS
+#                            (non-zero exit) when more than this share of the batch
+#                            came from the offline placeholder generator rather than
+#                            the teacher model. Default: 0.10 (10%).
+#                            Placeholder rows are format-perfect and deterministic,
+#                            so a total teacher failure otherwise looks exactly like
+#                            success -- see spec risk 2. A run invoked with no teacher
+#                            model is exempt (it asked for placeholders).
+#   --skip-gate              Generate without running the quality gate. For
+#                            debugging only; never for the paid 2400-row run.
 #   --smoke-test             Shorthand for --total 15. Also defaults the
 #                            teacher to the offline placeholder (fast, no API
 #                            key needed) UNLESS --teacher-model is passed
@@ -69,6 +81,8 @@ TEACHER_MODEL="gemini-3.5-flash"
 TEACHER_MODEL_EXPLICIT=false
 SMOKE_TEST=false
 BARGE_IN_RATE=0.25
+MAX_PLACEHOLDER_SHARE=0.10
+SKIP_GATE=false
 
 # Load .env if present (mirrors python-dotenv behaviour in _teacher_client.py)
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
@@ -85,6 +99,8 @@ while [[ $# -gt 0 ]]; do
         --total)          TOTAL="$2";          shift 2 ;;
         --teacher-model)  TEACHER_MODEL="$2";  TEACHER_MODEL_EXPLICIT=true; shift 2 ;;
         --barge-in-rate)  BARGE_IN_RATE="$2";  shift 2 ;;
+        --max-placeholder-share) MAX_PLACEHOLDER_SHARE="$2"; shift 2 ;;
+        --skip-gate)      SKIP_GATE=true;      shift ;;
         --smoke-test)     TOTAL=15; SMOKE_TEST=true; shift ;;
         --dry-run)        DRY_RUN=true;        shift ;;
         *)
@@ -176,6 +192,7 @@ echo "Output dir:    $DEST"
 echo "Seed:          $SEED"
 echo "Teacher model: ${TEACHER_MODEL:-placeholder (offline)}"
 echo "Barge-in rate: $BARGE_IN_RATE"
+echo "Gate:          max placeholder share $MAX_PLACEHOLDER_SHARE$( [[ "$SKIP_GATE" == true ]] && echo " (SKIPPED)" )"
 echo "Modality:      voice_only"
 echo "Totals:        en=$(( EN[L1]+EN[L2]+EN[L3]+EN[L4]+EN[L5] )) / th=$(( TH[L1]+TH[L2]+TH[L3]+TH[L4]+TH[L5] )) / code_switch=$(( CS[L1]+CS[L2]+CS[L3]+CS[L4]+CS[L5] ))  (~${TOTAL_ALL} total)"
 echo "==========================="
@@ -213,4 +230,21 @@ print(f'  -> {meta.output_files[0].name}  ({meta.num_samples} samples)')
 done
 
 echo ""
-echo "=== Done. Voice data in $DEST (~${TOTAL_ALL} total) ==="
+echo "=== Generated. Voice data in $DEST (~${TOTAL_ALL} total) ==="
+
+# Quality gate (spec risk 2). Placeholder output is format-perfect by
+# construction, so a teacher model that failed on every sample yields a batch
+# with zero format violations and fifteen success lines above -- success and
+# total failure are indistinguishable without reading the sidecars. This reads
+# them. Non-zero exit here means DO NOT MERGE.
+if [[ "$SKIP_GATE" == true ]]; then
+    echo "[skip-gate] quality gate not run (--skip-gate)"
+else
+    echo ""
+    run python3 "$PROJECT_ROOT/scripts/check_voice_batch.py" \
+        --input-dir "$DEST" \
+        --max-placeholder-share "$MAX_PLACEHOLDER_SHARE"
+fi
+
+echo ""
+echo "=== Done. ==="
