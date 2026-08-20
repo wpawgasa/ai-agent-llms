@@ -72,6 +72,7 @@ def _sample_prompts(
         chosen.append({
             "prompt_messages": row["prompt"],
             "ground_truth": row["ground_truth"],
+            "modality": row.get("modality") or "text",
         })
         if len(chosen) >= n_prompts:
             break

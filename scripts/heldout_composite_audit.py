@@ -40,6 +40,52 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+def _corpus_has_voice(data_dir: Path, split: str) -> bool:
+    """True if the source split file contains at least one voice conversation.
+
+    Used to catch the silent-failure mode where the corpus does carry voice
+    conversations but none reached the audit sample — the same failure shape
+    as R18(c)'s silently-inactive R5 guardrail, where "0" looked healthy.
+    """
+    path = Path(data_dir) / f"{split}.jsonl"
+    if not path.exists():
+        return False
+    with open(path) as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            conv = json.loads(line)
+            if (conv.get("modality") or "text") == "voice":
+                return True
+    return False
+
+
+def _voice_dropped_warning(
+    data_dir: Path, split: str, voice_rows: list[dict[str, Any]]
+) -> str | None:
+    """Message to print when the corpus carries voice but the guardrail can't fire.
+
+    Returns ``None`` when either the corpus has no voice conversations at all
+    (nothing to warn about) or at least one voice row did reach the audit
+    sample (the guardrail computes normally). Otherwise returns a loud
+    warning: a voice-bearing corpus that yields zero voice rows in the audit
+    would otherwise look identical to an all-text corpus — a silently
+    inactive guardrail reporting a "healthy" absence, the exact failure shape
+    R18(c) documents for the R5 reward-hacking guardrail.
+    """
+    if voice_rows or not _corpus_has_voice(data_dir, split):
+        return None
+    return (
+        f"[warn] {data_dir}/{split}.jsonl contains at least one voice "
+        "conversation, but zero voice rows reached this audit's sampled "
+        "prompts — voice_format_compliance did NOT fire. This is the exact "
+        "silent-failure shape R18(c) documents for the R5 guardrail: a "
+        "missing signal that looks like a healthy 0. Check modality "
+        "propagation through _load_grpo_jsonl / _sample_prompts and the "
+        "sample size before trusting this run's absence of a voice score."
+    )
+
+
 def _components(comp: str, gt: dict[str, Any]) -> dict[str, Any]:
     """Strict composite components for one row — same scorers as
     grpo._heldout_composite_score, broken out instead of summed."""
@@ -172,6 +218,10 @@ def main() -> int:
         )
         summary["voice_format_compliance"] = clean / len(voice_rows)
         summary["voice_rows"] = len(voice_rows)
+    else:
+        warning = _voice_dropped_warning(args.data_dir, args.split, voice_rows)
+        if warning:
+            print(warning, file=sys.stderr)
 
     args.output.write_text(
         json.dumps({"summary": summary, "rows": rows_sorted}, indent=2, ensure_ascii=False)

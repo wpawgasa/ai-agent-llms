@@ -226,6 +226,17 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
           reached its terminal state. Non-terminal rows have
           ``terminal_reached=False`` so the reward correctly skips the
           completion sub-reward (see ``reward_business_logic.py:72``).
+      - ``modality``: the source conversation's ``modality`` field
+        (``"text"`` | ``"voice"``, defaulting to ``"text"`` for the
+        pre-Task-3 corpus, which predates the field entirely), one plain
+        string column. TRL 1.0.0's ``GRPOTrainer`` forwards every dataset
+        column beyond ``prompt``/``completion`` into the reward function's
+        ``**kwargs`` (``trl/trainer/grpo_trainer.py:1034``);
+        ``_make_reward_adapter``'s adapter already accepts arbitrary
+        ``**kwargs`` and only reads ``ground_truth`` out of them, so this
+        column is inert for training/reward scoring — it exists purely so
+        downstream row-level consumers (the held-out audit) can tell which
+        modality a row came from.
     """
     from datasets import Dataset
 
@@ -335,6 +346,7 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
                         "ground_truth": json.dumps(
                             row_gt, ensure_ascii=False, default=str
                         ),
+                        "modality": raw.get("modality") or "text",
                     }
                 )
 
