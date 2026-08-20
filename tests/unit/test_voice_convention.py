@@ -152,3 +152,49 @@ def test_non_string_content_does_not_crash():
     ]
     result = find_voice_violations(msgs, "voice")
     assert isinstance(result, list)
+
+
+def _barge_in_conversation(recovery: str) -> list[dict]:
+    return [
+        {"role": "user", "content": "สวัสดีค่ะ"},
+        {
+            "role": "assistant",
+            "content": "[STATE: A → A]\n<S>ราคาแพ็คเกจ<unspoken>อยู่ที่ 5999 บาทค่ะ</S>",
+        },
+        {"role": "user", "content": "เดี๋ยวก่อนค่ะ"},
+        {"role": "assistant", "content": recovery},
+    ]
+
+
+def test_valid_barge_in_recovery_has_no_violations():
+    msgs = _barge_in_conversation(
+        "[STATE: A → A]\n<S>ขอโทษที่พูดแทรกนะคะ</S><S>ราคาอยู่ที่ 5999 บาทค่ะ</S>"
+    )
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_recovery_without_an_acknowledgement_is_a_violation():
+    msgs = _barge_in_conversation("[STATE: A → A]\n<S>ราคาอยู่ที่ 5999 บาทค่ะ</S>")
+    assert any("acknowledgement" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_recovery_that_advances_the_state_is_a_violation():
+    msgs = _barge_in_conversation(
+        "[STATE: A → B]\n<S>ขอโทษที่พูดแทรกนะคะ</S><S>ราคาอยู่ที่ 5999 บาทค่ะ</S>"
+    )
+    assert any("advances" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_two_unspoken_markers_are_a_violation():
+    msgs = _barge_in_conversation(
+        "[STATE: A → A]\n<S>ขอโทษที่พูดแทรกนะคะ<unspoken>ค่ะ</S>"
+    )
+    assert any("exactly once" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_unspoken_marker_in_the_last_turn_is_a_violation():
+    msgs = [
+        {"role": "user", "content": "สวัสดีค่ะ"},
+        {"role": "assistant", "content": "[STATE: A → A]\n<S>ราคา<unspoken>ค่ะ</S>"},
+    ]
+    assert any("last" in v for v in find_voice_violations(msgs, "voice"))

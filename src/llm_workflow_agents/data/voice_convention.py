@@ -160,6 +160,76 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
     return violations
 
 
+def _all_acknowledgements() -> tuple[str, ...]:
+    out: list[str] = []
+    for openers in ACKNOWLEDGEMENTS.values():
+        out.extend(openers)
+    return tuple(out)
+
+
+def find_barge_in_violations(messages: list[dict[str, Any]]) -> list[str]:
+    """Check the four facts that make a barge-in recovery well formed.
+
+    1. The marker appears exactly once in the conversation.
+    2. The marker sits in an assistant turn that is not the last turn.
+    3. The next assistant turn starts with a known acknowledgement.
+    4. The next assistant turn annotates the same state as the interrupted turn.
+
+    Fact 4 has a reason. A barge-in completes nothing, so the workflow does not
+    advance. A conversation with no marker is valid and returns an empty list.
+    """
+    marked = [
+        index
+        for index, msg in enumerate(messages)
+        if msg.get("role") == "assistant"
+        and _UNSPOKEN_MARKER in (msg.get("content") or "")
+    ]
+    total = sum(
+        (msg.get("content") or "").count(_UNSPOKEN_MARKER)
+        for msg in messages
+        if msg.get("role") == "assistant"
+    )
+    if total == 0:
+        return []
+    if total > 1:
+        return [
+            f"the {_UNSPOKEN_MARKER} marker appears {total} times; it must "
+            f"appear exactly once in a conversation"
+        ]
+
+    marker_index = marked[0]
+    later = [
+        index
+        for index, msg in enumerate(messages)
+        if index > marker_index and msg.get("role") == "assistant"
+    ]
+    if not later:
+        return [
+            f"the {_UNSPOKEN_MARKER} marker sits in the last assistant turn; "
+            f"the caller interrupted, so a recovery turn must follow"
+        ]
+
+    violations: list[str] = []
+    interrupted = _STATE_RE.search(messages[marker_index].get("content") or "")
+    recovery_content = messages[later[0]].get("content") or ""
+    recovery = _STATE_RE.search(recovery_content)
+
+    spoken = "".join(iter_chunks(recovery_content)).lstrip()
+    if not spoken.startswith(_all_acknowledgements()):
+        violations.append(
+            f"the recovery turn opens with {spoken[:40]!r} and not with an "
+            f"acknowledgement; open it with one of {_all_acknowledgements()}"
+        )
+    if interrupted and recovery and recovery.group(2) != interrupted.group(1):
+        violations.append(
+            f"the recovery turn advances the state from "
+            f"{interrupted.group(1)} to {recovery.group(2)}; a barge-in "
+            f"completes nothing, so annotate "
+            f"[{interrupted.group(1)} -> {interrupted.group(1)}]"
+        )
+    return violations
+
+
 def find_voice_violations(
     messages: list[dict[str, Any]], modality: str
 ) -> list[str]:
@@ -182,6 +252,7 @@ def find_voice_violations(
             continue
         turn_index += 1
         violations.extend(_check_voice_turn(content, turn_index))
+    violations.extend(find_barge_in_violations(messages))
     return violations
 
 
