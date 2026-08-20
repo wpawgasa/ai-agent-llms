@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "2217355117a4",
+  "strategy": "manual-commit",
+  "branch": "feat/voice-conversation-generation",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/superpowers/plans/2026-08-20-voice-conversation-generation.md",
+    "docs/superpowers/specs/2026-08-20-voice-conversation-generation-design.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/22/17355117a4/0/metadata.json",
+      "transcript": "/22/17355117a4/0/full.jsonl",
+      "content_hash": "/22/17355117a4/0/content_hash.txt",
+      "prompt": "/22/17355117a4/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 50,
+    "cache_creation_tokens": 58297,
+    "cache_read_tokens": 5007216,
+    "output_tokens": 42798,
+    "api_call_count": 25
+  }
+}
