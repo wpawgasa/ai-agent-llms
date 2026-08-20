@@ -91,22 +91,42 @@ def _corpus_has_loss_false(
     inspectable there either. A missing split file is not an error here —
     ``_load_split`` is what raises for a required split; this check only
     needs best-effort visibility into whichever files exist.
+
+    This function's entire job is to decide whether to warn — it must never
+    itself be the thing that fails a run. A missing file, an empty file, or
+    a line that fails to parse as JSON all resolve to "no evidence found
+    here", not an exception. ``_load_split`` still crashes on the same
+    malformed line later in the same run when it actually reads the corpus;
+    this function just isn't where that surfaces. Skipped lines are logged
+    (not silently swallowed) so a genuinely broken corpus stays visible.
     """
     import json as _json
 
+    found = False
     for name in splits:
         path = Path(data_source) / f"{name}.jsonl"
         if not path.exists():
             continue
+        skipped = 0
         with open(path) as fh:
             for line in fh:
                 if not line.strip():
                     continue
-                raw = _json.loads(line)
-                for m in raw.get("messages") or []:
-                    if m.get("loss") is False:
-                        return True
-    return False
+                try:
+                    raw = _json.loads(line)
+                except ValueError:
+                    skipped += 1
+                    continue
+                if any(m.get("loss") is False for m in raw.get("messages") or []):
+                    found = True
+        if skipped:
+            logger.warning(
+                "corpus_has_loss_false_check_skipped_lines",
+                split=name,
+                path=str(path),
+                skipped=skipped,
+            )
+    return found
 
 
 def render_response_only_sample(
