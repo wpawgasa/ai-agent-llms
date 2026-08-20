@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -120,3 +122,86 @@ class TestModalityReachesSampledPrompts:
         prompts = _sample_prompts(tmp_path, "test", n_prompts=1, seed=42)
         assert len(prompts) == 1
         assert prompts[0]["modality"] == "text"
+
+
+class TestSummariseByModality:
+    """Spec section 5 forbids blending; the audit must report each modality.
+
+    A blended mean_composite looks exactly like the 0.7595-comparable number
+    and moves the pre-registered 0.75 bar without a decision.
+    """
+
+    @staticmethod
+    def _row(modality, composite, state_acc=0.0, tool_f1=0.0, task=0.0):
+        row = {
+            "composite": composite,
+            "state_acc": state_acc,
+            "tool_f1": tool_f1,
+            "task": task,
+        }
+        if modality is not None:
+            row["modality"] = modality
+        return row
+
+    def test_reports_each_modality_separately(self):
+        from heldout_composite_audit import summarise_by_modality
+
+        rows = [
+            self._row("text", 0.8),
+            self._row("text", 0.6),
+            self._row("voice", 0.2),
+        ]
+        out = summarise_by_modality(rows)
+        assert set(out) == {"text", "voice"}
+        assert out["text"]["n_rows"] == 2
+        assert out["text"]["mean_composite"] == 0.7
+        assert out["voice"]["n_rows"] == 1
+        assert out["voice"]["mean_composite"] == 0.2
+
+    def test_blended_mean_hides_a_collapsed_modality(self):
+        """The number this separation exists to prevent."""
+        from heldout_composite_audit import summarise_by_modality
+
+        rows = [self._row("text", 0.90)] * 9 + [self._row("voice", 0.10)]
+        blended = sum(r["composite"] for r in rows) / len(rows)
+        out = summarise_by_modality(rows)
+        assert blended == pytest.approx(0.82)  # would read as a pass
+        assert out["voice"]["mean_composite"] == 0.10  # the real story
+
+    def test_missing_modality_counts_as_text(self):
+        from heldout_composite_audit import summarise_by_modality
+
+        out = summarise_by_modality([self._row(None, 0.5)])
+        assert set(out) == {"text"}
+        assert out["text"]["n_rows"] == 1
+
+    def test_single_modality_sample_is_not_mixed(self):
+        from heldout_composite_audit import summarise_by_modality
+
+        out = summarise_by_modality([self._row("text", 0.5), self._row("text", 0.7)])
+        assert len(out) == 1  # main() sets mixed_modality from this length
+
+    def test_every_component_is_reported_per_modality(self):
+        from heldout_composite_audit import summarise_by_modality
+
+        out = summarise_by_modality(
+            [self._row("voice", 0.5, state_acc=0.4, tool_f1=0.6, task=0.8)]
+        )
+        assert out["voice"]["mean_state_acc"] == 0.4
+        assert out["voice"]["mean_tool_f1"] == 0.6
+        assert out["voice"]["mean_task"] == 0.8
+
+
+class TestModalityFlag:
+    def test_audit_exposes_a_modality_flag(self):
+        """Mirrors build_heldout_clean_set.py so one command audits one modality."""
+        import subprocess
+
+        out = subprocess.run(
+            [sys.executable, str(SCRIPTS / "heldout_composite_audit.py"), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert "--modality" in out.stdout
+        for choice in ("text", "voice", "all"):
+            assert choice in out.stdout
