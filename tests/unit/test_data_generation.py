@@ -2731,3 +2731,82 @@ class TestBargeInLossFlagProducer:
         payload["messages"][1]["loss"] = False
         row = self._generate(tmp_path, payload, monkeypatch)
         assert not any("loss" in m for m in row["messages"]), row["messages"]
+
+
+class TestRichPromptMarkerScrub:
+    """An authored system prompt must never carry a runtime control marker.
+
+    The rich prompt is generated AFTER the coherence-repair loop, so
+    find_voice_violations never sees it. _RICH_VOICE_OVERRIDE used to instruct
+    the teacher to put [END_CONVERSATION] into the system prompt, which at
+    rich_prompt_rate=0.30 would have manufactured ~720 copies of the L4_061_6
+    anomaly in the 2,400-conversation batch.
+    """
+
+    def test_voice_override_no_longer_asks_for_end_conversation(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _rich_prompt_system
+
+        voice = _rich_prompt_system("voice")
+        assert "<S>" in voice  # chunked dialogue lines are still required
+        assert "Do include [END_CONVERSATION]" not in voice
+        assert "do NOT include [END_CONVERSATION]" in voice
+
+    def test_scrub_deletes_control_markers_from_a_voice_prompt(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        authored = 'Say "<S>ขอบคุณค่ะ</S>" [END_CONVERSATION] then stop.'
+        out = _scrub_rich_prompt(authored, "voice")
+        assert "[END_CONVERSATION]" not in out
+        assert "<S>ขอบคุณค่ะ</S>" in out  # chunking survives in voice
+
+    def test_scrub_deletes_chunk_markers_from_a_text_prompt(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        out = _scrub_rich_prompt('Say "<S>hello</S>" [END_CONVERSATION]', "text")
+        assert "<S>" not in out and "</S>" not in out
+        assert "[END_CONVERSATION]" not in out
+
+    def test_scrub_leaves_a_clean_prompt_untouched(self) -> None:
+        from llm_workflow_agents.data.generate_workflows import _scrub_rich_prompt
+
+        authored = 'Say "<S>hello</S>" and wait.'
+        assert _scrub_rich_prompt(authored, "voice") == authored
+
+    def test_generated_voice_system_prompt_carries_no_control_marker(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """End to end: even a teacher that ignores the instruction cannot land
+        a control marker in messages[0]."""
+        rich = json.dumps(
+            {"system_prompt": 'Persona. Say "<S>สวัสดีค่ะ</S>" [END_CONVERSATION]'}
+        )
+        conversation = json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": "[STATE: GREETING → GREETING]\n<S>Hello</S>",
+                    },
+                ]
+            }
+        )
+
+        def fake_call(model, system_prompt, user_prompt):
+            return rich if "system_prompt" in system_prompt else conversation
+
+        monkeypatch.setattr(gw, "call_teacher_model", fake_call)
+        meta = generate_workflow_dataset(
+            "L1",
+            num_samples=2,
+            teacher_model="fake-teacher",
+            output_dir=tmp_path,
+            seed=5,
+            modality_preset="voice_only",
+            rich_prompt_rate=1.0,
+            repair_incoherent=False,
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        for row in rows:
+            assert "[END_CONVERSATION]" not in row["messages"][0]["content"]

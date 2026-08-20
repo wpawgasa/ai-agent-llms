@@ -1452,9 +1452,46 @@ VOICE MODE — this prompt drives a spoken agent. Override rule 4 above: every
 quoted dialogue line MUST be split into <S>...</S> chunks at natural pause
 points, exactly as a text-to-speech engine needs. Example:
 "<S>สวัสดีค่ะ</S><S>ไม่ทราบว่าสะดวกสนทนาสักครู่ไหมคะ</S>"
-Do include [END_CONVERSATION] after the final chunk of a closing section.
-Still do NOT include <F> or [TRANSFER].
+Chunking is the ONLY change. Still do NOT include [END_CONVERSATION],
+<unspoken>, <F>, or [TRANSFER] — those are runtime control markers the agent
+emits during the call, never instructions written into this prompt.
 """
+
+
+#: Markers that must never appear in an authored system prompt, by modality.
+#: `<S>` is legal in a voice system prompt because rule 4 above asks for
+#: chunked dialogue lines; the runtime control markers are legal in neither.
+_RICH_PROMPT_FORBIDDEN: dict[str, tuple[str, ...]] = {
+    "text": ("<S>", "</S>", "[END_CONVERSATION]", "<unspoken>", "[TRANSFER]"),
+    "voice": ("[END_CONVERSATION]", "<unspoken>", "[TRANSFER]"),
+}
+
+
+def _scrub_rich_prompt(text: str, modality: str) -> str:
+    """Delete runtime control markers from an authored system prompt.
+
+    The rich prompt is generated AFTER the coherence-repair loop
+    (`_build_one_sample`), so `find_voice_violations` never sees it. Telling
+    the teacher not to emit a marker is not the same as checking that it did
+    not, and an unchecked path is where L4_061_6 — the one existing corpus row
+    with a stray `[END_CONVERSATION]` in its system message — came from.
+
+    Scrubs rather than rejects: the authored text cost a paid API call and is
+    otherwise fine, and deleting a control marker from a prose instruction
+    changes nothing else about it. Loud either way — every scrub logs.
+    """
+    forbidden = _RICH_PROMPT_FORBIDDEN.get(modality, _RICH_PROMPT_FORBIDDEN["voice"])
+    found = [marker for marker in forbidden if marker in text]
+    if not found:
+        return text
+    for marker in found:
+        text = text.replace(marker, "")
+    logger.warning(
+        "rich_system_prompt_markers_scrubbed",
+        modality=modality,
+        markers=found,
+    )
+    return text
 
 
 def _rich_prompt_system(modality: str) -> str:
@@ -1504,7 +1541,7 @@ def _generate_rich_system_prompt(
         text = str(data.get("system_prompt", "")).strip()
         if not text:
             raise ValueError("empty system_prompt in teacher response")
-        return text
+        return _scrub_rich_prompt(text, modality)
     except Exception as exc:
         logger.warning(
             "rich_system_prompt_fallback",
