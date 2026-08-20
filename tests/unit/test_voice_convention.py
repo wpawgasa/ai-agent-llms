@@ -93,6 +93,19 @@ def test_silent_tool_call_turn_with_no_chunk_is_legal():
     assert find_voice_violations(msgs, "voice") == []
 
 
+def test_chunkless_turn_with_tool_call_and_end_conversation_is_a_violation():
+    """Rule 5 (tool call + [END_CONVERSATION] together) applies even with no
+    chunk — a silent tool-call turn must not also claim to end the call, or
+    the orchestrator hangs up before the tool result is ever seen."""
+    msgs = _voice_turn(
+        '[STATE: A → A]\n<tool_call>{"name": "f", "arguments": {}}'
+        '</tool_call>[END_CONVERSATION]'
+    )
+    violations = find_voice_violations(msgs, "voice")
+    assert violations != []
+    assert any("END_CONVERSATION" in v and "tool call" in v for v in violations)
+
+
 def test_chunkless_turn_with_bare_prose_is_still_a_violation():
     """Rule 3 keeps flagging real spoken text left outside a chunk."""
     msgs = _voice_turn("[STATE: A → A]\nสวัสดีค่ะ")

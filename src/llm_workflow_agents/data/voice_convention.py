@@ -108,7 +108,15 @@ def strip_voice_markup(text: str) -> str:
 
 
 def _check_voice_turn(content: str, turn_index: int) -> list[str]:
-    """Return every format violation in one voice assistant turn."""
+    """Return every format violation in one voice assistant turn.
+
+    Chunk presence is orthogonal to every other rule, so no rule below may
+    live only inside the "chunks present" branch unless it is genuinely
+    meaningless without a chunk — see the per-rule notes. Rule 5's
+    tool-call/[END_CONVERSATION] check is the one rule that is meaningful
+    either way, so it runs once, before the branch, instead of being
+    duplicated in both.
+    """
     violations: list[str] = []
     where = f"assistant turn {turn_index}"
 
@@ -122,6 +130,17 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
         )
         return violations
 
+    # Rule 5 (tool-call half): a turn that calls a tool must never also end
+    # the conversation. This holds regardless of whether the turn carries any
+    # spoken chunks — a silent tool-call turn can still illegally claim to
+    # end the call — so it runs once here, before the chunk-presence branch,
+    # rather than once per branch.
+    if _END_MARKER in content and _TOOL_CALL_RE.search(content):
+        violations.append(
+            f"{where}: holds both [END_CONVERSATION] and a tool call; a turn "
+            f"that calls a tool must not end the conversation"
+        )
+
     chunks = iter_chunks(content)
     if not chunks:
         # Rule 3: a turn with no spoken text at all is legal and carries no
@@ -132,6 +151,13 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
         # strip the state marker, every <tool_call> block, the control
         # markers, and any chunks (there are none here). Only flag this turn
         # if spoken text is left sitting outside a chunk.
+        #
+        # Rules 1, 2 and 5's other two halves (marker/tool-call/end-marker
+        # "inside a chunk", and "end-marker before the final </S>") are all
+        # relative to a chunk boundary and are vacuously satisfied here: with
+        # zero chunks nothing can sit inside one, and "before the final </S>"
+        # has no final </S> to be before. They do not need a chunkless
+        # counterpart.
         remainder = _STATE_RE.sub("", content)
         remainder = _TOOL_CALL_RE.sub("", remainder)
         remainder = remainder.replace(_END_MARKER, "").replace(_UNSPOKEN_MARKER, "")
@@ -172,12 +198,8 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
             f"{where}: a tool call sits inside a chunk; it is never spoken, "
             f"so put it outside every <S>"
         )
-    # Rule 5.
-    if _END_MARKER in content and _TOOL_CALL_RE.search(content):
-        violations.append(
-            f"{where}: holds both [END_CONVERSATION] and a tool call; a turn "
-            f"that calls a tool must not end the conversation"
-        )
+    # Rule 5 (remaining two halves — both meaningful only relative to a
+    # chunk boundary, so they stay here rather than in the chunkless branch).
     if _END_MARKER in joined:
         violations.append(
             f"{where}: [END_CONVERSATION] sits inside a chunk; it is never "
