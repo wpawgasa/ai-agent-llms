@@ -944,16 +944,6 @@ _HANDOFF_ACK_TEMPLATES: dict[str, str] = {
     "code_switch": "ได้ค่ะ รบกวน follow up ให้ด้วยนะคะ",
 }
 
-# Voice-only: a short spoken acknowledgement before an in-state tool call, so
-# the turn has spoken prose (and therefore a chunk) instead of holding only a
-# <tool_call> block, which the voice checker rejects (every assistant turn
-# must carry at least one <S>...</S> chunk).
-_TOOL_CALL_ACK_TEMPLATES: dict[str, str] = {
-    "en": "One moment please.",
-    "th": "รอสักครู่นะคะ",
-    "code_switch": "รอสักครู่นะคะ",
-}
-
 
 def _generate_placeholder_conversation(
     workflow: WorkflowGraph,
@@ -1111,21 +1101,10 @@ def _generate_placeholder_conversation(
         if current_state and current_state.tools and step.from_state not in visited_state_ids:
             tool_name = current_state.tools[0]
             tool_call = {"name": tool_name, "arguments": {"placeholder": "value"}}
-            if modality == "voice":
-                # A pure <tool_call> turn has no spoken prose, so it would
-                # hold no <S> chunk and fail the voice checker (every
-                # assistant turn must carry at least one chunk). Add a short
-                # spoken acknowledgement before the (unspoken) tool call.
-                ack_tmpl = _TOOL_CALL_ACK_TEMPLATES.get(
-                    language or "en", _TOOL_CALL_ACK_TEMPLATES["en"]
-                )
-                in_state_content = (
-                    f"[STATE: {from_name} → {from_name}]\n"
-                    f"{_speak(ack_tmpl)}\n"
-                    f"<tool_call>{json.dumps(tool_call)}</tool_call>"
-                )
-            else:
-                in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
+            # Same content in every modality: a turn that only calls a tool
+            # is silent on the line (spec §2 rule 3) — no chunk is invented
+            # for it, in voice mode or otherwise.
+            in_state_content = f"[STATE: {from_name} → {from_name}]\n<tool_call>{json.dumps(tool_call)}</tool_call>"
             budget = max(1, spec.retry_budget)
             attempts = 0
             succeeded = False
@@ -1190,24 +1169,22 @@ def _generate_placeholder_conversation(
                 )
                 messages.append({"role": "user", "content": ack_tmpl})
 
-        # Transition turn
+        # Transition turn. Same prose in every modality: when the state had
+        # no tools, text mode narrates "Handling ..." and voice mode speaks
+        # that same sentence (chunked). When the state had tools, text mode
+        # emits the bare marker and nothing else — voice mode does too; a
+        # turn with no spoken text is silent on the line (spec §2 rule 3),
+        # not a turn that needs invented filler.
         transition_content = f"[STATE: {from_name} → {to_name}]"
-        if modality == "voice":
-            # Every voice turn needs at least one spoken chunk, even a
-            # transition that (in text mode) would carry no prose at all.
-            transition_prose = (
-                f"Handling {domain_name} in state {from_name}."
-                if not (current_state and current_state.tools)
-                else f"Moving on to {to_name}."
-            )
-            transition_content += f"\n{_speak(transition_prose)}"
+        if not (current_state and current_state.tools):
+            transition_content += f"\n{_speak(f'Handling {domain_name} in state {from_name}.')}"
+        if modality == "voice" and step.to_state in terminal_ids:
             # This turn never carries a tool call, so it is always eligible
             # to close the conversation (rule V5). walk_path only lands on a
-            # terminal to_state on the final step of the path.
-            if step.to_state in terminal_ids:
-                transition_content += "\n[END_CONVERSATION]"
-        elif not (current_state and current_state.tools):
-            transition_content += f"\nHandling {domain_name} in state {from_name}."
+            # terminal to_state on the final step of the path. A silent
+            # terminal turn (bare marker + this marker, no chunk) is legal
+            # under rule 3.
+            transition_content += "\n[END_CONVERSATION]"
         messages.append({
             "role": "assistant",
             "content": transition_content,

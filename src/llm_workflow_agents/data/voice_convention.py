@@ -124,10 +124,23 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
 
     chunks = iter_chunks(content)
     if not chunks:
-        violations.append(
-            f"{where}: holds no <S>...</S> chunk; every spoken word in a voice "
-            f"conversation must sit inside a chunk"
-        )
+        # Rule 3: a turn with no spoken text at all is legal and carries no
+        # chunk — a turn that only calls a tool is silent on the line. The
+        # production reference states this: "Format spoken text with `</S>`;
+        # emit no delimiter when there is no speech." Determine "no spoken
+        # text" the same way the chunked case's rule 3 check below does:
+        # strip the state marker, every <tool_call> block, the control
+        # markers, and any chunks (there are none here). Only flag this turn
+        # if spoken text is left sitting outside a chunk.
+        remainder = _STATE_RE.sub("", content)
+        remainder = _TOOL_CALL_RE.sub("", remainder)
+        remainder = remainder.replace(_END_MARKER, "").replace(_UNSPOKEN_MARKER, "")
+        remainder = _CHUNK_RE.sub("", remainder)
+        if remainder.strip():
+            violations.append(
+                f"{where}: text sits outside every chunk: "
+                f"{remainder.strip()[:60]!r}; all spoken text goes inside <S>...</S>"
+            )
         return violations
 
     joined = "".join(chunks)

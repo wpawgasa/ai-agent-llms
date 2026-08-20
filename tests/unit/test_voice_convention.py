@@ -84,6 +84,23 @@ def test_assistant_turn_with_no_chunks_at_all_is_a_violation():
     assert find_voice_violations(msgs, "voice") != []
 
 
+def test_silent_tool_call_turn_with_no_chunk_is_legal():
+    """A turn that only calls a tool is silent on the line (spec rule 3)."""
+    msgs = _voice_turn(
+        '[STATE: A → A]\n<tool_call>{"name": "check_eligibility", '
+        '"arguments": {"customer_id": "C1"}}</tool_call>'
+    )
+    assert find_voice_violations(msgs, "voice") == []
+
+
+def test_chunkless_turn_with_bare_prose_is_still_a_violation():
+    """Rule 3 keeps flagging real spoken text left outside a chunk."""
+    msgs = _voice_turn("[STATE: A → A]\nสวัสดีค่ะ")
+    violations = find_voice_violations(msgs, "voice")
+    assert violations != []
+    assert any("outside every chunk" in v for v in violations)
+
+
 def test_chunk_at_the_limit_is_accepted():
     body = "ก" * CHUNK_MAX_CHARS
     msgs = _voice_turn(f"[STATE: A → A]\n<S>{body}</S>")
