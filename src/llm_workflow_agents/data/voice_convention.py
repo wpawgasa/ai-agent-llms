@@ -60,12 +60,27 @@ def iter_chunks(text: str) -> list[str]:
     return _CHUNK_RE.findall(text)
 
 
+#: A turn can hold at most this many spoken characters and still conform.
+SPOKEN_CHARS_MAX = TURN_MAX_CHUNKS * CHUNK_MAX_CHARS
+
+
 def chunk_spoken_text(text: str) -> str:
-    """Split plain spoken text into <S>...</S> chunks.
+    """Split plain spoken text into <S>...</S> chunks. Never delete content.
 
     Splits on sentence-ending punctuation first. A piece still above
     CHUNK_MAX_CHARS is split again on the last space before the limit, and
-    failing that at the limit itself, so the result always conforms.
+    failing that at the limit itself. Every spoken character of the input
+    survives into some chunk; only the whitespace *between* chunks is dropped,
+    because a chunk boundary is itself the pause.
+
+    Raises ``ValueError`` when the input cannot be chunked within both limits
+    — more than ``SPOKEN_CHARS_MAX`` characters of speech simply does not fit
+    in one spoken turn. This used to truncate instead: a 2,289-character input
+    came back as 776 characters of chunks and ``find_voice_violations``
+    reported no violation, so a corpus builder deleted 66% of a turn in
+    silence. Silent data loss in a corpus builder is the R12/R13 shape, so it
+    fails loudly now. The caller authors the prose it passes here and is
+    expected to keep a spoken turn short.
 
     Deterministic. The placeholder generator needs it, and the placeholder
     generator must stay reproducible.
@@ -85,12 +100,19 @@ def chunk_spoken_text(text: str) -> str:
         if piece:
             out.append(piece)
 
-    # A turn above TURN_MAX_CHUNKS is a violation, so merge the tail into the
-    # last legal chunk rather than emit an illegal turn.
+    # Too many chunks: merge the tail back into one chunk where it still fits
+    # inside CHUNK_MAX_CHARS. That re-joins content, it does not drop any.
     if len(out) > TURN_MAX_CHUNKS:
         head = out[: TURN_MAX_CHUNKS - 1]
         tail = " ".join(out[TURN_MAX_CHUNKS - 1 :])
-        out = head + [tail[:CHUNK_MAX_CHARS]]
+        if len(tail) > CHUNK_MAX_CHARS:
+            raise ValueError(
+                f"cannot chunk {len(text)} characters of speech within "
+                f"{TURN_MAX_CHUNKS} chunks of {CHUNK_MAX_CHARS} characters "
+                f"(limit {SPOKEN_CHARS_MAX}); shorten the turn instead of "
+                f"letting the chunker delete the overflow"
+            )
+        out = head + [tail]
 
     return "".join(f"<S>{c}</S>" for c in out)
 
@@ -105,6 +127,47 @@ def strip_voice_markup(text: str) -> str:
     out = text.replace("<S>", "").replace("</S>", "")
     out = out.replace(_END_MARKER, "").replace(_UNSPOKEN_MARKER, "")
     return out
+
+
+def apply_barge_in_loss_flag(messages: list[dict[str, Any]]) -> bool:
+    """Mark the interrupted turn as no-loss. Return whether one was found.
+
+    The orchestrator writes ``<unspoken>`` into the model's own past turn when
+    the caller barges in. The model never emits that marker, so training on the
+    turn that carries it teaches the model to emit it — spec risk 3, and the
+    same unconditional-habit shape risk R15 records.
+
+    This is the single producer of the ``loss`` key. Every consumer
+    (``render_response_only_sample``, ``_load_grpo_jsonl``,
+    ``build_preference_pairs``, ``mine_model_negatives``) reads
+    ``msg.get("loss", True)``, so:
+
+    - a marker-bearing assistant turn gets ``loss: False``;
+    - every other message gets any stale ``loss`` key deleted, so a
+      conversation with no marker carries no ``loss`` key at all and the
+      absent-key default (``True``) governs it.
+
+    Deleting rather than trusting an inbound key matters: the teacher model is
+    told to emit no extra keys, so a ``loss`` key on a turn with no marker can
+    only be a hallucination, and honouring it would silently drop a real
+    training target.
+
+    Idempotent — safe to call more than once on the same message list.
+    """
+    found = False
+    for msg in messages:
+        content = msg.get("content")
+        carries_marker = (
+            msg.get("role") == "assistant"
+            and isinstance(content, str)
+            and _UNSPOKEN_MARKER in content
+        )
+        if carries_marker:
+            msg["loss"] = False
+            found = True
+        else:
+            msg.pop("loss", None)
+    return found
 
 
 def _check_voice_turn(content: str, turn_index: int) -> list[str]:

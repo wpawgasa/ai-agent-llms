@@ -44,6 +44,7 @@ from llm_workflow_agents.data._workflow_script import (
 )
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
 from llm_workflow_agents.data.voice_convention import (
+    apply_barge_in_loss_flag,
     chunk_spoken_text,
     find_voice_violations,
 )
@@ -2136,6 +2137,18 @@ def generate_workflow_dataset(
                 },
             )
 
+        # The ONLY producer of the per-message `loss` key, and the only place
+        # `barge_in` is decided. Both run here, after every teacher attempt,
+        # every repair retry, every redraw and every placeholder fallback have
+        # settled, so no path can skip them.
+        #
+        # `barge_in` is recorded from what the conversation actually contains,
+        # not from the draw that asked the teacher for an interruption. The
+        # draw is a request; a placeholder fallback never honours it and a
+        # teacher may ignore it, and a label that disagrees with its own
+        # content is the R12 shape.
+        barge_in = apply_barge_in_loss_flag(messages)
+
         # Count tool calls and errors
         tool_calls_d = 0
         tool_errors_d = 0
@@ -2178,6 +2191,11 @@ def generate_workflow_dataset(
             "generation_source": generation_source,
             "behavior": behavior,
             "modality": modality,
+            # Requested vs realised, kept apart on purpose: the gap between
+            # them is exactly "the teacher was asked for an interruption and
+            # did not write one", which the batch gate reads.
+            "barge_in_requested": result["barge_in"],
+            "barge_in_realized": barge_in,
             "sample_language": sample_language,
             "domain_key": domain_key,
             "intent_category": intent_category,
@@ -2250,6 +2268,8 @@ def generate_workflow_dataset(
 
     # --- aggregate stat deltas (single-threaded reduction, sample-index order) ---
     redraws_used = 0
+    barge_in_requested = 0
+    barge_in_realized = 0
     for outcome in outcomes:
         samples.append(outcome["sample"])
         repair_retries += outcome["repair_retries"]
@@ -2266,6 +2286,8 @@ def generate_workflow_dataset(
         )
         behavior_counts[outcome["behavior"]] += 1
         modality_counts[outcome["modality"]] += 1
+        barge_in_requested += 1 if outcome["barge_in_requested"] else 0
+        barge_in_realized += 1 if outcome["barge_in_realized"] else 0
         language_counts[outcome["sample_language"]] = (
             language_counts.get(outcome["sample_language"], 0) + 1
         )
@@ -2292,6 +2314,10 @@ def generate_workflow_dataset(
     stats = {
         "behavior_distribution": behavior_counts,
         "modality_distribution": modality_counts,
+        # A barge-in the teacher was asked for but did not write leaves
+        # requested > realized. The batch gate reads both.
+        "barge_in_requested": barge_in_requested,
+        "barge_in_realized": barge_in_realized,
         "domain_distribution": domain_counts,
         "language_distribution": language_counts,
         "intent_category_distribution": intent_category_counts,

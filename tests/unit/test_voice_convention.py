@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from llm_workflow_agents.data.voice_convention import (
     ACKNOWLEDGEMENTS,
     CHUNK_MAX_CHARS,
@@ -281,14 +285,115 @@ def test_chunk_spoken_text_splits_on_sentences():
 def test_chunk_spoken_text_never_exceeds_the_limits():
     from llm_workflow_agents.data.voice_convention import chunk_spoken_text
 
-    long_text = ". ".join("word " * 40 for _ in range(12))
+    # Long enough to need re-splitting, short enough to still fit one turn.
+    long_text = ". ".join("word " * 30 for _ in range(4))
     result = chunk_spoken_text(long_text)
     chunks = iter_chunks(result)
     assert len(chunks) <= TURN_MAX_CHUNKS
     assert all(len(c) <= CHUNK_MAX_CHARS for c in chunks)
 
 
+def test_chunk_spoken_text_preserves_every_spoken_character():
+    """The chunker must not delete content to satisfy the limits.
+
+    It used to: a 2,289-character input came back as 776 characters of chunks
+    and find_voice_violations reported no violation. Silent data loss in a
+    corpus builder is the R12/R13 shape.
+    """
+    import re as _re
+
+    from llm_workflow_agents.data.voice_convention import chunk_spoken_text
+
+    text = (
+        "Thank you for holding. I have pulled up your account now. "
+        "The outstanding balance is two hundred baht. Would you like to pay it today?"
+    )
+    chunks = iter_chunks(chunk_spoken_text(text))
+    assert _re.sub(r"\s+", "", "".join(chunks)) == _re.sub(r"\s+", "", text)
+
+
+def test_chunk_spoken_text_preserves_content_when_the_tail_is_merged():
+    """The over-many-chunks path re-joins the tail; it must not truncate it."""
+    import re as _re
+
+    from llm_workflow_agents.data.voice_convention import chunk_spoken_text
+
+    text = ". ".join(f"sentence number {i} here" for i in range(8))
+    chunks = iter_chunks(chunk_spoken_text(text))
+    assert len(chunks) <= TURN_MAX_CHUNKS
+    assert _re.sub(r"\s+", "", "".join(chunks)) == _re.sub(r"\s+", "", text)
+
+
+def test_chunk_spoken_text_fails_loudly_when_the_turn_cannot_fit():
+    from llm_workflow_agents.data.voice_convention import (
+        SPOKEN_CHARS_MAX,
+        chunk_spoken_text,
+    )
+
+    too_long = ". ".join("word " * 40 for _ in range(12))
+    assert len(too_long) > SPOKEN_CHARS_MAX
+    with pytest.raises(ValueError, match="cannot chunk"):
+        chunk_spoken_text(too_long)
+
+
 def test_chunk_spoken_text_handles_empty_input():
     from llm_workflow_agents.data.voice_convention import chunk_spoken_text
 
     assert iter_chunks(chunk_spoken_text("")) == ["..."]
+
+
+def test_apply_barge_in_loss_flag_marks_only_the_marker_turn():
+    from llm_workflow_agents.data.voice_convention import apply_barge_in_loss_flag
+
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "<S>a <unspoken>b</S>"},
+        {"role": "user", "content": "sorry"},
+        {"role": "assistant", "content": "<S>Got it</S>"},
+    ]
+    assert apply_barge_in_loss_flag(messages) is True
+    assert [m.get("loss") for m in messages] == [None, None, False, None, None]
+
+
+def test_apply_barge_in_loss_flag_reports_absence_and_leaves_no_key():
+    from llm_workflow_agents.data.voice_convention import apply_barge_in_loss_flag
+
+    messages = [
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "<S>hello</S>"},
+    ]
+    assert apply_barge_in_loss_flag(messages) is False
+    assert not any("loss" in m for m in messages)
+
+
+def test_apply_barge_in_loss_flag_deletes_a_stale_key():
+    """A `loss` key on a turn with no marker can only be a hallucination; the
+    teacher prompt forbids extra keys. Honouring it would silently drop a real
+    training target."""
+    from llm_workflow_agents.data.voice_convention import apply_barge_in_loss_flag
+
+    messages = [{"role": "assistant", "content": "<S>hello</S>", "loss": False}]
+    assert apply_barge_in_loss_flag(messages) is False
+    assert "loss" not in messages[0]
+
+
+def test_apply_barge_in_loss_flag_is_idempotent():
+    from llm_workflow_agents.data.voice_convention import apply_barge_in_loss_flag
+
+    messages = [{"role": "assistant", "content": "<S>a <unspoken>b</S>"}]
+    apply_barge_in_loss_flag(messages)
+    first = json.dumps(messages, ensure_ascii=False)
+    apply_barge_in_loss_flag(messages)
+    assert json.dumps(messages, ensure_ascii=False) == first
+
+
+def test_apply_barge_in_loss_flag_ignores_a_marker_in_a_user_turn():
+    """Only an assistant turn is ever a training target, so only an assistant
+    turn can need masking. find_barge_in_violations rejects the misplaced
+    marker separately."""
+    from llm_workflow_agents.data.voice_convention import apply_barge_in_loss_flag
+
+    messages = [{"role": "user", "content": "<unspoken>"}]
+    assert apply_barge_in_loss_flag(messages) is False
+    assert not any("loss" in m for m in messages)

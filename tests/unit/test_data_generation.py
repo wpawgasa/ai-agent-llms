@@ -2616,3 +2616,118 @@ class TestPlaceholderVoice:
         rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         for row in rows:
             assert find_voice_violations(row["messages"], "text") == []
+
+
+class TestBargeInLossFlagProducer:
+    """The `loss` flag must have a producer, and `barge_in` must be a fact.
+
+    Every consumer of the per-message `loss` key was built, tested and
+    documented while nothing anywhere wrote it — the R18(c) shape, a guardrail
+    wired but never armed. These tests fail if the producer is removed again.
+    """
+
+    _MARKER_CONVERSATION = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n"
+                "<S>Hello there</S><S>let me <unspoken>pull up your file</S>",
+            },
+            {"role": "user", "content": "sorry, one thing first"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n"
+                "<S>Of course</S><S>I was saying I would pull up your file</S>",
+            },
+        ]
+    }
+
+    _PLAIN_CONVERSATION = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "[STATE: GREETING → GREETING]\n<S>Hello there</S>",
+            },
+        ]
+    }
+
+    def _generate(self, tmp_path, payload, monkeypatch, **kwargs):
+        monkeypatch.setattr(
+            gw, "call_teacher_model", lambda m, s, u: json.dumps(payload)
+        )
+        meta = generate_workflow_dataset(
+            "L1",
+            num_samples=1,
+            teacher_model="fake-teacher",
+            output_dir=tmp_path,
+            seed=5,
+            modality_preset="voice_only",
+            barge_in_rate=1.0,
+            rich_prompt_rate=0.0,
+            repair_incoherent=False,
+            **kwargs,
+        )
+        return json.loads(meta.output_files[0].read_text().splitlines()[0])
+
+    def test_marker_turn_carries_loss_false_and_nothing_else_does(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        row = self._generate(tmp_path, self._MARKER_CONVERSATION, monkeypatch)
+        flagged = [m for m in row["messages"] if m.get("loss") is False]
+        assert len(flagged) == 1, row["messages"]
+        assert "<unspoken>" in flagged[0]["content"]
+        assert flagged[0]["role"] == "assistant"
+        # No other message carries the key at all, so the absent-key default
+        # (True) governs every real training target.
+        assert sum(1 for m in row["messages"] if "loss" in m) == 1
+
+    def test_marker_conversation_records_barge_in_true(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        row = self._generate(tmp_path, self._MARKER_CONVERSATION, monkeypatch)
+        assert row["barge_in"] is True
+
+    def test_conversation_without_marker_has_no_loss_key_and_barge_in_false(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """barge_in_rate=1.0 asks for an interruption; this teacher writes none.
+
+        The stored flag must follow the content, not the request. A label that
+        disagrees with its own conversation is the R12 shape.
+        """
+        row = self._generate(tmp_path, self._PLAIN_CONVERSATION, monkeypatch)
+        assert row["barge_in"] is False
+        assert not any("loss" in m for m in row["messages"]), row["messages"]
+
+    def test_placeholder_fallback_never_claims_a_barge_in(self, tmp_path) -> None:
+        """The placeholder cannot write a three-turn interruption, so it must
+        not be labelled as carrying one."""
+        meta = generate_workflow_dataset(
+            "L2",
+            num_samples=4,
+            output_dir=tmp_path,
+            seed=7,
+            modality_preset="voice_only",
+            barge_in_rate=1.0,
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert rows
+        assert all(r["barge_in"] is False for r in rows)
+        assert all(not any("loss" in m for m in r["messages"]) for r in rows)
+        # The gap is visible in the sidecar so a teacher that silently drops
+        # every interruption is detectable.
+        assert meta.stats["barge_in_requested"] == 4
+        assert meta.stats["barge_in_realized"] == 0
+
+    def test_stale_loss_key_from_the_teacher_is_deleted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The teacher is told to emit no extra keys, so a `loss` key on a turn
+        with no marker can only be a hallucination — honouring it would
+        silently drop a real training target."""
+        payload = json.loads(json.dumps(self._PLAIN_CONVERSATION))
+        payload["messages"][1]["loss"] = False
+        row = self._generate(tmp_path, payload, monkeypatch)
+        assert not any("loss" in m for m in row["messages"]), row["messages"]
