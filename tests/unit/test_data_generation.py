@@ -119,6 +119,54 @@ class TestWorkflowGeneration:
         with open(r1.output_files[0]) as f1, open(r2.output_files[0]) as f2:
             assert f1.read() == f2.read()
 
+    def test_seed_determinism_across_processes(self, tmp_output_dir: Path) -> None:
+        """Same seed, two SEPARATE processes, DIFFERENT PYTHONHASHSEED values.
+
+        test_seed_determinism above runs both generations in one interpreter, so
+        it cannot see hash randomisation. Iterating a ``set[str]`` and handing
+        the result to ``rng.shuffle`` made the generator's output depend on
+        ``PYTHONHASHSEED``, which meant every DVC "reproducible" generation
+        stage was conditional on an environment variable nobody sets. This test
+        pins nothing: it launches two subprocesses with deliberately different
+        hash seeds and demands byte-identical output.
+        """
+        import os
+        import subprocess
+        import sys
+
+        # The digest goes to a file, not to stdout: the generator logs a
+        # structlog line to stdout that carries the (differing) temp path.
+        script = (
+            "import sys, pathlib, hashlib\n"
+            "sys.path.insert(0, %r)\n"
+            "from llm_workflow_agents.data.generate_workflows import "
+            "generate_workflow_dataset\n"
+            "meta = generate_workflow_dataset('L3', num_samples=6, seed=99, "
+            "language='en', output_dir=pathlib.Path(sys.argv[1]))\n"
+            "pathlib.Path(sys.argv[2]).write_text(hashlib.sha256("
+            "meta.output_files[0].read_bytes()).hexdigest())\n"
+        ) % str(Path(__file__).resolve().parents[2] / "src")
+
+        digests = []
+        for hashseed in ("0", "12345"):
+            env = dict(os.environ, PYTHONHASHSEED=hashseed)
+            out_dir = tmp_output_dir / f"hs{hashseed}"
+            digest_file = tmp_output_dir / f"digest{hashseed}.txt"
+            subprocess.run(
+                [sys.executable, "-c", script, str(out_dir), str(digest_file)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            digests.append(digest_file.read_text().strip())
+
+        assert digests[0] == digests[1], (
+            "generator output differs across PYTHONHASHSEED values: "
+            f"{digests[0]} vs {digests[1]} — some set iteration order is "
+            "leaking into the output"
+        )
+
     def test_messages_start_with_system(self, tmp_output_dir: Path) -> None:
         result = generate_workflow_dataset(
             complexity_level="L1",

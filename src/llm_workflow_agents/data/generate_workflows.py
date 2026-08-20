@@ -345,7 +345,7 @@ def select_subgraph(
     # Step 2: add num_branches optional edges
     num_branches_target = rng.randint(*spec.num_branches)
     candidate_branch_edges = [
-        e for src in included_names
+        e for src in sorted(included_names)
         for e in branch_edges.get(src, [])
         if e.intent_category != "upsell_promo"
     ]
@@ -368,7 +368,7 @@ def select_subgraph(
     num_loops_target = rng.randint(*spec.num_loops)
     loops_added = 0
     all_loop_candidates = [
-        e for src in included_names
+        e for src in sorted(included_names)
         for e in branch_edges.get(src, [])
         if e.dst in included_names
         and e.dst != src
@@ -390,7 +390,7 @@ def select_subgraph(
     # Step 4: recovery arcs
     if spec.include_recovery:
         recovery_candidates = [
-            e for src in included_names
+            e for src in sorted(included_names)
             for e in branch_edges.get(src, [])
             if e.trigger == "tool_error" and e.dst in included_names
         ]
@@ -405,7 +405,7 @@ def select_subgraph(
     # Step 5: upsell arc
     if intent_category == "upsell_promo":
         upsell_candidates = [
-            e for src in included_names
+            e for src in sorted(included_names)
             for e in branch_edges.get(src, [])
             if e.intent_category == "upsell_promo" and e.dst in included_names
         ]
