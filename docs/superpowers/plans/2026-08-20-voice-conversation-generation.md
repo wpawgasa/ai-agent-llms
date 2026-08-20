@@ -678,8 +678,8 @@ class TestModality:
             "L1", num_samples=4, output_dir=tmp_path / "b", seed=42,
             modality_preset="default",
         )
-        rows_a = [json.loads(x) for x in a.output_file.read_text().splitlines()]
-        rows_b = [json.loads(x) for x in b.output_file.read_text().splitlines()]
+        rows_a = [json.loads(x) for x in a.output_files[0].read_text().splitlines()]
+        rows_b = [json.loads(x) for x in b.output_files[0].read_text().splitlines()]
         assert [r["messages"] for r in rows_a] == [r["messages"] for r in rows_b]
         assert all(r["modality"] == "text" for r in rows_a)
 
@@ -688,7 +688,7 @@ class TestModality:
             "L1", num_samples=4, output_dir=tmp_path, seed=42,
             modality_preset="voice_only",
         )
-        rows = [json.loads(x) for x in meta.output_file.read_text().splitlines()]
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         assert all(r["modality"] == "voice" for r in rows)
 ```
 
@@ -1140,7 +1140,7 @@ class TestPlaceholderVoice:
             "L3", num_samples=6, output_dir=tmp_path, seed=42,
             modality_preset="voice_only",
         )
-        rows = [json.loads(x) for x in meta.output_file.read_text().splitlines()]
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         assert rows
         for row in rows:
             assert row["modality"] == "voice"
@@ -1150,7 +1150,7 @@ class TestPlaceholderVoice:
         from llm_workflow_agents.data.voice_convention import find_voice_violations
 
         meta = generate_workflow_dataset("L3", num_samples=6, output_dir=tmp_path, seed=42)
-        rows = [json.loads(x) for x in meta.output_file.read_text().splitlines()]
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         for row in rows:
             assert find_voice_violations(row["messages"], "text") == []
 ```

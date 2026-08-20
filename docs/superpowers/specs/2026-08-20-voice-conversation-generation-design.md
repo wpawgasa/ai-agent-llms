@@ -70,7 +70,12 @@ Five rules define the format.
 2. Each `<tool_call>` block sits outside every chunk. The agent never speaks it.
 3. Every spoken character sits inside a chunk. Delete the state line. Delete each
    tool call. Each remaining non-whitespace character must sit between an `<S>`
-   and its `</S>`.
+   and its `</S>`. A turn with no spoken text at all is legal and carries no
+   chunk. A turn that only calls a tool is silent on the line. The production
+   reference states this: "Format spoken text with `</S>`; emit no delimiter
+   when there is no speech." Do not invent filler speech to give such a turn a
+   chunk. Uniform filler before every tool call is the kind of structural edit
+   risk R15 records being learned as an unconditional habit.
 4. Chunks do not nest. The count of `<S>` equals the count of `</S>`. Each `<S>`
    precedes its `</S>`.
 5. `[END_CONVERSATION]` follows the last chunk of a terminal turn. It sits
