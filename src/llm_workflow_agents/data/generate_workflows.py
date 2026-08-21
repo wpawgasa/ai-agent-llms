@@ -1237,30 +1237,6 @@ RULES:
 """
 
 
-_VOICE_RULES = """\
-
-VOICE MODE — this conversation is spoken aloud through a text-to-speech engine.
-The orchestrator reads your output as a stream, finds each <S>...</S> chunk, and
-sends it to the engine in order. Six extra rules apply:
-
-- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>. The
-  agent never speaks it.
-- V2. Put every <tool_call> block OUTSIDE every <S>. The agent never speaks it.
-- V3. Put every spoken word INSIDE a chunk. No spoken text may sit outside
-  <S>...</S>.
-- V4. Split at natural pause points. Keep a chunk to {chunk_target} characters
-  and never above {chunk_max}. Keep a turn to {turn_target} chunks and never
-  above {turn_max}.
-- V5. Keep replies short. A spoken reply is one or two sentences. Use no
-  markdown, no bullet points, no numbered lists, no headers.
-- V6. End a terminal turn with [END_CONVERSATION] after the last </S>, outside
-  the chunks. Never put it on a turn that also calls a tool.
-
-Worked example of one voice assistant turn:
-    [STATE: VERIFY_PATIENT → VERIFY_PATIENT]
-    <S>ได้เลยค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูลสักครู่นะคะ</S>
-    <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345"}}}}</tool_call>
-"""
 
 
 _BARGE_IN_RULES = """\
@@ -1291,19 +1267,9 @@ def _teacher_system_prompt(modality: str) -> str:
     """
     if modality != "voice":
         return _TEACHER_SYSTEM_PROMPT
-    from llm_workflow_agents.data.voice_convention import (
-        CHUNK_MAX_CHARS,
-        CHUNK_TARGET_CHARS,
-        TURN_MAX_CHUNKS,
-        TURN_TARGET_CHUNKS,
-    )
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
 
-    return _TEACHER_SYSTEM_PROMPT + _VOICE_RULES.format(
-        chunk_target=CHUNK_TARGET_CHARS,
-        chunk_max=CHUNK_MAX_CHARS,
-        turn_target=TURN_TARGET_CHUNKS,
-        turn_max=TURN_MAX_CHUNKS,
-    )
+    return _TEACHER_SYSTEM_PROMPT + render_voice_format_rules()
 
 
 _LANGUAGE_INSTRUCTIONS: dict[str, str] = {

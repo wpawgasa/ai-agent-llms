@@ -1,15 +1,18 @@
-"""The teacher prompts state the voice contract in prose; keep them in step.
+"""The voice format contract is checked here, not generated.
 
-`voice_convention.py` is the enforced contract — `find_voice_violations` is
-what decides whether a row enters the corpus. The same contract is stated a
-second and third time, as prose, in `_VOICE_RULES` and `_RICH_VOICE_OVERRIDE`.
-Those copies are deliberately not generated from the module (see CLAUDE.md
-R20), so nothing but a test stops them drifting.
+`voice_convention.py` defines the enforced contract — `find_voice_violations`
+is what decides whether a row enters the corpus. The same contract is stated
+as prose for a language model via `render_voice_format_rules()`. Both the
+teacher prompt and the serving system prompt render from that one function, so
+they can never drift.
 
-Drift is only self-correcting in one direction. A prompt that under-states a
-rule produces rows the checker rejects and the repair loop regenerates, at API
-cost. A prompt that names a marker the checker no longer knows about is dead
-prose. Either is worth catching here rather than during a paid 2,400-row run.
+The old test asserted only that certain strings appeared, so a reviewer inverted
+a rule's meaning (changing "outside" to "inside") and every assertion still
+passed. The new tests check identity instead: the exact bytes that
+`render_voice_format_rules()` produces must appear in the teacher prompt.
+
+`_RICH_VOICE_OVERRIDE` is a different instruction about authoring dialogue in
+a system prompt, not a copy of the rules, so it is tested separately.
 """
 
 from __future__ import annotations
@@ -23,20 +26,38 @@ from llm_workflow_agents.data.generate_workflows import (
 )
 
 
+def test_render_voice_format_rules_substitutes_every_limit():
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    text = render_voice_format_rules()
+    # No placeholder may survive. Do not assert "no braces at all": the worked
+    # example contains real JSON, and .format() un-doubles those braces.
+    for name in ("{chunk_target}", "{chunk_max}", "{turn_target}", "{turn_max}"):
+        assert name not in text
+    for value in (vc.CHUNK_TARGET_CHARS, vc.CHUNK_MAX_CHARS,
+                  vc.TURN_TARGET_CHUNKS, vc.TURN_MAX_CHUNKS):
+        assert str(value) in text
+
+
+def test_teacher_voice_prompt_embeds_the_shared_rules_verbatim():
+    """Identity, not keyword presence. The old test asserted only that certain
+    strings appeared, so inverting a rule's meaning left it passing."""
+    from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    assert render_voice_format_rules() in _teacher_system_prompt("voice")
+
+
+def test_text_teacher_prompt_holds_no_voice_rules():
+    from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    assert render_voice_format_rules() not in _teacher_system_prompt("text")
+
+
 @pytest.fixture(scope="module")
 def voice_prompt() -> str:
     return _teacher_system_prompt("voice")
-
-
-def test_voice_prompt_renders_the_module_limits(voice_prompt):
-    """The four numeric limits come from the module, not from a literal."""
-    for value in (
-        vc.CHUNK_TARGET_CHARS,
-        vc.CHUNK_MAX_CHARS,
-        vc.TURN_TARGET_CHUNKS,
-        vc.TURN_MAX_CHUNKS,
-    ):
-        assert str(value) in voice_prompt
 
 
 def test_voice_prompt_names_every_marker_the_checker_enforces(voice_prompt):
