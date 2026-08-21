@@ -39,6 +39,68 @@ def test_render_voice_format_rules_substitutes_every_limit():
         assert str(value) in text
 
 
+def test_prose_claims_match_enforced_contract():
+    """Assert specific directional claims in the prose against what the code enforces.
+
+    This test guards prose-against-code, not code-against-prose. The old test
+    asserted only that "<S>" appeared, so inverting "OUTSIDE every <S>" to
+    "INSIDE every <S>" passed all checks. The new checks pin the directional
+    phrases themselves, so an inversion fails immediately.
+
+    Before the fix: invert V1 from "OUTSIDE" to "INSIDE" → test passed.
+    After the fix: invert V1 from "OUTSIDE" to "INSIDE" → test fails.
+    """
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    rules = render_voice_format_rules()
+
+    # V1: The state marker must be OUTSIDE every <S>. The code enforces this at
+    # voice_convention.py:252-257 by checking if the state marker appears
+    # inside chunks (joined text) and flagging it as a violation. Pin this by
+    # asserting the V1 text itself contains the directional phrase.
+    assert "- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>" in rules, (
+        "V1 must state state marker goes OUTSIDE chunks, not INSIDE"
+    )
+
+    # V2: Tool calls must be OUTSIDE every <S>. The code enforces this at
+    # voice_convention.py:258-263 by checking if a tool call appears inside
+    # chunks and flagging it. Pin by asserting V2's specific text.
+    assert "- V2. Put every <tool_call> block OUTSIDE every <S>" in rules, (
+        "V2 must state tool calls go OUTSIDE chunks"
+    )
+
+    # V3a: Spoken text must be INSIDE a chunk. The code enforces this at
+    # voice_convention.py:283-291 by extracting remainder text after removing
+    # all markers and chunks, then flagging if anything is left.
+    assert "Put every spoken word INSIDE a chunk" in rules, (
+        "V3 must state spoken text goes INSIDE chunks"
+    )
+
+    # V3b: A turn with no spoken text is legal and carries no chunk. The code
+    # enforces this at voice_convention.py:208-233 by returning early with no
+    # violations for chunkless turns.
+    assert "A turn with no spoken text at all is legal and carries no chunk" in rules, (
+        "V3 must state that turns with no spoken text are legal and carry no chunk"
+    )
+
+    # V3c: Never invent filler speech. The code enforces this at
+    # voice_convention.py:209-223 by documenting the rule; it is not actively
+    # checked but is a guideline for authoring. The prose must state it.
+    assert "Never invent filler" in rules, (
+        "V3 must forbid inventing filler speech"
+    )
+
+    # V6: [END_CONVERSATION] goes after the last </S> and never shares a turn
+    # with a tool call. The code enforces this at voice_convention.py:196-205
+    # (no tool calls on end-marker turns) and 266-278 (marker after last </S>).
+    assert "End a terminal turn with [END_CONVERSATION] after the last </S>" in rules, (
+        "V6 must state end marker goes after the last chunk"
+    )
+    assert "Never put it on a turn that also calls a tool" in rules, (
+        "V6 must forbid end marker on turns with tool calls"
+    )
+
+
 def test_teacher_voice_prompt_embeds_the_shared_rules_verbatim():
     """Identity, not keyword presence. The old test asserted only that certain
     strings appeared, so inverting a rule's meaning left it passing."""
