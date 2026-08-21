@@ -73,6 +73,40 @@ def compute_weighted_workflow_score(
     )
 
 
+#: Share of Phase 1 quality carried by the voice stratum.
+#:
+#: NOT in configs/benchmark/selection_weights.yaml on purpose: no code reads
+#: that file, so a weight placed there would be a knob that does nothing —
+#: the defect shape risks R16 and R18c both record.
+DEFAULT_VOICE_WEIGHT = 0.30
+
+
+def blend_modality_scores(
+    score_text: float | None,
+    score_voice: float | None,
+    voice_weight: float = DEFAULT_VOICE_WEIGHT,
+) -> float:
+    """Blend the two modality strata into one quality number.
+
+    A weighted mean of two per-stratum scores, NOT a mean over pooled rows.
+    A pooled mean takes its effective weight from however many rows each
+    stratum happens to hold, so it drifts every time the data is regenerated
+    and nobody notices, because the result still looks like a number.
+
+    With one stratum absent the other is returned unchanged, by identity and
+    not by arithmetic. That keeps this change inert until a voice corpus
+    exists: the ranking moves when a person adds voice data, not when someone
+    merges a branch.
+    """
+    if not 0.0 <= voice_weight <= 1.0:
+        raise ValueError(f"voice_weight must be within 0.0 and 1.0, got {voice_weight}")
+    if score_voice is None:
+        return score_text if score_text is not None else 0.0
+    if score_text is None:
+        return score_voice
+    return voice_weight * score_voice + (1.0 - voice_weight) * score_text
+
+
 def full_workflow_success_rate(
     predictions: list[ConversationPrediction],
     ground_truth: list[ConversationGroundTruth],

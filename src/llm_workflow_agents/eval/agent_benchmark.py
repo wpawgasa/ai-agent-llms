@@ -22,9 +22,23 @@ from typing import Any
 
 import structlog
 
-from llm_workflow_agents.eval.state_accuracy import StateMachineMetrics, parse_state_transitions
-from llm_workflow_agents.eval.tool_call_f1 import ToolCallMetrics, parse_tool_calls
+from llm_workflow_agents.eval.state_accuracy import (
+    ConversationGroundTruth,
+    ConversationPrediction,
+    StateMachineMetrics,
+    evaluate_state_machine,
+    parse_state_transitions,
+)
+from llm_workflow_agents.eval.tool_call_f1 import (
+    ToolCallMetrics,
+    TurnGroundTruth,
+    TurnPrediction,
+    evaluate_tool_calls,
+    evaluate_tool_calls_conversation,
+    parse_tool_calls,
+)
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
+from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend_modality_scores
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -199,6 +213,103 @@ def evaluate_workflow_quality(
     )
 
     return metrics
+
+
+def _fmt_stratum(value: float | None) -> str:
+    """Render a per-stratum score for the console summary, or 'null' when empty."""
+    return "null" if value is None else f"{value:.4f}"
+
+
+def compute_modality_quality_summary(
+    samples: list[dict[str, Any]],
+    state_predictions: list[ConversationPrediction],
+    state_ground_truths: list[ConversationGroundTruth],
+    conv_tool_preds: list[list[TurnPrediction]],
+    conv_tool_gts: list[list[TurnGroundTruth]],
+    voice_weight: float = DEFAULT_VOICE_WEIGHT,
+) -> dict[str, Any]:
+    """Score the text and voice strata separately, then blend into one number.
+
+    Partitions conversations by ``sample.get("modality") or "text"`` — a
+    conversation with no ``modality`` field (every sample predating the voice
+    feature) is grouped into the text stratum, never dropped. Each stratum's
+    quality is computed once over its own aggregated metrics, using this
+    module's own :func:`compute_weighted_score` — NOT
+    ``composite_score.compute_weighted_workflow_score``, a different formula
+    with a different signature. The two per-stratum scores are then blended
+    with :func:`llm_workflow_agents.eval.composite_score.blend_modality_scores`,
+    a weighted mean of the two stratum means, never a mean over pooled rows
+    (a pooled mean's effective weight drifts with row counts every time the
+    corpus is regenerated).
+
+    With no voice conversations present, ``quality_voice`` is ``None`` and
+    ``blend_modality_scores`` returns ``quality_text`` by float identity —
+    this makes the change inert on every benchmark run predating the voice
+    corpus.
+
+    A later task adds chunk-format diagnostics to this same summary dict;
+    this function owns only the modality partition and the blend, so the
+    dict stays open to that addition without restructuring.
+
+    Args:
+        samples: The raw benchmark samples, in the same order used to build
+            the prediction/ground-truth lists below.
+        state_predictions: Per-conversation state predictions, one per sample.
+        state_ground_truths: Per-conversation state ground truth, one per sample.
+        conv_tool_preds: Per-conversation lists of turn-level tool predictions,
+            one list per sample (as built for conversation-level tool eval).
+        conv_tool_gts: Per-conversation lists of turn-level tool ground truth,
+            one list per sample.
+        voice_weight: Share of quality carried by the voice stratum.
+
+    Returns:
+        Dict with ``quality_text``, ``quality_voice`` (either ``None`` when
+        that stratum is empty), ``quality`` (the blend), ``n_text``,
+        ``n_voice``, and ``voice_weight``.
+    """
+    partitions: dict[str, list[int]] = {}
+    for idx, sample in enumerate(samples):
+        modality = sample.get("modality") or "text"
+        partitions.setdefault(modality, []).append(idx)
+
+    def _stratum_quality(indices: list[int]) -> float | None:
+        if not indices:
+            return None
+        sub_state_preds = [state_predictions[i] for i in indices]
+        sub_state_gts = [state_ground_truths[i] for i in indices]
+        sub_conv_tool_preds = [conv_tool_preds[i] for i in indices]
+        sub_conv_tool_gts = [conv_tool_gts[i] for i in indices]
+        sub_turn_preds = [tp for i in indices for tp in conv_tool_preds[i]]
+        sub_turn_gts = [tg for i in indices for tg in conv_tool_gts[i]]
+
+        stratum_state_metrics = evaluate_state_machine(sub_state_preds, sub_state_gts)
+        stratum_tool_turn = evaluate_tool_calls(sub_turn_preds, sub_turn_gts)
+        stratum_tool_conv = evaluate_tool_calls_conversation(sub_conv_tool_preds, sub_conv_tool_gts)
+        stratum_tool_best = (
+            stratum_tool_conv
+            if stratum_tool_conv.tool_call_f1 >= stratum_tool_turn.tool_call_f1
+            else stratum_tool_turn
+        )
+        return compute_weighted_score(
+            stratum_state_metrics,
+            stratum_tool_best,
+            stratum_state_metrics.task_completion_rate,
+        )
+
+    text_indices = partitions.get("text", [])
+    voice_indices = partitions.get("voice", [])
+    quality_text = _stratum_quality(text_indices)
+    quality_voice = _stratum_quality(voice_indices)
+    quality = blend_modality_scores(quality_text, quality_voice, voice_weight)
+
+    return {
+        "quality_text": quality_text,
+        "quality_voice": quality_voice,
+        "quality": quality,
+        "n_text": len(text_indices),
+        "n_voice": len(voice_indices),
+        "voice_weight": voice_weight,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -607,17 +718,10 @@ if __name__ == "__main__":
 
     load_dotenv()
 
-    from llm_workflow_agents.eval.state_accuracy import (
-        ConversationGroundTruth,
-        ConversationPrediction,
-        evaluate_state_machine,
-    )
-    from llm_workflow_agents.eval.tool_call_f1 import (
-        TurnGroundTruth,
-        TurnPrediction,
-        evaluate_tool_calls,
-        evaluate_tool_calls_conversation,
-    )
+    # ConversationGroundTruth, ConversationPrediction, evaluate_state_machine,
+    # TurnGroundTruth, TurnPrediction, evaluate_tool_calls and
+    # evaluate_tool_calls_conversation are imported at module level above
+    # (needed there by compute_modality_quality_summary).
     from llm_workflow_agents.eval.tool_chain_propagation import evaluate_chain_propagation
 
     parser = argparse.ArgumentParser(description="Experiment A: workflow quality benchmark")
@@ -678,6 +782,16 @@ if __name__ == "__main__":
             "'sglang' enables the Qwen3 thinking toggle like vLLM. "
             "'tensorrt_llm' skips the thinking toggle (TRT-LLM rejects "
             "unknown body fields)."
+        ),
+    )
+    parser.add_argument(
+        "--voice-weight",
+        type=float,
+        default=DEFAULT_VOICE_WEIGHT,
+        help=(
+            "Share of quality carried by the voice stratum (default: "
+            f"{DEFAULT_VOICE_WEIGHT}). Ignored when the run holds no voice "
+            "conversations, in which case quality equals the text score exactly."
         ),
     )
     args = parser.parse_args()
@@ -827,6 +941,16 @@ if __name__ == "__main__":
         tool_metrics_conversation=tool_metrics_conv,
     )
 
+    # Score the text and voice strata separately and blend (voice weighted
+    # DEFAULT_VOICE_WEIGHT by default). With no voice conversations present
+    # this is inert: quality_summary["quality"] == quality_summary["quality_text"]
+    # by float identity (blend_modality_scores' no-voice-stratum branch).
+    quality_summary = compute_modality_quality_summary(
+        samples, state_predictions, state_ground_truths,
+        conv_tool_preds, conv_tool_gts,
+        voice_weight=args.voice_weight,
+    )
+
     # --- Write results ---
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -848,12 +972,21 @@ if __name__ == "__main__":
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
         "metrics": quality.to_dict(),
+        # A later task adds chunk-format diagnostics here alongside the
+        # modality blend; quality_summary is left as a flat, open dict so
+        # that addition doesn't require restructuring this block.
+        "quality_summary": quality_summary,
     }
 
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    logger.info("benchmark_complete", output=str(output_path), **quality.to_dict())
+    logger.info(
+        "benchmark_complete",
+        output=str(output_path),
+        **quality.to_dict(),
+        **quality_summary,
+    )
     print(f"\nResults written to {output_path}")
     print(f"  weighted_workflow_score : {quality.weighted_workflow_score:.3f}  (target >=0.75)")
     print(f"  full_workflow_success   : {quality.full_workflow_success:.3f}  (target >=0.55)")
@@ -863,3 +996,12 @@ if __name__ == "__main__":
     print(f"  tool_call_f1 (conv)     : {quality.tool_metrics_conversation.tool_call_f1:.3f}")
     print(f"  latency_per_turn_avg_ms : {quality.latency_per_turn_avg_ms:.1f}")
     print(f"  ttft_avg_ms             : {quality.ttft_avg_ms:.1f}")
+    print(
+        "  quality (blended)       : "
+        f"{quality_summary['quality']:.4f}"
+        f"  [text={_fmt_stratum(quality_summary['quality_text'])} "
+        f"(n={quality_summary['n_text']}), "
+        f"voice={_fmt_stratum(quality_summary['quality_voice'])} "
+        f"(n={quality_summary['n_voice']}), "
+        f"voice_weight={quality_summary['voice_weight']}]"
+    )
