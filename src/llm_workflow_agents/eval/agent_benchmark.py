@@ -39,6 +39,7 @@ from llm_workflow_agents.eval.tool_call_f1 import (
 )
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
 from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend_modality_scores
+from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -247,9 +248,10 @@ def compute_modality_quality_summary(
     this makes the change inert on every benchmark run predating the voice
     corpus.
 
-    A later task adds chunk-format diagnostics to this same summary dict;
-    this function owns only the modality partition and the blend, so the
-    dict stays open to that addition without restructuring.
+    ``attach_chunk_diagnostics`` merges chunk-format diagnostics into this
+    same summary dict as a separate step; this function owns only the
+    modality partition and the blend, so the dict stays open to that
+    addition without restructuring.
 
     Args:
         samples: The raw benchmark samples, in the same order used to build
@@ -309,6 +311,65 @@ def compute_modality_quality_summary(
         "n_text": len(text_indices),
         "n_voice": len(voice_indices),
         "voice_weight": voice_weight,
+    }
+
+
+def _voice_stratum_completions(
+    samples: list[dict[str, Any]],
+    conv_tool_preds: list[list[TurnPrediction]],
+) -> list[str]:
+    """Return the raw per-turn generated text for VOICE-modality samples only.
+
+    Chunk diagnostics (``<S>...</S>`` markers) only make sense on voice
+    output — a text conversation holds no chunk markers at all (see
+    ``02-data-generation.md``, Voice Modality; ``data/voice_convention.py``
+    checks the converse for text rows). Uses the same partition rule as
+    :func:`compute_modality_quality_summary`: ``sample.get("modality") or
+    "text"``.
+    """
+    out: list[str] = []
+    for sample, turns in zip(samples, conv_tool_preds):
+        if (sample.get("modality") or "text") != "voice":
+            continue
+        out.extend(tp.content for tp in turns)
+    return out
+
+
+def _voice_stratum_language(samples: list[dict[str, Any]]) -> str:
+    """Return the most common ``language`` among VOICE-modality samples.
+
+    Defaults to ``"en"`` when no voice samples are present or none carries a
+    ``language`` field, matching ``chunk_diagnostics``' own default and
+    ``data/system_prompt.py``'s ``sample.get("language") or "en"`` convention.
+    """
+    from collections import Counter
+
+    langs = [
+        sample.get("language") or "en"
+        for sample in samples
+        if (sample.get("modality") or "text") == "voice"
+    ]
+    if not langs:
+        return "en"
+    return Counter(langs).most_common(1)[0][0]
+
+
+def attach_chunk_diagnostics(
+    quality_summary: dict[str, Any],
+    voice_completions: list[str],
+    language: str = "en",
+) -> dict[str, Any]:
+    """Attach reference-free chunk diagnostics to a quality summary dict.
+
+    Guardrail only (see ``chunk_diagnostics.py``'s module docstring for why):
+    this merges a new ``chunk_diagnostics`` key into a *copy* of
+    ``quality_summary`` without touching any existing key — in particular
+    ``quality``, the number that ranks Phase 1 candidates. Chunk formatting
+    is cheap for fine-tuning to install, so it must never move that ranking.
+    """
+    return {
+        **quality_summary,
+        "chunk_diagnostics": chunk_diagnostics(voice_completions, language),
     }
 
 
@@ -951,6 +1012,16 @@ if __name__ == "__main__":
         voice_weight=args.voice_weight,
     )
 
+    # Attach reference-free chunk-format diagnostics over the VOICE stratum's
+    # completions only (voice markers don't appear in text conversations).
+    # Guardrails only — attach_chunk_diagnostics never touches
+    # quality_summary["quality"], so this cannot move the Phase 1 ranking.
+    quality_summary = attach_chunk_diagnostics(
+        quality_summary,
+        _voice_stratum_completions(samples, conv_tool_preds),
+        _voice_stratum_language(samples),
+    )
+
     # --- Write results ---
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -972,9 +1043,9 @@ if __name__ == "__main__":
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
         "metrics": quality.to_dict(),
-        # A later task adds chunk-format diagnostics here alongside the
-        # modality blend; quality_summary is left as a flat, open dict so
-        # that addition doesn't require restructuring this block.
+        # quality_summary now also carries a "chunk_diagnostics" key
+        # (guardrails, computed over the voice stratum only; see
+        # attach_chunk_diagnostics) alongside the modality blend.
         "quality_summary": quality_summary,
     }
 
@@ -1004,4 +1075,13 @@ if __name__ == "__main__":
         f"voice={_fmt_stratum(quality_summary['quality_voice'])} "
         f"(n={quality_summary['n_voice']}), "
         f"voice_weight={quality_summary['voice_weight']}]"
+    )
+    _diag = quality_summary["chunk_diagnostics"]
+    print(
+        "  chunk diagnostics (guardrail, voice only, not in composite): "
+        f"n_turns_with_chunks={_diag['n_turns_with_chunks']}, "
+        f"first_chunk_p50/p90={_diag['first_chunk_p50']:.0f}/{_diag['first_chunk_p90']:.0f}, "
+        f"chunk_len_p50/p90={_diag['chunk_len_p50']:.0f}/{_diag['chunk_len_p90']:.0f}, "
+        f"chunks_per_turn_p50={_diag['chunks_per_turn_p50']:.1f}, "
+        f"boundary_quality={_diag['boundary_quality']:.3f}"
     )
