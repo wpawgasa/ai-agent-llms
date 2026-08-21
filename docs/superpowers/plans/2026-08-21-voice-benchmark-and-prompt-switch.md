@@ -268,6 +268,19 @@ def test_real_text_rows_render_byte_identically(tmp_path):
 
 This step must run before any change to `system_prompt.py`, or the baseline records the new behaviour and the test proves nothing.
 
+FIRST un-ignore the fixture. `.gitignore:62` is a blanket `*.json` guarding GCP
+credentials, so `git add tests/fixtures/text_prompt_baseline.json` would SILENTLY
+SKIP it, and the byte-identity test would then fail on any fresh checkout with
+"run the baseline capture step first" — a test that cannot run. The repo already
+uses this escape hatch one line below for `!deployments/**/config.json`, so add
+the same kind of negation immediately after that line:
+
+```
+!tests/fixtures/*.json
+```
+
+Confirm it worked before continuing: `git check-ignore -v tests/fixtures/text_prompt_baseline.json` must print nothing.
+
 ```bash
 source .venv/bin/activate && python -c "
 import json, pathlib
@@ -682,7 +695,19 @@ In `src/llm_workflow_agents/eval/agent_benchmark.py`, locate the site that aggre
 grep -n "state_metrics\|tool_metrics\|def .*summar\|def run_benchmark" src/llm_workflow_agents/eval/agent_benchmark.py
 ```
 
-Partition the scored conversations by `(conv.get("modality") or "text")`, compute `compute_weighted_workflow_score` once per stratum, and report:
+Partition the scored conversations by `(conv.get("modality") or "text")`, compute the score once per stratum, and report the results.
+
+**Use `agent_benchmark.py`'s OWN `compute_weighted_score(state, tool, completion)`,
+defined at about line 62 of that file.** Do NOT use
+`composite_score.compute_weighted_workflow_score(state, tool)`. They are
+different functions: the benchmark's takes `completion` explicitly and uses the
+BETTER of per-turn and conversation-level state accuracy, and `agent_benchmark.py`
+does not import `composite_score` at all. Blending a different formula than the
+one this benchmark has always used would silently change what its headline number
+means. `blend_modality_scores` is unaffected — it blends two floats and does not
+care which scorer produced them.
+
+Report:
 
 - `quality_text`, or `null` when the stratum is empty
 - `quality_voice`, or `null` when the stratum is empty
