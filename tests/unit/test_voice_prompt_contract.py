@@ -1,15 +1,18 @@
-"""The teacher prompts state the voice contract in prose; keep them in step.
+"""The voice format contract is checked here, not generated.
 
-`voice_convention.py` is the enforced contract — `find_voice_violations` is
-what decides whether a row enters the corpus. The same contract is stated a
-second and third time, as prose, in `_VOICE_RULES` and `_RICH_VOICE_OVERRIDE`.
-Those copies are deliberately not generated from the module (see CLAUDE.md
-R20), so nothing but a test stops them drifting.
+`voice_convention.py` defines the enforced contract — `find_voice_violations`
+is what decides whether a row enters the corpus. The same contract is stated
+as prose for a language model via `render_voice_format_rules()`. Both the
+teacher prompt and the serving system prompt render from that one function, so
+they can never drift.
 
-Drift is only self-correcting in one direction. A prompt that under-states a
-rule produces rows the checker rejects and the repair loop regenerates, at API
-cost. A prompt that names a marker the checker no longer knows about is dead
-prose. Either is worth catching here rather than during a paid 2,400-row run.
+The old test asserted only that certain strings appeared, so a reviewer inverted
+a rule's meaning (changing "outside" to "inside") and every assertion still
+passed. The new tests check identity instead: the exact bytes that
+`render_voice_format_rules()` produces must appear in the teacher prompt.
+
+`_RICH_VOICE_OVERRIDE` is a different instruction about authoring dialogue in
+a system prompt, not a copy of the rules, so it is tested separately.
 """
 
 from __future__ import annotations
@@ -23,20 +26,100 @@ from llm_workflow_agents.data.generate_workflows import (
 )
 
 
+def test_render_voice_format_rules_substitutes_every_limit():
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    text = render_voice_format_rules()
+    # No placeholder may survive. Do not assert "no braces at all": the worked
+    # example contains real JSON, and .format() un-doubles those braces.
+    for name in ("{chunk_target}", "{chunk_max}", "{turn_target}", "{turn_max}"):
+        assert name not in text
+    for value in (vc.CHUNK_TARGET_CHARS, vc.CHUNK_MAX_CHARS,
+                  vc.TURN_TARGET_CHUNKS, vc.TURN_MAX_CHUNKS):
+        assert str(value) in text
+
+
+def test_prose_claims_match_enforced_contract():
+    """Assert specific directional claims in the prose against what the code enforces.
+
+    This test guards prose-against-code, not code-against-prose. The old test
+    asserted only that "<S>" appeared, so inverting "OUTSIDE every <S>" to
+    "INSIDE every <S>" passed all checks. The new checks pin the directional
+    phrases themselves, so an inversion fails immediately.
+
+    Before the fix: invert V1 from "OUTSIDE" to "INSIDE" → test passed.
+    After the fix: invert V1 from "OUTSIDE" to "INSIDE" → test fails.
+    """
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    rules = render_voice_format_rules()
+
+    # V1: The state marker must be OUTSIDE every <S>. The code enforces this at
+    # voice_convention.py:252-257 by checking if the state marker appears
+    # inside chunks (joined text) and flagging it as a violation. Pin this by
+    # asserting the V1 text itself contains the directional phrase.
+    assert "- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>" in rules, (
+        "V1 must state state marker goes OUTSIDE chunks, not INSIDE"
+    )
+
+    # V2: Tool calls must be OUTSIDE every <S>. The code enforces this at
+    # voice_convention.py:258-263 by checking if a tool call appears inside
+    # chunks and flagging it. Pin by asserting V2's specific text.
+    assert "- V2. Put every <tool_call> block OUTSIDE every <S>" in rules, (
+        "V2 must state tool calls go OUTSIDE chunks"
+    )
+
+    # V3a: Spoken text must be INSIDE a chunk. The code enforces this at
+    # voice_convention.py:283-291 by extracting remainder text after removing
+    # all markers and chunks, then flagging if anything is left.
+    assert "Put every spoken word INSIDE a chunk" in rules, (
+        "V3 must state spoken text goes INSIDE chunks"
+    )
+
+    # V3b: A turn with no spoken text is legal and carries no chunk. The code
+    # enforces this at voice_convention.py:208-233 by returning early with no
+    # violations for chunkless turns.
+    assert "A turn with no spoken text at all is legal and carries no chunk" in rules, (
+        "V3 must state that turns with no spoken text are legal and carry no chunk"
+    )
+
+    # V3c: Never invent filler speech. The code enforces this at
+    # voice_convention.py:209-223 by documenting the rule; it is not actively
+    # checked but is a guideline for authoring. The prose must state it.
+    assert "Never invent filler" in rules, (
+        "V3 must forbid inventing filler speech"
+    )
+
+    # V6: [END_CONVERSATION] goes after the last </S> and never shares a turn
+    # with a tool call. The code enforces this at voice_convention.py:196-205
+    # (no tool calls on end-marker turns) and 266-278 (marker after last </S>).
+    assert "End a terminal turn with [END_CONVERSATION] after the last </S>" in rules, (
+        "V6 must state end marker goes after the last chunk"
+    )
+    assert "Never put it on a turn that also calls a tool" in rules, (
+        "V6 must forbid end marker on turns with tool calls"
+    )
+
+
+def test_teacher_voice_prompt_embeds_the_shared_rules_verbatim():
+    """Identity, not keyword presence. The old test asserted only that certain
+    strings appeared, so inverting a rule's meaning left it passing."""
+    from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    assert render_voice_format_rules() in _teacher_system_prompt("voice")
+
+
+def test_text_teacher_prompt_holds_no_voice_rules():
+    from llm_workflow_agents.data.generate_workflows import _teacher_system_prompt
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+    assert render_voice_format_rules() not in _teacher_system_prompt("text")
+
+
 @pytest.fixture(scope="module")
 def voice_prompt() -> str:
     return _teacher_system_prompt("voice")
-
-
-def test_voice_prompt_renders_the_module_limits(voice_prompt):
-    """The four numeric limits come from the module, not from a literal."""
-    for value in (
-        vc.CHUNK_TARGET_CHARS,
-        vc.CHUNK_MAX_CHARS,
-        vc.TURN_TARGET_CHUNKS,
-        vc.TURN_MAX_CHUNKS,
-    ):
-        assert str(value) in voice_prompt
 
 
 def test_voice_prompt_names_every_marker_the_checker_enforces(voice_prompt):

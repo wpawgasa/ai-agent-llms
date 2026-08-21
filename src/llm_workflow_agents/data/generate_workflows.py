@@ -946,6 +946,100 @@ _HANDOFF_ACK_TEMPLATES: dict[str, str] = {
 }
 
 
+def _is_self_loop_turn(content: str) -> bool:
+    """True when the turn's state annotation keeps the conversation in place.
+
+    A barge-in interrupts speech; it completes nothing. The recovery turn
+    therefore repeats the interrupted turn's state, and that is only a
+    well-formed ground truth when the interrupted turn did not advance.
+    """
+    state = _STATE_ANNOTATION_RE.search(content)
+    return bool(state) and state.group(1) == state.group(2)
+
+
+def _insert_placeholder_barge_in(
+    messages: list[dict[str, Any]],
+    language: str,
+    rng: random.Random,
+) -> None:
+    """Insert one interruption in place. No-op when no turn qualifies.
+
+    Three coordinated edits, because a barge-in is not one insertion: the
+    interrupted turn is cut, an interrupting user turn follows it, and a
+    recovery assistant turn follows that. The recovery annotates the SAME
+    state — an interruption completes nothing, so the workflow must not
+    advance, and find_barge_in_violations enforces exactly that.
+
+    The candidate draw and the cut point both come from the caller's
+    per-sample ``rng`` — never module-level randomness — so the placeholder
+    stays reproducible at a fixed seed.
+    """
+    from llm_workflow_agents.data.voice_convention import (
+        acknowledgement_for,
+        barge_in_interruption_for,
+        iter_chunks,
+    )
+
+    # >= 1 chunk, not >= 2: the placeholder's transition turns almost always
+    # render exactly one short-sentence chunk ("Handling X in state Y."), so
+    # requiring a second chunk leaves zero candidates on real placeholder
+    # output. One chunk is enough — the cut lands inside that chunk's own
+    # words, so it needs no sibling chunk before it.
+    #
+    # from == to is REQUIRED, and it is the whole reason the ground truth
+    # stays well formed. The recovery turn is annotated with the interrupted
+    # turn's `from` state (find_barge_in_violations enforces exactly that),
+    # so interrupting an ADVANCING turn [X -> Y] emits a recovery [X -> X]
+    # while the conversation already sits in Y — a state_sequence that jumps
+    # backwards with no transition explaining it. The checker cannot catch
+    # that, because the checker's rule and the defect agree. Restricting the
+    # draw to self-loop turns makes `from` and `to` the same state, so the
+    # annotation is correct and the sequence stays continuous.
+    candidates = [
+        i for i, m in enumerate(messages)
+        if m.get("role") == "assistant"
+        and i not in (0, len(messages) - 1)
+        and len(iter_chunks(m.get("content") or "")) >= 1
+        and "[END_CONVERSATION]" not in (m.get("content") or "")
+        and _is_self_loop_turn(m.get("content") or "")
+    ]
+    if not candidates:
+        # Loud, not silent. A candidate filter that selects nothing disables
+        # the feature while every gate still reports "0 violations" (risk
+        # R18c's shape); the sidecar's barge_in_requested vs barge_in_realized
+        # gap records the same fact at batch level.
+        logger.warning("placeholder_barge_in_no_candidate", language=language)
+        return
+
+    idx = candidates[rng.randrange(len(candidates))]
+    content = messages[idx]["content"]
+    chunks = iter_chunks(content)
+    victim = chunks[-1]
+    words = victim.split()
+    if len(words) < 2:
+        return
+    cut = len(" ".join(words[: max(1, len(words) // 2)]))
+    interrupted = content.replace(
+        f"<S>{victim}</S>", f"<S>{victim[:cut]}<unspoken>{victim[cut:]}</S>", 1
+    )
+    messages[idx]["content"] = interrupted
+
+    # Safe because the candidate filter admitted only self-loop turns:
+    # group(1) == group(2), so the recovery repeats the state the
+    # conversation is actually in and state_sequence stays continuous.
+    state = _STATE_ANNOTATION_RE.search(content)
+    from_state = state.group(1) if state else ""
+    opener = acknowledgement_for(language)[0]
+    messages.insert(idx + 1, {"role": "user", "content": barge_in_interruption_for(language)})
+    messages.insert(idx + 2, {
+        "role": "assistant",
+        "content": (
+            f"[STATE: {from_state} → {from_state}]\n"
+            f"<S>{opener}</S><S>{victim[cut:].strip() or victim}</S>"
+        ),
+    })
+
+
 def _generate_placeholder_conversation(
     workflow: WorkflowGraph,
     tool_schemas: list[dict[str, Any]],
@@ -959,6 +1053,7 @@ def _generate_placeholder_conversation(
     outbound_reason: "OutboundReason | None" = None,
     resolved_retry_exhaustion: str = "none",
     modality: str = "text",
+    barge_in: bool = False,
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -985,6 +1080,16 @@ def _generate_placeholder_conversation(
     (when it holds no tool call) gets ``[END_CONVERSATION]`` appended. When it
     is ``"text"`` (the default) output is byte-identical to before this
     parameter existed.
+
+    ``barge_in`` requests one interruption via ``_insert_placeholder_barge_in``
+    once the full turn sequence is built. It is a no-op unless ``modality`` is
+    ``"voice"`` and at least one turn qualifies (one or more spoken chunks, not
+    the first or last message, no ``[END_CONVERSATION]``); a text sample or a
+    sample with no qualifying turn is returned unchanged. The threshold is one
+    chunk, not two: an ordinary placeholder speaking turn renders at most one
+    ``<S>...</S>`` chunk (a single short sentence), so requiring two would
+    select nothing on real placeholder output and silently disable the
+    feature — do not "fix" this back to two.
     """
     messages: list[dict[str, Any]] = []
     domain_name = domain_spec.name if domain_spec else spec.level
@@ -1194,6 +1299,9 @@ def _generate_placeholder_conversation(
 
         turn_idx += 1
 
+    if modality == "voice" and barge_in:
+        _insert_placeholder_barge_in(messages, language, rng)
+
     return messages
 
 
@@ -1237,30 +1345,6 @@ RULES:
 """
 
 
-_VOICE_RULES = """\
-
-VOICE MODE — this conversation is spoken aloud through a text-to-speech engine.
-The orchestrator reads your output as a stream, finds each <S>...</S> chunk, and
-sends it to the engine in order. Six extra rules apply:
-
-- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>. The
-  agent never speaks it.
-- V2. Put every <tool_call> block OUTSIDE every <S>. The agent never speaks it.
-- V3. Put every spoken word INSIDE a chunk. No spoken text may sit outside
-  <S>...</S>.
-- V4. Split at natural pause points. Keep a chunk to {chunk_target} characters
-  and never above {chunk_max}. Keep a turn to {turn_target} chunks and never
-  above {turn_max}.
-- V5. Keep replies short. A spoken reply is one or two sentences. Use no
-  markdown, no bullet points, no numbered lists, no headers.
-- V6. End a terminal turn with [END_CONVERSATION] after the last </S>, outside
-  the chunks. Never put it on a turn that also calls a tool.
-
-Worked example of one voice assistant turn:
-    [STATE: VERIFY_PATIENT → VERIFY_PATIENT]
-    <S>ได้เลยค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูลสักครู่นะคะ</S>
-    <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345"}}}}</tool_call>
-"""
 
 
 _BARGE_IN_RULES = """\
@@ -1291,19 +1375,9 @@ def _teacher_system_prompt(modality: str) -> str:
     """
     if modality != "voice":
         return _TEACHER_SYSTEM_PROMPT
-    from llm_workflow_agents.data.voice_convention import (
-        CHUNK_MAX_CHARS,
-        CHUNK_TARGET_CHARS,
-        TURN_MAX_CHUNKS,
-        TURN_TARGET_CHUNKS,
-    )
+    from llm_workflow_agents.data.voice_convention import render_voice_format_rules
 
-    return _TEACHER_SYSTEM_PROMPT + _VOICE_RULES.format(
-        chunk_target=CHUNK_TARGET_CHARS,
-        chunk_max=CHUNK_MAX_CHARS,
-        turn_target=TURN_TARGET_CHUNKS,
-        turn_max=TURN_MAX_CHUNKS,
-    )
+    return _TEACHER_SYSTEM_PROMPT + render_voice_format_rules()
 
 
 _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
@@ -1361,11 +1435,11 @@ def _build_teacher_prompt(
     voice_line = ""
     if modality == "voice":
         from llm_workflow_agents.data.voice_convention import (
-            ACKNOWLEDGEMENTS,
             CHUNK_MAX_CHARS,
             CHUNK_TARGET_CHARS,
             TURN_MAX_CHUNKS,
             TURN_TARGET_CHUNKS,
+            acknowledgement_for,
         )
 
         voice_line = (
@@ -1377,7 +1451,7 @@ def _build_teacher_prompt(
         )
         if barge_in:
             openers = ", ".join(
-                f'"{o}"' for o in ACKNOWLEDGEMENTS.get(language, ACKNOWLEDGEMENTS["en"])
+                f'"{o}"' for o in acknowledgement_for(language)
             )
             voice_line += _BARGE_IN_RULES.format(openers=openers)
     transition_key = (
@@ -1957,7 +2031,7 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
                 intent_category, initiator, outbound_reason,
                 resolved_retry_exhaustion=resolved_retry_exhaustion,
-                modality=modality,
+                modality=modality, barge_in=barge_in,
             )
 
         fell_back = False

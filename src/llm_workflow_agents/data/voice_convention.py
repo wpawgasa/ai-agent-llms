@@ -55,6 +55,41 @@ ACKNOWLEDGEMENTS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The interrupting user turn spoken when a caller barges in, one per
+#: language. This turn is never checked by ``find_barge_in_violations`` (it
+#: only constrains the assistant side), but it still must match the
+#: conversation's language — a Thai interruption line dropped verbatim into
+#: an English conversation would be a silent, uncaught corpus defect.
+_BARGE_IN_INTERRUPTIONS: dict[str, str] = {
+    "th": "ขอโทษนะคะ ขอถามหน่อย",
+    "en": "Sorry, can I ask something?",
+    "code_switch": "ขอโทษนะคะ ขอถามหน่อย",
+}
+
+
+def barge_in_interruption_for(language: str) -> str:
+    """Return the interrupting user turn's text for one language.
+
+    Mirrors ``acknowledgement_for``: `code_switch` maps to Thai (a
+    code-switched conversation is Thai-primary), and an unknown language
+    falls back to English.
+    """
+    if language == "code_switch":
+        return _BARGE_IN_INTERRUPTIONS["th"]
+    return _BARGE_IN_INTERRUPTIONS.get(language, _BARGE_IN_INTERRUPTIONS["en"])
+
+
+def acknowledgement_for(language: str) -> tuple[str, ...]:
+    """Return the acknowledgement openers for one language.
+
+    `code_switch` maps to Thai: a code-switched conversation is Thai-primary,
+    so an English opener reads wrong even though English words appear in it.
+    """
+    if language == "code_switch":
+        return ACKNOWLEDGEMENTS["th"]
+    return ACKNOWLEDGEMENTS.get(language, ACKNOWLEDGEMENTS["en"])
+
+
 def iter_chunks(text: str) -> list[str]:
     """Return the spoken chunks of one turn, in order."""
     return _CHUNK_RE.findall(text)
@@ -241,9 +276,16 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
             f"never more than {TURN_MAX_CHUNKS}"
         )
     for position, chunk in enumerate(chunks, start=1):
-        if len(chunk) > CHUNK_MAX_CHARS:
+        # Spoken characters, not literal ones. The <unspoken> marker is the
+        # one marker that legally sits INSIDE a chunk (it marks the word where
+        # a barge-in cut the speech off), and it is never spoken, so counting
+        # its ten characters against a limit that exists to bound
+        # text-to-speech latency measures the wrong thing. A chunk of 155
+        # spoken characters is legal whether or not a caller interrupted it.
+        spoken = chunk.replace(_UNSPOKEN_MARKER, "")
+        if len(spoken) > CHUNK_MAX_CHARS:
             violations.append(
-                f"{where}, chunk {position}: {len(chunk)} characters is too "
+                f"{where}, chunk {position}: {len(spoken)} characters is too "
                 f"long for one spoken chunk; keep a chunk to "
                 f"{CHUNK_TARGET_CHARS} characters and never more than "
                 f"{CHUNK_MAX_CHARS}"
@@ -410,6 +452,51 @@ def find_voice_violations(
         violations.extend(_check_voice_turn(content, turn_index))
     violations.extend(find_barge_in_violations(messages))
     return violations
+
+
+#: The voice format contract, stated in prose for a language model.
+#:
+#: `find_voice_violations` is the enforced contract; this is the same contract
+#: written for a reader that cannot run code. Both the teacher prompt and the
+#: serving system prompt render from THIS string, so the two can never drift.
+#: The braces in the worked example are doubled because the caller may pass the
+#: result through str.format; render_voice_format_rules does the substitution.
+_VOICE_FORMAT_RULES_TEMPLATE = """\
+
+VOICE MODE — this conversation is spoken aloud through a text-to-speech engine.
+The orchestrator reads your output as a stream, finds each <S>...</S> chunk, and
+sends it to the engine in order. Six extra rules apply:
+
+- V1. Put the [STATE: X → Y] marker on the first line, OUTSIDE every <S>. The
+  agent never speaks it.
+- V2. Put every <tool_call> block OUTSIDE every <S>. The agent never speaks it.
+- V3. Put every spoken word INSIDE a chunk. No spoken text may sit outside
+  <S>...</S>. A turn with no spoken text at all is legal and carries no chunk;
+  a turn that only calls a tool is silent on the line. Never invent filler
+  speech to give such a turn a chunk.
+- V4. Split at natural pause points. Keep a chunk to {chunk_target} characters
+  and never above {chunk_max}. Keep a turn to {turn_target} chunks and never
+  above {turn_max}.
+- V5. Keep replies short. A spoken reply is one or two sentences. Use no
+  markdown, no bullet points, no numbered lists, no headers.
+- V6. End a terminal turn with [END_CONVERSATION] after the last </S>, outside
+  the chunks. Never put it on a turn that also calls a tool.
+
+Worked example of one voice assistant turn:
+    [STATE: VERIFY_PATIENT → VERIFY_PATIENT]
+    <S>ได้เลยค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูลสักครู่นะคะ</S>
+    <tool_call>{{"name": "request_referral", "arguments": {{"patient_id": "P12345"}}}}</tool_call>
+"""
+
+
+def render_voice_format_rules() -> str:
+    """Return the voice format contract with the four limits substituted."""
+    return _VOICE_FORMAT_RULES_TEMPLATE.format(
+        chunk_target=CHUNK_TARGET_CHARS,
+        chunk_max=CHUNK_MAX_CHARS,
+        turn_target=TURN_TARGET_CHUNKS,
+        turn_max=TURN_MAX_CHUNKS,
+    )
 
 
 def _find_text_violations(messages: list[dict[str, Any]]) -> list[str]:

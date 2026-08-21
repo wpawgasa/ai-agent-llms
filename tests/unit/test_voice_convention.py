@@ -130,6 +130,34 @@ def test_chunk_one_over_the_limit_is_a_violation():
     assert any("too long" in v for v in find_voice_violations(msgs, "voice"))
 
 
+def test_the_unspoken_marker_does_not_count_toward_the_chunk_limit():
+    """The limit bounds text-to-speech latency, so it counts SPOKEN characters.
+
+    ``<unspoken>`` is the one marker that legally sits inside a chunk. A
+    chunk holding the maximum number of spoken characters stays legal when a
+    barge-in cuts it, and the placeholder generator's only spoken self-loop
+    turns are long enough that the ten literal marker characters decided
+    admission on their own.
+    """
+    body = "ก" * CHUNK_MAX_CHARS
+    cut = CHUNK_MAX_CHARS // 2
+    marked = f"{body[:cut]}<unspoken>{body[cut:]}"
+    msgs = _voice_turn(f"[STATE: A → A]\n<S>{marked}</S>")
+    assert len(marked) > CHUNK_MAX_CHARS  # literal length is over the limit
+    # A lone marker also trips the "a recovery turn must follow" rule, which
+    # is a different rule; this test is only about the length measurement.
+    assert not any("too long" in v for v in find_voice_violations(msgs, "voice"))
+
+
+def test_spoken_text_over_the_limit_is_still_a_violation_with_a_marker():
+    body = "ก" * (CHUNK_MAX_CHARS + 1)
+    cut = CHUNK_MAX_CHARS // 2
+    msgs = _voice_turn(
+        f"[STATE: A → A]\n<S>{body[:cut]}<unspoken>{body[cut:]}</S>"
+    )
+    assert any("too long" in v for v in find_voice_violations(msgs, "voice"))
+
+
 def test_turn_at_the_chunk_limit_is_accepted():
     body = "<S>ok</S>" * TURN_MAX_CHUNKS
     msgs = _voice_turn(f"[STATE: A → A]\n{body}")
@@ -436,3 +464,23 @@ def test_placeholder_generator_never_trips_the_chunker_limit():
                             continue
                         spoken = "".join(iter_chunks(msg.get("content") or ""))
                         assert len(spoken) <= SPOKEN_CHARS_MAX
+
+
+def test_acknowledgement_for_code_switch_returns_thai():
+    """Code-switched conversations are Thai-primary; English openers read wrong."""
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("code_switch") == ACKNOWLEDGEMENTS["th"]
+
+
+def test_acknowledgement_for_known_languages():
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("th") == ACKNOWLEDGEMENTS["th"]
+    assert acknowledgement_for("en") == ACKNOWLEDGEMENTS["en"]
+
+
+def test_acknowledgement_for_unknown_language_falls_back_to_english():
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("de") == ACKNOWLEDGEMENTS["en"]

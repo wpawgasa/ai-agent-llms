@@ -48,14 +48,25 @@ echo "=== Per-level results ==="
 for L in l1 l2 l3 l4 l5; do
     F="$RESULTS_DIR/${MODEL_TAG}_frontier_${L}.json"
     if [[ -f "$F" ]]; then
-        SCORE=$(python3 -c "
+        # Read the BLENDED quality when the run carries a modality summary,
+        # and say which number is being shown. metrics.weighted_workflow_score
+        # is pooled over every row in the run, so on a two-stratum run its
+        # effective voice weight comes from the row counts and drifts whenever
+        # the data is regenerated — the quantity the design forbids (section 5).
+        # Runs predating the modality summary fall back to it unchanged.
+        read -r LABEL SCORE < <(python3 -c "
 import json, sys
 with open(sys.argv[1]) as f:
     d = json.load(f)
-m = d.get('metrics', d)
-print(f\"{m.get('weighted_workflow_score', 0):.3f}\")
+q = d.get('quality_summary') or {}
+if 'quality' in q:
+    strata = 'text+voice' if q.get('n_voice') else 'text'
+    print(f\"quality(blended,{strata}) {q['quality']:.3f}\")
+else:
+    m = d.get('metrics', d)
+    print(f\"weighted_workflow_score {m.get('weighted_workflow_score', 0):.3f}\")
 " "$F")
-        echo "  $L: weighted_workflow_score = $SCORE   ($F)"
+        echo "  $L: $LABEL = $SCORE   ($F)"
     else
         echo "  $L: (missing) $F"
     fi

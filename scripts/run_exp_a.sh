@@ -11,7 +11,9 @@
 #   --kv-cache-dtype  KV cache quantization dtype (default: auto)
 #   --backend <b>     Serving backend: vllm (default), sglang, tensorrt_llm.
 #                     When set, uses <model>_<backend>.yaml sibling configs.
-#   --data <path>     Benchmark data directory (default: data/output/benchmark/task_a)
+#   --data <path>     Benchmark data directory (default: data/output/benchmark/task_a).
+#                     Repeatable: pass it twice to score the text and voice strata
+#                     in one run and get the blended quality number.
 #   --max-samples <n> Limit to first N samples per level, 0=all (default: 0)
 #   --dry-run         Print commands without executing
 
@@ -24,7 +26,7 @@ LAUNCH_SCRIPT="$PROJECT_ROOT/serving/launch.sh"
 
 KV_CACHE_DTYPE="auto"
 BACKEND=""
-DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
+DATA_DIRS=()          # repeatable --data; empty means "use the default below"
 MAX_SAMPLES=0
 DRY_RUN=false
 SPEC_METHOD=""
@@ -36,7 +38,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --kv-cache-dtype)          KV_CACHE_DTYPE="$2";    shift 2 ;;
         --backend)                 BACKEND="$2";            shift 2 ;;
-        --data)                    DATA_DIR="$2";           shift 2 ;;
+        --data)                    DATA_DIRS+=("$2");       shift 2 ;;
         --max-samples)             MAX_SAMPLES="$2";        shift 2 ;;
         --dry-run)                 DRY_RUN=true;            shift   ;;
         --speculative-method)      SPEC_METHOD="$2";        shift 2 ;;
@@ -48,6 +50,16 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
     esac
+done
+
+if [ ${#DATA_DIRS[@]} -eq 0 ]; then
+    DATA_DIRS=("$PROJECT_ROOT/data/output/benchmark/task_a")
+fi
+# One --data flag per path; agent_benchmark.py sorts them, so flag order here
+# cannot change a result.
+DATA_ARGS=()
+for D in "${DATA_DIRS[@]}"; do
+    DATA_ARGS+=(--data "$D")
 done
 
 # Build forwarding args array and result-file suffix for A/B base-vs-spec comparisons.
@@ -188,7 +200,7 @@ print(c.get('inference', {}).get('stochastic_trials', 5))
         --model             "$MODEL_NAME" \
         --engine            "$SERVING_ENGINE" \
         --output            "$RESULT_FILE" \
-        --data              "$DATA_DIR" \
+        "${DATA_ARGS[@]}" \
         --max-samples       "$MAX_SAMPLES" \
         --stochastic-trials "$STOCHASTIC_TRIALS" \
         --log-level         DEBUG \

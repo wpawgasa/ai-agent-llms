@@ -62,6 +62,7 @@ Thumbs.db
 *.json
 # Track BiFrost gateway config explicitly (uses env.* placeholders, no secrets)
 !deployments/**/config.json
+!tests/fixtures/*.json
 
 # SQLite runtime state (BiFrost logs/config store) — machine-specific, may
 # contain logged prompts/responses. Never commit.

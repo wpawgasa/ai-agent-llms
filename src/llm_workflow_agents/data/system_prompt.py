@@ -396,5 +396,14 @@ def build_enriched_system_prompt(
     # Rendered per-sample rather than using the module-level FORMAT_RULES
     # constant, which is frozen at budget 1: an L5 row whose data shows three
     # attempts must not be shipped under a "do NOT retry it" rule.
+    # Voice mode. A row with no `modality` field is text: every conversation
+    # generated before the field existed is a written one. The block sits after
+    # the "Workflow script" marker so force_rebuild regenerates it from current
+    # code rather than preserving a stale copy (the defect risk R13 records).
+    if (sample.get("modality") or "text") == "voice":
+        from llm_workflow_agents.data.voice_convention import render_voice_format_rules
+
+        parts.append(render_voice_format_rules())
+
     parts.append(f"\n{_format_rules_cached(retry_budget, _STAY_RULE_ENABLED)}")
     return "\n".join(parts)

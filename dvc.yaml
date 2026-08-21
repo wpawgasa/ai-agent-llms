@@ -21,6 +21,22 @@ stages:
       - data/output/benchmark/task_a
     # Levels L1–L5, 200 samples/level, seed=100, lang=mixed, behavior=default
 
+  task_a_benchmark_voice:
+    desc: >-
+      Voice stratum for Phase 1, 250 conversations at 50 per level. Additive:
+      the text stratum at data/output/benchmark/task_a is FROZEN and must not
+      be regenerated. Matched to it on size, language mix and generation
+      source so modality is the only difference between the strata. Teacher
+      model: gemini-3.5-flash (requires GEMINI_API_KEY).
+    cmd: ./scripts/generate_benchmark_voice_data.sh
+    deps:
+      - scripts/generate_benchmark_voice_data.sh
+      - src/llm_workflow_agents/data/generate_workflows.py
+      - src/llm_workflow_agents/data/voice_convention.py
+      - data/templates/tool_schemas_L1_to_L5.json
+    outs:
+      - data/output/benchmark/task_a_voice
+
   task_a_sft_generate:
     desc: >-
       Raw Task A SFT conversations from the teacher models (4 450 at last
