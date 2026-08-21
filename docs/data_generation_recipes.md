@@ -113,6 +113,70 @@ The dataset stats dict includes `intent_category_distribution` so you can verify
 | `code_switch` | Thai-English code-switching within each conversation — Thai sentence structure with embedded English terms, mirroring real call-centre interactions |
 | *(omitted)* | Each sample randomly assigned `en` or `th` (50/50) |
 
+### Voice Modality
+
+Each conversation is drawn as **text** (written) or **voice** (spoken). A voice
+conversation's assistant turns are split into `<S>...</S>` chunks that the
+orchestrator streams to a text-to-speech engine, and are kept short.
+
+| Preset | text | voice |
+|--------|------|-------|
+| `default` | 100% | 0% |
+| `voice_mix` | 70% | 30% |
+| `voice_heavy` | 40% | 60% |
+| `voice_only` | 0% | 100% |
+
+`default` is text-only **and consumes no randomness**. Every pre-existing config
+therefore reproduces byte-for-byte; a modality draw on the default path would
+shift the random stream and silently change what every old seed generates.
+`tests/unit/test_data_generation.py` guards this.
+
+`barge_in_rate` (default 0.25) is the share of VOICE conversations for which the
+teacher model is *asked* for one `<unspoken>` interruption. Whether one was
+actually written is a separate fact — the sample's `barge_in` field records what
+the conversation contains, and the stats sidecar reports
+`barge_in_requested` against `barge_in_realized`. The placeholder generator
+never emits an interruption, so a placeholder batch reports `realized=0`.
+
+**The format contract** lives in `data/voice_convention.py` and is checked by
+`find_voice_violations`, which runs inside the generator's coherence repair
+loop. Five rules:
+
+1. The `[STATE: X → Y]` marker sits **outside** every chunk — never spoken.
+2. Every `<tool_call>` block sits **outside** every chunk — never spoken.
+3. Every spoken character sits **inside** a chunk. A turn with no spoken text at
+   all is legal and carries no chunk: a turn that only calls a tool is silent on
+   the line. **Do not invent filler speech to give such a turn a chunk** — uniform
+   filler before every tool call is the structural edit risk R15 records being
+   learned as an unconditional habit.
+4. Chunks do not nest; `<S>` and `</S>` counts match and each opens before it closes.
+5. `[END_CONVERSATION]` follows the last chunk of a terminal turn, sits outside
+   every chunk, and never shares a turn with a tool call.
+
+Length limits, measured from the two production reference prompts in
+`data/templates/` (45 chunks, 19 turns: chunk median 42 chars / p90 85 / max 117;
+chunks per turn median 2 / max 5):
+
+| Level | Target | Violation above |
+|-------|--------|-----------------|
+| Chunk | 100 characters | 160 characters |
+| Turn | 3 chunks | 5 chunks |
+
+Text conversations are checked in the other direction — they must contain no
+`<S>`, no `[END_CONVERSATION]` and no `<unspoken>`. Without that second
+direction the `modality` field would be advisory.
+
+**Rules 1 and 2 are why nothing downstream changed.** `extract_state_annotations`,
+`extract_tool_calls`, `eval/state_accuracy.py` and `eval/tool_call_f1.py` all work
+unmodified on voice rows.
+
+**Training implication:** a barge-in turn carries `"loss": false`, because the
+orchestrator — not the model — writes the `<unspoken>` marker into the model's own
+past turn. Only the `response_only` recipe can honour a per-message opt-out;
+`all_tokens` has no such mechanism and logs `all_tokens_ignores_loss_flag`. Any
+corpus containing voice data must train under `response_only`, or the model learns
+to emit the marker itself.
+
 ### System Prompt Contract
 
 Every generated sample's `messages[0]` is a fully enriched system prompt assembled by `data/system_prompt.py::build_enriched_system_prompt`. It contains four blocks, in this order:
@@ -147,6 +211,7 @@ Seeds are assigned per-generator to guarantee no sample overlap between benchmar
 |---------|------|
 | Benchmark | 100 |
 | SFT | 42 |
+| Voice (`task_a_voice`) | 4242 |
 
 Train / validation / test splits are derived deterministically from the SFT cleaned set with a separate split seed (see [Train/Val/Test Splits](#trainvaltest-splits)).
 
@@ -178,6 +243,8 @@ Every recipe writes JSONL where each line is one conversation sample. The schema
 | `domain` | str | Domain key from `domain_registry.py` (e.g. `"healthcare"`) |
 | `num_states`, `num_tools`, `chain_depth` | int | Convenience counters derived from the graph |
 | `language` | str | `"en"`, `"th"`, or `"code_switch"` |
+| `modality` | str | `"text"` or `"voice"`. Absent on rows generated before the modality axis existed; treat absent as `"text"` |
+| `barge_in` | bool | True when the conversation actually contains an `<unspoken>` interruption (a fact about the data, not the request) |
 | `user_behavior` | str | `"cooperative"`, `"adversarial_probing"`, `"digressing"`, or `"invalid_tool_inputs"` (sampled per the active behavior preset) |
 | `workflow_graph` | dict | State machine (see below) |
 | `workflow_script` | str | Human-readable rendering of `workflow_graph` (also embedded inside `messages[0]`) |
@@ -427,6 +494,66 @@ python scripts/clean_task_a_sft.py \
 
 ---
 
+### Voice (`generate_voice_data.sh`)
+
+An **additive** batch of spoken conversations. It does not replace or re-roll the
+text corpus — existing text rows stay byte-identical, which is what keeps stored
+results on the C2 lineage comparable.
+
+2 400 conversations, weighted toward the Thai voicebot deployment, across fifteen
+legs (5 levels × 3 languages):
+
+| Language | Conversations | Share |
+|----------|--------------|-------|
+| en | 480 | 20% |
+| th | 1 200 | 50% |
+| code_switch | 720 | 30% |
+
+```bash
+# Full batch (requires the teacher model's API key in .env)
+./scripts/generate_voice_data.sh
+
+# 15-conversation smoke, offline placeholder, no API key
+./scripts/generate_voice_data.sh --smoke-test
+
+# 15-conversation smoke against the LIVE teacher — an explicit --teacher-model
+# overrides the smoke default, regardless of argument order. Do this before
+# spending on the full batch.
+./scripts/generate_voice_data.sh --smoke-test --teacher-model gemini-3.5-flash
+
+# Dry run
+./scripts/generate_voice_data.sh --dry-run
+```
+
+Defaults: seed 4242 (distinct from SFT's 42, so the voice batch draws its own
+domains and workflows), `barge_in_rate` 0.25, `modality_preset="voice_only"`,
+output `data/output/sft/task_a_voice`.
+
+#### The batch quality gate — read this before merging a batch
+
+After generation the runner invokes `scripts/check_voice_batch.py`, which reads the
+per-leg `.stats.json` sidecars and **exits non-zero on a degraded batch**. A non-zero
+exit means DO NOT MERGE.
+
+It exists because **format checking alone cannot tell success from total failure**.
+Placeholder output is format-perfect by construction, so a teacher model that failed
+on every single sample still produces 2 400 rows, zero format violations, and fifteen
+cheerful success lines. Merging that batch would put 2 400 deterministic,
+structurally uniform rows into the corpus — risk R15 at scale. In a simulated total
+outage the gate reports `6 of 6 (100.0%) came from the placeholder generator` while
+the very same run still prints `[ok] every row on disk passes find_voice_violations`.
+
+Four checks: placeholder share against `--max-placeholder-share` (default 0.10;
+a run invoked with no teacher model at all is exempt, since it asked for
+placeholders), format re-verification against the artifact on disk, modality
+labelling, and a barge-in realisation **warning** (never a failure — the request
+is a rate, and the checker cannot know how many the teacher should have managed).
+
+`--skip-gate` exists for debugging and is deliberately absent from the DVC stage
+command. Never use it for the paid run.
+
+---
+
 ### Train/Val/Test Splits
 
 There is **no separate held-out generator**. The cleaned SFT corpus is split deterministically into train / validation / test at an **85 / 10 / 5** ratio, and these splits are reused across:
@@ -439,10 +566,20 @@ The split is produced by `scripts/split_task_a_sft.py` (DVC stage `task_a_sft_sp
 
 | Split | File | Conversations |
 |-------|------|--------------|
-| train | `task_a_splits/train.jsonl` | ~4 414 |
-| validation | `task_a_splits/validation.jsonl` | ~519 |
-| test | `task_a_splits/test.jsonl` | ~261 |
-| **Total** | | **~5 194** |
+| train | `task_a_splits/train.jsonl` | 4 711 |
+| validation | `task_a_splits/validation.jsonl` | 554 |
+| test | `task_a_splits/test.jsonl` | 278 |
+| **Total** | | **5 543** |
+
+> Counts measured 2026-08-21. The earlier ~4 414 / ~519 / ~261 figures in this
+> doc predated the R12 corpus regeneration.
+
+**The shuffle is per modality.** Adding the voice batch must not reassign
+conversations that are already split, or it silently moves rows out of the
+pinned held-out set behind R17's 0.7595 — measured at 8 of 278 under a naive
+pooled shuffle. `scripts/split_task_a_sft.py` groups by modality before
+shuffling, so an additive batch is genuinely additive. `--input-dir` is
+repeatable and the directory list is sorted, so flag order cannot change a split.
 
 > **Important:** the `test.jsonl` split must not be used during training or hyperparameter selection. Reserve it for final evaluation only.
 
@@ -473,15 +610,28 @@ GEMINI_API_KEY=... ./scripts/generate_benchmark_data_teacher.sh --teacher gemini
 GEMINI_API_KEY=... ./scripts/generate_benchmark_data_teacher.sh --teacher gemini-3.1-flash-lite
 # (then merge per-level outputs to l{level}_mixed_gemini-3_merged.jsonl)
 
-# 2. SFT training data (also used by GRPO)
+# 2. SFT training data — text (also used by GRPO)
 OPENAI_API_KEY=sk-... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
 
-# 3. Cleanup
+# 2b. SFT training data — voice, additive. Smoke the LIVE teacher on 15 rows first;
+#     teacher compliance with the <S> format is the biggest risk in the batch.
+GEMINI_API_KEY=... ./scripts/generate_voice_data.sh --smoke-test --teacher-model gemini-3.5-flash
+GEMINI_API_KEY=... ./scripts/generate_voice_data.sh
+# The runner's quality gate exits non-zero on a degraded batch. Do not merge on a
+# non-zero exit, and do not reach for --skip-gate to get past it.
+
+# 3. Cleanup — reads BOTH corpora. --input-dir is repeatable.
+#    NOTE: the DVC pipeline additionally runs task_a_sft_remediate between
+#    generation and cleaning for the TEXT corpus. The voice batch skips it: that
+#    stage replays an authoring ledger keyed to specific pre-existing
+#    conversations, and voice rows need no remediation because the generator
+#    enforces the convention at generation time.
 python scripts/clean_task_a_sft.py \
     --input-dir data/output/sft/task_a \
+    --input-dir data/output/sft/task_a_voice \
     --output-dir data/output/sft/task_a_cleaned
 
-# 4. Deterministic 85/10/5 train/val/test split (seed=42)
+# 4. Deterministic 85/10/5 train/val/test split (seed=42, shuffled per modality)
 python scripts/split_task_a_sft.py \
     --input-dir data/output/sft/task_a_cleaned \
     --output-dir data/output/sft/task_a_splits
@@ -492,7 +642,17 @@ python scripts/filter_grpo_data.py \
     --output-dir data/output/grpo/task_a
 ```
 
-**Total samples generated:** ~4 645 (benchmark ~200 + SFT ~4 445 cleaned). GRPO and final evaluation reuse splits of the SFT corpus rather than generating new data.
+**Total samples:** benchmark ~1 000 + SFT text 5 549 raw (5 543 after cleaning)
++ voice 2 400 = ~8 900 (≈30% voice once the voice batch is merged). GRPO and final
+evaluation reuse splits of the SFT corpus rather than generating new data.
+
+**Held-out evaluation reports text and voice separately and never blends them.**
+The pinned 206-row contamination-free set behind R17's 0.7595 was built text-only,
+before voice existed. Blending voice rows into it — or into a future comparable run
+— breaks the only link back to that number. `scripts/build_heldout_clean_set.py`
+takes `--modality {text,voice,all}` (default `all`); the text slice needs
+`--modality text` once the corpus is mixed, or the pinned rebuild returns 326
+instead of 206.
 
 ---
 
