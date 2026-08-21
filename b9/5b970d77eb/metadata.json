@@ -1,0 +1,29 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b95b970d77eb",
+  "strategy": "manual-commit",
+  "branch": "feat/voice-benchmark-and-prompt-switch",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "scripts/run_exp_a.sh",
+    "scripts/run_exp_a_per_level.sh",
+    "scripts/run_exp_a_single.sh",
+    "src/llm_workflow_agents/eval/agent_benchmark.py",
+    "src/llm_workflow_agents/eval/chunk_diagnostics.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b9/5b970d77eb/0/metadata.json",
+      "transcript": "/b9/5b970d77eb/0/full.jsonl",
+      "content_hash": "/b9/5b970d77eb/0/content_hash.txt",
+      "prompt": "/b9/5b970d77eb/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 718,
+    "cache_creation_tokens": 1999689,
+    "cache_read_tokens": 140745897,
+    "output_tokens": 364325,
+    "api_call_count": 359
+  }
+}
