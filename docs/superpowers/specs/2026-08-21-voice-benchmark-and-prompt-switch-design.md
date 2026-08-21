@@ -219,16 +219,42 @@ The existing text rows predate the `modality` field. A row without the field
 counts as text. `filter_by_modality` and the held-out audit already use that
 rule.
 
-Report three numbers together:
+### Correction, measured 2026-08-21
+
+An earlier draft of this section named the wrong formula and the wrong home for
+the weight. Both are corrected here.
+
+The live formula is `compute_weighted_workflow_score` in
+`src/llm_workflow_agents/eval/composite_score.py`:
 
 ```
-quality_text  = 0.5 x state_transition_accuracy_text  + 0.5 x tool_call_f1_text
-quality_voice = 0.5 x state_transition_accuracy_voice + 0.5 x tool_call_f1_voice
-quality       = w x quality_voice + (1 - w) x quality_text
+score = 0.4 x state_transition_accuracy + 0.4 x tool_call_f1
+      + 0.2 x task_completion_rate
 ```
 
-Add `voice_weight: 0.30` under `cat_a` in
-`configs/benchmark/selection_weights.yaml`.
+`configs/benchmark/selection_weights.yaml` states a different formula
+(0.5 / 0.5). **No code reads that file.** A grep across `src/` and `scripts/`
+returns no consumer. It is aspirational configuration. Do not put the voice
+weight there: a knob nothing reads is the defect risk R16 and risk R18c both
+record.
+
+### The blend
+
+Score each stratum with the existing formula. Then blend the two scores:
+
+```
+score_text  = compute_weighted_workflow_score(state_text,  tool_text)
+score_voice = compute_weighted_workflow_score(state_voice, tool_voice)
+score       = w x score_voice + (1 - w) x score_text
+```
+
+Blending at the score level keeps the per-stratum formula untouched. Within one
+stratum, the number means exactly what it meant before.
+
+Define `DEFAULT_VOICE_WEIGHT = 0.30` once, in `composite_score.py`. Expose it as
+a `--voice-weight` flag on the benchmark runner. Leave
+`selection_weights.yaml` alone; wiring that file into the scoring path is
+separate work, named in section 9.
 
 Compute a weighted mean of two per-stratum means. Do NOT compute one mean over
 pooled rows. The two differ. A pooled mean takes its weight from the row counts,
@@ -329,6 +355,8 @@ description against 258 conversations, and this design cannot prevent it.
 ## 9. Out of scope
 
 - Fixing the `task_a_benchmark` stage description. Separate work, named here.
+- Wiring `configs/benchmark/selection_weights.yaml` into the scoring path. No
+  code reads it today. Separate work, named in section 5.
 - Re-running Phase 1 across the 15 candidates.
 - Changing the composite weights outside the new `voice_weight` key.
 - Chunk-boundary comparison against gold under teacher forcing.
