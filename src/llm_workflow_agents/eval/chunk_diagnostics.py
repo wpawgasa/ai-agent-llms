@@ -155,12 +155,23 @@ def chunk_diagnostics_by_language(
     (sorted) so the combination performed is visible in the output, not
     implicit in the number.
 
+    Each language's OWN sub-scores are returned under ``"per_language"``,
+    keyed by language, each holding the same keys as
+    :func:`chunk_diagnostics`. The pooled figure alone cannot answer the
+    question these metrics exist to answer. The benchmark's voice stratum
+    draws English and Thai at even odds, so a pooled ``boundary_quality`` of
+    0.6 is equally consistent with "both languages chunk adequately" and
+    with "English is near-perfect and Thai is broken" — and the second is
+    the finding worth having. Pooling stays the headline for the reason in
+    the paragraph above; the split sits beside it, not instead of it.
+
     Args:
         completions_by_language: Per-language lists of raw generated turn
             text, e.g. ``{"en": [...], "th": [...]}``.
 
     Returns:
-        The same keys as :func:`chunk_diagnostics`, plus ``"languages"``.
+        The same keys as :func:`chunk_diagnostics`, plus ``"languages"``
+        and ``"per_language"``.
     """
     first_all: list[float] = []
     all_all: list[float] = []
@@ -180,4 +191,8 @@ def chunk_diagnostics_by_language(
 
     out = _summarize(first_all, all_all, counts_all, well_ended_all, total_chunks_all)
     out["languages"] = sorted(completions_by_language)
+    out["per_language"] = {
+        language: _summarize(*_collect_raw(completions, language))
+        for language, completions in sorted(completions_by_language.items())
+    }
     return out

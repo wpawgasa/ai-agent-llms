@@ -16,7 +16,10 @@
 #
 # Options:
 #   --kv-cache-dtype <dtype>  KV cache quantization dtype (vLLM mode, default: auto)
-#   --data <path>             Benchmark data directory (default: data/output/benchmark/task_a)
+#   --data <path>             Benchmark data directory (default: data/output/benchmark/task_a).
+#                             Repeatable: pass it twice to score the text and voice
+#                             strata in one run and get the blended quality number,
+#                             e.g. --data .../task_a --data .../task_a_voice
 #   --max-samples <n>         Limit to first N samples (0=all; frontier default: 50)
 #   --stochastic-trials <n>   Override stochastic trial count from YAML
 #   --max-model-len <n>       Override serving.max_model_len from YAML [vLLM mode only]
@@ -39,7 +42,7 @@ FRONTIER_CONFIG="$PROJECT_ROOT/configs/models_exp_a/frontier.yaml"
 FRONTIER_MODEL=""
 CONFIG_ARG=""
 KV_CACHE_DTYPE="auto"
-DATA_DIR="$PROJECT_ROOT/data/output/benchmark/task_a"
+DATA_DIRS=()          # repeatable --data; empty means "use the default below"
 DATA_DIR_SET=false
 LEVEL=""
 MAX_SAMPLES=0
@@ -59,7 +62,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --frontier-model)    FRONTIER_MODEL="$2";                    shift 2 ;;
         --kv-cache-dtype)    KV_CACHE_DTYPE="$2";                    shift 2 ;;
-        --data)              DATA_DIR="$2"; DATA_DIR_SET=true;        shift 2 ;;
+        --data)              DATA_DIRS+=("$2"); DATA_DIR_SET=true;     shift 2 ;;
         --level)             LEVEL="$2";                              shift 2 ;;
         --max-samples)       MAX_SAMPLES="$2"; MAX_SAMPLES_SET=true;  shift 2 ;;
         --stochastic-trials) STOCHASTIC_TRIALS_OVERRIDE="$2";         shift 2 ;;
@@ -173,8 +176,12 @@ print(c.get('inference', {}).get('max_samples_default', 50))
 fi
 
 # ---------------------------------------------------------------------------
-# Level filter: resolve --level to a single JSONL file under DATA_DIR.
+# Level filter: resolve --level to one JSONL file under EACH --data root.
 # ---------------------------------------------------------------------------
+
+if [[ "$DATA_DIR_SET" == "false" ]]; then
+    DATA_DIRS=("$PROJECT_ROOT/data/output/benchmark/task_a")
+fi
 
 LEVEL_TAG=""
 if [[ -n "$LEVEL" ]]; then
@@ -183,20 +190,27 @@ if [[ -n "$LEVEL" ]]; then
         echo "ERROR: --level must be one of L1, L2, L3, L4, L5 (got: $LEVEL)" >&2
         exit 1
     fi
-    if [[ "$DATA_DIR_SET" == "false" ]]; then
-        SEARCH_ROOT="$PROJECT_ROOT/data/output/benchmark/task_a"
-    else
-        SEARCH_ROOT="$DATA_DIR"
-    fi
-    # Find a single JSONL whose basename starts with the level token
-    LEVEL_FILE=$(find "$SEARCH_ROOT" -maxdepth 1 -type f -name "${LEVEL_LC}_*.jsonl" | head -n1)
-    if [[ -z "$LEVEL_FILE" || ! -f "$LEVEL_FILE" ]]; then
-        echo "ERROR: no JSONL matching ${LEVEL_LC}_*.jsonl under $SEARCH_ROOT" >&2
-        exit 1
-    fi
-    DATA_DIR="$LEVEL_FILE"
+    # Resolve the level within EACH --data root, so a two-stratum run stays a
+    # two-stratum run at every level instead of collapsing to one file.
+    LEVEL_FILES=()
+    for ROOT in "${DATA_DIRS[@]}"; do
+        LEVEL_FILE=$(find "$ROOT" -maxdepth 1 -type f -name "${LEVEL_LC}_*.jsonl" | head -n1)
+        if [[ -z "$LEVEL_FILE" || ! -f "$LEVEL_FILE" ]]; then
+            echo "ERROR: no JSONL matching ${LEVEL_LC}_*.jsonl under $ROOT" >&2
+            exit 1
+        fi
+        LEVEL_FILES+=("$LEVEL_FILE")
+    done
+    DATA_DIRS=("${LEVEL_FILES[@]}")
     LEVEL_TAG="_${LEVEL_LC}"
 fi
+
+# One --data flag per path. agent_benchmark.py sorts them, so flag order here
+# cannot change a result.
+DATA_ARGS=()
+for D in "${DATA_DIRS[@]}"; do
+    DATA_ARGS+=(--data "$D")
+done
 
 mkdir -p "$RESULTS_DIR"
 
@@ -211,7 +225,7 @@ fi
 if [[ -n "$LEVEL" ]]; then
     echo "Level:          $LEVEL"
 fi
-echo "Data path:      $DATA_DIR"
+echo "Data path(s):   ${DATA_DIRS[*]}"
 echo "Results dir:    $RESULTS_DIR"
 echo "Max samples:    ${MAX_SAMPLES} (0=all)"
 echo "Stoch trials:   $STOCHASTIC_TRIALS"
@@ -289,7 +303,7 @@ python3 -m llm_workflow_agents.eval.agent_benchmark \
     --engine            "$SERVING_ENGINE" \
     --kv-cache-dtype    "$KV_CACHE_DTYPE" \
     --output            "$RESULT_FILE" \
-    --data              "$DATA_DIR" \
+    "${DATA_ARGS[@]}" \
     --max-samples       "$MAX_SAMPLES" \
     --stochastic-trials "$STOCHASTIC_TRIALS" \
     --log-level         DEBUG \

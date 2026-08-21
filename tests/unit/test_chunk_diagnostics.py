@@ -245,3 +245,58 @@ class TestVoiceStratumHelpers:
 
         out = _voice_stratum_completions_by_language(samples, conv_tool_preds)
         assert out == {}
+
+
+class TestPerLanguageSubScores:
+    """A pooled boundary quality cannot say WHICH language drags it down.
+
+    The benchmark voice stratum draws English and Thai at even odds, so the
+    only question these metrics exist to answer — is Thai chunking the
+    problem? — is invisible in the pooled figure alone.
+    """
+
+    _MIXED = {
+        # Every English chunk ends on terminal punctuation.
+        "en": ["<S>Hello there.</S><S>How can I help?</S>"],
+        # No Thai chunk ends on a sentence-final particle.
+        "th": ["<S>สวัสดี</S><S>ยินดีให้บริการ</S>"],
+    }
+
+    def test_each_language_reports_its_own_boundary_quality(self):
+        out = chunk_diagnostics_by_language(self._MIXED)
+        assert out["boundary_quality"] == 0.5          # pooled: 2 of 4 chunks
+        assert out["per_language"]["en"]["boundary_quality"] == 1.0
+        assert out["per_language"]["th"]["boundary_quality"] == 0.0
+
+    def test_per_language_holds_every_diagnostic_key(self):
+        out = chunk_diagnostics_by_language(self._MIXED)
+        for language in ("en", "th"):
+            sub = out["per_language"][language]
+            for key in (
+                "first_chunk_p50", "first_chunk_p90", "chunk_len_p50",
+                "chunk_len_p90", "chunks_per_turn_p50", "boundary_quality",
+                "n_turns_with_chunks",
+            ):
+                assert key in sub, (language, key)
+
+    def test_the_per_language_turn_counts_sum_to_the_pooled_count(self):
+        out = chunk_diagnostics_by_language(self._MIXED)
+        assert sum(
+            sub["n_turns_with_chunks"] for sub in out["per_language"].values()
+        ) == out["n_turns_with_chunks"]
+
+    def test_a_language_with_no_chunks_still_reports_its_own_zeros(self):
+        """``languages`` already lists a chunkless language; ``per_language``
+        now shows that it contributed nothing, rather than leaving the reader
+        to infer it."""
+        out = chunk_diagnostics_by_language(
+            {"en": ["<S>Hello there.</S>"], "th": ["[STATE: A → A]"]}
+        )
+        assert out["per_language"]["th"]["n_turns_with_chunks"] == 0
+        assert out["per_language"]["th"]["boundary_quality"] == 0.0
+        assert out["per_language"]["en"]["n_turns_with_chunks"] == 1
+
+    def test_an_empty_stratum_has_an_empty_per_language_map(self):
+        out = chunk_diagnostics_by_language({})
+        assert out["per_language"] == {}
+        assert out["languages"] == []

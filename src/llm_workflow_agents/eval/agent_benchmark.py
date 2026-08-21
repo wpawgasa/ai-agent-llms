@@ -13,6 +13,18 @@ CLI usage (invoked by scripts/run_exp_a.sh):
 Data directory is expected to contain JSONL files produced by
 scripts/generate_benchmark_data.sh (one file per complexity level).
 Each sample must have the schema written by generate_workflows.py.
+
+``--data`` is repeatable, and naming both strata is what makes the modality
+blend fire — the text stratum and the voice stratum are SIBLING directories
+and the loader globs one level deep:
+
+    python -m llm_workflow_agents.eval.agent_benchmark ... \\
+        --data data/output/benchmark/task_a \\
+        --data data/output/benchmark/task_a_voice
+
+With one ``--data`` the run behaves exactly as it did before the flag became
+repeatable, and ``quality_summary["quality"]`` equals the text score by float
+identity.
 """
 
 from __future__ import annotations
@@ -233,7 +245,22 @@ def compute_modality_quality_summary(
 
     Partitions conversations by ``sample.get("modality") or "text"`` — a
     conversation with no ``modality`` field (every sample predating the voice
-    feature) is grouped into the text stratum, never dropped. Each stratum's
+    feature) is grouped into the text stratum, never dropped.
+
+    A conversation whose ``modality`` is present but is neither ``"text"``
+    nor ``"voice"`` (a typo, a stale label, a modality this scorer does not
+    know) is ALSO counted into the text stratum, and never dropped. Two
+    choices were available: drop it, or fail. Dropping is what this function
+    used to do, and it is the worse of the two — ``n_text + n_voice`` stopped
+    summing to ``len(samples)`` with nothing in the output saying so, which
+    turns the ranking into a measurement of a subset that still reads like a
+    number. Failing is also wrong here: this function runs AFTER every
+    generation in the run has been paid for, so raising would discard a
+    completed benchmark over a label. So the row is folded into the
+    established default stratum and the fact is made impossible to miss —
+    a ``benchmark_unknown_modality`` warning, plus ``n_unknown_modality``
+    and ``unknown_modalities`` in the returned dict and in the console
+    summary. ``n_text + n_voice == len(samples)`` always holds. Each stratum's
     quality is computed once over its own aggregated metrics, using this
     module's own :func:`compute_weighted_score` — NOT
     ``composite_score.compute_weighted_workflow_score``, a different formula
@@ -267,7 +294,8 @@ def compute_modality_quality_summary(
     Returns:
         Dict with ``quality_text``, ``quality_voice`` (either ``None`` when
         that stratum is empty), ``quality`` (the blend), ``n_text``,
-        ``n_voice``, and ``voice_weight``.
+        ``n_voice``, ``n_unknown_modality``, ``unknown_modalities`` and
+        ``voice_weight``. ``n_text`` includes any unknown-modality rows.
     """
     partitions: dict[str, list[int]] = {}
     for idx, sample in enumerate(samples):
@@ -298,8 +326,21 @@ def compute_modality_quality_summary(
             stratum_state_metrics.task_completion_rate,
         )
 
-    text_indices = partitions.get("text", [])
+    unknown = sorted(k for k in partitions if k not in ("text", "voice"))
+    unknown_indices = [i for k in unknown for i in partitions[k]]
+    text_indices = sorted(partitions.get("text", []) + unknown_indices)
     voice_indices = partitions.get("voice", [])
+    if unknown:
+        # Loud, and in the output — never dropped. A dropped row makes the
+        # ranking a measurement of a subset that still looks like a whole
+        # number (risk R18c's shape), and n_text + n_voice would stop summing
+        # to len(samples) with nothing saying so.
+        logger.warning(
+            "benchmark_unknown_modality",
+            modalities=unknown,
+            n_unknown=len(unknown_indices),
+            counted_as="text",
+        )
     quality_text = _stratum_quality(text_indices)
     quality_voice = _stratum_quality(voice_indices)
     quality = blend_modality_scores(quality_text, quality_voice, voice_weight)
@@ -310,6 +351,8 @@ def compute_modality_quality_summary(
         "quality": quality,
         "n_text": len(text_indices),
         "n_voice": len(voice_indices),
+        "n_unknown_modality": len(unknown_indices),
+        "unknown_modalities": unknown,
         "voice_weight": voice_weight,
     }
 
@@ -374,24 +417,77 @@ def attach_chunk_diagnostics(
 # CLI entrypoint — invoked by scripts/run_exp_a.sh
 # ---------------------------------------------------------------------------
 
-def _load_samples(data_path: "Path") -> list[dict[str, Any]]:
-    """Load benchmark samples from a directory (all *.jsonl) or a single file."""
+#: Where the text stratum lives. The voice stratum is the SIBLING directory
+#: ``data/output/benchmark/task_a_voice``; pass both with two ``--data`` flags
+#: to produce a run that blends the two modality strata.
+DEFAULT_DATA_DIR = "data/output/benchmark/task_a"
+
+
+def resolve_data_paths(values: "list[str] | None") -> "list[Path]":
+    """Resolve repeated ``--data`` values into a sorted list of paths.
+
+    ``--data`` is repeatable so one run can name both strata: the text
+    stratum and the voice stratum are sibling directories and
+    :func:`_load_samples` globs ``*.jsonl`` non-recursively, so a single
+    directory can never hold both. Without this the modality blend has no
+    reachable invocation at all — ``blend_modality_scores`` could only ever
+    take its "no voice stratum" identity branch, which is the flattering
+    kind of inertness risk R16 records.
+
+    ``argparse``'s ``action="append"`` APPENDS to a non-``None`` default
+    rather than replacing it, so a default written into the flag would leak
+    into every explicit invocation (the trap already hit in
+    ``scripts/clean_task_a_sft.py``). The flag therefore defaults to
+    ``None`` and the fallback lives here.
+
+    The result is sorted and de-duplicated so flag ORDER cannot change a
+    result: sample order feeds ``--max-samples`` and every aggregate below,
+    so two runs naming the same strata in different orders must score
+    identically.
+    """
+    from pathlib import Path
+
+    raw = list(values or [])
+    if not raw:
+        raw = [DEFAULT_DATA_DIR]
+    return sorted({Path(v) for v in raw}, key=lambda p: str(p))
+
+
+def _load_samples(
+    data_paths: "Path | list[Path]", max_samples_per_path: int = 0
+) -> list[dict[str, Any]]:
+    """Load benchmark samples from directories (all *.jsonl) and/or files.
+
+    Accepts one path or several. Files within a directory are read in sorted
+    filename order, and the paths themselves are read in the order given
+    (:func:`resolve_data_paths` sorts them first).
+
+    ``max_samples_per_path`` caps each PATH's contribution rather than the
+    concatenated list. With one ``--data`` that is exactly the old whole-run
+    cap; with two strata it stops the cap from truncating one stratum to
+    zero while the console still reports ``voice_weight=0.3`` — a run that
+    reads as "blend applied" while the blend is inert.
+    """
     import json
     from pathlib import Path
 
-    p = Path(data_path)
-    if p.is_file():
-        paths = [p]
-    else:
-        paths = sorted(p.glob("*.jsonl"))
+    if isinstance(data_paths, (str, Path)):
+        data_paths = [Path(data_paths)]
 
     samples: list[dict[str, Any]] = []
-    for path in paths:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    samples.append(json.loads(line))
+    for data_path in data_paths:
+        p = Path(data_path)
+        paths = [p] if p.is_file() else sorted(p.glob("*.jsonl"))
+        from_this_path: list[dict[str, Any]] = []
+        for path in paths:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        from_this_path.append(json.loads(line))
+        if max_samples_per_path > 0:
+            from_this_path = from_this_path[:max_samples_per_path]
+        samples.extend(from_this_path)
     return samples
 
 
@@ -787,8 +883,17 @@ if __name__ == "__main__":
     parser.add_argument("--output",   required=True,  help="Path to write results JSON")
     parser.add_argument(
         "--data",
-        default="data/output/benchmark/task_a",
-        help="Directory containing benchmark JSONL files (default: data/output/benchmark/task_a)",
+        action="append",
+        default=None,   # NOT the default path: action="append" appends to a
+                        # non-None default instead of replacing it, so the
+                        # default would leak into every explicit invocation.
+                        # resolve_data_paths applies the fallback.
+        help=(
+            "Directory of benchmark JSONL files, or one JSONL file. Repeatable: "
+            f"pass it twice to score both modality strata in one run (default: {DEFAULT_DATA_DIR}), "
+            f"e.g. --data {DEFAULT_DATA_DIR} --data {DEFAULT_DATA_DIR}_voice. "
+            "Paths are sorted before loading, so flag order cannot change a result."
+        ),
     )
     parser.add_argument(
         "--endpoint",
@@ -799,7 +904,12 @@ if __name__ == "__main__":
         "--max-samples",
         type=int,
         default=0,
-        help="Limit evaluation to first N samples per level (0 = no limit, useful for smoke tests)",
+        help=(
+            "Limit evaluation to the first N samples from EACH --data path "
+            "(0 = no limit, useful for smoke tests). Per path, not per run, so "
+            "a two-stratum smoke run cannot truncate one stratum to zero while "
+            "still reporting a voice weight."
+        ),
     )
     parser.add_argument(
         "--stochastic-trials",
@@ -862,25 +972,37 @@ if __name__ == "__main__":
         ),
     )
 
-    data_dir = Path(args.data)
-    if not data_dir.exists():
-        print(f"ERROR: data path not found: {data_dir}", file=sys.stderr)
+    data_paths = resolve_data_paths(args.data)
+    for _p in data_paths:
+        if not _p.exists():
+            print(f"ERROR: data path not found: {_p}", file=sys.stderr)
+            print(
+                "Run ./scripts/generate_benchmark_data.sh first to generate benchmark data.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    samples = _load_samples(data_paths, max_samples_per_path=args.max_samples)
+    if not samples:
         print(
-            "Run ./scripts/generate_benchmark_data.sh first to generate benchmark data.",
+            "ERROR: no JSONL samples found at "
+            + ", ".join(str(_p) for _p in data_paths),
             file=sys.stderr,
         )
         sys.exit(1)
 
-    samples = _load_samples(data_dir)
-    if not samples:
-        print(f"ERROR: no JSONL samples found at {data_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    if args.max_samples > 0:
-        samples = samples[: args.max_samples]
+    # A single path keeps the old string in the log and the result JSON; a
+    # multi-path run records every stratum it read.
+    data_dir_repr = (
+        str(data_paths[0]) if len(data_paths) == 1
+        else ", ".join(str(_p) for _p in data_paths)
+    )
 
     import re as _re_start
-    _start_level_match = _re_start.match(r"(l[1-5])_", data_dir.name) if data_dir.is_file() else None
+    _start_level_match = (
+        _re_start.match(r"(l[1-5])_", data_paths[0].name)
+        if len(data_paths) == 1 and data_paths[0].is_file() else None
+    )
     _start_level_tag = _start_level_match.group(1).upper() if _start_level_match else "mixed"
 
     logger.info(
@@ -888,7 +1010,7 @@ if __name__ == "__main__":
         model=args.model,
         engine=args.engine,
         endpoint=args.endpoint,
-        data_dir=str(data_dir),
+        data_dir=data_dir_repr,
         complexity_level=_start_level_tag,
         num_samples=len(samples),
         stochastic_trials=args.stochastic_trials,
@@ -1026,7 +1148,10 @@ if __name__ == "__main__":
     # `l[1-5]_*.jsonl` file (the per-level case). For directory inputs
     # spanning all levels, "mixed" is recorded.
     import re as _re
-    level_match = _re.match(r"(l[1-5])_", data_dir.name) if data_dir.is_file() else None
+    level_match = (
+        _re.match(r"(l[1-5])_", data_paths[0].name)
+        if len(data_paths) == 1 and data_paths[0].is_file() else None
+    )
     level_tag = level_match.group(1).upper() if level_match else "mixed"
 
     result = {
@@ -1034,7 +1159,8 @@ if __name__ == "__main__":
         "engine": args.engine,
         "endpoint": args.endpoint,
         "kv_cache_dtype": args.kv_cache_dtype,
-        "data_dir": str(data_dir),
+        "data_dir": data_dir_repr,
+        "data_paths": [str(_p) for _p in data_paths],
         "complexity_level": level_tag,
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
@@ -1072,6 +1198,12 @@ if __name__ == "__main__":
         f"(n={quality_summary['n_voice']}), "
         f"voice_weight={quality_summary['voice_weight']}]"
     )
+    if quality_summary["n_unknown_modality"]:
+        print(
+            f"  WARNING: {quality_summary['n_unknown_modality']} conversation(s) "
+            f"carry an unknown modality {quality_summary['unknown_modalities']} "
+            f"and were counted into the TEXT stratum"
+        )
     _diag = quality_summary["chunk_diagnostics"]
     print(
         "  chunk diagnostics (guardrail, voice only, not in composite): "
@@ -1082,3 +1214,13 @@ if __name__ == "__main__":
         f"boundary_quality={_diag['boundary_quality']:.3f} "
         f"(pooled across languages={_diag['languages']})"
     )
+    # Per language, because a pooled boundary_quality cannot say WHICH
+    # language drags it down, and the voice stratum is half Thai by design.
+    for _lang, _sub in sorted(_diag["per_language"].items()):
+        print(
+            f"    {_lang}: n_turns_with_chunks={_sub['n_turns_with_chunks']}, "
+            f"first_chunk_p50/p90={_sub['first_chunk_p50']:.0f}/{_sub['first_chunk_p90']:.0f}, "
+            f"chunk_len_p50/p90={_sub['chunk_len_p50']:.0f}/{_sub['chunk_len_p90']:.0f}, "
+            f"chunks_per_turn_p50={_sub['chunks_per_turn_p50']:.1f}, "
+            f"boundary_quality={_sub['boundary_quality']:.3f}"
+        )
