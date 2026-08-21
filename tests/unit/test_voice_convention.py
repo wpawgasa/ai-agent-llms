@@ -436,3 +436,23 @@ def test_placeholder_generator_never_trips_the_chunker_limit():
                             continue
                         spoken = "".join(iter_chunks(msg.get("content") or ""))
                         assert len(spoken) <= SPOKEN_CHARS_MAX
+
+
+def test_acknowledgement_for_code_switch_returns_thai():
+    """Code-switched conversations are Thai-primary; English openers read wrong."""
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("code_switch") == ACKNOWLEDGEMENTS["th"]
+
+
+def test_acknowledgement_for_known_languages():
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("th") == ACKNOWLEDGEMENTS["th"]
+    assert acknowledgement_for("en") == ACKNOWLEDGEMENTS["en"]
+
+
+def test_acknowledgement_for_unknown_language_falls_back_to_english():
+    from llm_workflow_agents.data.voice_convention import ACKNOWLEDGEMENTS, acknowledgement_for
+
+    assert acknowledgement_for("de") == ACKNOWLEDGEMENTS["en"]

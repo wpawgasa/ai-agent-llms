@@ -55,6 +55,41 @@ ACKNOWLEDGEMENTS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: The interrupting user turn spoken when a caller barges in, one per
+#: language. This turn is never checked by ``find_barge_in_violations`` (it
+#: only constrains the assistant side), but it still must match the
+#: conversation's language — a Thai interruption line dropped verbatim into
+#: an English conversation would be a silent, uncaught corpus defect.
+_BARGE_IN_INTERRUPTIONS: dict[str, str] = {
+    "th": "ขอโทษนะคะ ขอถามหน่อย",
+    "en": "Sorry, can I ask something?",
+    "code_switch": "ขอโทษนะคะ ขอถามหน่อย",
+}
+
+
+def barge_in_interruption_for(language: str) -> str:
+    """Return the interrupting user turn's text for one language.
+
+    Mirrors ``acknowledgement_for``: `code_switch` maps to Thai (a
+    code-switched conversation is Thai-primary), and an unknown language
+    falls back to English.
+    """
+    if language == "code_switch":
+        return _BARGE_IN_INTERRUPTIONS["th"]
+    return _BARGE_IN_INTERRUPTIONS.get(language, _BARGE_IN_INTERRUPTIONS["en"])
+
+
+def acknowledgement_for(language: str) -> tuple[str, ...]:
+    """Return the acknowledgement openers for one language.
+
+    `code_switch` maps to Thai: a code-switched conversation is Thai-primary,
+    so an English opener reads wrong even though English words appear in it.
+    """
+    if language == "code_switch":
+        return ACKNOWLEDGEMENTS["th"]
+    return ACKNOWLEDGEMENTS.get(language, ACKNOWLEDGEMENTS["en"])
+
+
 def iter_chunks(text: str) -> list[str]:
     """Return the spoken chunks of one turn, in order."""
     return _CHUNK_RE.findall(text)

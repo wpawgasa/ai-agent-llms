@@ -2701,9 +2701,17 @@ class TestBargeInLossFlagProducer:
         assert row["barge_in"] is False
         assert not any("loss" in m for m in row["messages"]), row["messages"]
 
-    def test_placeholder_fallback_never_claims_a_barge_in(self, tmp_path) -> None:
-        """The placeholder cannot write a three-turn interruption, so it must
-        not be labelled as carrying one."""
+    def test_placeholder_can_now_claim_a_barge_in(self, tmp_path) -> None:
+        """Task 3 gave the placeholder the ability to write a three-turn
+        interruption via ``_insert_placeholder_barge_in``, so a
+        placeholder-only voice batch can realize the requested rate — this
+        used to assert the opposite (`barge_in_realized == 0`) before that
+        landed.
+
+        The label must still follow the content, not the request: any row
+        that did NOT realize a barge-in must carry no marker and no `loss`
+        key, exactly as before.
+        """
         meta = generate_workflow_dataset(
             "L2",
             num_samples=4,
@@ -2714,12 +2722,20 @@ class TestBargeInLossFlagProducer:
         )
         rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
         assert rows
-        assert all(r["barge_in"] is False for r in rows)
-        assert all(not any("loss" in m for m in r["messages"]) for r in rows)
-        # The gap is visible in the sidecar so a teacher that silently drops
-        # every interruption is detectable.
+        assert any(r["barge_in"] for r in rows)
+        for r in rows:
+            marked = [m for m in r["messages"] if "<unspoken>" in (m.get("content") or "")]
+            if r["barge_in"]:
+                assert len(marked) == 1
+                assert marked[0]["loss"] is False
+            else:
+                assert not marked
+                assert not any("loss" in m for m in r["messages"])
+        # The gap (requested vs realized) is visible in the sidecar so a
+        # teacher/placeholder that silently drops an interruption is
+        # detectable.
         assert meta.stats["barge_in_requested"] == 4
-        assert meta.stats["barge_in_realized"] == 0
+        assert meta.stats["barge_in_realized"] == sum(1 for r in rows if r["barge_in"])
 
     def test_stale_loss_key_from_the_teacher_is_deleted(
         self, tmp_path, monkeypatch
@@ -2810,3 +2826,54 @@ class TestRichPromptMarkerScrub:
         assert rows
         for row in rows:
             assert "[END_CONVERSATION]" not in row["messages"][0]["content"]
+
+
+class TestPlaceholderBargeIn:
+    """The placeholder must be able to produce an interruption.
+
+    The teacher writes barge-ins for teacher runs. The placeholder is the
+    offline, reproducible path, and it produced none.
+    """
+
+    def _voice_rows(self, tmp_path, seed=17, rate=1.0, n=6):
+        meta = generate_workflow_dataset(
+            "L3", num_samples=n, output_dir=tmp_path, seed=seed,
+            modality_preset="voice_only", barge_in_rate=rate,
+        )
+        return [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+
+    def test_placeholder_emits_barge_in_at_rate_one(self, tmp_path):
+        rows = self._voice_rows(tmp_path)
+        assert any(r["barge_in"] for r in rows)
+
+    def test_barge_in_rows_pass_the_checker(self, tmp_path):
+        from llm_workflow_agents.data.voice_convention import find_voice_violations
+
+        for r in self._voice_rows(tmp_path):
+            assert find_voice_violations(r["messages"], "voice") == []
+
+    def test_marker_bearing_turn_carries_loss_false(self, tmp_path):
+        for r in self._voice_rows(tmp_path):
+            if not r["barge_in"]:
+                continue
+            marked = [m for m in r["messages"] if "<unspoken>" in (m.get("content") or "")]
+            assert len(marked) == 1
+            assert marked[0]["loss"] is False
+
+    def test_rate_zero_emits_none(self, tmp_path):
+        rows = self._voice_rows(tmp_path, rate=0.0)
+        assert not any(r["barge_in"] for r in rows)
+
+    def test_reproducible_at_a_fixed_seed(self, tmp_path):
+        a = self._voice_rows(tmp_path / "a")
+        b = self._voice_rows(tmp_path / "b")
+        assert [r["messages"] for r in a] == [r["messages"] for r in b]
+
+    def test_text_samples_never_get_a_marker(self, tmp_path):
+        meta = generate_workflow_dataset(
+            "L3", num_samples=6, output_dir=tmp_path, seed=17, barge_in_rate=1.0,
+        )
+        rows = [json.loads(x) for x in meta.output_files[0].read_text().splitlines()]
+        assert not any(r["barge_in"] for r in rows)
+        assert not any("<unspoken>" in (m.get("content") or "")
+                       for r in rows for m in r["messages"])
