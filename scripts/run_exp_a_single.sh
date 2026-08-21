@@ -254,6 +254,7 @@ if [ "$DRY_RUN" = true ]; then
         [ -n "$MAX_NUM_SEQS" ]  && DRY_LAUNCH_ARGS+=(--max-num-seqs  "$MAX_NUM_SEQS")
         echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG ${DRY_LAUNCH_ARGS[*]}"
     fi
+    echo "[DRY RUN] Would evaluate: python3 -m llm_workflow_agents.eval.agent_benchmark ${DATA_ARGS[*]}"
     echo "[DRY RUN] Would write results to $RESULT_FILE"
     exit 0
 fi
