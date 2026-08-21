@@ -144,6 +144,19 @@ realised total; the sidecar's aggregate `barge_in_realized` counts every row
 regardless of source and can no longer distinguish a real teacher delivery from
 a degraded run the placeholder covered for.
 
+The placeholder may only interrupt a **self-loop** turn (`[STATE: X → X]`). The
+recovery turn repeats the interrupted turn's `from` state — a rule
+`find_barge_in_violations` enforces — so interrupting an advancing turn
+`[X → Y]` annotated `[X → X]` while the conversation already sat in `Y`, leaving
+`ground_truth.state_sequence` discontinuous, and the checker agreed with it.
+The restriction costs realisation rate: under the tool-call stay convention
+almost every self-loop turn is a *silent* tool-call turn with no speech to
+interrupt, so at `barge_in_rate=1.0` roughly one placeholder voice row in nine
+realises an interruption (measured 22/200, 40 per level, seed 777). A request
+that finds no candidate logs `placeholder_barge_in_no_candidate`. Expect the
+placeholder's `barge_in_realized` to sit far below `barge_in_requested`; that
+gap is the filter, not a defect.
+
 **The format contract** lives in `data/voice_convention.py` and is checked by
 `find_voice_violations`, which runs inside the generator's coherence repair
 loop. Five rules:

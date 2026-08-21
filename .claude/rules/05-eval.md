@@ -64,7 +64,31 @@ def full_workflow_success_rate(predictions, ground_truth) -> float:
 ### Modality blending — `blend_modality_scores`
 
 Phase 1 quality for Task A is a weighted blend of a text-stratum score and a
-voice-stratum score, not either stratum alone:
+voice-stratum score whenever a run holds both strata. `eval/agent_benchmark.py`
+computes it (`compute_modality_quality_summary`) into
+`quality_summary["quality"]` of the result JSON, and
+`scripts/run_exp_a_per_level.sh` is the consumer that ranks on it — it reads
+`quality_summary.quality` when present and falls back to
+`metrics.weighted_workflow_score` for runs predating the summary. Do not rank
+on `metrics.weighted_workflow_score` on a two-stratum run: it is pooled over
+every row, so its effective voice weight comes from the row counts and drifts
+whenever the data is regenerated.
+
+A run holds both strata only when it is told to. `--data` is repeatable, and
+the two strata are sibling directories:
+
+```
+python -m llm_workflow_agents.eval.agent_benchmark ... \
+    --data data/output/benchmark/task_a \
+    --data data/output/benchmark/task_a_voice
+```
+
+The per-stratum scores come from `agent_benchmark.compute_weighted_score` —
+this module's `compute_weighted_workflow_score` above is a different formula
+(`state_transition_accuracy` alone, where the benchmark uses
+`max(state_transition_accuracy, state_sequence_accuracy)` and an explicit
+completion term). Blending happens at the score level, so within one stratum
+the number means exactly what it meant before.
 
 ```python
 def blend_modality_scores(
@@ -79,8 +103,13 @@ A weighted mean of the two per-stratum scores — never a mean pooled over raw
 rows, whose effective weight would drift with however many rows each stratum
 happens to hold. With one stratum absent, the other is returned unchanged by
 float identity, not by an arithmetic shortcut that merely rounds to the same
-value: until a real voice corpus exists, this is inert and cannot move the
-Phase 1 ranking. `eval/agent_benchmark.py` is the caller.
+value: a single-stratum run — every run there has ever been — is inert and
+cannot move the Phase 1 ranking.
+
+A conversation whose `modality` is neither `"text"` nor `"voice"` (absent
+counts as text) is folded into the text stratum and named in
+`n_unknown_modality` / `unknown_modalities`, never dropped, so
+`n_text + n_voice == len(samples)` always holds.
 
 ### Chunk diagnostics — guardrails, never composite terms (`chunk_diagnostics.py`)
 
@@ -103,7 +132,10 @@ score two different sentences):
 measurements across languages before computing any percentile (an average of
 two already-computed percentiles is not itself a percentile of anything) and
 must be used for the benchmark's voice stratum, which draws English and Thai
-at even odds.
+at even odds. It also returns `per_language`, each language's own sub-scores
+beside the pooled figure — the pooled `boundary_quality` cannot say which
+language drags it down, which is the only question the metric exists to
+answer on a half-Thai stratum.
 
 **Guardrail, not a composite term.** Chunk formatting is cheap to install
 through fine-tuning, so letting these move the Phase 1 winner would select on
