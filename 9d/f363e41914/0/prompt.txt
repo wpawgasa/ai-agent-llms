@@ -1,0 +1,1022 @@
+subagent-driven
+
+---
+
+<task-notification>
+<task-id>a011980128aec8a26</task-id>
+<tool-use-id>toolu_015uJnZ5NGYUfa5EopPTW4ZB</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a011980128aec8a26.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 1: voice format checker" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**Status:** DONE
+
+**Commit SHA:** `10597d1 feat(data): voice format convention module`
+
+**Test Summary:** 21/21 passing (6 parsing, 8 rules, 7 length+bidirectional)
+
+**What Implemented:**
+- `src/llm_workflow_agents/data/voice_convention.py` — voice format checker with:
+  - 5 format rules (state/tool markers outside chunks, spoken text only in chunks, balanced tags, no tool calls with END_CONVERSATION)
+  - 2 length limits (chunk ≤160 chars, turn ≤5 chunks)
+  - Bidirectional validation (voice format enforcement + text marker prohibition)
+  - `iter_chunks()`, `strip_voice_markup()`, `find_voice_violations()`
+  - `ACKNOWLEDGEMENTS` dict (Thai + English) from monomax_prompt_parts.json
+- `tests/unit/test_voice_convention.py` — 21 tests covering all rules and both modalities
+
+**No deviations; all interface contracts met. Module is pure stdlib, mirrors state_convention.py posture, ready for downstream tasks (generation, audit, eval).**</result>
+<usage><subagent_tokens>79172</subagent_tokens><tool_uses>20</tool_uses><duration_ms>160402</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>abd6acbb0d9fb6173</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/abd6acbb0d9fb6173.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 1" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>1. SPEC COMPLIANCE: ✅ — implements exactly the brief's prescribed steps, interfaces, and file list; nothing missing, nothing extra.
+2. TASK QUALITY: Not Approved
+
+Findings:
+- Critical: Rule 5 only half-implemented — `[END_CONVERSATION]` "follows the last chunk" positional requirement is never checked; placing it before or between chunks produces zero violations (verified live). Only the tool-call-co-occurrence half and the inside-a-chunk half are checked.
+- Important: `find_voice_violations`'s docstring claims it checks "the barge-in recovery," but no barge-in logic exists in this diff and `ACKNOWLEDGEMENTS` is never referenced by any checker — misleading contract.
+- Important: voice-direction checking raises an uncaught `TypeError` on non-string `content` (e.g. a list of content blocks), while `_find_text_violations` explicitly guards with `isinstance(content, str)` — asymmetric robustness given the `Any`-typed content field.
+- Minor: unrecognized `modality` values (not "voice"/"text") silently fall through to voice-checking instead of raising.
+
+Verified clean: `→`/`-&gt;` both work; 160/161-char and 5/6-chunk boundaries behave correctly; empty message list handled; missing state marker correctly not flagged; module is pure-stdlib with no cycle risk; 21/21 tests pass (matches report) and all assert real, non-vacuous conditions; structure extends cleanly for a later `find_barge_in_violations`/`chunk_spoken_text`.
+
+⚠️ Cannot verify from diff: whether the design doc's actual wording of rule 5 matches the stricter "follows the last chunk" reading used in this review (doc not in review inputs); whether real generated data ever triggers the END_CONVERSATION-positioning gap in practice.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-1-review.md`.</result>
+<usage><subagent_tokens>101015</subagent_tokens><tool_uses>14</tool_uses><duration_ms>143340</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a011980128aec8a26</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a011980128aec8a26.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 1: voice format checker" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** DONE
+
+**Commit SHAs:** `7b91cc5 fix(voice): address reviewer findings on format rules and robustness`
+
+**Test Summary:** 25/25 passing (4 new tests for Rule 5 positioning + robustness)
+
+**All Findings Fixed:**
+1. Rule 5 now validates [END_CONVERSATION] comes after final `&lt;/S&gt;` (critical)
+2. Docstring corrected; removed false barge-in recovery claim (important)
+3. Voice path now guards non-string content like text path (important)
+
+No concerns; fix report appended to task-1-report.md.</result>
+<usage><subagent_tokens>93101</subagent_tokens><tool_uses>13</tool_uses><duration_ms>85131</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a6b7807de413953a7</task-id>
+<tool-use-id>toolu_01CjuVVJPWWr3DCrvjjpMoXg</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a6b7807de413953a7.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 1 fixes" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All live-tested and confirmed correct. No regressions found.
+
+1. ADDRESSED — src/llm_workflow_agents/data/voice_convention.py:137-143 adds `rfind("&lt;/S&gt;")` vs `find(_END_MARKER)` positional check; live-tested before-first-chunk, between-chunks (both flagged "before the final &lt;/S&gt;"), and after-last-chunk (accepted, no violation) — matches spec.
+2. ADDRESSED — src/llm_workflow_agents/data/voice_convention.py:166-169 docstring now reads "checks the five format rules and both length limits" with no barge-in mention; `ACKNOWLEDGEMENTS` (line 40) remains defined and unused as expected, confirmed by grep.
+3. ADDRESSED — src/llm_workflow_agents/data/voice_convention.py:184-186 adds `isinstance(content, str)` guard before calling `_check_voice_turn`; covered by `tests/unit/test_voice_convention.py:143-149` (`test_non_string_content_does_not_crash`), which genuinely crashes pre-fix since `iter_chunks`→`re.findall` on a list raises `TypeError` (verified by code inspection, not just re-running).
+
+Verification: `pytest tests/unit/test_voice_convention.py -v` → 25 passed. New positional tests (`before_first_chunk`, `between_chunks`) fail pre-fix since no such check existed. No-marker and trailing-whitespace/newline cases confirmed to produce zero violations (no regression on legitimate turns).
+
+New breakage: none
+Deferred: none</result>
+<usage><subagent_tokens>75063</subagent_tokens><tool_uses>6</tool_uses><duration_ms>40973</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a4cdfe8f344f8ef96</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a4cdfe8f344f8ef96.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 2: barge-in recovery check" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**Status:** DONE
+
+**Commit SHA:** d049ca8
+
+**Test Summary:** 30/30 tests pass (5 new barge-in tests + 25 existing tests all passing)
+
+**Implementation:**
+- Added `_all_acknowledgements()` function to aggregate openers across languages
+- Added `find_barge_in_violations(messages)` with four mechanical validation rules
+- Integrated barge-in checks into `find_voice_violations()` 
+- All code transcribed verbatim from brief
+- No deviations from requirements
+
+**Concerns:** None. Implementation complete and validated.</result>
+<usage><subagent_tokens>66445</subagent_tokens><tool_uses>10</tool_uses><duration_ms>72796</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a85550ba1e62d286a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a85550ba1e62d286a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 2" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>SPEC COMPLIANCE: ✅
+TASK QUALITY: Not Approved
+
+- Critical: `find_barge_in_violations` crashes (`TypeError`) when the recovery turn's `content` is non-string (e.g. a multimodal content-block list) — no `isinstance(content, str)` guard, unlike the turn-level loop which has one; repro confirmed via direct call.
+- Important: a marker planted in a `user` or `tool` role message is invisible to the checker — both `marked` and `total` only look at `role == "assistant"`, so a corrupted-role marker returns `[]` (treated as valid/no-marker) instead of being flagged.
+- Minor: interrupted or recovery turn with no `[STATE: ...]` annotation silently skips the state-match check instead of reporting a violation (out of the four listed facts, likely acceptable scope-wise, but worth a follow-up).
+- Minor: brief's Step 4 says "Expected: PASS, 26 tests" but actual/correct count is 30 — a miscount in the brief text, not an implementer error.
+
+Verification: diff is a verbatim transcription of the brief (code, tests, commit message all match). `pytest tests/unit/test_voice_convention.py -v` → 30 passed. Confirmed the 4 new assertions genuinely fail pre-fix (checked out `7b91cc5`'s version: 4 failed/1 trivially passed) and pass post-fix. Confirmed "exactly once" vs "which turn holds it" agree when one turn holds the marker twice. Confirmed additivity — all 25 pre-existing tests unaffected. Probed ack-in-second-chunk, marker-turn-followed-by-user-only, and leading-Thai-particle cases — all correctly flagged; the two findings above are the only misbehaviors found.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-2-review.md`.</result>
+<usage><subagent_tokens>96751</subagent_tokens><tool_uses>10</tool_uses><duration_ms>182393</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a4cdfe8f344f8ef96</task-id>
+<tool-use-id>toolu_01StQqk4emnCmyPQRq2SEPuh</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a4cdfe8f344f8ef96.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 2: barge-in recovery check" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** DONE
+
+**Commit SHAs:** d049ca8 (initial), 28920e8 (fixes)
+
+**Test Summary:** 33/33 tests pass (30 original + 3 new covering tests)
+
+**Fixes Applied:**
+1. Guard all content reads with `isinstance(content, str)` to prevent TypeError on non-string recovery content
+2. Count marker across ALL messages to detect misplaced markers in user/tool roles; emit clear violations naming offending role
+
+**Concerns:** None. Both findings fixed and validated.</result>
+<usage><subagent_tokens>79522</subagent_tokens><tool_uses>9</tool_uses><duration_ms>75756</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aca075881643d0ad5</task-id>
+<tool-use-id>toolu_012eTDtKrtnxeCpAftLKDs8P</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/aca075881643d0ad5.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 2 fixes" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both findings verified via live testing and code review of `src/llm_workflow_agents/data/voice_convention.py:160-243` (post-fix). All 33 unit tests pass, including 3 new tests. Manually confirmed all three new tests would fail pre-fix: `test_non_string_recovery_content_does_not_crash` (list content is truthy, bypasses `or ""`, hits `_STATE_RE.search()`/`re` on a list → `TypeError`); `test_marker_in_user_message_is_a_violation` and `test_marker_in_tool_message_is_a_violation` (pre-fix `total`/`marked` filtered on `role == "assistant"` only, so a user/tool marker gave `total == 0` → `[]`, failing the assertion). Live-tested regression cases: well-formed barge-in (marker + correct recovery) → `[]`; no-marker conversation → `[]`; list-content on the "interrupted" marked turn and on the recovery turn → no crash in either case.
+
+1. ADDRESSED — voice_convention.py:180-186 (`total` count, isinstance guard), :191-201 (new non-assistant scan, isinstance guard), :208-213 (`marked`, isinstance guard), :228-231 (`recovery_content` guard before `_STATE_RE.search`/`iter_chunks`). All four content reads guarded; live tests on both interrupted-turn and recovery-turn list content produced no crash.
+2. ADDRESSED — voice_convention.py:180-186 (count widened to all messages, str-guarded) and :191-201 (new loop emits `f"... sits in a {role} message ..."`); `marked` (voice_convention.py:208-213) and `later`/interrupted/recovery lookups (voice_convention.py:215-221, 227-236) unchanged — still filtered to `role == "assistant"`, confirming positional/recovery logic untouched.
+
+New breakage: none found. Widened count does not false-positive on the well-formed or no-marker regression cases (verified live); Task 1's five format rules and two length-limit tests (chunk/turn at-limit and over-limit) all still pass unchanged, confirming no cross-contamination from this diff (which only touches `find_barge_in_violations`).
+
+Deferred: none.</result>
+<usage><subagent_tokens>77705</subagent_tokens><tool_uses>5</tool_uses><duration_ms>86036</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a0334fbddbcfda08f</task-id>
+<tool-use-id>toolu_01SUXEXvQGL35xCFknKmxnEX</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a0334fbddbcfda08f.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 3: modality preset and sample field" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task 3 complete.
+
+Status: DONE_WITH_CONCERNS
+Commit SHA: 3fe37a8
+Test summary: tests/unit/test_data_generation.py 137/137 passed, including test_seed_determinism and test_concurrent_seed_determinism; the 7 new TestModality tests all pass.
+Concerns:
+- One deviation: the brief's own verbatim test code calls `a.output_file` (singular), but `DatasetMetadata` only ever had `output_files` (plural list); I added a minimal read-only `output_file` property returning `output_files[0]` — required for the brief's tests to run at all, not a design choice. Full rationale in the report.
+- Did not add modality to the outer stats-sidecar bundle (no `modality_distribution` in `.stats.json`) — brief didn't ask for it; flagged as worth confirming.
+- `tests/unit/test_dpo_config_kwargs.py` has a pre-existing, unrelated collection error (torchvision/vllm import) in this environment — not touched, not caused by this change.
+
+Full report: `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-3-report.md`</result>
+<usage><subagent_tokens>123042</subagent_tokens><tool_uses>49</tool_uses><duration_ms>268682</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a0334fbddbcfda08f</task-id>
+<tool-use-id>toolu_01CqJQtsG5ciJp4bata5GQtb</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a0334fbddbcfda08f.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 3: modality preset and sample field" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both rulings applied and verified.
+
+Status: DONE
+Commit SHAs: 3fe37a8 (original), cdfe4e1 (rulings fix)
+Test summary: tests/unit/test_data_generation.py 138/138 passed, including the 3 reproducibility-guard tests (test_seed_determinism, test_concurrent_seed_determinism, test_default_preset_does_not_shift_the_random_stream) and the new test_stats_sidecar_reports_modality_distribution.
+Concerns: none remaining — output_file property reverted, test call sites fixed to output_files[0], modality_distribution wired into stats sidecar exactly like initiator_distribution. Report updated at task-3-report.md.</result>
+<usage><subagent_tokens>144673</subagent_tokens><tool_uses>27</tool_uses><duration_ms>158598</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a1a7e54370da50e8a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a1a7e54370da50e8a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 3" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>1. SPEC COMPLIANCE: ✅
+2. TASK QUALITY: Approved
+
+No findings — Critical / Important / Minor: none.
+
+⚠️ Cannot verify from diff: none.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-3-review.md`. Key checks: no `output_file` property exists on `DatasetMetadata` anywhere (Ruling A honored); `modality_distribution` reaches `.stats.json` beside its siblings (Ruling B honored); the `default` draw path calls neither `_select_modality` nor `rng.random()` on any branch; guard tests pass (`pytest tests/unit/test_data_generation.py -v -k "determinism or does_not_shift"` → 3 passed) and full file passes (138 passed); empirically confirmed `voice_mix` and `default` diverge at the same seed (messages differ, default consumes zero modality draws) proving the guard is load-bearing.</result>
+<usage><subagent_tokens>98368</subagent_tokens><tool_uses>11</tool_uses><duration_ms>79908</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>af99d24a9618fc19b</task-id>
+<tool-use-id>toolu_01K5YW1nxrxSrdvURhHzYVtS</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/af99d24a9618fc19b.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 4: teacher prompts per modality" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Committed cleanly, working tree clean for the two tracked files.
+
+Status: DONE
+Commit SHA: 7f8a71b (branch feat/voice-conversation-generation)
+Tests: `test_data_generation.py` 145 passed; `test_teacher_prompt_contract.py` 4 passed; full `tests/unit/` (minus 5 pre-existing trl→vllm→torchvision collection failures, unrelated) 1500 passed; determinism subset (`-k "determinism or does_not_shift"`) 3 passed.
+Concerns:
+- Fixed a bug in the brief's own test snippet: `WorkflowTransition(...)` needs `condition=` (required, no default) — added `condition=""` to the two affected test calls.
+- Same pre-existing trl/vllm/torchvision collection error the brief flagged for `test_dpo_config_kwargs.py` also hits 4 other trl-dependent files in this environment; all ignored as unrelated, per the brief's guidance.
+Full report: `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-4-report.md`</result>
+<usage><subagent_tokens>137802</subagent_tokens><tool_uses>59</tool_uses><duration_ms>388505</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aa049f74ace67ba9a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/aa049f74ace67ba9a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 4" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>SPEC COMPLIANCE: ✅
+TASK QUALITY: Approved
+
+- Minor: `_generate_rich_system_prompt`'s `modality` param placement is a defensible judgment call, correctly self-flagged; no other callers exist.
+- Minor: the `[END_CONVERSATION]` text embedded in text-mode rich prompts ("do not use [END_CONVERSATION]") only avoids tripping `find_voice_violations` because system messages are excluded from the repair-loop's scope at this stage — not a defect now, but worth a comment if a future task points the checker at the fully-assembled conversation.
+
+Verified directly (not just read): byte-fidelity of `_TEACHER_SYSTEM_PROMPT`/`_RICH_PROMPT_SYSTEM` (`_teacher_system_prompt("text")`/`_rich_prompt_system("text")` both `== ` the constants); brace escaping via live calls to `_teacher_system_prompt("voice")` and `_build_teacher_prompt(..., modality="voice", barge_in=True)` (no `KeyError`, JSON renders with single braces); both `_generate_teacher_conversation` call sites pass `modality`/`barge_in`; `modality` is genuinely in scope at `_find_violations` (drawn once, never reassigned, not shadowed); scanned all 5 files in `data/output/sft/task_a/*.jsonl` for voice markers — found one `[END_CONVERSATION]` occurrence, but traced that it lives in a system message excluded from `_find_violations`'s input, so no false-positive rejection risk. The `WorkflowTransition(condition="")` fix is correct and minimal (required field, brief's snippet had a typo). Test counts match report: 149 passed combined, 3 passed for determinism guards.
+
+Review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-4-review.md`.</result>
+<usage><subagent_tokens>102840</subagent_tokens><tool_uses>20</tool_uses><duration_ms>111810</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a670f1e848462fb09</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a670f1e848462fb09.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 5: placeholder voice output" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commit: `08ccb1e` on `feat/voice-conversation-generation` ("feat(data): voice output from the placeholder generator")
+Tests: 183/183 passed (test_voice_convention.py + test_data_generation.py); full suite 1505/1505 passed excluding 5 pre-existing trl/vllm/torchvision collection-error files (matches brief's known issue).
+Concerns:
+- Brief's own test snippet had a typo (`meta.output_file` → should be `meta.output_files[0]`); fixed it to match the actual `DatasetMetadata` API.
+- Two assistant-turn sites (in-state tool-call turn, and transition turns where the state has tools) carry no prose in text mode, so a voice turn there would have zero `&lt;S&gt;` chunks and fail the checker; added a minimal deterministic spoken acknowledgement for those, beyond what the brief's snippet literally showed, to make the end-to-end test pass.
+- Verified text-mode byte-identical output only after pinning `PYTHONHASHSEED` (separate processes showed unrelated dict/set-ordering noise otherwise); no actual regression found.
+Full details, every command run, and all 5 assistant-turn sites documented in `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-5-report.md`.</result>
+<usage><subagent_tokens>178245</subagent_tokens><tool_uses>63</tool_uses><duration_ms>567282</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a670f1e848462fb09</task-id>
+<tool-use-id>toolu_01DW6Dht1efPcKM8hahgyPmn</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a670f1e848462fb09.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 5: placeholder voice output" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: `08ccb1e` (original Task 5), `825cbce` (ruling fix)
+Test summary: `pytest tests/unit/test_voice_convention.py tests/unit/test_data_generation.py -v` → 185 passed; broader suite (excluding 5 pre-existing trl/vllm collection errors) → 1507 passed.
+Concerns: none — invented filler prose fully reverted (verified absent via 120-row multi-seed sweep), checker now legalizes silent tool-call/marker-only turns via the rule-3 remainder check, existing fixture test still passes via the new path as predicted. Report appended to `.superpowers/sdd/2026-08-20-voice-conversation-generation/task-5-report.md` (gitignored, not committed — matches how the original report was handled).</result>
+<usage><subagent_tokens>212384</subagent_tokens><tool_uses>25</tool_uses><duration_ms>277240</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a1508cf00177ebd6a</task-id>
+<tool-use-id>toolu_01NdcYcPRzPVHvVoNo559CZb</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a1508cf00177ebd6a.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 5 fixes" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>1. Silent tool-call turn legalized while prose-outside-chunk still flagged — ADDRESSED. `voice_convention.py:125-144`; verified via `test_silent_tool_call_turn_with_no_chunk_is_legal` and live L3/L4 generation (26+20 tool-only turns, 0 chunks, 0 violations); `test_chunkless_turn_with_bare_prose_is_still_a_violation` still fails as expected.
+
+2. Invented acknowledgement prose reverted — ADDRESSED. `generate_workflows.py:939-1096` diff confirms `_TOOL_CALL_ACK_TEMPLATES` dict and both branches removed; grep for "One moment"/"รอสักครู่"/"Moving on to" in on-disk file returns nothing; live-generated voice output (12 samples, L3+L4) shows zero uniform filler and 46 chunk-free tool-only turns. The 120-row sweep claim is consistent with what I independently reproduced.
+
+New breakage: Critical — the new `if not chunks:` early-return branch (`voice_convention.py:126-144`) skips Rule 5's "`[END_CONVERSATION]` + `&lt;tool_call&gt;` together is a violation" check (that check only lives at lines 176-180, inside the chunked branch). Reproduced: a chunkless turn `[STATE: A → A]\n&lt;tool_call&gt;{...}&lt;/tool_call&gt;[END_CONVERSATION]` now returns `[]` from `find_voice_violations`, i.e. passes, where the existing chunked-branch test (`test_rule_5_end_conversation_with_a_tool_call_is_a_violation`) still correctly fails it because that fixture has a `&lt;S&gt;` chunk present. This exact combination isn't currently emitted by `_generate_placeholder_conversation` (its END_CONVERSATION turn is structurally tool-call-free), but the checker itself is a rubber stamp for this case per the explicit regression list.
+
+Deferred: none.</result>
+<usage><subagent_tokens>90436</subagent_tokens><tool_uses>16</tool_uses><duration_ms>92587</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a670f1e848462fb09</task-id>
+<tool-use-id>toolu_014R42CZEeeMUMmojozaxCKi</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a670f1e848462fb09.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 5: placeholder voice output" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: `08ccb1e`, `825cbce`, `d795b61` (round 2 fix)
+Test summary: `pytest tests/unit/test_voice_convention.py tests/unit/test_data_generation.py -q` → 186 passed; broader suite (excl. 5 pre-existing trl/vllm collection errors) → 1508 passed.
+Concerns: none — rule 5's tool-call+`[END_CONVERSATION]` check now runs once, unconditionally, before the chunk-presence branch (no duplication); direct repro of coordinator's exact snippet now correctly flagged.
+
+Per-rule chunkless audit:
+- Rule 1 (marker inside chunk): N/A, vacuous — correctly skipped
+- Rule 2 (tool call inside chunk): N/A, vacuous — correctly skipped
+- Rule 3 (prose outside chunk): applicable — already handled via remainder check
+- Rule 4 (balanced tags): applies universally, checked before chunk branch
+- Rule 5a (tool call + END_CONVERSATION together): applicable regardless of chunks — **was the bug**, now hoisted to run once for all turns
+- Rule 5b (END_CONVERSATION inside chunk): N/A, vacuous — correctly skipped
+- Rule 5c (END_CONVERSATION before final `&lt;/S&gt;`): N/A, no `&lt;/S&gt;` to bind to — vacuously satisfied, correctly skipped (this is what legalizes the placeholder's silent terminal turn: marker + END_CONVERSATION, no chunk)
+- Chunk-count/length limits: N/A, trivially satisfied with zero chunks</result>
+<usage><subagent_tokens>239581</subagent_tokens><tool_uses>100</tool_uses><duration_ms>210849</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a3d22d1919ad1cf47</task-id>
+<tool-use-id>toolu_01VRWoiAeBB1nKifKYokQYxT</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a3d22d1919ad1cf47.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 5 round 2" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All 24 generated rows across L3/L4 voice_only and default-preset text runs pass with zero violations.
+
+Verdict: **ADDRESSED**. `src/llm_workflow_agents/data/voice_convention.py:138` — the `[END_CONVERSATION]`+tool-call check runs once, unconditionally, ahead of the `if not chunks:` branch (line 145). Grep confirms exactly one occurrence of that condition in the file — not duplicated. Repro snippet now returns the violation `"assistant turn 1: holds both [END_CONVERSATION] and a tool call..."`. New test `test_chunkless_turn_with_tool_call_and_end_conversation_is_a_violation` (tests/unit/test_voice_convention.py:96-107) covers it.
+
+Judgment on the 5c reasoning: I agree with it. 5c ("`[END_CONVERSATION]` must follow the final `&lt;/S&gt;`") is genuinely about ordering relative to a chunk boundary that doesn't exist in a chunkless turn — but that gap is fully covered because the extracted rule 5 (tool-call + END_CONVERSATION) and rule 3 (bare prose outside a chunk) together already reject every dangerous chunkless case; a chunkless turn with only `[END_CONVERSATION]` and no tool call and no stray prose is legitimately a valid silent turn ending the call, so nothing is missing. The audit's claim holds.
+
+Regression check: all listed violation/pass cases map to existing named tests, and `pytest tests/unit/test_voice_convention.py tests/unit/test_data_generation.py -q` → **186 passed**. Placeholder generation at L3/L4 with `modality_preset="voice_only"` (8 rows each) and a default-preset L3 run (8 rows) all scored zero violations.
+
+New breakage: none.
+
+Deferred: none.</result>
+<usage><subagent_tokens>82016</subagent_tokens><tool_uses>10</tool_uses><duration_ms>57286</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a21bf72e705cf82db</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a21bf72e705cf82db.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 6: per-message loss flag" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Report written. Summary for you:
+
+Status: DONE_WITH_CONCERNS
+Commit: `52625ff` on `feat/voice-conversation-generation`
+Test summary: 4/4 new tests pass; full `test_training.py` + new file = 83 passed / 2 failed (pre-existing GPU-bf16 env failures, confirmed via git-stash diff, unrelated to this change).
+
+Concerns:
+- Step 6's warning couldn't literally use the brief's `dataset`-iterating snippet — no such variable exists where `loss_mask` is selected, and even later `_prepare_split` drops the `messages` column post-render. I placed the warning at the same site but backed it with a new `_corpus_has_loss_false()` helper that scans the raw JSONL directly.
+- Discovered `_load_split` in `sft.py` (not in the brief's file list) was stripping the `loss` key from every message, which would make the step-3 masking fix inert in real training runs and the step-6 warning permanently silent. I fixed that too (preserves `loss:False` only, byte-identical for existing rows) since without it the feature doesn't actually work outside unit tests — flagged prominently in the report for review since it's beyond the brief's literal scope.</result>
+<usage><subagent_tokens>135837</subagent_tokens><tool_uses>42</tool_uses><duration_ms>645815</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ad01a602f7be534b3</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ad01a602f7be534b3.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 6" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## SPEC COMPLIANCE: ✅
+
+## TASK QUALITY: Approved
+
+- Important: `_corpus_has_loss_false` has no try/except around `json.loads(line)` — a malformed JSONL line raises `JSONDecodeError` uncaught, violating the "cannot crash on a malformed line" bar. Practical impact is low since `_load_split` already crashes unguarded on malformed lines later in the same run; this just moves the failure earlier, and only under `all_tokens`.
+- Important: No automated test covers `_corpus_has_loss_false` or the warning firing end-to-end — only manually verified per the report. I independently confirmed it fires correctly today (fires on `loss:false` + `all_tokens`, never on `response_only`, never on a clean corpus), but there's no regression lock on a safety-critical warning.
+- Minor: `_load_split` drops an explicit `loss:true` key rather than preserving it verbatim (renders as absent) — harmless since both honouring sites treat absent/true identically.
+- Minor: RULING 1's scope expansion wasn't re-confirmed against unwritten future task briefs (7–11), only title/grep-checked.
+
+⚠️ Cannot verify from diff: whether a not-yet-written Task 7 step assumes `_load_split` did *not* carry `loss` through pre-fix.
+
+Verified directly rather than trusting the report: labels/input_ids split for `loss:false` turns (tokens stay in `input_ids`, fully `-100` in `labels`), `_load_split` byte-identical output for key-absent messages, no invented keys, cache fingerprint hashes raw bytes not parsed rows, `_load_grpo_jsonl` retains `loss:false` turns in later prompts' prefixes while excluding them as training rows, both downstream scripts call `_load_grpo_jsonl` unedited, and the 2 pre-existing `TestTrainerMaxLength` failures are a bf16/GPU sandbox limitation unrelated to this diff (confirmed by reading test bodies, not `git stash`). Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-6-review.md`.</result>
+<usage><subagent_tokens>101652</subagent_tokens><tool_uses>19</tool_uses><duration_ms>210969</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a21bf72e705cf82db</task-id>
+<tool-use-id>toolu_01W8LsLuycdBu3Lsdqx2hhVH</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a21bf72e705cf82db.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 6: per-message loss flag" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: `52625ff` (original), `dc61e0d` (fix round — hardened `_corpus_has_loss_false` against malformed/missing/empty files + logs skips; added 8 new tests asserting on captured log records via `structlog.testing.capture_logs`, not just return values)
+Test summary: `pytest tests/unit/test_training.py tests/unit/test_response_only_loss_flag.py -q` → 91 passed, 2 failed (pre-existing, confirmed-unrelated bf16/GPU sandbox limitation)
+Concerns: none new — both Important findings addressed and verified; report appended at `.superpowers/sdd/2026-08-20-voice-conversation-generation/task-6-report.md`.</result>
+<usage><subagent_tokens>161774</subagent_tokens><tool_uses>21</tool_uses><duration_ms>199286</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a4b1c25911b1a4b04</task-id>
+<tool-use-id>toolu_01M5zxScDDtfo5zNJLWH7cEf</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a4b1c25911b1a4b04.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 6 fixes" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## VERDICT
+
+**Finding 1 (Important):** ADDRESSED — `src/llm_workflow_agents/training/sft.py:115-129`. JSONDecodeError now caught in try/except ValueError (line 115-119), malformed lines skipped with `continue`, skipped count logged per-split (line 122-128). Missing files handled at line 108-109 (`if not path.exists(): continue`), empty files resolve to False naturally. All test cases pass: missing dir, empty file, malformed line, malformed line with good match in same file.
+
+**Finding 2 (Important):** ADDRESSED — `tests/unit/test_response_only_loss_flag.py:95-204`. TestCorpusHasLossFalse (5 tests, lines 95-149) covers robustness; TestAllTokensLossFlagWarning (3 tests, lines 167-204) asserts on **captured log records** via `structlog.testing.capture_logs()`: fires under all_tokens + loss:false (line 176-184), does NOT fire under response_only (line 186-194), does NOT fire on corpus without loss key (line 196-204). All 12 tests pass.
+
+**New breakage:** None. 91 passed in test_training.py + test_response_only_loss_flag.py; 2 pre-existing bf16/GPU failures (unrelated).
+
+**Deferred:** None.</result>
+<usage><subagent_tokens>66599</subagent_tokens><tool_uses>12</tool_uses><duration_ms>112394</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a6ae1466fff493d69</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a6ae1466fff493d69.output</output-file>
+<status>completed</status>
+<summary>Agent "Tasks 7+8: pipeline guards and multi-input-dir" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**Status:** DONE
+
+**Commits:**
+- Task 7: `a56a8ec` — test(data): guard the loss flag and modality through the pipeline
+- Task 8: `fb0800c` — feat(scripts): read more than one input directory
+
+**Test Results:**
+- Task 7: 15/15 passed (2 regression locks already passing, 1 new test fixed by stripping voice markup)
+- Task 8: 16/16 passed (2 new tests fixed by accepting list of directories)
+
+**Key Points:**
+- **No import cycle found** — `voice_convention.py` imports only stdlib and `_workflow_script`; no circular dependency with `heldout_clean_set.py`
+- **Argparse behavior confirmed** — `action="append"` with `required=True` produces list only on append (no spurious default)
+- **Backward compatibility** — one `--input-dir` keeps today's behavior exactly
+- Both scripts' help text verified to show repeatable flag
+
+**Concerns:** None.
+
+Detailed report: `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-7-8-report.md`</result>
+<usage><subagent_tokens>82093</subagent_tokens><tool_uses>43</tool_uses><duration_ms>189242</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a8e31b4262de4046a</task-id>
+<tool-use-id>toolu_016aSM8VWhiu3PemBJ1mR1eC</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a8e31b4262de4046a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Tasks 7+8" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Verdict 1 — Spec Compliance
+- Task 7: ✅ — `clean_record` untouched (verified via diff); both fingerprint functions strip voice markup; verified a true no-op on all 5,543 real conversations in `data/output/sft/task_a_splits/`.
+- Task 8: ❌ — `--input-dir` correctly made repeatable with no spurious default, and DVC's pinned single-flag invocations work identically. But dropping `default=DEFAULT_INPUT` in favor of `required=True` breaks the **zero-argument** call form that `scripts/run_phase2_sft.sh:89`, `README.md:519`, and `CLAUDE.md` (R12) all document/use — confirmed by running `python3 scripts/split_task_a_sft.py` with no flags: exits 2, `error: the following arguments are required: --input-dir`.
+
+## Verdict 2 — Task Quality: Not Approved
+- CRITICAL [T8]: breaks the documented zero-argument invocation of `split_task_a_sft.py`, which `scripts/run_phase2_sft.sh` (a live production runner) relies on. Report's "no concerns / backward compatible" claim wasn't tested against this call shape.
+- Important [T8]: `--input-dir` flag order changes the resulting split (verified by reversing two dirs at fixed seed 42 → different train split) — same-invocation runs are reproducible, but this is an undocumented footgun for future pipeline edits.
+- Minor [T8]: error message on missing files prints a Python list repr instead of a clean path string.
+- T7: no findings — clean, minimal implementation; new tests confirmed non-vacuous.
+
+Test run: `pytest tests/unit/test_clean_task_a_sft.py tests/unit/test_split_task_a_sft.py tests/unit/test_heldout_clean_set.py -q` → 17 passed.
+
+⚠️ Cannot verify from diff: whether other undocumented callers (CI, cron, other devs' scripts) also invoke either script with zero `--input-dir` args beyond the three found.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-7-8-review.md`.</result>
+<usage><subagent_tokens>100375</subagent_tokens><tool_uses>23</tool_uses><duration_ms>188362</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a6ae1466fff493d69</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a6ae1466fff493d69.output</output-file>
+<status>completed</status>
+<summary>Agent "Tasks 7+8: pipeline guards and multi-input-dir" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** DONE
+
+**Commit SHAs:**
+- Task 7: `a56a8ec`
+- Task 8 (initial): `fb0800c`
+- Task 8 (fixes): `8cd1ad9`
+
+**Test Summary:** `source .venv/bin/activate &amp;&amp; pytest tests/unit/test_clean_task_a_sft.py tests/unit/test_split_task_a_sft.py tests/unit/test_heldout_clean_set.py -q` → 18/18 passed (2 Task 7 regression locks, 3 Task 8 reproducibility tests, 13 existing)
+
+**Fixes Applied:**
+- ✅ Restored zero-argument invocation: `split_task_a_sft.py` with no flags correctly defaults to `DEFAULT_INPUT`
+- ✅ Directory order reproducibility: `sorted(input_dirs)` in `_load_rows()` ensures identical splits regardless of `--input-dir` flag order
+- ✅ Readable error messages: changed from Python list repr to comma-separated paths
+- ✅ Help text restored with default mention for backward compatibility
+
+**Concerns:** None. All coordinator findings addressed. DVC stages (lines 57, 79, 108, 125, 388, 403) compatible with single `--input-dir` (no breaking changes).</result>
+<usage><subagent_tokens>95854</subagent_tokens><tool_uses>26</tool_uses><duration_ms>192933</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ab28e7084ff950a08</task-id>
+<tool-use-id>toolu_0165MPoo3G4VLVQzdZn5UCj6</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ab28e7084ff950a08.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-review Task 8 fixes" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both scripts now print readable comma-separated paths instead of a list repr. All verifications complete.
+
+Verdict summary:
+
+1. **ADDRESSED** — `scripts/split_task_a_sft.py:79` `default=None`, `:129` `input_dirs = args.input_dir or [DEFAULT_INPUT]`. Verified: zero-arg dry-run and explicit `--input-dir` dry-run both report identical 5543/4711/554/278. `scripts/clean_task_a_sft.py:139` still `required=True`, no default added.
+2. **ADDRESSED** — `scripts/split_task_a_sft.py:46` sorts the directory list inside `_load_rows()` (not at parse site as instructed, but functionally correct). Verified byte-identical train/validation/test output across `[dirA,dirB]` vs `[dirB,dirA]` flag order (6-row temp corpus, seed 42). Single-dir ordering unchanged (still `sorted(input_dir.glob(...))`). **Inconsistency**: `main()`'s `print(f"Input dirs  : {input_dirs}")` at line ~156 and the `is_dir()` guard loop at ~131 still iterate the unsorted, as-given `input_dirs` — cosmetic only (doesn't affect data/reproducibility), but the printed banner can show a different directory order than what was actually globbed, which is misleading during debugging.
+3. **ADDRESSED** — both scripts now emit `", ".join(str(d) for d in input_dirs)` instead of list-repr; verified via execution on both scripts.
+
+New breakage: none found.
+
+Deferred: the cosmetic order-mismatch between the unsorted `Input dirs` banner/`is_dir()` iteration order and the sorted actual-load order in `split_task_a_sft.py` (finding 2's instruction was "sort the directory list" generally, not scoped to only `_load_rows`).</result>
+<usage><subagent_tokens>76940</subagent_tokens><tool_uses>9</tool_uses><duration_ms>64402</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ac00ccd3dd9689c4a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ac00ccd3dd9689c4a.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 9: voice runner and DVC stage" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commit: `879d6af` on `feat/voice-conversation-generation` — "feat(scripts): voice generation runner and DVC stage"
+Tests: 16/16 pass (`test_generate_voice_data_sh.py` + `test_generate_sft_data_sh.py`); broader suite 1540 passed/13 failed+1 collection-error, all pre-existing/unrelated (trl→torchvision, bf16/GPU-in-sandbox).
+
+Fifteen legs sum to exactly 2400 (en 480 / th 1200 / code_switch 720), verified. Smoke run: `15 rows, 0 with violations`.
+
+Concerns (documented in the report, full path `.superpowers/sdd/2026-08-20-voice-conversation-generation/task-9-report.md`):
+1. Made `--smoke-test` also force offline placeholder generation (`teacher_model=""`), since the literal command in step 6 has no `--teacher-model` and its own heading says "NO teacher model" — the naive design (default `gemini-3.5-flash`) hung &gt;2min on live calls.
+2. `output_dir` is passed via `functools.partial` outside the `generate_workflow_dataset(...)` call block, not as `output_dir=Path(...)` inside it — the brief's own step-1 test does `ast.literal_eval` on every kwarg with no exclusion, which rejects a `Path(...)` call node.
+
+No GPU/`dvc` used; `dvc.yaml` validated only via `yaml.safe_load` per instructions.</result>
+<usage><subagent_tokens>187023</subagent_tokens><tool_uses>77</tool_uses><duration_ms>862026</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ac00ccd3dd9689c4a</task-id>
+<tool-use-id>toolu_01LJ31pW433BEXutdvkU1XLv</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ac00ccd3dd9689c4a.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 9: voice runner and DVC stage" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: `879d6af` (original), `940a154` (ruling follow-up) on `feat/voice-conversation-generation`
+Tests: `pytest tests/unit/test_generate_voice_data_sh.py tests/unit/test_generate_sft_data_sh.py -q` → 19 passed; smoke run → 15 rows, 0 violations; broader suite 1543 passed (same 13 pre-existing unrelated failures)
+Concerns: none — both rulings implemented as specified (inline `output_dir` restored, order-independent `--smoke-test`/`--teacher-model` precedence added and tested); executable bit confirmed 100755; report appended at `.superpowers/sdd/2026-08-20-voice-conversation-generation/task-9-report.md`</result>
+<usage><subagent_tokens>210171</subagent_tokens><tool_uses>89</tool_uses><duration_ms>1208544</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a48b7918d3e7bd364</task-id>
+<tool-use-id>toolu_01XjFuWkq2h5yTyptHvfHeAH</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a48b7918d3e7bd364.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 9" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>1. SPEC COMPLIANCE: ✅
+2. TASK QUALITY: Approved
+
+- Minor: `generate_sft_until_target.py`'s `--modality-preset` plumbing has no dedicated test (only py_compile + manual review)
+- Minor: the fifteen leg sizes are hardcoded constants rather than derived at runtime from the weight table (matches brief exactly; arithmetic independently re-verified correct)
+
+⚠️ Cannot verify from diff: none — all required checks (leg table sum, AST/signature binding of all 15 calls, seed threading, DVC wiring incl. remediate exclusion, sibling script regression, real smoke generation + violation check, executable bit, both rulings A and B) were independently reproduced and confirmed directly, not taken from the report.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-9-review.md`.</result>
+<usage><subagent_tokens>113608</subagent_tokens><tool_uses>23</tool_uses><duration_ms>215206</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9b0a45269095c4aa</task-id>
+<tool-use-id>toolu_01Uax9MwT3kR1i3zptoUCrAX</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a9b0a45269095c4aa.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 10: modality-split held-out audit" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE_WITH_CONCERNS
+Commit: `498d878` (only) on `feat/voice-conversation-generation`
+Tests: `test_heldout_clean_set.py` 3/3 pass; 83/83 pass across all dependent test files; full suite 1624 passed / 15 failed / 1 error — all failures pre-existing/documented (trl-torchvision collection error, bf16-GPU tests), none in touched files.
+
+Gate (verbatim, before == after):
+```
+278 candidates → 206 clean, 72 excluded
+[verify] OK — 206/206 rows match heldout_ckpt1767_v2corpus.json
+```
+Unchanged after the code change — 0.7595 unperturbed.
+
+Concern: brief's Step 6 snippet used a `conv` variable that didn't exist in `heldout_composite_audit.py`'s loop. I zipped in `prompts[i]` as `conv` (safe, never raises) — but `prompts` doesn't currently carry `modality` (that field lives only on raw corpus conversations per Task 3, never threaded through `_load_grpo_jsonl`/`_sample_prompts`). Result: the guardrail code is correct and tested against constructed data, but on a real run today `voice_rows` will always be 0 until a later task wires `modality` through the GRPO row-slicing path. Full detail and reasoning in the report file.</result>
+<usage><subagent_tokens>131787</subagent_tokens><tool_uses>39</tool_uses><duration_ms>422470</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9b0a45269095c4aa</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a9b0a45269095c4aa.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 10: modality-split held-out audit" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: `498d878` (round 0), `8e71684` (round 1 fix)
+Tests: new `test_grpo_modality_column.py` (4) + `test_heldout_composite_audit.py` (7) = 11 new pass; requested sweep `test_heldout_clean_set.py`+`test_response_only_loss_flag.py` 15/15 pass; full dependent-consumer sweep 121/121 pass; full suite 1636 passed/15 failed/1 error (identical pre-existing failure set as baseline, count rose only by the 12 new tests — no new failures).
+
+Gate (verbatim, post-fix): `278 candidates → 206 clean, 72 excluded`, `[verify] OK — 206/206 rows match heldout_ckpt1767_v2corpus.json` — unchanged.
+
+Mechanism: added a plain `"modality"` string column to `_load_grpo_jsonl`'s emitted rows (sourced from the raw conversation), propagated through `_sample_prompts` into the audit's `conv` dict. Verified safe for training by tracing `_make_reward_adapter`'s `**kwargs` (TRL forwards unknown columns, adapter only reads `ground_truth`) and confirming `build_preference_pairs.py`/`mine_model_negatives.py` access specific keys only — covered by a regression test asserting unchanged row count/prompt/ground_truth.
+
+Concerns: none outstanding — the warning helper (`_voice_dropped_warning`) is unit-tested directly (fires/doesn't-fire cases); full end-to-end audit run still untestable here (no GPU), same as round 0. Report appended in place at the same path.</result>
+<usage><subagent_tokens>166680</subagent_tokens><tool_uses>33</tool_uses><duration_ms>375058</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>af5c0662c561ded5a</task-id>
+<tool-use-id>toolu_01SkxsXDciwkND1bhFb1ae3j</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/af5c0662c561ded5a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 10" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>1. SPEC COMPLIANCE: ✅
+2. TASK QUALITY: Approved
+
+Gate output (personally run): `278 candidates`, `206 clean`, `72 excluded`, `[verify] OK — 206/206 rows match heldout_ckpt1767_v2corpus.json` — exact match required. Required test command: 27 passed.
+
+Findings:
+- Minor: `grpo.py` docstring cites `trl/trainer/grpo_trainer.py:1034` for the column-forwarding logic; actual installed code is at line 1156-1157. Mechanism itself verified correct.
+- Minor: round 0's "safety check" claim missed the dead-guardrail bug the controller had to catch; round 1 fix is sound.
+
+No Critical or Important findings. Independently verified (not trusting the report): TRL's `_calculate_rewards` forwards all non-prompt/completion/completion_ids dataset columns into reward kwargs; `_make_reward_adapter` reads only `ground_truth`, ignoring `modality`; `build_preference_pairs.py`/`mine_model_negatives.py`/DPO's R5 guardrail all access rows by explicit key, unaffected by the extra column; `modality` is always a present string (never null/absent), so no pyarrow schema risk. Ran `filter_by_modality` against real `data/output/sft/task_a_splits/test.jsonl` (278 rows, 0 with `modality` field) — `"text"` keeps all 278, `"voice"` yields 0 (correct, not inverted). Confirmed filter applied before contamination exclusion/sampling in `build_clean_set`. Diffed `summary` dict literal before/after — byte-identical; `voice_format_compliance` appended only afterward, composite formula untouched. All new/modified tests assert specific content, not vacuous.
+
+⚠️ Cannot verify from diff: the real GPU-backed `heldout_composite_audit.py` run (checkpoint generation, `voice_format_compliance` populated on genuine voice rows) — no GPU available; verified all feeding plumbing statically/via unit test instead.
+
+Full review written to `/workspaces/ai-agent-llms/.superpowers/sdd/2026-08-20-voice-conversation-generation/task-10-review.md`.</result>
+<usage><subagent_tokens>121268</subagent_tokens><tool_uses>28</tool_uses><duration_ms>186894</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ad1d5d8d682bb2a66</task-id>
+<tool-use-id>toolu_012UzcUK8YN3SJWABPzC38R8</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ad1d5d8d682bb2a66.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 11: suite and documentation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Stopping per your explicit instruction — Step 2's gate assertion failed, so I did not proceed to Steps 3/4 (documentation/commit). Full detail written to `.superpowers/sdd/2026-08-20-voice-conversation-generation/task-11-report.md`.
+
+Status: **BLOCKED**
+Documentation commit SHA: none (not reached)
+
+Step 1 (real suite, `--continue-on-collection-errors`, reproduced twice identically): **1636 passed, 15 failed, 1 collection error**. Every failing/erroring item traces by inspection to exactly the two known pre-existing families — no third family, no regression:
+- Family (a) trl→vllm→torchvision clash: 13 items (`test_dpo_config_kwargs.py` collection error; 11 `test_dpo_trainer_kwargs.py` failures; 1 `test_dpo_method_availability.py` failure) — all bottom out in the identical `RuntimeError: operator torchvision::nms does not exist` or its downstream `ImportError: cannot import name 'AutoProcessor'`.
+- Family (b) no-GPU bf16 limitation: 3 items (2 in `test_training.py::TestTrainerMaxLength`, plus 1 new sibling `test_grpo_config_kwargs.py::test_result_actually_constructs_a_grpoconfig` — identical `ValueError: Your setup doesn't support bf16/gpu.` at the same `transformers/training_args.py:1747` frame).
+
+Step 2 gate: **FAILED** — `5549 text rows, 1 holding a voice marker` (expected 0). Offender: `conversation_id L4_061_6` in `data/output/sft/task_a/l4_merged_20260630.jsonl`, message 0 carries a stray `[END_CONVERSATION]` marker. That file is DVC-tracked/git-ignored, mtime Jul 22 (predates this branch), so it looks pre-existing — but I made no changes and await your call rather than deciding myself.
+
+Concern: need your guidance on how to handle the corpus gate failure before I can continue to Steps 3–4.</result>
+<usage><subagent_tokens>113822</subagent_tokens><tool_uses>21</tool_uses><duration_ms>448350</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ad1d5d8d682bb2a66</task-id>
+<tool-use-id>toolu_01Bm2owUmPU9XpzZxYxnV6F2</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/ad1d5d8d682bb2a66.output</output-file>
+<status>completed</status>
+<summary>Agent "Task 11: suite and documentation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Documentation commit SHA: `da9f467611e205a9296e8cb1657a3ca407122897`
+
+Re-run Step 2 gate (narrowed to non-system messages, comment cites `generate_workflows.py:1583`):
+```
+5549 text rows, 0 offending
+```
+
+Docs written: CLAUDE.md gets new risk R20 (modality switch-on, `voice_convention.py` as format contract, `all_tokens` can't honor per-message `loss`, held-out audit text/voice separation tied to R17's 0.7595, and the `L4_061_6` latent hazard named explicitly); `.claude/rules/02-data-generation.md` gets a Voice Modality subsection under Task A (`modality_preset`, `barge_in_rate`, five format rules); `.claude/rules/03-training.md` gets a two-sentence `loss` flag note under sft.py. Test-count figures kept out of CLAUDE.md as instructed, recorded only in the report file.
+
+Steps 5–6 not attempted (no push/PR/merge), per Ruling 1.
+
+Concerns: none — corpus itself is fine; only the now-fixed gate was over-broad, and the one pre-existing system-message anomaly (`L4_061_6`) is documented as a named latent hazard rather than fixed, per your ruling.</result>
+<usage><subagent_tokens>148783</subagent_tokens><tool_uses>29</tool_uses><duration_ms>156777</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9dac978a61728aeb</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/59be4dc7-e2fe-47a8-aac0-e935cf10fe95/tasks/a9dac978a61728aeb.output</output-file>
+<status>completed</status>
+<summary>Agent "Final whole-branch review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Full review written to `.superpowers/sdd/2026-08-20-voice-conversation-generation/final-review.md`.
+
+**VERDICT: merge-ready with fixes.** Merge is blocked only on the documentation; the code fixes must land before the paid run.
+
+**Findings**
+- CRITICAL — `generate_workflows.py:1268` / spec §4: **nothing anywhere writes `loss: false`.** Only consumers exist (`sft.py:120,190,975`, `grpo.py:305`). Verified on 15 generated rows: `barge_in=True` on all, `loss` key on none. The whole apparatus + the `all_tokens_ignores_loss_flag` warning + R20's paragraph are unreachable. R18(c) verbatim.
+- CRITICAL — `scripts/generate_voice_data.sh` / `dvc.yaml:41`: **no gate on spec risk 2.** Placeholder output is format-perfect, so a total teacher failure yields 2,400 rows, zero violations, 15 success lines. `generation_source`/`repair_fallbacks` are recorded and read by nothing.
+- IMPORTANT — `generate_workflows.py:351,373`: PYTHONHASHSEED item is **true**. Measured `b1df9ca0…` vs `d64ce6f8…` (same seed, different hashseed); identical when pinned. Root cause: `for src in included_names` (a `set[str]`) feeding `rng.shuffle`. One-line fix ×2.
+- IMPORTANT — `generate_workflows.py:1864`: `barge_in=True` written on conversations with no `&lt;unspoken&gt;`; `find_barge_in_violations` returns `[]` at zero markers. Placeholder never gets `barge_in`.
+- IMPORTANT — `.claude/rules/02-data-generation.md` rule (3) inverts the contract and omits silent-turn legality — following it re-creates the R15 filler edit Task 5 removed.
+- IMPORTANT — `CLAUDE.md:191` R20: three false claims (`barge_in_rate` control, "single source of truth" — contract is duplicated in `_VOICE_RULES` and `_RICH_VOICE_OVERRIDE`, and the `loss:false` protection).
+- IMPORTANT — `generate_workflows.py:1449` `_RICH_VOICE_OVERRIDE` tells the teacher to put `[END_CONVERSATION]` in system prompts: ~720 new L4_061_6-shaped rows by design, never checked (rich prompt runs after the repair loop).
+- MEDIUM — `split_task_a_sft.py:142`: positional shuffle over the concatenated pool; merging voice moves **7 of 278** held-out rows into train (simulated at real sizes).
+- MEDIUM — `heldout_composite_audit.py:190`: `mean_composite` blends modalities; defaults point at the mixed corpus. Spec §5 forbids it.
+- MEDIUM — `voice_convention.py:90`: `chunk_spoken_text` silently drops 66% of a 2,289-char input; no preservation test.
+- MEDIUM — `strip_voice_markup` used only in `heldout_clean_set.py`; spec's two other consumers don't exist.
+- MINOR — append-not-replace output dir; `dvc repro` now broken until the paid run; `code_switch` gets English acknowledgements; `n_skipped_tool_preceded` mis-counts; `&lt;/S&gt;` unchecked in text direction; 4 unrelated June plan docs swept in.
+- Verified clean: Thai-corruption regex does **not** eat `&lt;S&gt;` markup (I tested it); `modality` genuinely survives to the audit; leg sums exactly 2,400; `L4_061_6` is real and unique; suite 1,633 passed / 4 failed / 2 collection errors, all pre-existing families.
+
+**Deferred triage:** #1 leave (verified covered by `find_continuity_violations` upstream), #2/#3/#5/#7/#9/#10 leave, #8/#11 leave-but-cheap, **#4 escalate** (the code comment was never added and the branch creates ~720 more instances), **#6 escalate** (confirmed, root-caused, blocks the run).
+
+**Your rulings:** Task 5 and Task 10 are the two best calls on the branch. Four have unnamed consequences — the Task 8 sort ruling silently determines held-out leakage; Task 9 smoke precedence isn't required anywhere; Task 1 fall-through costs teacher API calls, not just correctness; Task 11's folded review is where four doc errors got in, exactly the cost you predicted. One is wrong in scope: **Task 6's own justification — "a feature that only works in tests is not the deliverable" — is precisely the state the `loss` flag is in now.** You applied it to the loader and stopped one link short of the producer.
+
+**Point 4:** violations would be caught; a degraded batch would look like clean success; the `loss` apparatus is unreachable, not just untested. Five fixes (~a day) before spending money.</result>
+<usage><subagent_tokens>193660</subagent_tokens><tool_uses>71</tool_uses><duration_ms>848938</duration_ms></usage>
+</task-notification>
+
+---
+
+pause
+
+---
+
+resume
+
+---
+
+resume
+
+---
+
+<task-notification>
+<task-id>a188f77c882fe40a5</task-id>
+<tool-use-id>toolu_01LJnfc3K67fq67sGmC4vfGQ</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/218185c6-d913-4272-82b2-fcbd68f49b04/tasks/a188f77c882fe40a5.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix wave 2: remaining findings" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: all six findings complete, working tree clean, unrelated stash untouched.
+
+Commits (on `feat/voice-conversation-generation`):
+- `958de9e` F2 — voice batch gate (`check_voice_batch.py` +x, runner, dvc deps)
+- `6602812` F10 — untracked the four June plan docs (on disk, no history rewrite)
+- `30072b2` F4+F5 — rules-file rule 3 restated; R20's three false claims corrected
+- `648f63a` F7 — split shuffles per modality
+- `d352abb` F8 — per-modality composites, mixed-modality labelling, `--modality`
+- `e7438a1` F9 — caller-side guard test (the fix itself already landed in `0b53f9f`)
+
+Tests: 1,696 passed / 15 failed / 1 collection error — every failure is the pre-existing `trl`→`torchvision::nms` family, confirmed by running the same suite at pre-wave `da9f467` (1,635/16/1, same 15). ~40 tests added across 5 files.
+
+Finding 7 gate: `278 candidates`, `206 clean`, `72 excluded`, `[verify] OK — 206/206`. Re-splitting today's corpus reproduces `task_a_splits` byte-identically. Merge simulation at real sizes (5,543 text + 2,400 synthetic voice): **278/278 pinned candidates still in test**, vs 270/278 under the old scheme (7→train, 1→validation, matching the review); with the voice dir sorting first the old scheme leaked 268/278 and the new one 0/278.
+
+Finding 2 smoke: offline 15-row run → exit 0, PASSED (offline exemption applies). Simulated degraded teacher (monkeypatched outage, no API spend) → exit 1, `6 of 6 (100.0%) came from the placeholder generator` — while the same run still printed `[ok] every row on disk passes find_voice_violations`, which is the proof that format checking alone called a total outage clean.
+
+Judgment calls: kept the contract prose duplicated in the two teacher prompts rather than de-duplicating (checker is executable logic, prompts are LLM instructions with worked examples) and backed it with `test_voice_prompt_contract.py`; chose per-modality grouping over hash assignment (would move rows assigned today) and over carry-forward (makes stage output depend on its own prior output); `--assert-unmoved` deliberately kept out of the DVC cmd for the same reason.
+
+Could not fully do: `dvc.lock` is still stale and `data/output/sft/task_a_voice` still absent (no `dvc` CLI here) — now named in R20; and no real audit run (no GPU), so Finding 8 is covered by unit tests on the extracted seam only. Report written to `.superpowers/sdd/2026-08-20-voice-conversation-generation/fix-wave-report.md` — that path is gitignored, so it stays uncommitted like the other files there.</result>
+<usage><subagent_tokens>222800</subagent_tokens><tool_uses>110</tool_uses><duration_ms>1465923</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a7ff94e8d1627267b</task-id>
+<tool-use-id>toolu_015qmgkfnHWG1GX3iLuD5urH</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/218185c6-d913-4272-82b2-fcbd68f49b04/tasks/a7ff94e8d1627267b.output</output-file>
+<status>completed</status>
+<summary>Agent "Scoped re-review of the fix wave" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Full review written to `.superpowers/sdd/2026-08-20-voice-conversation-generation/fix-wave-rereview.md`.
+
+1. **ADDRESSED** — `voice_convention.py:132-171` producer, called `generate_workflows.py:2187`. Offline @rate 1.0: 0 loss keys, `barge_in=False`, sidecar `requested=6 realized=0`. Stub-teacher run: exactly one `loss:False` on the marker turn 6/6, hallucinated key deleted. Mask: `&lt;unspoken&gt;` in render, absent from unmasked span; control (key removed) puts it back.
+2. **ADDRESSED** — `check_voice_batch.py` + `generate_voice_data.sh:240-245` under `set -euo pipefail`. Offline smoke PASSED exit 0; simulated outage FAILED **shell exit 1** while `[ok] every row on disk passes find_voice_violations` still printed. Exemption is `teacher_models=={None}`; `generate_workflows.py:2397` always writes the key, mixed legs correctly not exempt, `--skip-gate` explicit and absent from the DVC cmd.
+3. **ADDRESSED** — `sorted()` at `:349,372,394,409`. Identical SHA-256 across `PYTHONHASHSEED` 0/12345/987654 (text) and 0/55555 (voice path).
+4. **ADDRESSED** — `.claude/rules/02-data-generation.md:69-81` states rule 3 correctly incl. silent-turn legality and the no-filler-speech/R15 warning.
+5. **ADDRESSED** — `CLAUDE.md:191`; all three claims now true against code. **Caveat:** `test_voice_prompt_contract.py` is presence-only — I inverted the prompt's meaning (`"outside"→"inside"`) and every assertion still passed, so it cannot catch finding 4's own failure mode.
+6. **ADDRESSED** — `generate_workflows.py:1455-1457` now forbids it; no other prompt asks for it; `_scrub_rich_prompt:1470-1494` deletes it anyway (executed).
+7. **ADDRESSED** — `split_task_a_sft.py:70-104`. (a) re-split byte-identical, md5 `7233e88b…` both sides. (b) `n_candidates 278 / n_clean 206 / n_excluded 72`, `[verify] OK — 206/206`, exit 0. (c) my own sim: NEW **278/278 in test, 0 leaked**; OLD **270/278, 8 leaked {train:7, validation:1}**. (d) immune to directory sort order (OLD would leak 268/278) and to multi-file batches; **but a voice row with no `modality` field falls into the text group and re-creates the 8-row leak**, and an incremental voice top-up moves 57/2,400 voice rows (documented limit).
+8. **ADDRESSED** — `heldout_composite_audit.py:151-176,274-280`; per-modality means executed (text 0.9 / voice 0.1 vs blended 0.82); `mixed_modality` flag + MIXED-MODALITY label; no existing summary key changed meaning; `voice_format_compliance` still separate (`:304`).
+9. **ADDRESSED** — swept 780–1199: first raise at 783, **zero silent-loss lengths below it**; 2289 raises. Sole caller is the placeholder path (`:995`); measured max spoken chars in the real 15-leg smoke = **52 of 800**.
+10. **ADDRESSED** — four untracked and on disk; `2026-06-18-lmcache` still tracked; `dff2314..da9f467` still 26 commits; no `git stash`.
+
+Suite: **15 failed / 1696 passed / 1 error** — 12 trl `AutoProcessor` ImportError, 1 `torchvision::nms`, 3 bf16/no-GPU. No voice/split/heldout/data_generation failure.
+
+New breakage: **R20's documented post-merge gate command omits `--modality text`** — after the merge the test split is 278 text + ~120 voice, so it returns `n_clean 326` and exits 1 (measured). Fails loudly, but the tempting "fix" is relaxing `--expect-clean` to 326, which would blend voice into the pinned set.
+
+Deferred: splitter can't distinguish "text" from "unlabelled"; `--assert-unmoved` not in the DVC cmd; incremental voice top-ups reshuffle; gate aggregates over appended re-run sidecars; absent `teacher_model` key conflated with offline; no `PYTHONHASHSEED` export; `main()`'s mixed-modality print untested; all unrelated original-review minors still open.
+
+Judgement: the 2,400-conversation paid run is safe to attempt, given the live 15-conversation teacher smoke first and `--modality text` added to R20's post-merge gate command.</result>
+<usage><subagent_tokens>203852</subagent_tokens><tool_uses>56</tool_uses><duration_ms>747516</duration_ms></usage>
+</task-notification>
+
+---
+
+we need to update Task A benchmark data to have voice conversations as well
+
+---
+
+A
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>awere-training-a-03b0421f8dd56a1c</task-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/218185c6-d913-4272-82b2-fcbd68f49b04/tasks/awere-training-a-03b0421f8dd56a1c.output</output-file>
+<status>completed</status>
+<summary>Agent "We're training a LLM to excel at both text and vo…" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Answering whether blending text and voice metrics is the right call for a dual-modality model.
+
+Yes — with three conditions, and one caveat that cuts against weighting voice too heavily *in selection specifically*.
+
+**Why it's right:** the selection metric should reflect the deployment distribution. If the model serves both modalities, ranking on text alone can hand you a winner that's quietly bad at the half you actually ship to.
+
+**Three conditions to make it sound:**
+
+1. **Compute it as a weighted mean of per-modality means, not a mean over pooled rows.** These differ. Pooling rows makes the effective weight whatever the row count happens to be, so it drifts every time benchmark data is regenerated — and nobody notices, because the number still looks like a number. `quality = w·mean(voice) + (1−w)·mean(text)` is stable under regeneration; `mean(all_rows)` is not.
+
+2. **Put `w` in `configs/benchmark/selection_weights.yaml`, not in the data mix.** As currently scoped, the 30% voice share *is* the weight — a product decision living in a generation ratio where nobody would think to look, and untunable without regenerating 1,000 conversations. Make it explicit and you can re-weight in seconds.
+
+3. **Always report the per-modality split beside the blend.** Otherwise you can't tell whether a winner is better at workflow state machines or just better at emitting `&lt;S&gt;` tags. Those are different capabilities and one is much cheaper to install.
+
+**The caveat, and it's the substantive one:** Phase 1 ranks *pre-trained* candidates that have never seen this convention. Voice score there is substantially a novel-instruction-following measurement — and that's precisely the skill SFT installs cheaply. R17 is the evidence: C2 took `tool_f1` on tool-bearing rows from 0.249 to 0.636 purely by fixing the training window, and R16 showed the voice-style convention was simply unlearnable from a 1024-token window until it wasn't. So a candidate that looks weak on voice at Phase 1 may not be weak post-SFT, while a candidate weak on *state-machine reasoning* probably still will be.
+
+That argues for blending with voice weighted at or below its deployment share — 0.3 is sensible — rather than at the 0.5–0.7 that "voice is the real target" would suggest. Select on the capability that's expensive to teach; verify the one that's cheap to teach after fine-tuning, in the held-out audit that already reports voice separately.
+
+Cost either way: changing the composite invalidates the existing gemma-4-26B-A4B selection for comparison purposes, so a meaningful new ranking needs Phase 1 re-run across the candidate set.</result>
+<usage><subagent_tokens>495228</subagent_tokens><tool_uses>200</tool_uses><duration_ms>31274</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>awere-training-a-03b0421f8dd56a1c</task-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/218185c6-d913-4272-82b2-fcbd68f49b04/tasks/awere-training-a-03b0421f8dd56a1c.output</output-file>
+<status>completed</status>
+<summary>Agent "We're training a LLM to excel at both text and vo…" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>No — three benchmarks is the wrong shape. You want **two corpora, two inference passes, three reported numbers.**
+
+"Blended" isn't a third benchmark, it's a derived statistic. If you generate a separate blended corpus and score it independently, its result won't equal the weighted mean of the other two — sampling noise guarantees it — so you'd own two disagreeing "blended" figures and no principled way to pick. And you'd pay 3× inference across 15 candidates for zero extra information, since the blend is arithmetic on numbers you already have.
+
+The structure that gives you all three cheaply:
+
+```
+text corpus  ──► score ──► mean(text)   ─┐
+                                          ├──► blended = w·voice + (1−w)·text
+voice corpus ──► score ──► mean(voice)  ─┘
+```
+
+Text and voice are **strata of one evaluation**, not separate evaluations.
+
+**And there's a stronger reason to keep the corpora separate than convenience** — one I just verified rather than assumed. Your on-disk benchmark is `gemini-3-flash-preview`-generated from June. Regenerating L1 at the same `seed=100` today produces a *different* corpus:
+
+```
+on-disk : 21394cafbcdef93b
+regen   : 5dd66582ab884c06
+```
+
+Two causes, both real: that artifact was teacher-generated (the filename says so) while the DVC stage now runs placeholder-only, and commit `0ad770e` — the `PYTHONHASHSEED` fix from the voice branch — changed generator output by sorting a set before shuffling. So **regenerating the benchmark as a mixed corpus would silently discard the exact data the existing gemma-4-26B-A4B ranking was measured on.**
+
+That makes the recommendation concrete:
+
+1. **Freeze `data/output/benchmark/task_a` as-is.** Treat it as the text stratum. It stays byte-comparable to the existing Phase 1 ranking.
+2. **Add `data/output/benchmark/task_a_voice` as an additive corpus** — the same pattern already used for the SFT corpus, and the same reason.
+3. **Score both in one benchmark run**, group by modality, report `mean(text)`, `mean(voice)`, and the weighted blend with `w` living in `selection_weights.yaml`.
+
+You get the blended ranking you asked for, plus a text number that still reconciles with the ranking you already have — which a regenerated mixed corpus would have quietly destroyed.
+
+One thing outside my directive, noted and moving on: `data/output/benchmark/task_a` is teacher-generated while `dvc.yaml`'s `task_a_benchmark` stage description claims "1 000 placeholder conversations… No teacher model or API key required." The artifact and its stage definition disagree, which is an R13-shaped provenance drift worth checking before anyone runs `dvc repro` on it.</result>
+<usage><subagent_tokens>500677</subagent_tokens><tool_uses>201</tool_uses><duration_ms>126379</duration_ms></usage>
+</task-notification>
+
+---
+
+yes
+
+---
+
+<task-notification>
+<task-id>awere-training-a-03b0421f8dd56a1c</task-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/218185c6-d913-4272-82b2-fcbd68f49b04/tasks/awere-training-a-03b0421f8dd56a1c.output</output-file>
+<status>completed</status>
+<summary>Agent "We're training a LLM to excel at both text and vo…" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Updated `docs/data_generation_recipes.md` — committed as `feeca51` on `main`.
+
+**Added:**
+- **`### Voice Modality`** under Shared Concepts — the four presets, why `default` consumes no randomness (a draw there would silently change what every old seed generates), `barge_in_rate` as a *request* versus `barge_in` as a *fact* about the data, the five format rules with the measured length limits, the bidirectional text check, and why any corpus carrying voice data must train under `response_only`.
+- **`modality` and `barge_in`** in the top-level field table, with "absent means text" stated for pre-existing rows; voice seed 4242 in the seed allocation table.
+- **`### Voice (generate_voice_data.sh)`** recipe — the additive 2,400-row batch at 20/50/30, the live-teacher smoke to run *before* spending on the full batch, and the batch quality gate with the reason it exists: format checking alone cannot distinguish a total teacher outage from success, because placeholder output is format-perfect.
+- **Generation order** now shows the voice step, cleaning from both corpora via repeatable `--input-dir`, and why voice skips `task_a_sft_remediate`.
+- **Held-out note**: text and voice reported separately, and `--modality text` required once the corpus is mixed or the pinned rebuild returns 326 instead of 206.
+
+**Also fixed while in there:** the train/val/test table still carried the pre-R12-regeneration counts (~4,414/519/261). Measured today it's 4,711/554/278 — corrected, with a dated note saying why the old figures were there.
+
+Two things I deliberately did **not** write, since they're decided but not built: the benchmark voice corpus, and the blended text+voice ranking metric. A recipe doc that describes commands you can't run is worse than one that's silent. They belong in the same commit as the implementation.
+
+One correction to flag from my earlier answer in this thread: the generation-order block documents the benchmark as teacher-generated (`generate_benchmark_data_teacher.sh`), which matches the on-disk artifact — so the disagreement I noted is specifically between `dvc.yaml`'s `task_a_benchmark` stage description ("placeholder conversations, no API key required") and reality. That's still worth resolving before anyone runs `dvc repro` on that stage.</result>
+<usage><subagent_tokens>516117</subagent_tokens><tool_uses>212</tool_uses><duration_ms>391750</duration_ms></usage>
+</task-notification>
+
+---
+
+yes on 3
+
+---
+
+yes, and should we also measure chunk accuracy for voice system?
+
+---
+
+yes
+
+---
+
+write plan
+
+---
+
+subagent-driven

@@ -1,0 +1,27 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9df363e41914",
+  "strategy": "manual-commit",
+  "branch": "feat/voice-benchmark-and-prompt-switch",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/llm_workflow_agents/data/generate_workflows.py",
+    "src/llm_workflow_agents/data/voice_convention.py",
+    "tests/unit/test_voice_prompt_contract.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9d/f363e41914/0/metadata.json",
+      "transcript": "/9d/f363e41914/0/full.jsonl",
+      "content_hash": "/9d/f363e41914/0/content_hash.txt",
+      "prompt": "/9d/f363e41914/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 574,
+    "cache_creation_tokens": 1898807,
+    "cache_read_tokens": 94519799,
+    "output_tokens": 297543,
+    "api_call_count": 287
+  }
+}

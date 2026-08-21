@@ -1,0 +1,36 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9df363e41914",
+  "session_id": "799b50a9-397e-4e27-9357-aacf22452d98",
+  "strategy": "manual-commit",
+  "created_at": "2026-08-21T07:05:57.421034074Z",
+  "branch": "feat/voice-benchmark-and-prompt-switch",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/llm_workflow_agents/data/generate_workflows.py",
+    "src/llm_workflow_agents/data/voice_convention.py",
+    "tests/unit/test_voice_prompt_contract.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5[1m]",
+  "turn_id": "d4779e87f7c2",
+  "token_usage": {
+    "input_tokens": 574,
+    "cache_creation_tokens": 1898807,
+    "cache_read_tokens": 94519799,
+    "output_tokens": 297543,
+    "api_call_count": 287
+  },
+  "session_metrics": {
+    "turn_count": 59
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-08-21T07:05:54.86408936Z",
+    "agent_lines": 89,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 89,
+    "agent_percentage": 100
+  }
+}
