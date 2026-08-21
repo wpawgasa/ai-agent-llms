@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "f1fc4b2b703f",
+  "strategy": "manual-commit",
+  "branch": "feat/voice-benchmark-and-prompt-switch",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/f1/fc4b2b703f/0/metadata.json",
+      "transcript": "/f1/fc4b2b703f/0/full.jsonl",
+      "content_hash": "/f1/fc4b2b703f/0/content_hash.txt",
+      "prompt": "/f1/fc4b2b703f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 740,
+    "cache_creation_tokens": 2018446,
+    "cache_read_tokens": 148546475,
+    "output_tokens": 376862,
+    "api_call_count": 370
+  }
+}
