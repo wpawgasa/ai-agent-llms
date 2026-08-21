@@ -135,8 +135,14 @@ shift the random stream and silently change what every old seed generates.
 teacher model is *asked* for one `<unspoken>` interruption. Whether one was
 actually written is a separate fact — the sample's `barge_in` field records what
 the conversation contains, and the stats sidecar reports
-`barge_in_requested` against `barge_in_realized`. The placeholder generator
-never emits an interruption, so a placeholder batch reports `realized=0`.
+`barge_in_requested` against `barge_in_realized`. The placeholder generator can
+now also realise a barge-in, deterministically — it is no longer true that a
+placeholder row realises none. A placeholder fallback inside a teacher run can
+therefore realise a barge-in of its own, so `scripts/check_voice_batch.py`
+counts only rows whose `generation_source` is `"teacher"` toward the teacher's
+realised total; the sidecar's aggregate `barge_in_realized` counts every row
+regardless of source and can no longer distinguish a real teacher delivery from
+a degraded run the placeholder covered for.
 
 **The format contract** lives in `data/voice_convention.py` and is checked by
 `find_voice_violations`, which runs inside the generator's coherence repair
@@ -609,6 +615,14 @@ Run the scripts in this order. Each depends on having a clean `data/output/` dir
 GEMINI_API_KEY=... ./scripts/generate_benchmark_data_teacher.sh --teacher gemini-3-flash
 GEMINI_API_KEY=... ./scripts/generate_benchmark_data_teacher.sh --teacher gemini-3.1-flash-lite
 # (then merge per-level outputs to l{level}_mixed_gemini-3_merged.jsonl)
+# This text stratum (data/output/benchmark/task_a) is now FROZEN — 1b below
+# is additive alongside it, never a replacement.
+
+# 1b. Benchmark — voice stratum, additive. 250 conversations, 50 per level,
+#     modality_preset="voice_only", one teacher (gemini-3.5-flash) for every
+#     level. Scored separately and blended with the text stratum via
+#     blend_modality_scores (DEFAULT_VOICE_WEIGHT = 0.30); see 05-eval.md.
+GEMINI_API_KEY=... ./scripts/generate_benchmark_voice_data.sh
 
 # 2. SFT training data — text (also used by GRPO)
 OPENAI_API_KEY=sk-... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh

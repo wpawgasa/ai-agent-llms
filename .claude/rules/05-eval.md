@@ -61,6 +61,58 @@ def full_workflow_success_rate(predictions, ground_truth) -> float:
     """% of conversations with ALL correct transitions AND tool calls. Target: >=55%."""
 ```
 
+### Modality blending — `blend_modality_scores`
+
+Phase 1 quality for Task A is a weighted blend of a text-stratum score and a
+voice-stratum score, not either stratum alone:
+
+```python
+def blend_modality_scores(
+    score_text: float | None,
+    score_voice: float | None,
+    voice_weight: float = DEFAULT_VOICE_WEIGHT,  # 0.30
+) -> float:
+    """voice_weight * score_voice + (1 - voice_weight) * score_text."""
+```
+
+A weighted mean of the two per-stratum scores — never a mean pooled over raw
+rows, whose effective weight would drift with however many rows each stratum
+happens to hold. With one stratum absent, the other is returned unchanged by
+float identity, not by an arithmetic shortcut that merely rounds to the same
+value: until a real voice corpus exists, this is inert and cannot move the
+Phase 1 ranking. `eval/agent_benchmark.py` is the caller.
+
+### Chunk diagnostics — guardrails, never composite terms (`chunk_diagnostics.py`)
+
+Three reference-free diagnostics score a voice completion's chunking shape
+without a gold transcript to align against (free generation means the model's
+spoken words differ from gold, so boundary comparison against gold would
+score two different sentences):
+
+- `first_chunk_p50` / `first_chunk_p90` — latency proxy: the orchestrator
+  starts text-to-speech on chunk 1 while the model writes chunk 2, so a long
+  opening chunk delays audio proportionally.
+- `chunk_len_p50` / `chunk_len_p90` and `chunks_per_turn_p50` — catches what
+  format checking cannot: one long chunk per turn passes every format rule
+  and still streams badly.
+- `boundary_quality` — share of chunks ending at a real pause point (Thai
+  sentence-final particles, English terminal punctuation).
+
+`chunk_diagnostics(completions, language)` scores a single-language list;
+`chunk_diagnostics_by_language(completions_by_language)` pools raw
+measurements across languages before computing any percentile (an average of
+two already-computed percentiles is not itself a percentile of anything) and
+must be used for the benchmark's voice stratum, which draws English and Thai
+at even odds.
+
+**Guardrail, not a composite term.** Chunk formatting is cheap to install
+through fine-tuning, so letting these move the Phase 1 winner would select on
+the wrong capability. `eval/agent_benchmark.py::attach_chunk_diagnostics`
+merges them into a copy of the quality summary alongside — never into — the
+`blend_modality_scores` result. The same separation holds in the held-out
+audit: `voice_format_compliance` is reported as a standalone guardrail metric
+over voice rows only, never folded into the composite.
+
 ## Quantization Benchmark Harness (`quant_benchmark.py`)
 ```python
 def run_quant_benchmark(

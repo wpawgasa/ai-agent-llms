@@ -26,8 +26,8 @@ stages:
       Voice stratum for Phase 1, 250 conversations at 50 per level. Additive:
       the text stratum at data/output/benchmark/task_a is FROZEN and must not
       be regenerated. Matched to it on size, language mix and generation
-      source so modality is the only difference between the strata. Requires
-      a teacher API key.
+      source so modality is the only difference between the strata. Teacher
+      model: gemini-3.5-flash (requires GEMINI_API_KEY).
     cmd: ./scripts/generate_benchmark_voice_data.sh
     deps:
       - scripts/generate_benchmark_voice_data.sh
