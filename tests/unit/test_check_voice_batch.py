@@ -64,17 +64,37 @@ def _write_leg(
     barge_in_realized: int = 0,
     modality: str = "voice",
     messages: list[dict] | None = None,
+    row_generation_sources: list[str] | None = None,
+    row_barge_ins: list[bool] | None = None,
 ) -> None:
-    """Write one leg: a .jsonl of conversations plus its .stats.json sidecar."""
+    """Write one leg: a .jsonl of conversations plus its .stats.json sidecar.
+
+    Every row also carries ``generation_source`` and ``barge_in`` — real
+    output always does (see ``ConversationSample``), and
+    ``count_teacher_realized_barge_ins`` reads exactly those two fields off
+    disk. By default every row is attributed to ``"teacher"`` and the first
+    ``barge_in_realized`` of them carry ``barge_in: True``, which reproduces
+    the pre-Task-3 world where "realised" and "realised by the teacher" were
+    the same number. Pass ``row_generation_sources`` / ``row_barge_ins``
+    (one entry per row) to build a batch that mixes sources.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     n = num_samples if num_samples is not None else sum(sources.values())
     rows = []
     for i in range(n):
+        source = (
+            row_generation_sources[i] if row_generation_sources is not None else "teacher"
+        )
+        realized = (
+            row_barge_ins[i] if row_barge_ins is not None else i < barge_in_realized
+        )
         rows.append(
             {
                 "conversation_id": f"{name}_{i:03d}",
                 "modality": modality,
                 "messages": messages if messages is not None else _VOICE_TURNS,
+                "generation_source": source,
+                "barge_in": realized,
             }
         )
     (directory / f"{name}.jsonl").write_text(
@@ -282,6 +302,40 @@ def test_realised_barge_ins_do_not_warn(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 0
     assert "[warn]" not in result.stderr
+
+
+def test_placeholder_fallback_realised_barge_ins_do_not_count_toward_teacher(tmp_path):
+    """Task 3 let the placeholder realise a barge-in too (generation_source
+    "placeholder"/"placeholder_fallback"). The warning exists to catch the
+    TEACHER dropping interruptions, so a placeholder_fallback row that
+    realised one must not be credited to the teacher's delivery — even
+    though the sidecar's aggregate barge_in_realized (which Task 3 did not
+    change) counts it.
+    """
+    n = 100
+    row_generation_sources = ["teacher"] * 30 + ["placeholder_fallback"] * 70
+    # The teacher itself realised NONE of what it was asked for; every
+    # realised barge-in in this batch came from the placeholder fallback.
+    row_barge_ins = [False] * 30 + [True] * 70
+    _write_leg(
+        tmp_path,
+        "leg1",
+        teacher_model="gemini-3.5-flash",
+        sources={"teacher": 30, "placeholder_fallback": 70},
+        num_samples=n,
+        barge_in_requested=25,
+        barge_in_realized=70,
+        row_generation_sources=row_generation_sources,
+        row_barge_ins=row_barge_ins,
+    )
+    # A 70% placeholder_fallback share would also trip the unrelated
+    # placeholder-share gate; disable it here so only the barge-in check
+    # under test can fail this run.
+    result = _run(tmp_path, "--max-placeholder-share", "1.0")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[warn]" in result.stderr
+    assert "realised 0" in result.stderr
+    assert "70 more were realised by non-teacher rows" in result.stderr
 
 
 # --- refusing to guess ------------------------------------------------------

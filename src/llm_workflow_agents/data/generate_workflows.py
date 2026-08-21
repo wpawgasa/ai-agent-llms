@@ -1053,9 +1053,13 @@ def _generate_placeholder_conversation(
 
     ``barge_in`` requests one interruption via ``_insert_placeholder_barge_in``
     once the full turn sequence is built. It is a no-op unless ``modality`` is
-    ``"voice"`` and at least one turn qualifies (two or more spoken chunks, not
+    ``"voice"`` and at least one turn qualifies (one or more spoken chunks, not
     the first or last message, no ``[END_CONVERSATION]``); a text sample or a
-    sample with no qualifying turn is returned unchanged.
+    sample with no qualifying turn is returned unchanged. The threshold is one
+    chunk, not two: an ordinary placeholder speaking turn renders at most one
+    ``<S>...</S>`` chunk (a single short sentence), so requiring two would
+    select nothing on real placeholder output and silently disable the
+    feature — do not "fix" this back to two.
     """
     messages: list[dict[str, Any]] = []
     domain_name = domain_spec.name if domain_spec else spec.level

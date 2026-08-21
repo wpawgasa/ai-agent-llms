@@ -27,10 +27,16 @@ Four checks:
    artifact on disk, not the one run against an in-memory object.
 3. **Modality label.** Every row of a voice batch must be labelled
    ``modality: voice``.
-4. **Barge-in realisation.** Warns (never fails) when the teacher was asked
-   for interruptions and wrote far fewer than requested. A warning, not a
-   failure, because the request is a rate and the checker cannot know how
-   many the teacher should have managed.
+4. **Barge-in realisation.** Warns (never fails) when the TEACHER was asked
+   for interruptions and its own rows wrote far fewer than requested. A
+   warning, not a failure, because the request is a rate and the checker
+   cannot know how many the teacher should have managed. Counted from
+   ``generation_source == "teacher"`` rows only, read directly off the
+   conversations on disk — not from the sidecars' aggregate
+   ``barge_in_realized``, which (since Task 3 gave the placeholder generator
+   the ability to realise a barge-in too) also includes ``placeholder`` and
+   ``placeholder_fallback`` rows and so can no longer tell a real teacher
+   delivery from a degraded run the placeholder covered for.
 
 Usage:
     python scripts/check_voice_batch.py --input-dir data/output/sft/task_a_voice
@@ -108,6 +114,32 @@ def summarise(sidecars: list[dict]) -> dict:
     }
 
 
+def count_teacher_realized_barge_ins(input_dir: Path) -> int:
+    """Count realised barge-ins on rows attributed to the teacher, on disk.
+
+    The sidecars' aggregate ``barge_in_realized`` (see ``summarise``) counts
+    every row that carries the marker, regardless of ``generation_source``.
+    Before Task 3 that was safe: only a teacher row could realise a barge-in,
+    so "realised" and "realised by the teacher" were the same number. Task 3
+    gave the placeholder generator that ability too, so a degraded run — the
+    teacher failing and ``placeholder``/``placeholder_fallback`` rows filling
+    in — can now realise barge-ins the sidecar happily counts, even though the
+    teacher delivered none. The warning this feeds exists specifically to
+    catch the teacher dropping interruptions, so it must read the rows on
+    disk and count only ``generation_source == "teacher"``.
+    """
+    count = 0
+    for path in sorted(input_dir.glob("*.jsonl")):
+        for line in path.open():
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("barge_in") and row.get("generation_source") == "teacher":
+                count += 1
+    return count
+
+
 def check_rows(input_dir: Path, expect_modality: str = "voice") -> list[str]:
     """Re-check every conversation on disk. Returns a list of failure lines."""
     from llm_workflow_agents.data.voice_convention import find_voice_violations
@@ -179,6 +211,7 @@ def main() -> int:
         return 2
 
     summary = summarise(sidecars)
+    teacher_realized = count_teacher_realized_barge_ins(args.input_dir)
     print("=== Voice batch gate ===")
     print(f"Input dir          : {args.input_dir}")
     print(f"Legs               : {summary['legs']}")
@@ -196,7 +229,8 @@ def main() -> int:
         f"teacher call failures {summary['teacher_call_failures']}"
     )
     print(
-        f"Barge-in           : {summary['barge_in_realized']} realised / "
+        f"Barge-in           : {summary['barge_in_realized']} realised total "
+        f"(any source) / {teacher_realized} realised by the teacher / "
         f"{summary['barge_in_requested']} requested"
     )
 
@@ -226,14 +260,23 @@ def main() -> int:
 
     if (
         summary["barge_in_requested"]
-        and summary["barge_in_realized"]
-        < BARGE_IN_WARN_RATIO * summary["barge_in_requested"]
+        and teacher_realized < BARGE_IN_WARN_RATIO * summary["barge_in_requested"]
     ):
+        non_teacher = summary["barge_in_realized"] - teacher_realized
+        aside = (
+            f" ({non_teacher} more were realised by non-teacher rows — "
+            "placeholder or placeholder_fallback — and are deliberately not "
+            "counted here, since this warning exists to catch the TEACHER "
+            "dropping interruptions.)"
+            if non_teacher > 0
+            else ""
+        )
         print(
             f"[warn] the teacher was asked for {summary['barge_in_requested']} "
-            f"interruptions and wrote {summary['barge_in_realized']}. The "
-            "barge-in rules are the hardest part of the voice format; a teacher "
-            "silently dropping them is worth knowing about before the merge.",
+            f"interruptions and its own rows (generation_source == \"teacher\") "
+            f"realised {teacher_realized}.{aside} The barge-in rules are the "
+            "hardest part of the voice format; a teacher silently dropping "
+            "them is worth knowing about before the merge.",
             file=sys.stderr,
         )
 
