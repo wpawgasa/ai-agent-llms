@@ -20,8 +20,51 @@ CORPUS = Path("data/output/sft/task_a_splits/test.jsonl")
 
 
 def _row(**overrides):
+    # workflow_graph mirrors the real shape (list-of-dict state_details with a
+    # "name" key on each entry — see data/output/sft/task_a_splits/test.jsonl
+    # row 0), not an invented one. An empty-dict state_details never renders a
+    # "Workflow script" section, which starves force_rebuild's marker-strip of
+    # anything to find and makes force_rebuild tests meaningless.
     sample = {
-        "workflow_graph": {"initial": "A", "terminal": ["B"], "state_details": {}},
+        "workflow_graph": {
+            "states": ["GREETING", "VERIFY_IDENTITY", "TERMINAL"],
+            "state_details": [
+                {
+                    "name": "GREETING",
+                    "tools": [],
+                    "entry_actions": [],
+                    "instruction": "Greet the customer and ask how you can help.",
+                },
+                {
+                    "name": "VERIFY_IDENTITY",
+                    "tools": [],
+                    "entry_actions": [],
+                    "instruction": "Verify the customer's identity.",
+                },
+                {
+                    "name": "TERMINAL",
+                    "tools": [],
+                    "entry_actions": [],
+                    "instruction": "Thank the customer and close the conversation.",
+                },
+            ],
+            "transitions": [
+                {
+                    "from": "GREETING",
+                    "to": "VERIFY_IDENTITY",
+                    "condition": "proceed to identity verification",
+                    "priority": 0,
+                },
+                {
+                    "from": "VERIFY_IDENTITY",
+                    "to": "TERMINAL",
+                    "condition": "proceed to resolution",
+                    "priority": 0,
+                },
+            ],
+            "initial": "GREETING",
+            "terminal": ["TERMINAL"],
+        },
         "tool_schemas": [],
         "messages": [],
         "language": "en",
