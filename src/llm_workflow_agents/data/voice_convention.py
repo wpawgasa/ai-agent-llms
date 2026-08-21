@@ -276,9 +276,16 @@ def _check_voice_turn(content: str, turn_index: int) -> list[str]:
             f"never more than {TURN_MAX_CHUNKS}"
         )
     for position, chunk in enumerate(chunks, start=1):
-        if len(chunk) > CHUNK_MAX_CHARS:
+        # Spoken characters, not literal ones. The <unspoken> marker is the
+        # one marker that legally sits INSIDE a chunk (it marks the word where
+        # a barge-in cut the speech off), and it is never spoken, so counting
+        # its ten characters against a limit that exists to bound
+        # text-to-speech latency measures the wrong thing. A chunk of 155
+        # spoken characters is legal whether or not a caller interrupted it.
+        spoken = chunk.replace(_UNSPOKEN_MARKER, "")
+        if len(spoken) > CHUNK_MAX_CHARS:
             violations.append(
-                f"{where}, chunk {position}: {len(chunk)} characters is too "
+                f"{where}, chunk {position}: {len(spoken)} characters is too "
                 f"long for one spoken chunk; keep a chunk to "
                 f"{CHUNK_TARGET_CHARS} characters and never more than "
                 f"{CHUNK_MAX_CHARS}"

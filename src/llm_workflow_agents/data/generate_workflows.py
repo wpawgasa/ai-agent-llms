@@ -946,6 +946,17 @@ _HANDOFF_ACK_TEMPLATES: dict[str, str] = {
 }
 
 
+def _is_self_loop_turn(content: str) -> bool:
+    """True when the turn's state annotation keeps the conversation in place.
+
+    A barge-in interrupts speech; it completes nothing. The recovery turn
+    therefore repeats the interrupted turn's state, and that is only a
+    well-formed ground truth when the interrupted turn did not advance.
+    """
+    state = _STATE_ANNOTATION_RE.search(content)
+    return bool(state) and state.group(1) == state.group(2)
+
+
 def _insert_placeholder_barge_in(
     messages: list[dict[str, Any]],
     language: str,
@@ -974,14 +985,30 @@ def _insert_placeholder_barge_in(
     # requiring a second chunk leaves zero candidates on real placeholder
     # output. One chunk is enough — the cut lands inside that chunk's own
     # words, so it needs no sibling chunk before it.
+    #
+    # from == to is REQUIRED, and it is the whole reason the ground truth
+    # stays well formed. The recovery turn is annotated with the interrupted
+    # turn's `from` state (find_barge_in_violations enforces exactly that),
+    # so interrupting an ADVANCING turn [X -> Y] emits a recovery [X -> X]
+    # while the conversation already sits in Y — a state_sequence that jumps
+    # backwards with no transition explaining it. The checker cannot catch
+    # that, because the checker's rule and the defect agree. Restricting the
+    # draw to self-loop turns makes `from` and `to` the same state, so the
+    # annotation is correct and the sequence stays continuous.
     candidates = [
         i for i, m in enumerate(messages)
         if m.get("role") == "assistant"
         and i not in (0, len(messages) - 1)
         and len(iter_chunks(m.get("content") or "")) >= 1
         and "[END_CONVERSATION]" not in (m.get("content") or "")
+        and _is_self_loop_turn(m.get("content") or "")
     ]
     if not candidates:
+        # Loud, not silent. A candidate filter that selects nothing disables
+        # the feature while every gate still reports "0 violations" (risk
+        # R18c's shape); the sidecar's barge_in_requested vs barge_in_realized
+        # gap records the same fact at batch level.
+        logger.warning("placeholder_barge_in_no_candidate", language=language)
         return
 
     idx = candidates[rng.randrange(len(candidates))]
@@ -997,6 +1024,9 @@ def _insert_placeholder_barge_in(
     )
     messages[idx]["content"] = interrupted
 
+    # Safe because the candidate filter admitted only self-loop turns:
+    # group(1) == group(2), so the recovery repeats the state the
+    # conversation is actually in and state_sequence stays continuous.
     state = _STATE_ANNOTATION_RE.search(content)
     from_state = state.group(1) if state else ""
     opener = acknowledgement_for(language)[0]

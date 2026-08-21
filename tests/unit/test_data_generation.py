@@ -2714,7 +2714,7 @@ class TestBargeInLossFlagProducer:
         """
         meta = generate_workflow_dataset(
             "L2",
-            num_samples=4,
+            num_samples=40,
             output_dir=tmp_path,
             seed=7,
             modality_preset="voice_only",
@@ -2734,7 +2734,7 @@ class TestBargeInLossFlagProducer:
         # The gap (requested vs realized) is visible in the sidecar so a
         # teacher/placeholder that silently drops an interruption is
         # detectable.
-        assert meta.stats["barge_in_requested"] == 4
+        assert meta.stats["barge_in_requested"] == 40
         assert meta.stats["barge_in_realized"] == sum(1 for r in rows if r["barge_in"])
 
     def test_stale_loss_key_from_the_teacher_is_deleted(
@@ -2833,9 +2833,18 @@ class TestPlaceholderBargeIn:
 
     The teacher writes barge-ins for teacher runs. The placeholder is the
     offline, reproducible path, and it produced none.
+
+    Sample counts here are 40, not 6. The candidate filter admits only
+    SELF-LOOP turns that also speak (see
+    ``_insert_placeholder_barge_in``), and under the tool-call stay
+    convention almost every self-loop turn is a silent tool-call turn with
+    no chunk to interrupt. Measured on 200 placeholder voice conversations
+    (40 per level, seed 777, ``barge_in_rate=1.0``): 22/200 rows realize an
+    interruption, so a 6-row batch realizes none more often than not. A
+    small-n ``any(...)`` assertion here would be a coin flip, not a test.
     """
 
-    def _voice_rows(self, tmp_path, seed=17, rate=1.0, n=6):
+    def _voice_rows(self, tmp_path, seed=17, rate=1.0, n=40):
         meta = generate_workflow_dataset(
             "L3", num_samples=n, output_dir=tmp_path, seed=seed,
             modality_preset="voice_only", barge_in_rate=rate,
@@ -2877,3 +2886,59 @@ class TestPlaceholderBargeIn:
         assert not any(r["barge_in"] for r in rows)
         assert not any("<unspoken>" in (m.get("content") or "")
                        for r in rows for m in r["messages"])
+
+    @staticmethod
+    def _discontinuities(row) -> list[tuple[dict, dict]]:
+        """Consecutive ground-truth transitions where a.to != b.from.
+
+        A ground-truth ``state_sequence`` is a list of ``{from, to}``
+        transitions in order. It is continuous when each transition starts
+        where the previous one ended; a break means a state appears after a
+        later one with nothing explaining the jump.
+        """
+        seq = row["ground_truth"]["state_sequence"]
+        return [
+            (a, b) for a, b in zip(seq, seq[1:]) if a["to"] != b["from"]
+        ]
+
+    def test_barge_in_leaves_the_state_sequence_continuous(self, tmp_path):
+        """The defect this filter exists to stop.
+
+        The recovery turn repeats the interrupted turn's ``from`` state (a
+        rule ``find_barge_in_violations`` enforces), so interrupting an
+        ADVANCING turn ``[X -> Y]`` wrote ``[X -> X]`` into a conversation
+        already sitting in ``Y``. The checker agreed with the defect, so no
+        gate saw it. Restricting the draw to self-loop turns makes ``from``
+        and ``to`` the same state and the sequence stays continuous.
+        """
+        rows = self._voice_rows(tmp_path)
+        interrupted = [r for r in rows if r["barge_in"]]
+        assert interrupted, "no barge-in realized; this test would prove nothing"
+        for row in interrupted:
+            assert self._discontinuities(row) == [], row["conversation_id"]
+
+    def test_the_interrupted_turn_is_always_a_self_loop(self, tmp_path):
+        """Stated directly, so a future relaxation of the filter fails here
+        rather than silently corrupting ground truth again."""
+        from llm_workflow_agents.data.generate_workflows import _STATE_ANNOTATION_RE
+
+        rows = self._voice_rows(tmp_path)
+        seen = 0
+        for row in rows:
+            if not row["barge_in"]:
+                continue
+            marked = [
+                m for m in row["messages"] if "<unspoken>" in (m.get("content") or "")
+            ]
+            assert len(marked) == 1
+            state = _STATE_ANNOTATION_RE.search(marked[0]["content"])
+            assert state is not None
+            assert state.group(1) == state.group(2), marked[0]["content"]
+            seen += 1
+        assert seen, "no barge-in realized; this test would prove nothing"
+
+    def test_rate_zero_rows_are_continuous_too(self, tmp_path):
+        """The control arm: without an interruption the sequence is already
+        continuous, so the test above measures the insertion and nothing else."""
+        for row in self._voice_rows(tmp_path, rate=0.0):
+            assert self._discontinuities(row) == [], row["conversation_id"]
