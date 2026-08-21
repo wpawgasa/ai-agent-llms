@@ -39,7 +39,7 @@ from llm_workflow_agents.eval.tool_call_f1 import (
 )
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
 from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend_modality_scores
-from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics
+from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics_by_language
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -314,50 +314,39 @@ def compute_modality_quality_summary(
     }
 
 
-def _voice_stratum_completions(
+def _voice_stratum_completions_by_language(
     samples: list[dict[str, Any]],
     conv_tool_preds: list[list[TurnPrediction]],
-) -> list[str]:
-    """Return the raw per-turn generated text for VOICE-modality samples only.
+) -> dict[str, list[str]]:
+    """Group VOICE-modality per-turn generated text by each sample's OWN language.
 
     Chunk diagnostics (``<S>...</S>`` markers) only make sense on voice
     output — a text conversation holds no chunk markers at all (see
     ``02-data-generation.md``, Voice Modality; ``data/voice_convention.py``
-    checks the converse for text rows). Uses the same partition rule as
-    :func:`compute_modality_quality_summary`: ``sample.get("modality") or
+    checks the converse for text rows). Uses the same modality partition rule
+    as :func:`compute_modality_quality_summary`: ``sample.get("modality") or
     "text"``.
+
+    The voice stratum is mixed by design — the benchmark draws English and
+    Thai at even odds per sample, independent of everything else (see
+    ``docs/superpowers/specs/2026-08-21-voice-benchmark-and-prompt-switch-design.md``
+    section 4) — so completions are grouped by each sample's own ``language``
+    (default ``"en"``) rather than collapsed to one language for the whole
+    stratum. Pass the result to :func:`chunk_diagnostics_by_language`, never
+    to :func:`chunk_diagnostics` directly.
     """
-    out: list[str] = []
+    out: dict[str, list[str]] = {}
     for sample, turns in zip(samples, conv_tool_preds):
         if (sample.get("modality") or "text") != "voice":
             continue
-        out.extend(tp.content for tp in turns)
+        language = sample.get("language") or "en"
+        out.setdefault(language, []).extend(tp.content for tp in turns)
     return out
-
-
-def _voice_stratum_language(samples: list[dict[str, Any]]) -> str:
-    """Return the most common ``language`` among VOICE-modality samples.
-
-    Defaults to ``"en"`` when no voice samples are present or none carries a
-    ``language`` field, matching ``chunk_diagnostics``' own default and
-    ``data/system_prompt.py``'s ``sample.get("language") or "en"`` convention.
-    """
-    from collections import Counter
-
-    langs = [
-        sample.get("language") or "en"
-        for sample in samples
-        if (sample.get("modality") or "text") == "voice"
-    ]
-    if not langs:
-        return "en"
-    return Counter(langs).most_common(1)[0][0]
 
 
 def attach_chunk_diagnostics(
     quality_summary: dict[str, Any],
-    voice_completions: list[str],
-    language: str = "en",
+    voice_completions_by_language: dict[str, list[str]],
 ) -> dict[str, Any]:
     """Attach reference-free chunk diagnostics to a quality summary dict.
 
@@ -366,10 +355,18 @@ def attach_chunk_diagnostics(
     ``quality_summary`` without touching any existing key — in particular
     ``quality``, the number that ranks Phase 1 candidates. Chunk formatting
     is cheap for fine-tuning to install, so it must never move that ranking.
+
+    ``voice_completions_by_language`` (from
+    :func:`_voice_stratum_completions_by_language`) is scored via
+    :func:`chunk_diagnostics_by_language`, which scores each language under
+    its own boundary-quality convention and pools the underlying
+    measurements before computing any percentile — see that function's
+    docstring for why a majority-vote single language, or an average of
+    per-language percentiles, would both be wrong.
     """
     return {
         **quality_summary,
-        "chunk_diagnostics": chunk_diagnostics(voice_completions, language),
+        "chunk_diagnostics": chunk_diagnostics_by_language(voice_completions_by_language),
     }
 
 
@@ -1018,8 +1015,7 @@ if __name__ == "__main__":
     # quality_summary["quality"], so this cannot move the Phase 1 ranking.
     quality_summary = attach_chunk_diagnostics(
         quality_summary,
-        _voice_stratum_completions(samples, conv_tool_preds),
-        _voice_stratum_language(samples),
+        _voice_stratum_completions_by_language(samples, conv_tool_preds),
     )
 
     # --- Write results ---
@@ -1083,5 +1079,6 @@ if __name__ == "__main__":
         f"first_chunk_p50/p90={_diag['first_chunk_p50']:.0f}/{_diag['first_chunk_p90']:.0f}, "
         f"chunk_len_p50/p90={_diag['chunk_len_p50']:.0f}/{_diag['chunk_len_p90']:.0f}, "
         f"chunks_per_turn_p50={_diag['chunks_per_turn_p50']:.1f}, "
-        f"boundary_quality={_diag['boundary_quality']:.3f}"
+        f"boundary_quality={_diag['boundary_quality']:.3f} "
+        f"(pooled across languages={_diag['languages']})"
     )

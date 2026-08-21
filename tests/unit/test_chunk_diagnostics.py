@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics
+from llm_workflow_agents.eval.chunk_diagnostics import (
+    chunk_diagnostics,
+    chunk_diagnostics_by_language,
+)
 
 
 def test_first_chunk_length_is_the_first_chunk_not_the_shortest():
@@ -65,6 +68,79 @@ def test_empty_input_does_not_raise():
     assert out["n_turns_with_chunks"] == 0
 
 
+class TestChunkDiagnosticsByLanguage:
+    """Pooled, mixed-language scoring — the fix for the majority-vote bug.
+
+    Majority vote would collapse a mixed en/th stratum to whichever language
+    has more conversations and score every chunk under that one convention.
+    These assert the actual requirement: each language is scored under its
+    OWN convention, and the underlying measurements are pooled (not the
+    already-computed percentiles) before any percentile is taken.
+    """
+
+    def test_mixed_en_th_stratum_scores_high_boundary_quality_for_both(self):
+        """3 English conversations end in full stops, 1 Thai ends in a particle.
+
+        Under majority vote (english wins 3:1) the Thai conversation's chunks
+        would be checked against English terminal punctuation and score 0 —
+        this is exactly the failure this fix removes.
+        """
+        completions_by_language = {
+            "en": [
+                "<S>Hello there.</S><S>How can I help?</S>",
+                "<S>Sure thing.</S>",
+                "<S>Have a nice day!</S>",
+            ],
+            "th": [
+                "<S>สวัสดีค่ะ</S><S>ยินดีให้บริการค่ะ</S>",
+            ],
+        }
+        out = chunk_diagnostics_by_language(completions_by_language)
+        assert out["boundary_quality"] == 1.0
+        assert out["n_turns_with_chunks"] == 4
+        assert out["languages"] == ["en", "th"]
+
+    def test_each_language_scored_under_its_own_convention_not_majority(self):
+        """Minority-language (1 th vs 3 en) chunks must not be zeroed out.
+
+        Same shape as the mixed test above but the Thai side is deliberately
+        WRONG under the Thai convention (ends mid-word, no particle) while
+        every English chunk is well-formed — proves the Thai group is really
+        being checked with Thai rules (some, not all, well-ended) rather than
+        silently dropped or scored under English rules (which would also make
+        it 0, so this fixture is the one that distinguishes the two).
+        """
+        completions_by_language = {
+            "en": ["<S>Hello there.</S>", "<S>Sure thing.</S>", "<S>Great!</S>"],
+            "th": ["<S>สวัสดี</S>"],  # no Thai final particle -> not well-ended
+        }
+        out = chunk_diagnostics_by_language(completions_by_language)
+        # 3 well-ended English chunks out of 4 total chunks.
+        assert out["boundary_quality"] == pytest.approx(0.75)
+        assert out["languages"] == ["en", "th"]
+
+    def test_pools_raw_measurements_not_average_of_percentiles(self):
+        """p90 of the pooled set, not an average of two per-language p90s.
+
+        en group chunk lengths: 10, 90. th group: 50. Pooled and sorted:
+        10, 50, 90 -> nearest-rank p90 (index int(0.9*3)=2) is 90, matching
+        the plain chunk_diagnostics percentile fixture. An average of
+        per-language p90s (90 and 50) would give 70, which is not a
+        percentile of anything.
+        """
+        completions_by_language = {
+            "en": ["<S>" + "a" * 10 + "</S><S>" + "c" * 90 + "</S>"],
+            "th": ["<S>" + "b" * 50 + "ค่ะ</S>"],
+        }
+        out = chunk_diagnostics_by_language(completions_by_language)
+        assert out["chunk_len_p90"] == 90
+
+    def test_empty_mapping_does_not_raise(self):
+        out = chunk_diagnostics_by_language({})
+        assert out["n_turns_with_chunks"] == 0
+        assert out["languages"] == []
+
+
 class TestAttachChunkDiagnostics:
     """Guardrail wiring in agent_benchmark.py: quality must never move."""
 
@@ -83,9 +159,9 @@ class TestAttachChunkDiagnostics:
         # A pathological voice completion (one giant chunk, no terminal
         # punctuation) would tank boundary_quality and chunk_len_p90 if these
         # diagnostics were ever folded into the composite.
-        voice_completions = ["<S>" + "x" * 500 + "</S>"]
+        voice_completions_by_language = {"en": ["<S>" + "x" * 500 + "</S>"]}
 
-        out = attach_chunk_diagnostics(dict(base_summary), voice_completions, "en")
+        out = attach_chunk_diagnostics(dict(base_summary), voice_completions_by_language)
 
         assert out["quality"] == base_summary["quality"]
         assert out["quality_text"] == base_summary["quality_text"]
@@ -93,48 +169,79 @@ class TestAttachChunkDiagnostics:
         assert "chunk_diagnostics" in out
         assert out["chunk_diagnostics"]["boundary_quality"] == 0.0
 
+    def test_quality_unchanged_with_a_mixed_language_voice_stratum(self):
+        """Same guarantee, but exercised with the mixed en/th shape this fix targets."""
+        from llm_workflow_agents.eval.agent_benchmark import attach_chunk_diagnostics
+
+        base_summary = {"quality": 0.6584, "quality_text": 0.61, "quality_voice": 0.74}
+        voice_completions_by_language = {
+            "en": ["<S>Hello there.</S>"],
+            "th": ["<S>สวัสดีค่ะ</S>"],
+        }
+
+        out = attach_chunk_diagnostics(dict(base_summary), voice_completions_by_language)
+
+        assert out["quality"] == base_summary["quality"]
+        assert out["chunk_diagnostics"]["boundary_quality"] == 1.0
+        assert out["chunk_diagnostics"]["languages"] == ["en", "th"]
+
     def test_original_summary_dict_is_not_mutated(self):
         from llm_workflow_agents.eval.agent_benchmark import attach_chunk_diagnostics
 
         base_summary = {"quality": 0.5}
-        attach_chunk_diagnostics(base_summary, ["<S>hi.</S>"], "en")
+        attach_chunk_diagnostics(base_summary, {"en": ["<S>hi.</S>"]})
 
         assert "chunk_diagnostics" not in base_summary
 
 
 class TestVoiceStratumHelpers:
-    """Diagnostics must be scored over VOICE-modality rows only."""
+    """Diagnostics must be scored over VOICE-modality rows only, per-language."""
 
-    def test_voice_stratum_completions_excludes_text_rows(self):
-        from llm_workflow_agents.eval.agent_benchmark import _voice_stratum_completions
+    def test_voice_stratum_completions_by_language_excludes_text_rows(self):
+        from llm_workflow_agents.eval.agent_benchmark import (
+            _voice_stratum_completions_by_language,
+        )
         from llm_workflow_agents.eval.tool_call_f1 import TurnPrediction
 
         samples = [
-            {"modality": "text"},
-            {"modality": "voice"},
+            {"modality": "text", "language": "en"},
+            {"modality": "voice", "language": "en"},
+            {"modality": "voice", "language": "th"},
             {},  # no modality field -> text stratum, per compute_modality_quality_summary
         ]
         conv_tool_preds = [
             [TurnPrediction(turn_id=0, content="plain text, no chunks")],
             [TurnPrediction(turn_id=0, content="<S>voice chunk.</S>")],
+            [TurnPrediction(turn_id=0, content="<S>สวัสดีค่ะ</S>")],
             [TurnPrediction(turn_id=0, content="more plain text")],
         ]
 
-        out = _voice_stratum_completions(samples, conv_tool_preds)
-        assert out == ["<S>voice chunk.</S>"]
+        out = _voice_stratum_completions_by_language(samples, conv_tool_preds)
+        assert out == {
+            "en": ["<S>voice chunk.</S>"],
+            "th": ["<S>สวัสดีค่ะ</S>"],
+        }
 
-    def test_voice_stratum_language_defaults_to_en_with_no_voice_rows(self):
-        from llm_workflow_agents.eval.agent_benchmark import _voice_stratum_language
+    def test_voice_sample_with_no_language_field_defaults_to_en(self):
+        from llm_workflow_agents.eval.agent_benchmark import (
+            _voice_stratum_completions_by_language,
+        )
+        from llm_workflow_agents.eval.tool_call_f1 import TurnPrediction
 
-        assert _voice_stratum_language([{"modality": "text", "language": "th"}]) == "en"
+        samples = [{"modality": "voice"}]
+        conv_tool_preds = [[TurnPrediction(turn_id=0, content="<S>hi.</S>")]]
 
-    def test_voice_stratum_language_is_the_majority_language(self):
-        from llm_workflow_agents.eval.agent_benchmark import _voice_stratum_language
+        out = _voice_stratum_completions_by_language(samples, conv_tool_preds)
+        assert out == {"en": ["<S>hi.</S>"]}
 
-        samples = [
-            {"modality": "voice", "language": "th"},
-            {"modality": "voice", "language": "th"},
-            {"modality": "voice", "language": "en"},
-            {"modality": "text", "language": "en"},
-        ]
-        assert _voice_stratum_language(samples) == "th"
+    def test_no_voice_rows_returns_empty_mapping(self):
+        from llm_workflow_agents.eval.agent_benchmark import (
+            _voice_stratum_completions_by_language,
+        )
+        from llm_workflow_agents.eval.tool_call_f1 import TurnPrediction
+
+        samples = [{"modality": "text", "language": "th"}]
+        conv_tool_preds = [[TurnPrediction(turn_id=0, content="plain text")]]
+
+        out = _voice_stratum_completions_by_language(samples, conv_tool_preds)
+        assert out == {}

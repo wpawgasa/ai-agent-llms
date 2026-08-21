@@ -18,6 +18,15 @@ three metrics below read the prediction alone:
   rule and still streams badly.
 - ``boundary_quality`` is the share of chunks ending at a real pause point
   (Thai sentence-final particles, English terminal punctuation).
+
+Language is per-conversation, not per-run: the benchmark's voice stratum
+draws English and Thai at even odds by design (see
+``docs/superpowers/specs/2026-08-21-voice-benchmark-and-prompt-switch-design.md``
+section 4), so a single ``language`` argument is only correct for one
+conversation's chunks. :func:`chunk_diagnostics_by_language` scores each
+language group under its own convention and pools the underlying
+measurements before any percentile is computed, so a caller holding a mixed
+stratum should use it instead of collapsing the stratum to one language.
 """
 
 from __future__ import annotations
@@ -51,15 +60,15 @@ def _pct(values: list[float], q: float) -> float:
     return float(ordered[min(len(ordered) - 1, int(q * len(ordered)))])
 
 
-def chunk_diagnostics(
-    completions: list[str], language: str = "en"
-) -> dict[str, Any]:
-    """Return chunk-shape diagnostics over a list of generated turns.
+def _collect_raw(
+    completions: list[str], language: str
+) -> tuple[list[float], list[float], list[float], int, int]:
+    """Return (first_lengths, all_lengths, counts, well_ended, total_chunks).
 
-    A turn with no ``<S>...</S>`` chunks (e.g. a silent tool-call-only turn,
-    which the voice format contract explicitly permits) is excluded from
-    every metric here rather than scored as a poor boundary — see
-    ``data/voice_convention.py`` rule 3 and CLAUDE.md R20.
+    One language's worth of raw, unaggregated measurements — the shared core
+    of both :func:`chunk_diagnostics` and :func:`chunk_diagnostics_by_language`.
+    A turn with no chunks (legal — a silent tool-call-only turn) contributes
+    nothing here rather than counting as a poor boundary.
     """
     first_lengths: list[float] = []
     all_lengths: list[float] = []
@@ -79,6 +88,16 @@ def chunk_diagnostics(
             if _ends_well(c, language):
                 well_ended += 1
 
+    return first_lengths, all_lengths, counts, well_ended, total_chunks
+
+
+def _summarize(
+    first_lengths: list[float],
+    all_lengths: list[float],
+    counts: list[float],
+    well_ended: int,
+    total_chunks: int,
+) -> dict[str, Any]:
     return {
         "first_chunk_p50": _pct(first_lengths, 0.5),
         "first_chunk_p90": _pct(first_lengths, 0.9),
@@ -88,3 +107,77 @@ def chunk_diagnostics(
         "boundary_quality": (well_ended / total_chunks) if total_chunks else 0.0,
         "n_turns_with_chunks": len(counts),
     }
+
+
+def chunk_diagnostics(
+    completions: list[str], language: str = "en"
+) -> dict[str, Any]:
+    """Return chunk-shape diagnostics over a list of generated turns.
+
+    A turn with no ``<S>...</S>`` chunks (e.g. a silent tool-call-only turn,
+    which the voice format contract explicitly permits) is excluded from
+    every metric here rather than scored as a poor boundary — see
+    ``data/voice_convention.py`` rule 3 and CLAUDE.md R20.
+
+    Every completion here is scored under the SAME ``language`` convention.
+    Do not call this directly on a stratum that mixes languages — see
+    :func:`chunk_diagnostics_by_language`.
+    """
+    return _summarize(*_collect_raw(completions, language))
+
+
+def chunk_diagnostics_by_language(
+    completions_by_language: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Score a mixed-language voice stratum, one convention per language.
+
+    Each language's completions are scored under their OWN boundary-quality
+    convention via :func:`_collect_raw` (Thai sentence-final particles vs.
+    English terminal punctuation) — never one convention applied to the whole
+    stratum. Scoring everything under whichever language happens to have more
+    conversations (a majority vote) would silently misapply the wrong
+    convention to the minority language and could make a model's chunking
+    look bad in a language it never mis-scored; the benchmark's voice
+    stratum draws languages at even odds by design, so a majority-vote
+    resolution is wrong on non-trivial mixes, not just a rare edge case.
+
+    Combination choice: the underlying per-chunk measurements (chunk
+    lengths, first-chunk lengths, chunk counts, well-ended counts) are
+    POOLED across languages before any percentile or ratio is computed, not
+    averaged after each language's percentiles are computed separately.
+    ``_pct`` uses nearest-rank on a sorted list; nearest-rank has no
+    algebraic identity under averaging two groups' already-computed
+    percentiles, so an average-of-percentiles would not itself be a
+    percentile of anything. Pooling first keeps every returned percentile a
+    genuine percentile of the full stratum's chunks.
+
+    The set of languages actually pooled is returned under ``"languages"``
+    (sorted) so the combination performed is visible in the output, not
+    implicit in the number.
+
+    Args:
+        completions_by_language: Per-language lists of raw generated turn
+            text, e.g. ``{"en": [...], "th": [...]}``.
+
+    Returns:
+        The same keys as :func:`chunk_diagnostics`, plus ``"languages"``.
+    """
+    first_all: list[float] = []
+    all_all: list[float] = []
+    counts_all: list[float] = []
+    well_ended_all = 0
+    total_chunks_all = 0
+
+    for language, completions in completions_by_language.items():
+        first_lengths, all_lengths, counts, well_ended, total_chunks = _collect_raw(
+            completions, language
+        )
+        first_all.extend(first_lengths)
+        all_all.extend(all_lengths)
+        counts_all.extend(counts)
+        well_ended_all += well_ended
+        total_chunks_all += total_chunks
+
+    out = _summarize(first_all, all_all, counts_all, well_ended_all, total_chunks_all)
+    out["languages"] = sorted(completions_by_language)
+    return out
