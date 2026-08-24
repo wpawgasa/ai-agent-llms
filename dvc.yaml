@@ -5,9 +5,20 @@ stages:
   # ---------------------------------------------------------------------------
 
   task_a_benchmark:
+    # FROZEN. `dvc repro` skips this stage. Do not unfreeze it without reading
+    # CLAUDE.md R21 first.
+    frozen: true
     desc: >-
-      1 000 placeholder conversations for Phase 1 model ranking.
-      No teacher model or API key required.
+      FROZEN — the Phase 1 text benchmark stratum, and the data behind the
+      current Cat A ranking. Do NOT regenerate it. 258 conversations in 17
+      files: 250 teacher-generated (gemini-3-flash-preview for L1-L3,
+      gemini-3-5-flash for L4-L5, generated 2026-06-11 and 2026-06-15), plus
+      one hand-added l3_insurance_premium_payment_th_*.jsonl that does not
+      follow the generator's naming convention. The `cmd` below is retained
+      for provenance only and does NOT describe how these files were made —
+      it runs the placeholder generator and would replace all 258 rows with
+      1 000 placeholder ones. That mismatch is why this stage is frozen.
+      The voice stratum (task_a_benchmark_voice) is additive alongside it.
     cmd: ./scripts/generate_benchmark_data.sh
     deps:
       - scripts/generate_benchmark_data.sh
