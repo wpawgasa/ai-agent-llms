@@ -17,6 +17,7 @@ VAL_PAIRS_OUT="data/output/preference/task_a/validation.jsonl"
 DRY_RUN=0
 NO_WANDB=0
 SKIP_PAIRS=0
+CHUNK_STEPS=0
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
@@ -44,6 +45,31 @@ Options:
   --skip-pairs            Skip scripts/build_preference_pairs.py (assume the
                           synthetic train/validation pair files already
                           exist)
+  --chunk-steps N         Train in chunks of N steps, scoring the R5 held-out
+                          guardrail BETWEEN chunks in a separate process
+                          (default: 0 = one straight-through run).
+
+                          The in-process guardrail cannot run on this model:
+                          load_in_4bit reaches only 0.77 GiB of
+                          Gemma-4-26B-A4B (the MoE experts are fused 3-D
+                          tensors bitsandbytes cannot swap), so training holds
+                          ~46 GiB and a second model copy does not fit on one
+                          GPU. See CLAUDE.md R19 and
+                          docs/dpo_memory_ceiling_investigation.md section 8.
+
+                          Each chunk is its own process, so the GPU empties
+                          between train and score. N must equal dpo.save_steps
+                          or no checkpoint exists at the boundary. This mode
+                          forces monitoring.reward_hacking_detector off.
+
+                          Two caveats. Scoring uses
+                          scripts/heldout_composite_audit.py, which samples the
+                          whole validation split with a fixed seed rather than
+                          the reserved guardrail slice the in-process callback
+                          used; harmless while mining runs on --split train.
+                          And dpo.save_total_limit still prunes old
+                          checkpoints, so a stop at step K may have deleted the
+                          best earlier checkpoint.
   --dry-run               Prepare pairs + patched config, exit before
                           training
   --no-wandb              Disable W&B logging (overrides YAML)
@@ -70,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --method)          METHOD="$2";          shift 2 ;;
     --pairs-data-dir)  PAIRS_DATA_DIR="$2";  shift 2 ;;
     --heldout)         HELDOUT="$2";         shift 2 ;;
+    --chunk-steps)     CHUNK_STEPS="$2";     shift 2 ;;
     --skip-pairs)       SKIP_PAIRS=1;        shift   ;;
     --dry-run)          DRY_RUN=1;           shift   ;;
     --no-wandb)         NO_WANDB=1;          shift   ;;
@@ -195,6 +222,26 @@ print(yaml.safe_load(open('${PATCHED_CFG}'))['output_dir'])
 ")
 
 # ── Banner ────────────────────────────────────────────────────────────────────
+# ── Chunked mode: validate the plan before anything expensive ───────────────
+if [[ "$CHUNK_STEPS" -gt 0 ]]; then
+  read -r TOTAL_STEPS SAVE_STEPS N_PROMPTS MAX_NEW MAX_SEQ HELDOUT_DIR <<<"$(python3 -c "
+import yaml
+cfg = yaml.safe_load(open('${PATCHED_CFG}'))
+d, m, dat = cfg.get('dpo', {}), cfg.get('monitoring', {}), cfg.get('data', {})
+print(d.get('training_steps', 500), d.get('save_steps', 100),
+      m.get('eval_held_out_num_prompts', 50), d.get('max_completion_length', 512),
+      d.get('max_seq_length', 8192),
+      dat.get('heldout_data_source', 'data/output/grpo/task_a'))
+")"
+
+  if [[ "$CHUNK_STEPS" -ne "$SAVE_STEPS" ]]; then
+    echo "Error: --chunk-steps ($CHUNK_STEPS) must equal dpo.save_steps ($SAVE_STEPS)." >&2
+    echo "       Otherwise no checkpoint exists at the chunk boundary to score." >&2
+    exit 1
+  fi
+
+fi
+
 echo "=== Task A DPO/ORPO — Phase 2 ==="
 echo "  DPO config     : $DPO_CONFIG"
 echo "  Method         : $RESOLVED_METHOD"
@@ -203,6 +250,10 @@ echo "  SFT checkpoint : $RESOLVED_CHECKPOINT"
 echo "  Pairs data dir : $PAIRS_DATA_DIR"
 echo "  Checkpoint     : $PROJECT_ROOT/checkpoints/$RUN_NAME/$MODEL_BASENAME/"
 echo "  W&B            : $([ "$NO_WANDB" -eq 1 ] && echo disabled || echo enabled)"
+if [[ "$CHUNK_STEPS" -gt 0 ]]; then
+  echo "  Chunked        : $TOTAL_STEPS steps in chunks of $CHUNK_STEPS"
+  echo "  Guardrail      : between chunks, separate process, $N_PROMPTS prompts"
+fi
 echo "=================================="
 
 if [[ $DRY_RUN -eq 1 ]]; then
@@ -221,12 +272,16 @@ echo "Logs: $LOG_FILE"
 # PATCHED_CFG above.
 cp "$PATCHED_CFG" "$CKPT_DIR/frozen_dpo_config_${RUN_TS}.yaml"
 
-python3 -c "
+# One training process. Called once for a straight-through run, or once per
+# chunk in --chunk-steps mode. Each call is a *separate* process, which is the
+# whole point in chunked mode: the GPU empties when it exits.
+train_once() {
+  python3 -c "
 import sys
 from pathlib import Path
 from llm_workflow_agents.training.dpo import train_dpo
 
-result = train_dpo(Path('${PATCHED_CFG}'))
+result = train_dpo(Path('$1'))
 if result.error:
     print(f'ERROR: {result.error}', file=sys.stderr)
     sys.exit(1)
@@ -237,5 +292,73 @@ print(f'Early stopped    : {result.early_stopped}')
 print(f'Held-out samples : {len(result.held_out_scores)}')
 print(f'Checkpoint       : {result.checkpoint_path}')
 " 2>&1 | tee -a "$LOG_FILE"
+}
+
+if [[ "$CHUNK_STEPS" -le 0 ]]; then
+  train_once "$PATCHED_CFG"
+  echo "Done. Checkpoint: $CKPT_DIR"
+  exit 0
+fi
+
+AUDIT_DIR="$PROJECT_ROOT/runs/audit/${RUN_NAME}_guardrail"
+mkdir -p "$AUDIT_DIR"
+echo "Chunked mode: $TOTAL_STEPS steps in chunks of $CHUNK_STEPS; audits -> $AUDIT_DIR"
+
+DONE_STEPS=0
+while [[ $DONE_STEPS -lt $TOTAL_STEPS ]]; do
+  TARGET=$(( DONE_STEPS + CHUNK_STEPS ))
+  [[ $TARGET -gt $TOTAL_STEPS ]] && TARGET=$TOTAL_STEPS
+
+  # Per-chunk config: cumulative max_steps, and the in-process guardrail off —
+  # it is the thing that runs out of memory (R19).
+  CHUNK_CFG="$PATCHED_DIR/${DPO_STEM}_${RUN_TS}_to${TARGET}.yaml"
+  python3 -c "
+import yaml
+cfg = yaml.safe_load(open('${PATCHED_CFG}'))
+cfg.setdefault('dpo', {})['training_steps'] = ${TARGET}
+cfg.setdefault('monitoring', {})['reward_hacking_detector'] = False
+with open('${CHUNK_CFG}', 'w') as f:
+    yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+"
+  cp "$CHUNK_CFG" "$CKPT_DIR/frozen_dpo_config_${RUN_TS}_to${TARGET}.yaml"
+
+  echo "=== chunk: training to step $TARGET of $TOTAL_STEPS ===" | tee -a "$LOG_FILE"
+  train_once "$CHUNK_CFG"
+
+  CKPT="$CKPT_DIR/checkpoint-${TARGET}"
+  [[ -d "$CKPT" ]] || {
+    echo "Error: expected checkpoint not found: $CKPT" >&2
+    echo "       --chunk-steps must equal dpo.save_steps." >&2
+    exit 1
+  }
+
+  echo "=== chunk: scoring $CKPT ===" | tee -a "$LOG_FILE"
+  python3 scripts/heldout_composite_audit.py \
+    --checkpoint "$CKPT" \
+    --data-dir "$HELDOUT_DIR" \
+    --split validation \
+    --n-prompts "$N_PROMPTS" \
+    --max-new-tokens "$MAX_NEW" \
+    --max-seq-length "$MAX_SEQ" \
+    --seed 42 \
+    --output "$AUDIT_DIR/step-${TARGET}.json" 2>&1 | tee -a "$LOG_FILE"
+
+  set +e
+  python3 scripts/dpo_guardrail_decide.py \
+    --trainer-state "$CKPT/trainer_state.json" \
+    --audit-dir "$AUDIT_DIR" 2>&1 | tee -a "$LOG_FILE"
+  DECISION=${PIPESTATUS[0]}
+  set -e
+
+  if [[ $DECISION -eq 10 ]]; then
+    echo "Guardrail STOPPED the run at step $TARGET (reward hacking)." | tee -a "$LOG_FILE"
+    break
+  elif [[ $DECISION -ne 0 ]]; then
+    echo "Error: guardrail decision failed with exit $DECISION" >&2
+    exit 1
+  fi
+
+  DONE_STEPS=$TARGET
+done
 
 echo "Done. Checkpoint: $CKPT_DIR"

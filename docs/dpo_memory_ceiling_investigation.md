@@ -206,12 +206,30 @@ In order:
 
 1. ~~**Test the `use_cache` hypothesis**~~ — done, **refuted** (§5, §8). The
    code fix stays because it is independently correct; it is not the answer.
-2. **Take the guardrail off the training GPU's peak.** This is now the only
-   line of attack that does not fight 32 GiB of arithmetic. Either run
-   `_evaluate` in a short-lived subprocess, or drop the in-run guardrail
-   entirely and score saved checkpoints offline with
-   `scripts/heldout_composite_audit.py`. The second is simpler, loses the
-   auto-stop, and is honest about what R5 can deliver on this model.
+2. ~~**Take the guardrail off the training GPU's peak.**~~ **Built and verified
+   2026-08-28.** `scripts/run_phase2_dpo.sh --chunk-steps N` trains in chunks.
+   Each chunk is its own process, so the GPU empties between training and
+   scoring and only one model copy is ever resident. Scoring runs as a separate
+   `scripts/heldout_composite_audit.py` process; `scripts/dpo_guardrail_decide.py`
+   reads `trainer_state.json` and the audit JSONs and reuses the existing
+   `is_reward_hacking` as the stop rule.
+
+   A concurrent subprocess was considered and rejected: it would need its own
+   ~46 GiB copy while training still holds ~46 GiB, and this machine has one
+   GPU.
+
+   Verified end to end on the 6-step / 3-step-chunk smoke
+   (`configs/training/dpo_cat_a_smoke_chunked.yaml`): chunk 1 trained fresh to
+   step 3, chunk 2 resumed from `checkpoint-3` and reached step 6, both
+   checkpoints scored, GPU measured at 1 MiB between the two phases. **Step 4
+   completed** — the step that failed in smoke7-9, 13, 14 and 16.
+
+   Two limits to know. The live run exercised only the *continue* path; the
+   *stop* path is covered by unit tests, not by a real run. And the audit
+   script samples the whole validation split with a fixed seed rather than the
+   reserved guardrail slice the in-process callback used — harmless while
+   `mine_model_negatives.py` runs on `--split train`, but it must be revisited
+   if mining ever moves to validation.
 3. **Decide `load_in_4bit` deliberately** (§8). It currently buys ~0.8 GiB
    while imposing a 4-bit base under a bf16-trained adapter — the mismatch
    R17 already flags for the audit. Turning it off costs ~2 GiB and removes
