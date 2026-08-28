@@ -99,6 +99,17 @@ data:
   # is also a passthrough. Revisit once the mining run investigates why yield
   # (12.8%) came in well under the 38.0% predicted from the held-out audit.
   model_negative_share: 0.2
+  # Cap the merged train set to just above what the run actually reads:
+  # 500 steps x batch 1 x grad_accum 8 = 4,000 rows. Without this the merged
+  # set is ~36,570 rows and `precompute_ref_log_probs` walks ALL of them before
+  # step 1 — about 6.3 hours at the measured 1.6 rows/s, and
+  # `run_phase2_dpo.sh --chunk-steps` repeats that once per chunk, so a 5-chunk
+  # run spends ~32 hours on reference logprobs for rows it never reads.
+  # Selection samples across the whole merged set with `seed`, never its head:
+  # the mixer can return synthetic rows before mined ones, and a head-slice
+  # would drop every mined negative (R18's scarce on-distribution half).
+  # Raise this in step with dpo.training_steps.
+  max_train_rows: 5000
   # Fraction of the GRPO validation split reserved for the R5 held-out
   # guardrail (dpo.py::_build_heldout_callback) and excluded from mining
   # (scripts/mine_model_negatives.py --split validation). Only meaningful if

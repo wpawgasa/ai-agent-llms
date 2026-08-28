@@ -220,6 +220,36 @@ def _mix_preference_sources(
     return merged
 
 
+def _cap_train_rows(
+    rows: list[dict[str, Any]], max_rows: int | None, seed: int = 42
+) -> list[dict[str, Any]]:
+    """Cap the merged train set to ``max_rows``, sampling across the whole set.
+
+    ``precompute_ref_log_probs`` walks the ENTIRE train split before step 1,
+    and ``run_phase2_dpo.sh --chunk-steps`` repeats that once per chunk. The
+    Cat A merged set is ~36,570 rows while a 500-step run at effective batch 8
+    reads 4,000, so an uncapped 5-chunk run spends ~32 hours computing
+    reference logprobs for rows it never reads (measured 2026-08-28 at
+    1.6 rows/s). Sizing the set to the run is the fix the config's own comment
+    already asks for.
+
+    **Samples across the set rather than taking its head.** With no
+    ``model_negative_share`` the mixer returns synthetic rows *then* mined ones,
+    unshuffled — a head-slice would discard every mined negative, which R18
+    identifies as the scarce, on-distribution, highest-value half of the
+    signal. Selection is seeded, so a resumed chunk sees the same subset as the
+    chunk before it; a different subset per chunk would defeat the point.
+
+    Original row order is preserved among the survivors. The trainer shuffles
+    its own batches, so order here carries no meaning.
+    """
+    if not max_rows or max_rows <= 0 or max_rows >= len(rows):
+        return list(rows)
+    rng = random.Random(seed)
+    keep = sorted(rng.sample(range(len(rows)), max_rows))
+    return [rows[i] for i in keep]
+
+
 def _load_dpo_dataset(
     data_cfg: dict[str, Any], seed: int = 42
 ) -> tuple[Dataset, Dataset]:
@@ -259,11 +289,15 @@ def _load_dpo_dataset(
     merged = _mix_preference_sources(
         synthetic_rows, model_rows, data_cfg.get("model_negative_share"), seed=seed
     )
+    n_merged = len(merged)
+    merged = _cap_train_rows(merged, data_cfg.get("max_train_rows"), seed=seed)
     logger.info(
         "dpo_dataset_loaded",
         n_synthetic=len(synthetic_rows),
         n_model=len(model_rows),
-        n_merged=len(merged),
+        n_merged=n_merged,
+        n_train=len(merged),
+        max_train_rows=data_cfg.get("max_train_rows"),
         model_negative_share_requested=data_cfg.get("model_negative_share"),
     )
 
