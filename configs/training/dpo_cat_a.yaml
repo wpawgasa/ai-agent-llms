@@ -66,7 +66,12 @@ dpo:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   warmup_ratio: 0.05
-  max_seq_length: 8192
+  # 8192 OOMs in loss.backward() at step 2 on a 93 GiB H100 NVL: it asks for
+  # 7.80 GiB with 5.80 GiB free (87.26 GiB in use). Precompute fits because it
+  # is forward-only; training does not. 6144 was probed for 2 steps and holds.
+  # The pair files below are length-filtered to this cap so NOTHING truncates —
+  # see the data section. Measured 2026-08-28.
+  max_seq_length: 6144
   max_completion_length: 512
   save_steps: 100
   save_total_limit: 3
@@ -78,9 +83,20 @@ data:
   # scripts/mine_model_negatives.py (on-distribution — the checkpoint's own
   # greedy errors). See dvc.yaml: task_a_preference_pairs,
   # task_a_preference_model_negatives.
+  # LENGTH-FILTERED to max_seq_length above, built by
+  #   scripts/build_dpo_smoke_fixtures.py --cap 6144 --n-train 5000 \
+  #     --n-validation 500 --n-model-negatives 51 \
+  #     --out-dir data/output/preference/task_a/cap6144
+  # Filtering is not a nicety. TRL's collator truncates prompt+completion to
+  # max_length, and `chosen`/`rejected` differ ONLY in the trailing assistant
+  # turn, so a truncated pair collapses to identical token ids: completion_mask
+  # all zeros, margin exactly 0, gradient exactly 0 — silently. Measured at
+  # 6144 on unfiltered rows it shows up as `entropy: nan` and grad_norm 137;
+  # on filtered rows entropy is 0.049 and grad_norm 32. Kept 5,000 of 5,447
+  # train rows scanned (92%), 500 of 538 validation, and all 51 mined negatives.
   train_sources:
-    - "data/output/preference/task_a/train.jsonl"
-    - "data/output/preference/task_a/model_negatives.jsonl"
+    - "data/output/preference/task_a/cap6144/train.jsonl"
+    - "data/output/preference/task_a/cap6144/model_negatives.jsonl"
   # DPO's own eval split. Built by dvc.yaml's task_a_preference_pairs stage
   # (build_preference_pairs.py --split validation) from the SAME GRPO
   # validation conversations that guardrail_reserved_fraction below
@@ -90,7 +106,7 @@ data:
   # population that also produced these eval pairs, contaminating eval_loss
   # and checkpoint selection — so flipping the mining source also requires
   # re-deriving this file from a partition disjoint from the minable pool.
-  validation_source: "data/output/preference/task_a/validation.jsonl"
+  validation_source: "data/output/preference/task_a/cap6144/validation.jsonl"
   # Mined negatives are on-distribution but scarce (51 of 399 sampled prompts
   # in the first mining run vs 29,256 synthetic pairs — well under 1% of a
   # plain concat). Oversample them (with replacement) to 20% of the merged
