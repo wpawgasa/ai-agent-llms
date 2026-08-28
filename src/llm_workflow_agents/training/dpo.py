@@ -371,6 +371,78 @@ def _dpo_trainer_kwargs(
     return kwargs
 
 
+def _assert_dpo_row_processing_support(trainer_cls: type) -> None:
+    """Fail fast if the installed TRL's ``DPOTrainer`` assumes a processor.
+
+    TRL 0.23.1 chooses its row-processing path from
+    ``model.config.model_type in MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES``
+    — a property of the MODEL, not of the ``processing_class`` it was actually
+    handed — and then dereferences ``processing_class.tokenizer``
+    unconditionally (``trl/trainer/dpo_trainer.py:739``). Gemma-4 is a
+    SigLIP+Gemma4 stack (R9), so it takes that vision path while Unsloth hands
+    the trainer a plain tokenizer. On transformers 5.x that is a
+    ``GemmaTokenizer``/``TokenizersBackend``, which exposes ``_tokenizer`` and
+    not ``tokenizer``, so the run dies with ``AttributeError: TokenizersBackend
+    has no attribute tokenizer`` — but only after the 26B checkpoint has
+    loaded and the dataset has been tokenized, i.e. ~35 minutes in.
+
+    TRL 1.0.0 branches on ``isinstance(processing_class, ProcessorMixin)``
+    instead and takes the text path for a plain tokenizer, which is what Cat A
+    preference pairs need — they carry no images.
+
+    This is an environment guard, not a code-compatibility shim. It fires when
+    ``.venv-train`` is incomplete: that venv shadows the base image's
+    transformers with 5.x but, if ``scripts/install_train.sh`` has not been
+    run, ships no ``trl`` of its own, so ``import trl`` silently falls through
+    to the image's older copy. Restoring the pin is the fix.
+
+    Follows ``trajectory_rollout.assert_trajectory_rollout_support()``:
+    inspect the installed, possibly Unsloth-patched source rather than trust a
+    version string. Unsloth wraps ``__init__``, so the whole MRO is scanned —
+    an unreadable or fully-wrapped source is treated as "cannot tell" and
+    allowed through, because blocking a run on a failed introspection would be
+    worse than the failure it guards.
+
+    Raises:
+        RuntimeError: if the resolved trainer selects its row-processing path
+            from the model type (the TRL 0.23.x behaviour).
+    """
+    import inspect
+
+    sources: list[str] = []
+    for klass in getattr(trainer_cls, "__mro__", (trainer_cls,)):
+        init = klass.__dict__.get("__init__")
+        if init is None:
+            continue
+        try:
+            sources.append(inspect.getsource(init))
+        except (OSError, TypeError):  # C-level or source unavailable
+            continue
+
+    if not any("is_vision_model" in s for s in sources):
+        return
+
+    try:
+        import trl
+
+        version = getattr(trl, "__version__", "unknown")
+    except ImportError:  # pragma: no cover - trl is imported by the caller
+        version = "unknown"
+
+    raise RuntimeError(
+        f"TRL {version}: DPOTrainer selects its row-processing path from the "
+        "model type (`is_vision_model`) and then dereferences "
+        "`processing_class.tokenizer` unconditionally. Gemma-4 takes that "
+        "vision path while Unsloth supplies a plain tokenizer, so training "
+        "would die with `AttributeError: ... has no attribute tokenizer` "
+        "after the 26B load. Install the pinned trl==1.0.0 into .venv-train "
+        "(scripts/install_train.sh), which branches on the processing class "
+        "instead. A partially-built .venv-train is the usual cause: it "
+        "shadows transformers but not trl, so `import trl` falls through to "
+        "the base image's older copy."
+    )
+
+
 def _resolve_trl_classes(method: str) -> tuple[type, type]:
     """Return the ``(Config, Trainer)`` pair the installed TRL provides.
 
@@ -392,6 +464,7 @@ def _resolve_trl_classes(method: str) -> tuple[type, type]:
             return ORPOConfig, ORPOTrainer
         from trl import DPOConfig, DPOTrainer
 
+        _assert_dpo_row_processing_support(DPOTrainer)
         return DPOConfig, DPOTrainer
     except ImportError as exc:
         import trl

@@ -57,3 +57,57 @@ def test_filter_shares_the_same_resolution_path():
         pytest.skip("TRL provides ORPO; nothing to fail")
     with pytest.raises(RuntimeError):
         _filter_dpo_config_kwargs({"learning_rate": 5e-6}, "orpo")
+
+
+# --------------------------------------------------------------------------- #
+# Row-processing path guard (see training/dpo.py)
+# --------------------------------------------------------------------------- #
+
+
+class _LegacyDPOTrainer:
+    """Stand-in for TRL 0.23.1's DPOTrainer.
+
+    It picks the row-processing path from the MODEL's type rather than from
+    the ``processing_class`` it was handed, then dereferences ``.tokenizer``
+    unconditionally.
+    """
+
+    def __init__(self, model, processing_class):
+        self.is_vision_model = (
+            model.config.model_type in {"gemma4"}
+        )
+        self.tokenizer = processing_class.tokenizer
+
+
+class _ModernDPOTrainer:
+    """Stand-in for TRL 1.0.0's DPOTrainer: branches on the processing class."""
+
+    def __init__(self, model, processing_class):
+        if isinstance(processing_class, ProcessorMixin):  # noqa: F821
+            self.tokenizer = processing_class.tokenizer
+            self._is_vlm = True
+        else:
+            self.tokenizer = processing_class
+            self._is_vlm = False
+
+
+def test_legacy_trainer_that_assumes_a_processor_is_rejected():
+    """A TRL whose DPOTrainer assumes a processor must fail before the 26B load."""
+    from llm_workflow_agents.training.dpo import (
+        _assert_dpo_row_processing_support,
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        _assert_dpo_row_processing_support(_LegacyDPOTrainer)
+    msg = str(exc.value)
+    # Must name the remedy, not just the symptom.
+    assert "install_train.sh" in msg
+    assert "trl" in msg.lower()
+
+
+def test_modern_trainer_that_branches_on_processing_class_is_accepted():
+    from llm_workflow_agents.training.dpo import (
+        _assert_dpo_row_processing_support,
+    )
+
+    _assert_dpo_row_processing_support(_ModernDPOTrainer)  # must not raise
