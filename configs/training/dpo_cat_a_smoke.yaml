@@ -1,0 +1,75 @@
+# Cat A DPO — SMOKE config for the memory-ceiling bisect
+# (docs/dpo_memory_ceiling_investigation.md).
+#
+# This reproduces the "smoke14" arm: R5 held-out guardrail ON, HF Trainer's own
+# periodic evaluation OFF, cap 5120, 6 training steps. On the 80 GB H100 that
+# arm OOMed at step 4, every time, in the training step immediately AFTER the
+# guardrail fired at step 3 (§1). Its partner arm (guardrail off, trainer eval
+# on) completed 6/6, which is what pinned the guardrail as the cause.
+#
+# It exists as a tracked file because the original smoke configs lived in a
+# per-session scratchpad that the container rebuild deleted, leaving no stored
+# smoke result reproducible (§6 housekeeping).
+#
+# PASS = 6/6 steps with the guardrail firing at steps 3 and 6.
+#
+# Reads the deterministic fixtures from scripts/build_dpo_smoke_fixtures.py —
+# 64 train / 16 validation / 8 model-negative rows, all length-filtered under
+# cap 5120 so nothing truncates and per-step memory is comparable across runs.
+#
+# Launch with `env -u UNSLOTH_VLLM_STANDBY` — otherwise Unsloth strips the
+# runner's PYTORCH_ALLOC_CONF=expandable_segments:True at import and the run is
+# not comparable to the ladder (§3).
+output_dir: "dpo_cat_a_smoke16"
+
+stage: "dpo"
+framework: "unsloth"
+
+model:
+  sft_checkpoint: "checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767"
+
+dpo:
+  method: "dpo"
+  training_steps: 6
+  learning_rate: 5.0e-6
+  beta: 0.1
+  # Required — without it Unsloth's compiled DPO trainer materializes four
+  # [2, S, 262144] fp32 logits tensors per step and OOMs before step 1.
+  precompute_ref_log_probs: true
+  # Ruled out on PEFT checkpoints: NotImplementedError in _compute_loss_liger.
+  use_liger_kernel: false
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  warmup_ratio: 0.05
+  # The ladder's cap. NOT the wall — 4096 and 5120 failed identically (§2) —
+  # but held at the ladder's value so this run is comparable to smoke14.
+  max_seq_length: 5120
+  max_completion_length: 512
+  save_steps: 100
+  save_total_limit: 3
+  # eval_strategy is hardcoded to "steps" in dpo.py, so the trainer's own
+  # periodic evaluation is switched off by pushing eval_steps past the end of
+  # the run. This is the "trainer eval off" half of the smoke14 arm.
+  eval_steps: 1000
+  seed: 42
+
+data:
+  train_sources:
+    - "data/output/preference/task_a/smoke/train.jsonl"
+    - "data/output/preference/task_a/smoke/model_negatives.jsonl"
+  validation_source: "data/output/preference/task_a/smoke/validation.jsonl"
+  model_negative_share: 0.2
+  # Must match mine_model_negatives.py's defaults — see dpo_cat_a.yaml.
+  guardrail_reserved_fraction: 0.2
+  guardrail_reserved_seed: 42
+  heldout_data_source: "data/output/grpo/task_a"
+
+monitoring:
+  # Fires at steps 3 and 6 of a 6-step run: one firing with training steps
+  # left after it, which is where the OOM always landed.
+  eval_held_out_every: 3
+  eval_held_out_num_prompts: 2
+  reward_hacking_detector: true
+
+logging:
+  wandb_project: "llm-workflow-agents-dpo"
