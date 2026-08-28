@@ -226,3 +226,81 @@ def test_load_dpo_dataset_applies_model_negative_share(tmp_path):
     train_ds, _ = _load_dpo_dataset(data_cfg, seed=3)
     # n_model solves n_model / (100 + n_model) == 0.1 -> n_model == 11 (rounded)
     assert len(train_ds) == 111
+
+
+# --------------------------------------------------------------------------- #
+# data.max_train_rows — cap the merged train set to what the run consumes
+# --------------------------------------------------------------------------- #
+#
+# WHY: `precompute_ref_log_probs` walks the WHOLE train split before step 1,
+# and `run_phase2_dpo.sh --chunk-steps` repeats that once per chunk. The
+# merged Cat A set is ~36,570 rows while a 500-step run at effective batch 8
+# reads 4,000, so an uncapped 5-chunk run spends ~32 hours computing reference
+# logprobs for rows it never reads. Measured 2026-08-28 at 1.6 rows/s.
+
+
+def _cap_fixture(tmp_path: Path, n_synthetic: int, n_model: int) -> dict:
+    syn = [dict(GOOD_ROW, prompt_fingerprint=f"s{i}") for i in range(n_synthetic)]
+    mod = [
+        dict(GOOD_ROW, source="model", prompt_fingerprint=f"m{i}")
+        for i in range(n_model)
+    ]
+    _write_jsonl(tmp_path / "train.jsonl", syn)
+    _write_jsonl(tmp_path / "model_negatives.jsonl", mod)
+    _write_jsonl(tmp_path / "validation.jsonl", [dict(GOOD_ROW)])
+    return {
+        "train_sources": [
+            str(tmp_path / "train.jsonl"),
+            str(tmp_path / "model_negatives.jsonl"),
+        ],
+        "validation_source": str(tmp_path / "validation.jsonl"),
+    }
+
+
+def test_max_train_rows_truncates_the_merged_train_set(tmp_path):
+    cfg = _cap_fixture(tmp_path, n_synthetic=50, n_model=10)
+    cfg["max_train_rows"] = 20
+    train, _ = _load_dpo_dataset(cfg, seed=42)
+    assert len(train) == 20
+
+
+def test_max_train_rows_absent_keeps_every_row(tmp_path):
+    cfg = _cap_fixture(tmp_path, n_synthetic=50, n_model=10)
+    train, _ = _load_dpo_dataset(cfg, seed=42)
+    assert len(train) == 60
+
+
+def test_max_train_rows_above_the_set_size_is_a_passthrough(tmp_path):
+    cfg = _cap_fixture(tmp_path, n_synthetic=50, n_model=10)
+    cfg["max_train_rows"] = 5000
+    train, _ = _load_dpo_dataset(cfg, seed=42)
+    assert len(train) == 60
+
+
+def test_cap_does_not_discard_the_mined_negatives(tmp_path):
+    """The trap: with no model_negative_share the mixer returns synthetic THEN
+    mined, unshuffled. A head-slice would drop every mined row — the scarce,
+    on-distribution ones R18 says carry the most value."""
+    cfg = _cap_fixture(tmp_path, n_synthetic=50, n_model=10)
+    cfg["max_train_rows"] = 30
+    train, _ = _load_dpo_dataset(cfg, seed=42)
+    kept = {r["chosen"][0]["content"] for r in train}
+    assert len(train) == 30
+    # Every row shares chosen/rejected text here, so assert via the mixer
+    # instead: capping must sample across the whole merged set, not its head.
+    from llm_workflow_agents.training.dpo import _cap_train_rows
+
+    merged = [{"i": i, "src": "syn"} for i in range(50)]
+    merged += [{"i": i, "src": "mod"} for i in range(10)]
+    capped = _cap_train_rows(merged, 30, seed=42)
+    assert len(capped) == 30
+    assert any(r["src"] == "mod" for r in capped)
+    assert kept  # loader path produced rows
+
+
+def test_cap_is_deterministic_for_a_given_seed(tmp_path):
+    from llm_workflow_agents.training.dpo import _cap_train_rows
+
+    merged = [{"i": i} for i in range(100)]
+    assert _cap_train_rows(merged, 10, seed=7) == _cap_train_rows(merged, 10, seed=7)
+    assert _cap_train_rows(merged, 10, seed=7) != _cap_train_rows(merged, 10, seed=8)
