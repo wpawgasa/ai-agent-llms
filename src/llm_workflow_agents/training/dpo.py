@@ -40,6 +40,8 @@ import json
 import random
 import re
 from dataclasses import dataclass, field
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -316,6 +318,77 @@ def _load_dpo_dataset(
         )
 
     return _to_dataset(merged), _to_dataset(eval_rows)
+
+
+@contextmanager
+def _gradient_checkpointing_paused(model) -> Iterator[None]:
+    """Turn gradient checkpointing off for the duration of a forward-only pass.
+
+    Unsloth loads this model with *offloaded* gradient checkpointing — the
+    banner reads ``Unsloth: Will smartly offload gradients to save VRAM!``. Each
+    checkpointed layer copies its hidden states to host memory and relies on a
+    backward pass to consume and free them.
+
+    ``precompute_ref_log_probs`` has no backward pass. It runs forward-only
+    under ``no_grad``, so the offloaded activations are never drained and simply
+    accumulate — measured at 65 MB per row, linear, which OOM-killed two
+    500-step runs partway through the 5,000-row split. The retained tensors are
+    identifiable by arithmetic: CPU bfloat16 with element counts that divide
+    exactly by ``2 * hidden_size`` (e.g. 34,276,352 = 2 x 6,086 tokens x 2,816).
+    See CLAUDE.md R19 and docs/dpo_memory_ceiling_investigation.md section 11.
+
+    Checkpointing buys nothing in a pass that keeps no graph, so pausing it
+    costs no memory and removes the leak.
+
+    **The per-module flag is not enough.** Unsloth installs this offload by
+    replacing ``torch.utils.checkpoint.CheckpointFunction``, below the flag that
+    HF and TRL consult, so pausing the flag alone leaves the leak untouched —
+    measured at 65.3 MB/row with the flag paused, while the global
+    ``CPU_BUFFERS`` pool grew from 200 buffers / 4.36 GB to 735 / 33.49 GB,
+    matching the retained-tensor total to the decimal. So this also calls
+    ``unpatch_unsloth_smart_gradient_checkpointing()`` and restores it on exit.
+
+    **Flips only the per-module flag, never the hook.** Clearing
+    ``_gradient_checkpointing_func`` instead — which is what
+    ``from_pretrained(use_gradient_checkpointing=False)`` does — leaves the flag
+    set and the first forward dies with ``AttributeError:
+    'Gemma4TextDecoderLayer' object has no attribute
+    '_gradient_checkpointing_func'``. Keeping the hook also preserves Unsloth's
+    own implementation for training rather than replacing it with the stock one,
+    which ``gradient_checkpointing_enable()`` would do.
+
+    Restores each module's prior value, so a model loaded without checkpointing
+    does not come out of the block with it switched on.
+    """
+    # Unsloth installs its offload BELOW the per-module flag, by replacing
+    # torch.utils.checkpoint.CheckpointFunction, so the flag loop below does
+    # not reach it — and neither does TRL's own `disable_gradient_checkpointing`
+    # guard inside `compute_ref_log_probs`. This is the switch that does.
+    unpatched = False
+    try:
+        from unsloth_zoo.gradient_checkpointing import (
+            patch_unsloth_smart_gradient_checkpointing,
+            unpatch_unsloth_smart_gradient_checkpointing,
+        )
+    except Exception:  # noqa: BLE001 - a non-Unsloth env must still work
+        patch_unsloth_smart_gradient_checkpointing = None
+        unpatch_unsloth_smart_gradient_checkpointing = None
+    if unpatch_unsloth_smart_gradient_checkpointing is not None:
+        unpatch_unsloth_smart_gradient_checkpointing()
+        unpatched = True
+
+    paused = []
+    for module in model.modules():
+        if getattr(module, "gradient_checkpointing", False):
+            paused.append(module)
+            module.gradient_checkpointing = False
+    try:
+        yield
+    finally:
+        for module in paused:
+            module.gradient_checkpointing = True
+        if unpatched and patch_unsloth_smart_gradient_checkpointing is not None:
+            patch_unsloth_smart_gradient_checkpointing()
 
 
 def _dpo_trainer_kwargs(
@@ -650,13 +723,19 @@ def train_dpo(config_path: Path) -> DPOResult:
         )
 
     trainer_config = config_cls(**trainer_kwargs)
-    trainer = trainer_cls(
-        model=model,
-        args=trainer_config,
-        train_dataset=train_ds,
-        eval_dataset=eval_ds,
-        processing_class=tokenizer,
-    )
+    # The trainer's __init__ is where `precompute_ref_log_probs` runs, and that
+    # pass is forward-only. Unsloth's offloaded checkpointing would copy every
+    # layer's hidden states to host memory with no backward pass to free them —
+    # 65 MB per row, which OOM-killed two 500-step runs. Nothing in __init__
+    # needs checkpointing, so pause it here and let training have it back.
+    with _gradient_checkpointing_paused(model):
+        trainer = trainer_cls(
+            model=model,
+            args=trainer_config,
+            train_dataset=train_ds,
+            eval_dataset=eval_ds,
+            processing_class=tokenizer,
+        )
 
     callbacks = []
     if monitoring_cfg.get("reward_hacking_detector", False):

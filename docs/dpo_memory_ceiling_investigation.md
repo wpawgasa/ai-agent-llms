@@ -501,3 +501,72 @@ the run reached row 3,277 instead of 2,222 — and the leak continued. Check
   path.
 - **Give the sampler a floor.** A `MemAvailable` threshold that kills the run
   turns a machine-wide outage into a diagnostic that ends by itself.
+
+
+---
+
+## 11. The leak, found and fixed
+
+**2026-08-29.** The 64 MB/row leak in section 10 is Unsloth's global
+`CPU_BUFFERS` pool, and it is fixed.
+
+### What it is
+
+`Unsloth_Offloaded_Gradient_Checkpointer.forward` copies each layer's hidden
+states to host memory (`unsloth_zoo/gradient_checkpointing.py:162`) and holds
+them in a module-level `CPU_BUFFERS` list. Censused live inside a real run:
+
+| sample | CPU_BUFFERS | its size | retained hidden-state tensors | RSS |
+|--------|-------------|----------|-------------------------------|-----|
+| 1 | 200 | 4.36 GB | 4.34 GB | 9.0 GB |
+| 3 | 278 | 12.73 GB | 12.73 GB | 20.6 GB |
+| 5 | 461 | 21.09 GB | 21.14 GB | 32.3 GB |
+| 8 | **735** | **33.49 GB** | **33.49 GB** | 50.0 GB |
+
+The two totals agree to the decimal at every sample. Buffers are both resized
+and appended — a new one is allocated whenever none fits the current sequence
+length — so 5,000 rows of varying lengths bound nothing.
+
+### Why the obvious fix does not work
+
+Unsloth installs the offload by replacing
+`torch.utils.checkpoint.CheckpointFunction`, **below** the per-module
+`gradient_checkpointing` flag. Pausing that flag measured **65.3 MB/row** —
+unchanged. The same blind spot explains why TRL's own guard is ineffective
+here: `compute_ref_log_probs` already wraps its forward in
+`with torch.no_grad(), disable_gradient_checkpointing(...)`, and Unsloth's
+compiled copy carries that guard verbatim. Both miss the real switch.
+
+### The fix
+
+`training/dpo.py::_gradient_checkpointing_paused` calls
+`unpatch_unsloth_smart_gradient_checkpointing()` on entry and restores it in
+the `finally` block, wrapping the trainer construction where the precompute
+runs. Restoring on failure matters — a precompute that raises must not leave
+training running without its offload.
+
+Measured on the real runner, same config and data:
+
+| | leak rate | RSS at row ~900 |
+|---|-----------|-----------------|
+| before | 65.00 MB/row | 60.4 GB, climbing |
+| **after** | **0.00 MB/row** | **3.0 GB, flat rows 104-922** |
+
+Cover: `tests/unit/test_dpo_precompute_checkpointing.py`, 10 tests. Three of
+them fail against the flag-only version, so the ineffective fix cannot return.
+
+### How it was found, and how long it should have taken
+
+Three hypotheses were refuted by measurement before the instrument was built:
+pinned host buffers (65 MB/row with pinning off), W&B (65 MB/row with it
+disabled — the supporting correlation was confounded, because every
+`--no-wandb` run was also a short run), and the per-module checkpointing flag.
+
+`scripts/diagnose_precompute_leak.py` settled it. Its first mode reconstructs
+the precompute loop by hand and censuses live tensors between rows; that
+version **does not leak at any scale**, which is the result that finally
+pointed at the caller rather than the forward pass. Its `--real` mode censuses
+from a thread inside the actual `train_dpo` call and names the owning object.
+
+The lesson is cheap to state: the reconstruction answered "does my version
+leak?", which was never the question. Instrument the real path first.
