@@ -420,3 +420,84 @@ rather than blocking a run on a failed introspection. Cover:
 Note `unsloth_compiled_cache/` inlines TRL's source into
 `UnslothDPOTrainer.py`, so it must be deleted whenever TRL changes underneath
 it — otherwise the old trainer keeps running from cache.
+
+---
+
+## 10. The host-memory leak in the reference-logprob precompute
+
+**Measured 2026-08-29.** Two attempts at the real 500-step run were killed by
+the kernel OOM killer, both during `precompute_ref_log_probs`, neither during
+training. The cause is a leak proportional to rows processed.
+
+### The measurement
+
+Sampling the training PID's `VmRSS` against the precompute's own row counter,
+every 15 s:
+
+| row | resident | available |
+|-----|----------|-----------|
+| 2,383 | 154.1 GB | 52.0 GB |
+| 2,404 | 155.4 GB | 50.7 GB |
+| 2,425 | 156.8 GB | 50.4 GB |
+| 2,448 | 158.1 GB | 49.0 GB |
+| 2,471 | 159.6 GB | 47.5 GB |
+| 2,493 | 161.0 GB | 46.1 GB |
+
+**64 MB per row**, linear over 110 consecutive rows. Projected across the
+5,000-row train split that is ~320 GB, against a 216 GB machine.
+
+### It explains every observation
+
+- Both kills landed in precompute, never in a training step.
+- The kill point **moved with available memory**: row 2,222 while 61 GB of
+  `/dev/shm` was occupied, row 3,277 after that was freed. A fixed-size
+  allocation would have failed at the same row both times.
+- Rows slowed from 1.6/s to 177 s then 279 s before each kill — the kernel
+  swapping before it gave up. `Killed` with no traceback is SIGKILL, so no
+  Python error is ever written.
+- Memory returns in full when the process exits, so it is process-local.
+
+### What it is not
+
+`DPOTrainer._precompute_ref_logps` appends `ref_chosen_logp.cpu()` and
+`ref_rejected_logp.cpu()` per batch — two scalars, ~40 KB across the whole
+split. Reading that loop and concluding the precompute was innocent was a
+mistake: the leak is in the data path around it, not in the accumulator.
+
+**One suggestive number, not a finding.** 64 MB is close to a logits slice over
+a typical completion at this vocabulary: 128 tokens x 262,144 x 2 bytes =
+67 MB. That would point at per-row logits being retained rather than freed. It
+is unverified.
+
+### First hypothesis to test
+
+`dpo.py` never sets `dataloader_pin_memory`, so HF's default `True` applies.
+Pinned host buffers are cached by size and not returned to the OS, and the
+collator pads to the longest row in each batch, so every distinct length can
+add a block. One line to falsify: run the precompute with pinned memory off and
+re-measure the slope over ~500 rows.
+
+### The `/dev/shm` confound, and the correction it forced
+
+`/dev/shm` is tmpfs and therefore RAM. It held **61 GB** of stale
+`flashtalk_models` / `flashtalk-sol-env` caches owned by another user, dated
+three weeks earlier, mapped by no process. Every run started with 154 GB
+available instead of 215 GB. Removing them (2026-08-29, with the owner's
+agreement) restored 61 GB and drained swap to zero.
+
+**That was not the fix, and calling it one was wrong.** It bought headroom —
+the run reached row 3,277 instead of 2,222 — and the leak continued. Check
+`du -sh /dev/shm/*` before blaming the trainer, but do not stop there.
+
+### Tooling notes, learned the hard way
+
+- **Sample an explicit PID.** Three samplers in a row reported "process gone"
+  against a healthy run: one started before the process existed, one used a
+  `pgrep -f` pattern containing `(`, which is an ERE metacharacter and silently
+  matches nothing, and one matched the checking shell itself.
+- **`nvidia-smi --query-compute-apps` is the reliable liveness check**, not
+  `pgrep` on a command-line fragment. The runner launches training through a
+  `train_once` shell function, so the process is `python3 -c`, not the venv
+  path.
+- **Give the sampler a floor.** A `MemAvailable` threshold that kills the run
+  turns a machine-wide outage into a diagnostic that ends by itself.
