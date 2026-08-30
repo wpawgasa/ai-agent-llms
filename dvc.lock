@@ -373,3 +373,40 @@ stages:
       hash: md5
       md5: b48fe2140f35da9d8f5efa546d595438
       size: 936556
+  task_a_dpo_gemma4_26b_a4b:
+    cmd: ./scripts/run_phase2_dpo.sh --dpo-config 
+      configs/training/dpo_cat_a.yaml --skip-pairs --chunk-steps 100
+    deps:
+    - path: checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 50ed6597b51c313f06231ec6f13653d0.dir
+      size: 563078376
+      nfiles: 48
+    - path: configs/training/dpo_cat_a.yaml
+      hash: md5
+      md5: 937dcbdcccb6870766dc8a442db812a1
+      size: 8795
+    - path: data/output/preference/task_a/cap6144
+      hash: md5
+      md5: 0a9e6012490473d74baaf19b378fae80.dir
+      size: 151494575
+      nfiles: 3
+    - path: scripts/dpo_guardrail_decide.py
+      hash: md5
+      md5: ba3237aca56d4468591e1d45895aae6f
+      size: 4354
+    - path: scripts/run_phase2_dpo.sh
+      hash: md5
+      md5: 416966bde1ac5d76b667817fd0a6d84a
+      size: 16790
+      isexec: true
+    - path: src/llm_workflow_agents/training/dpo.py
+      hash: md5
+      md5: ede05584729174d3c73ff3045982d050
+      size: 41809
+    outs:
+    - path: checkpoints/dpo_cat_a/gemma-4-26B-A4B-it
+      hash: md5
+      md5: 26f90ec951f8552a1b0517c2cbeb42c7.dir
+      size: 690510834
+      nfiles: 51
