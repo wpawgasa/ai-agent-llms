@@ -377,6 +377,46 @@ stages:
   # Phase 2 — GRPO RL fine-tuning
   # ---------------------------------------------------------------------------
 
+  task_a_dpo_gemma4_26b_a4b:
+    # FROZEN. `dvc repro` skips this stage. Its cmd is a multi-hour GPU run,
+    # and the weights on disk did NOT come from one clean invocation — see the
+    # desc. Do not unfreeze without reading CLAUDE.md R22.
+    frozen: true
+    desc: >-
+      FROZEN — Phase 2 preference learning (DPO) on the C2 checkpoint, 500
+      steps in five 100-step chunks with the R5 held-out guardrail scored
+      BETWEEN chunks in a separate process (CLAUDE.md R19, R22).
+
+      RESULT: a null result. checkpoint-400 scores 0.7566 on the pinned
+      206-row contamination-free set against C2's 0.7595, and 199 of those 206
+      rows are byte-identical. The preference pairs are too easy — training
+      loss reached 0.0035 — so the DPO gradient vanishes. C2 remains the best
+      Cat A checkpoint. See docs/cat_a_dpo_null_result.md.
+
+      THE cmd BELOW IS RECORDED FOR PROVENANCE, NOT REPRODUCTION. These
+      weights came from TWO invocations: the first was interrupted at chunk 3
+      and the second resumed from checkpoint-200. `save_total_limit: 3` then
+      pruned checkpoint-100 and checkpoint-200, so the directory holds only
+      300/400/500. The faithful record is the ten frozen_dpo_config_*.yaml
+      files beside train.log, from both invocations.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_dpo_gemma4_26b_a4b
+          dvc push  task_a_dpo_gemma4_26b_a4b
+    cmd: >-
+      ./scripts/run_phase2_dpo.sh
+      --dpo-config configs/training/dpo_cat_a.yaml
+      --skip-pairs --chunk-steps 100
+    deps:
+      - scripts/run_phase2_dpo.sh
+      - scripts/dpo_guardrail_decide.py
+      - src/llm_workflow_agents/training/dpo.py
+      - configs/training/dpo_cat_a.yaml
+      - data/output/preference/task_a/cap6144
+      - checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+    outs:
+      - checkpoints/dpo_cat_a/gemma-4-26B-A4B-it
+
   task_a_grpo_gemma4_26b_a4b:
     desc: >-
       Phase 2 GRPO — Gemma-4 26B-A4B-it RL fine-tune seeded from the
