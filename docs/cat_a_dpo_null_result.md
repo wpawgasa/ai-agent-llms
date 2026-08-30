@@ -90,6 +90,53 @@ it.
 **Harder negatives, not more steps.** More steps on separable pairs adds
 nothing: the gradient is already ~0.
 
+### RESOLVED 2026-08-30 — the negatives were there, the sampler never took them
+
+R18's open question is settled, and the answer is not the split effect.
+`scripts/investigate_mining_yield.py` Probe 2, run on **both** splits with
+identical flags so only `--split` varies:
+
+| | TRAIN | VALIDATION |
+|---|-------|------------|
+| rows scored | 346 | 279 |
+| tool-bearing rows found | **46** | **6** |
+| wrong rate, tool-bearing | **67.4%** (31/46) | 83.3% (5/6, n too small) |
+| wrong rate, no-tool | 6.0% | 4.0% |
+| aggregate wrong rate | 14.2% | 5.7% |
+| **tool share realised** | **0.13** | **0.02** |
+
+Reference: held-out audit 38.0% tool-bearing; first mining run 12.8% aggregate.
+
+**The split effect is refuted, in the opposite direction.** C2 is wrong on
+67.4% of tool-bearing TRAIN rows — *higher* than the 38.0% held-out figure, not
+lower, so "train is easier because it was memorised" does not hold. (`_classify`
+is ~1.4 points stricter than the composite per Probe 1, and n=46 gives roughly
++/-7 points; neither closes a gap that large or reverses its sign.)
+
+**The 12.8% vs 38.0% gap was sample composition.** `--tool-share 0.75` was not
+achievable: 0.13 realised on train, 0.02 on validation. The 12.8% was an
+aggregate over a sample that was 87% easy no-tool rows at 6% wrong, diluting a
+tool-bearing rate of 67.4%.
+
+**Cause, one line in `_select_prompts`.** It deduped to one row per
+conversation by keeping whichever turn it met first and `continue`-ing past the
+rest. A conversation's opening assistant turn is almost never a tool call, so
+`tool_rows` was starved before `tool_share` was ever applied. Fixed by
+preferring a conversation's tool-bearing turn; on the real corpus the realised
+share goes **0.13 -> 0.90 on train and 0.02 -> 1.00 on validation**, and train
+now returns the full 300 tool-bearing rows requested. (It returns 333 of 400
+because only 33 of 2,558 conversations contain no tool call at all.)
+
+**So hard negatives are abundant.** At 67.4% wrong on 300 tool-bearing prompts,
+a re-mine should yield roughly **200 negatives against the first run's 51** —
+and they are the on-distribution errors that R18 asked for, not synthetic
+corruptions. That is a direct attack on this document's section 2: the pairs
+were too easy because the hard ones were never sampled.
+
+Re-mining and a second DPO attempt are the next step. The mined negatives that
+produced this null result came from the old sampler and should be regenerated,
+not reused.
+
 The blocking question is R18's open one — `scripts/mine_model_negatives.py`
 found C2 wrong on only **12.8%** of TRAIN prompts (51 of 399) while the
 held-out audit measures **38.0%** on TEST. The classifier-effect explanation is
