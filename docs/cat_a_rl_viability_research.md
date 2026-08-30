@@ -129,6 +129,67 @@ are worth starting.
 
 ---
 
+## 6b. Does this mean we need to generate more data?
+
+**Not yet. Selection first.** The RL problem was never volume.
+
+| | |
+|---|---|
+| train turn rows | 27,056 |
+| **tool-bearing rows** | **9,771 (36.1%)** |
+| no-tool rows | 17,285 (63.9%) |
+
+C2 is wrong on roughly 22% of tool-bearing turns (67 negatives from 333
+mostly-tool-bearing prompts, 2026-08-30). Applied to 9,771 rows that is on the
+order of **2,000 rows where C2 already errs**, before generating anything. We
+fed the trainer all 27,056 rows and 63.9% of them cannot produce a gradient.
+
+Generating before measuring the pass rate would repeat the mistake this
+document records: acting at the wrong level. Run step 1 of section 6 first.
+
+### If generation is needed, the lever is complexity, not volume
+
+The corpus is skewed shallow:
+
+| level | share | `chain_depth` | `num_tools` |
+|-------|-------|---------------|-------------|
+| L1-L3 | **67.3%** | 0-2 | 1-4 |
+| L4-L5 | 32.7% | 3-4 | 6-7 |
+
+The residual failure is **argument fidelity** — 18 of 71 right-tool-wrong-args,
+0 wrong tool names (R17). Wrong arguments come from carrying values across a
+tool chain, and `chain_depth` is that knob. Two-thirds of the corpus has a
+chain depth of 2 or less.
+
+So the target is **L4/L5-heavy generation**, not more conversations.
+
+**Validate a generated batch by pass rate, not by volume.** More easy data makes
+the RL signal worse. The acceptance test is "does C2 fail on it sometimes",
+which is only knowable by generating and then measuring.
+
+### Voice stays out of this experiment
+
+Voice is a different capability axis — chunking, barge-in, `<S>` markers. It
+does not make tool arguments harder, which is where the errors are. Three
+reasons from R20 not to mix it in:
+
+1. The held-out audit must report text and voice **separately and never
+   blended**. The pinned 206-row set behind C2's 0.7595 is text-only; blending
+   destroys the only measuring stick tied to that number.
+2. Adding rows to an existing modality group reshuffles that group's split
+   assignment. A merge needs `split_task_a_sft.py --assert-unmoved` and a
+   rebuild of the pinned set.
+3. Voice requires the `response_only` loss recipe, because `all_tokens` cannot
+   honour the per-message `loss: false` flag on barge-in turns.
+
+**One open, measurable question:** under the tool-call stay convention almost
+every self-loop turn is a silent tool-call turn, so a voice corpus may carry a
+*higher* tool-bearing turn density than text. That is one CPU pass to check
+once a voice corpus exists. It is not a reason to entangle voice with the RL
+work now.
+
+---
+
 ## 7. Prevention
 
 Log `frac_reward_zero_std` and a pass-rate histogram **before** the first
