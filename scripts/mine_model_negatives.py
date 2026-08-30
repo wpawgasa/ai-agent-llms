@@ -59,33 +59,60 @@ from llm_workflow_agents.data.heldout_clean_set import (  # noqa: E402
 def _select_prompts(
     data_dir: Path, split: str, n: int, tool_share: float, seed: int
 ) -> list[dict[str, Any]]:
-    """Pick N unique-conversation rows, over-weighting tool-bearing turns."""
+    """Pick N unique-conversation rows, over-weighting tool-bearing turns.
+
+    One row per conversation, and when a conversation contains a
+    tool-bearing turn that is the turn kept — see the note in the body.
+    """
     from llm_workflow_agents.training.grpo import _load_grpo_jsonl
 
     ds = _load_grpo_jsonl(data_dir, split=split)
-    seen: set[str] = set()
-    tool_rows: list[dict[str, Any]] = []
-    other_rows: list[dict[str, Any]] = []
+    # One row per conversation, PREFERRING a tool-bearing turn.
+    #
+    # Dedupe by the conversation's opening user turn so we never pick two
+    # adjacent turns of one conversation — near-duplicate prompts would inflate
+    # the apparent error count without adding information. But *which* turn is
+    # kept matters: this used to keep whichever turn came first and skip the
+    # rest, and a conversation's opening assistant turn is almost never a tool
+    # call. `tool_rows` was therefore starved before `tool_share` was applied —
+    # measured at a realised share of 0.13 on train and 0.02 on validation
+    # against a 0.75 target (CLAUDE.md R22 follow-up).
+    #
+    # That is why the first mining run reported C2 wrong on only 12.8% of
+    # prompts: the sample was 87% easy no-tool rows at 6% wrong, diluting a
+    # tool-bearing rate of 67.4%. The hard, on-distribution negatives were in
+    # the data and never sampled.
+    #
+    # Insertion order is preserved and the lists are shuffled with `seed`
+    # below, so selection stays deterministic.
+    by_conv: dict[str, dict[str, Any]] = {}
     for i in range(len(ds)):
         row = ds[i]
-        # Dedupe by the conversation's opening user turn so we never pick two
-        # adjacent turns of one conversation — near-duplicate prompts would
-        # inflate the apparent error count without adding information.
         prompt = row["prompt"]
         first_user = next(
             (m.get("content", "") for m in prompt if m.get("role") == "user"), ""
         )
-        if first_user in seen:
-            continue
-        seen.add(first_user)
         gt = json.loads(row["ground_truth"])
+        has_tool = bool(gt.get("tool_calls"))
         # `_generate_for_checkpoint` keys on "prompt_messages" (the shape
         # `_sample_prompts` emits), not the loader's "prompt".
         entry = {
             "prompt_messages": row["prompt"],
             "ground_truth": row["ground_truth"],
         }
-        (tool_rows if gt.get("tool_calls") else other_rows).append(entry)
+        kept = by_conv.get(first_user)
+        if kept is None:
+            by_conv[first_user] = {"entry": entry, "has_tool": has_tool}
+        elif has_tool and not kept["has_tool"]:
+            # Upgrade: this conversation does have a tool-bearing turn.
+            by_conv[first_user] = {"entry": entry, "has_tool": True}
+
+    tool_rows: list[dict[str, Any]] = [
+        v["entry"] for v in by_conv.values() if v["has_tool"]
+    ]
+    other_rows: list[dict[str, Any]] = [
+        v["entry"] for v in by_conv.values() if not v["has_tool"]
+    ]
 
     rng = random.Random(seed)
     rng.shuffle(tool_rows)

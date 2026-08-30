@@ -1,0 +1,25 @@
+{
+  "train_wrong_rate": 0.128,
+  "heldout_composite_wrong_rate": 0.38,
+  "split_effect_probe": {
+    "probe": "split_effect",
+    "split": "validation",
+    "n_prompts_sampled": 285,
+    "n_scored": 279,
+    "n_wrong": 16,
+    "wrong_rate": 0.05734767025089606,
+    "by_kind": {
+      "model_state_error": 11,
+      "model_no_tool_call": 4,
+      "model_wrong_args": 1
+    },
+    "n_tool_bearing": 6,
+    "n_wrong_tool_bearing": 5,
+    "wrong_rate_tool_bearing": 0.8333333333333334,
+    "n_no_tool": 273,
+    "n_wrong_no_tool": 11,
+    "wrong_rate_no_tool": 0.040293040293040296,
+    "tool_share_requested": 0.75,
+    "tool_share_scored": 0.021505376344086023
+  }
+}
