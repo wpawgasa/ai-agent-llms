@@ -1,10 +1,15 @@
-# Generation runbook: +1,500 voice, +1,500 harder (L4/L5)
+# Generation runbook: +3,000 voice, +1,500 harder (L4/L5)
 
 **For a machine with teacher-model API access.** Generation needs no GPU and no
 existing corpus. It writes new files only; nothing is overwritten.
 
-Target after the merge: about 8,500 conversations, roughly 45% L4/L5 and 18%
+Target after the merge: about 10,000 conversations, roughly 45% L4/L5 and 30%
 voice, up from 5,543 conversations at 32.5% L4/L5 and no voice.
+
+The 30% voice share matches `DEFAULT_VOICE_WEIGHT = 0.30`, the weight
+`blend_modality_scores` already uses for the Phase 1 voice stratum (R20). Voice
+conversations carry complexity levels too, so the 3,000 voice rows contribute
+about 1,200 of the L4/L5 total.
 
 ---
 
@@ -55,11 +60,11 @@ will not hold it on 1,500.
 
 ---
 
-## 2. Voice batch — 1,500 conversations
+## 2. Voice batch — 3,000 conversations
 
 ```bash
 ./scripts/generate_voice_data.sh \
-    --total 1500 \
+    --total 3000 \
     --teacher-model gemini-3.5-flash \
     --barge-in-rate 0.25 \
     --max-placeholder-share 0.10
@@ -68,8 +73,8 @@ will not hold it on 1,500.
 - writes to `data/output/sft/task_a_voice/`
 - seed defaults to **4242**, deliberately different from the text corpus seed of
   42 so the two batches draw different domains and workflows
-- `--total 1500` overrides the per-leg table with a uniform count: 15 legs
-  (5 levels x 3 languages), so 100 per leg
+- `--total 3000` overrides the per-leg table with a uniform count: 15 legs
+  (5 levels x 3 languages), so 200 per leg
 - the quality gate **fails the run** above a 10% placeholder share. Do not pass
   `--skip-gate` on a paid run.
 
@@ -126,7 +131,7 @@ PY
 python3 scripts/check_voice_batch.py data/output/sft/task_a_voice
 ```
 
-Expect roughly 1,500 new L4/L5 rows and 1,500 voice rows. `check_voice_batch.py`
+Expect roughly 1,500 new L4/L5 rows and 3,000 voice rows. `check_voice_batch.py`
 warns where the teacher was asked for a barge-in and did not deliver one; a
 modest gap is normal, a total absence is not.
 
@@ -146,7 +151,7 @@ Preferred, if the machine has the GCS credentials:
 ```bash
 dvc add data/output/sft/task_a data/output/sft/task_a_voice
 dvc push
-git add -A && git commit -m "data: +1500 voice, +1500 L4/L5" && git push
+git add -A && git commit -m "data: +3000 voice, +1500 L4/L5" && git push
 ```
 
 Otherwise archive both directories and transfer them.

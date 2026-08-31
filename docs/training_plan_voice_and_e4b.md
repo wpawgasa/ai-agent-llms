@@ -39,7 +39,7 @@ print("voice rows:", v)
 PY
 ```
 
-Expect roughly 7,000 text rows (5,543 existing plus 1,500 new L4/L5) and 1,500
+Expect roughly 7,000 text rows (5,543 existing plus 1,500 new L4/L5) and 3,000
 voice rows.
 
 ---
