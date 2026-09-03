@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "1d1bdf3f5830",
+  "strategy": "manual-commit",
+  "branch": "data/task-a-corpus-v3",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "dvc.lock"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1d/1bdf3f5830/0/metadata.json",
+      "transcript": "/1d/1bdf3f5830/0/full.jsonl",
+      "content_hash": "/1d/1bdf3f5830/0/content_hash.txt",
+      "prompt": "/1d/1bdf3f5830/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 138,
+    "cache_creation_tokens": 349410,
+    "cache_read_tokens": 20125545,
+    "output_tokens": 76019,
+    "api_call_count": 69
+  }
+}

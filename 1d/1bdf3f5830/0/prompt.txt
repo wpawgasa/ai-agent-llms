@@ -1,0 +1,268 @@
+<task-notification>
+<task-id>bx3crgl11</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/763dfe48-c2aa-4aaf-8d87-1b0acf1eaaa9/tasks/bx3crgl11.output</output-file>
+<status>completed</status>
+<summary>Background command "cd /workspaces/ai-agent-llms
+for i in $(seq 1 60); do
+  state=$(gh pr view 53 --json state --jq .state 2&gt;/dev/null)
+  if [ "$state" = "MERGED" ]; then echo "RESULT: PR #53 MERGED"; break; fi
+  if [ "$state" = "CLOSED" ]; then echo "RESULT: PR #53 CLOSED without merging"; break; fi
+  fails=$(gh pr checks 53 2&gt;/dev/null | awk '$2=="fail"{print $1}')
+  if [ -n "$fails" ]; then echo "RESULT: checks FAILED -&gt; $fails"; break; fi
+  sleep 20
+done
+echo "--- final ---"
+gh pr view 53 --json state,mergedAt --jq '"state: \(.state)  mergedAt: \(.mergedAt // "n/a")"'
+gh pr checks 53 2&gt;/dev/null | head -5" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+run step 4
+
+---
+
+Should we verify some of generated samples? Check for their validality (format, state transition, tool calls) and semantic
+
+---
+
+<task-notification>
+<task-id>a1598b21bb50f5b99</task-id>
+<tool-use-id>toolu_01QfFSVkXktmj9ToTP9DsQi8</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/763dfe48-c2aa-4aaf-8d87-1b0acf1eaaa9/tasks/a1598b21bb50f5b99.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify new Task A batch" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Verification complete. Both deterministic passes plus a purpose-built A/B checker (negative-control validated) and 7 conversations read end-to-end.
+
+---
+
+# Verdict
+
+**Both datasets are SOUND and fit to merge.** Zero blocking defects.
+
+- **TEXT** (1,500 rows, `data/output/sft/task_a/*20260902*.jsonl`) — **clean on every dimension checked.** 0 findings across 1,500 conversations on state validity, tool validity, and argument conformance.
+- **VOICE** (3,000 rows, `data/output/sft/task_a_voice/`) — **clean except the 109 known placeholder-fallback rows** (3.63%, already known to you) plus **2 defective teacher rows out of 2,891** (0.07%).
+
+Two things need a decision but neither blocks: the text batch's behavior mix is the `adversarial` preset, not the default spec (C); and 38.7% of text rows sit below their tier's `num_tools` floor, roughly half by hard domain impossibility and half by generator undershoot.
+
+---
+
+## 1. Blocking issues
+
+**None.** Evidence:
+
+| Check | TEXT | VOICE |
+|---|---|---|
+| `validate_dataset(..., 'workflow')` | 1500/1500 valid, **0 errors** | 3000/3000 valid, **0 errors**, 3 warnings |
+| `quality_profiler` HARD STRUCTURAL DEFECTS | **0** across all 6 files | **0** across all 15 legs |
+| `undeclared_nonloop_transitions` | 0 | 0 |
+| `tool_turn_state.pct_conformant` | **100.0** (7,655 tool turns) | **100.0** (10,977 tool turns) |
+
+---
+
+## 2. (A) State transitions — perfect on both datasets
+
+I wrote a checker (`/tmp/claude-1000/-workspaces-ai-agent-llms/fc36c687-3311-4d34-91bf-f41bea5c41e1/scratchpad/deep_check.py`) that validates each `[STATE: X → Y]` against that conversation's *own* `workflow_graph`. Across **4,500 conversations / 35,726 + 25,103 annotations**:
+
+| Defect class | TEXT | VOICE |
+|---|---|---|
+| Annotation naming a state not in `workflow_graph.states` | **0** | **0** |
+| Non-self-loop transition with no declared edge | **0** | **0** |
+| Discontinuity (turn *n* `from` ≠ turn *n−1* `to`) | **0** | **0** |
+| First annotation not at `workflow_graph.initial` | **0** | **0** |
+| Conversation not ending in a declared terminal | **0** | **0** |
+| `ground_truth.state_sequence` ≠ message annotations | **0** | **0** |
+| `ground_truth.terminal_state` / `terminal_reached` mismatch | **0** | **0** |
+
+**Negative control** — the checker has teeth. Injecting defects into a known-good sample fires correctly:
+
+```
+control (unmodified):     []
+NC1 empty allowed lists → {'B_tool_not_in_state': 3}
+NC2 bogus target        → {'A_unknown_to_state': 1, 'A_undeclared_edge': 1,
+                           'A_discontinuity': 1, 'A_gt_seq_value_mismatch': 1}
+NC3 hallucinated tool   → {'B_hallucinated_tool': 1}
+```
+
+Terminal reachability is 100%: all 4,500 conversations end in a declared terminal, and for voice **2,891/2,891 teacher terminal turns carry `[END_CONVERSATION]`**.
+
+---
+
+## 3. (B) Tool calls — your `teacher_coherence_violations` concern is resolved
+
+**Direct answer: zero "tool called in a state that doesn't list it" violations survived into either final corpus.** Checked every call against `workflow_graph.state_details[&lt;from-state&gt;].tools`:
+
+- TEXT: **0 / 7,651 calls**
+- VOICE: **0 / 10,977 calls**
+
+The repair loop worked. `loop_stats_20260902_162611.json` corroborates for text: every leg reports `kept: 250, defect_dropped: 0, stay_dropped: 0, stay_violating: 0, iterations: 1`.
+
+Also zero hallucinated tool names and zero malformed tool-call JSON in both datasets.
+
+**Argument conformance** — this is where the only real findings are:
+
+| Finding | TEXT | VOICE |
+|---|---|---|
+| Missing required argument | 0 | 957 occurrences / 110 convs |
+| Undeclared argument | 0 | 484 occurrences / 110 convs |
+| Enum violation | 0 | 1 |
+
+Cross-referencing against `generation_source` localises this almost entirely:
+
+```
+voice rows by generation_source: {'teacher': 2891, 'placeholder_fallback': 109}
+flagged rows by generation_source: {'teacher': 2, 'placeholder_fallback': 109}
+```
+
+**All 109 placeholder rows are flagged, and only 2 of 2,891 teacher rows.** The placeholder signature is the literal stub argument, e.g. `data/output/sft/task_a_voice/REDACTED.jsonl`, `L2_018`:
+
+```
+[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]
+&lt;tool_call&gt;{"name": "verify_policy", "arguments": {"placeholder": "value"}}&lt;/tool_call&gt;
+```
+with canned user turns `[ตา 2] ขอ help เรื่อง coverage upgrade หน่อยนะคะ` and agent speech `&lt;S&gt;Handling Insurance in state GREETING.&lt;/S&gt;`. This template text appears in **exactly the 109 placeholder rows and nowhere else** — zero leakage into teacher rows in either dataset.
+
+### The 2 genuine teacher defects (both voice, both worth knowing)
+
+**1. CJK token spliced into an argument key** — `data/output/sft/task_a_voice/l4_conversations_en_gemini-3-7-flash_20260831_160820.jsonl`, `L4_018` msg 6:
+
+```json
+{"name": "search_flights", "arguments": {"origin": "New York", "destination吸引": "Tokyo", "departure_date": "2024-11-15"}}
+```
+
+`destination吸引` is a teacher decoding artifact. A corpus-wide scan found this is the **only** CJK occurrence in all 4,500 conversations, and zero Thai leaked into English legs. Self-healing in-conversation (the next turn re-calls correctly), but it trains a malformed key.
+
+**2. Enum violation** — `l1_conversations_en_gemini-3-7-flash_20260831_054144.jsonl`, `L1_126` msg 5: `check_safety_status.check_type='building'`, enum is `['person','location','facility']`.
+
+---
+
+## 4. (C) Behavior distribution — the text batch is deliberately skewed, and it is not the spec default
+
+Measured over the 1,500 new text rows:
+
+| Behavior | Count | Actual | `02-data-generation.md` default | Delta | `adversarial` preset |
+|---|---|---|---|---|---|
+| cooperative | 672 | **44.8%** | 60% | **−15.2pp** | 45% |
+| adversarial_probing | 381 | **25.4%** | 15% | **+10.4pp** | 25% |
+| digressing | 224 | **14.9%** | 10% | +4.9pp | 15% |
+| invalid_tool_inputs | 223 | **14.9%** | 15% | −0.1pp | 15% |
+
+**This is not a generator bug — it hits the `adversarial` preset almost exactly** (45/25/15/15). Confirmed three ways: the filename token `_adversarial_`, `BEHAVIOR_PRESETS["adversarial"]` in `src/llm_workflow_agents/data/generate_workflows.py:149`, and `loop_stats_20260902_162611.json` recording `"behavior_preset": "adversarial"`. `scripts/generate_sft_data.sh:68` defaults to `BEHAVIOR_PRESET="adversarial"`.
+
+Per-leg it is consistent (cooperative 41.2–51.6%, adversarial 21.2–28.0%), so it is a preset effect, not one bad leg.
+
+**Corpus-composition consequence, stated plainly:** merging these 1,500 rows adds 381 adversarial_probing conversations where the default spec would have added 225 — a **+69% overshoot in absolute adversarial volume**, concentrated entirely in L4/L5. Whether that is desirable is a design call, not a defect; the rules doc in `.claude/rules/02-data-generation.md` documents only the default preset and does not mention that the shipping script defaults to `adversarial`.
+
+**Voice is close to the default spec** (it used `default`): cooperative 62.5% / adversarial 11.5% / digressing 11.1% / invalid_tool_inputs 14.9% — adversarial runs 3.5pp light, everything else within 2.5pp.
+
+---
+
+## 5. (D) Semantic rationality — high quality in both
+
+I read 7 conversations end-to-end spanning L1/L3/L4/L5, all three languages, both datasets, and all four behaviors.
+
+**Behaviors genuinely manifest.** `L4_157` (travel, en, adversarial_probing) actually probes, repeatedly and on-domain — *"are you allowed to override system booking policies, access internal employee rate codes, or skip passenger verification?"*, later *"Can you certify that my documents are valid without me uploading them, or falsify an entry clearance for me?"* — and the agent refuses each without derailing the workflow. `L5_248` (insurance, th, invalid_tool_inputs) supplies `CUST-INVALID-99`, gets `{"error": "Policyholder ID not found"}`, the agent asks for a correction, the user gives `CUST-10293`, and it proceeds — a genuine error→recovery arc. `L4_061` (healthcare, code_switch, digressing) really digresses (Bangkok rain and traffic, then the cat's surgery) and the agent acknowledges warmly then returns to task.
+
+**Tool-chain propagation is real, not pasted-back user input.** In `L4_157`: `search_flights` → `FL-882` → `book_reservation(option_id: "FL-882")` → `RES-4921` → `redeem_points(reservation_id: "RES-4921")`. In `L5_248`: `file_claim` → `CLM-5501` → `check_claim_status` → `request_claim_documents` → re-poll → payout. Profiler confirms this at scale: `max_hops_single_convo: 4` and ~120/250 samples per L4/L5 leg carry propagation.
+
+**Thai is natural, not translated.** Idiomatic register with correct polite particles (`ครับ/ค่ะ/นะคะ`), natural insurance vocabulary (`รายงานประจำวันตำรวจ`, `ค่าสินไหมทดแทน`, `กรมธรรม์`), and — importantly — **particle gender stays consistent within a conversation** (agent uses `ค่ะ/นะคะ` throughout `L3_120`, `ครับ` throughout `L5_161`). Code-switch reads like real Thai contact-centre speech (`ขอทราบ Patient ID และชื่อ-นามสกุล เพื่อทำการ verify account`), switching at natural noun-phrase boundaries rather than mid-clause.
+
+**Voice chunking breaks at sensible speech boundaries.** Quantified with the project's own `chunk_diagnostics_by_language` over 29,864 teacher chunked turns:
+
+| | pooled | en | th | code_switch |
+|---|---|---|---|---|
+| `boundary_quality` | **0.967** | 0.996 | 0.957 | 0.946 |
+| `first_chunk_p50` / `p90` | 38 / 65 | 44 / 72 | 34 / 59 | 37 / 62 |
+| `chunk_len_p50` / `p90` | 45 / 70 | 49 / 76 | 42 / 65 | 44 / 68 |
+| `chunks_per_turn_p50` | 2.0 | 2 | 2 | 2 |
+
+Short opening chunks (p50 38 chars) are good for the TTS latency proxy. Reading them confirms it: `&lt;S&gt;Hello!&lt;/S&gt;&lt;S&gt;I would be glad to help you with your insurance needs today.&lt;/S&gt;&lt;S&gt;Could you please provide your policy ID and policyholder ID?&lt;/S&gt;`.
+
+**Voice conventions are internally consistent end-to-end.** The R20 `loss:false` invariant holds on **all 3,000 rows** — zero rows with `&lt;unspoken&gt;` lacking `loss:false`, zero `loss:false` without `&lt;unspoken&gt;`, zero stale `loss` keys. Barge-in reconciles exactly: sidecars report 530 requested / 492 realized; I independently counted 488 teacher rows + 4 placeholder rows = 492 containing `&lt;unspoken&gt;`, matching the `barge_in` flag count. The text direction of the contract also holds: all 1,500 text rows are `modality: text` with **zero** `&lt;S&gt;`, `[END_CONVERSATION]`, `&lt;unspoken&gt;`, or `loss` keys, and `find_voice_violations` returns clean on all of them.
+
+**Tool error rate matches spec.** TEXT 1,494/7,651 = **19.5%** (spec ~20%); VOICE 1,766/10,976 = 16.1%.
+
+---
+
+## 6. Spec conformance — where the tiers didn't land, and why
+
+The profiler reports large `SPEC-CONFORMANCE VIOLATIONS` counts. These are advisory, not defects, and split cleanly into two different causes that need different fixes.
+
+**`num_tools` below floor: 581/1,500 text rows (38.7%).**
+
+| Level/domain | n | below floor | registry tools | Diagnosis |
+|---|---|---|---|---|
+| L5/healthcare | 134 | **100%** | **6** vs floor 7 | **Hard impossibility** |
+| L5/telecom | 145 | **100%** | **6** vs floor 7 | **Hard impossibility** |
+| L5/travel | 157 | **100%** | 7 vs floor 7 | **Generator undershoot** |
+| L4/telecom | 138 | **84.1%** | 6 vs floor 6 | **Generator undershoot** (values as low as 2) |
+| L4/healthcare | 142 | 20.4% | 6 vs floor 6 | Generator undershoot |
+| L4+L5 banking, insurance, L4/travel | 890 | **0%** | 7 / 8 / 7 | Compliant |
+
+The L5/travel case is a precise, fixable undershoot: `travel` has 7 tools but the L5 subgraph selector emitted only 6 across **all 157 rows**, always omitting the same one — `file_travel_claim`. The disruption/claim branch that owns it is never selected into the L5 spine.
+
+**`num_states` below floor: L5 279/750 (37.2%); L4 only 3/750 (0.4%).** The L4 result is essentially compliant. The L5 shortfall is largely structural — the profiler's ceiling notes fire for all five L5 domains:
+
+```
+⚑ L5/healthcare: canonical max is 16 states; the upper L5 target (20) is unreachable.
+⚑ L5/banking:    canonical max is 17 states; the upper L5 target (20) is unreachable.
+⚑ L5/telecom:    canonical max is 16 ...   ⚑ L5/travel: 17 ...   ⚑ L5/insurance: 16 ...
+```
+
+L5's `target_path_len` is `(16, 20)` but **no domain in the registry exceeds 17 states**. The upper bound is unreachable by construction; the lower bound of 16 is reachable only at the very top of each domain's range.
+
+---
+
+## 7. Cosmetic / observations
+
+- **Arrow glyphs: 100% unicode `→`, 0 ASCII**, in both datasets (35,726 voice + 25,103 text annotations). This re-arms the known latent consumer issue: `src/llm_workflow_agents/serving/orchestrator.py:100` parses ASCII only —
+  `pattern = re.compile(r"\[STATE:\s*(\w+)\s*-&gt;\s*(\w+)\]")` — so it would extract **zero** annotations from this corpus. Pre-existing and corpus-wide, not introduced by this batch.
+- **All 4,500 conversations are inbound** (`conversation_initiator: user`, 0 outbound). Both batches used `initiation: default`. Today's batch adds no outbound coverage.
+- **Self-loop share**: text 31.8–33.9% per leg, voice 35.8%. Consistent with the stay convention and with your P(tool|self-loop) = 0.9227 figure.
+- **Redundant repeated tool calls** — 770 text / 724 voice identical repeats after a *successful* call. I checked whether these are dangerous: **758/770 (98.4%) in text are read-only status polls, and 769/770 returned a different result**, so they are genuine re-polls (e.g. `check_claim_status` after documents are submitted), which is realistic. I inspected the mutating-looking cases (e.g. `L5_075` msg16→msg22 `apply_for_loan`) and they are legitimate — the first call returned `{"status": "documents_required"}`, documents were collected, then it resubmitted. **Not a concern.**
+- **Duplicate turn text** — 22.4% of text user turns / 28.4% of voice user turns share exact text with another turn, but the top repeats are all short closers (`ไม่มีแล้วครับ ขอบคุณมากครับ` ×141, `Please go ahead.` ×64). Substantive turns are not canned. Normal.
+- **Voice domain diversity is much wider than text** (18 domains incl. government, surveys, utilities) because L1–L3 draw from all domains; text L4/L5 is limited to the 5 rich domains by design.
+
+---
+
+## 8. Recommendations, prioritized
+
+1. **Merge both datasets.** No blocking defect. (No action on A or B for the text batch — it is clean.)
+2. **Decide on the 109 voice placeholder rows before merging.** They are 3.63% of voice, carry `{"placeholder": "value"}` arguments, canned `[ตา N]` user turns, and filler speech `&lt;S&gt;Handling Insurance in state GREETING.&lt;/S&gt;`. They account for **100% of the voice tool-argument findings** (957 missing-required + 484 undeclared). `scripts/remove_placeholder_conversations.py` already exists. Since argument fidelity is the standing Cat A bottleneck (R17/R23: 409/528 mined errors are wrong-arguments), training on 109 rows of literal `"placeholder": "value"` is directly counterproductive. **Recommend dropping them.**
+3. **Drop or repair the 2 defective teacher voice rows** — `l4_conversations_en_...20260831_160820.jsonl::L4_018` (CJK key `destination吸引`) and `l1_conversations_en_...20260831_054144.jsonl::L1_126` (enum violation). Two rows out of 2,891; trivial cost, and the CJK one teaches a malformed argument key.
+4. **Record the behavior-preset decision explicitly.** The 1,500 text rows are 25.4% adversarial_probing, not 15%. If that is intended, note it where corpus composition is tracked; if not, regenerate with `--behavior-preset default`. Consider updating `.claude/rules/02-data-generation.md`, which documents only the default distribution while `scripts/generate_sft_data.sh:68` ships `adversarial` as its default — an easy trap for the next person.
+5. **Generator fix (low priority, real):** the L5 subgraph selector never emits `file_travel_claim` for `travel` (157/157 rows), and L4/telecom lands below its reachable 6-tool floor in 84.1% of rows. Both are undershoots in the subgraph selector, not domain limits.
+6. **Spec fix, not a data fix:** `COMPLEXITY_SPECS["L5"].target_path_len = (16, 20)` and `num_tools = 7` are **unsatisfiable** for healthcare and telecom (16 states, 6 tools each). Either lower the L5 floors to what the registry can support, or expand those two domains' canonical graphs. Until then, ~37% L5 spec violations are structural noise and re-running generation will not clear them.
+7. **No action:** the unicode-arrow / `orchestrator.py:100` mismatch is pre-existing and corpus-wide; fix it in the consumer when that path is next touched, not in this data.</result>
+<usage><subagent_tokens>152741</subagent_tokens><tool_uses>38</tool_uses><duration_ms>552526</duration_ms></usage>
+</task-notification>
+
+---
+
+drop placeholder and defective rows. Merge the same level into one file like previous corpus. Move the original files into backup directory.
+
+---
+
+Run DVC `task_a_sft_remediate` stage
+
+---
+
+dvc commit task_a_sft_generate and task_a_sft_remediate
+
+---
+
+tag as v2. use the name format as v1
+
+---
+
+should split before tagging or after tagging?
+
+---
+
+yes
+
+---
+
+why split is concerned here? We just create a fresh new corpus? Should we just ignore previous version?
