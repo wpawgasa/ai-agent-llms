@@ -1,0 +1,107 @@
+# Cat A SFT — cell C2 recipe, on the task-a-sft-v3 corpus.
+#
+# The corpus arm of a two-arm comparison. sft_cat_a_c2.yaml trained this exact
+# recipe on task-a-sft-v2 and produced checkpoint-1767 (tag
+# sft-cat-a-c2-corpus-v2), which scored 0.7595. This file changes the corpus and
+# NOTHING else, so a difference between the two is attributable to the data.
+#
+# Every hyperparameter below is byte-identical to sft_cat_a_c2.yaml. Do not
+# "improve" any of them here. The corpus is larger and harder, which invites
+# raising the LR or the epoch count; doing so spends the experiment, and R15 and
+# R16 are both cases where a confounded comparison had to be withdrawn.
+#
+# WHAT THE CORPUS ADDS, and the confound it carries:
+#   +1,500 harder L4/L5 text (L4/L5 share 32.5% -> 46.9%)
+#   +2,889 voice conversations (a modality no Cat A run has ever trained on)
+# Two changes at once, so this arm answers "is the v3 corpus better?" and NOT
+# "which half helped". If the result is negative, run a text-only arm (v2 text
+# plus the 1,500 hard rows, no voice) to separate them. If positive, attribution
+# is optional — the ship decision is between two corpora that exist.
+#
+# HOW TO READ THE RESULT — the stored 0.7595 is NOT the baseline here. It was
+# measured on a 206-row set built from v2 test minus v1 train/validation, and
+# that set no longer reconstructs: growing the text modality group reshuffled
+# it (240 rows moved, 34 test -> train), so v3 is a new lineage, not an additive
+# batch. Score BOTH checkpoints on data/output/heldout/cat_a_v3_test_not_in_v2
+# (304 text rows, in neither train nor validation of the corpus C2 saw) and
+# compare those two numbers. Expect the re-scored v2 checkpoint to land below
+# 0.7595 — the v3 set is harder — which is a change of measuring stick, not a
+# regression.
+#
+# Voice is reported SEPARATELY and never blended into the composite (R20).
+# data/output/heldout/cat_a_v3_test_voice holds 146 voice rows. The v2
+# checkpoint never trained on voice, so its score there is not a baseline and a
+# low number is not a regression — it is a capability that did not exist.
+#
+# output_dir keeps this run off the v2 checkpoint's path (CLAUDE.md R13). That
+# path holds the 0.7595 weights; the tag sft-cat-a-c2-corpus-v2 makes an
+# overwrite recoverable, but dvc gc can still prune blobs the current lock no
+# longer references, so do not rely on recovery.
+output_dir: "sft_cat_a_c2_corpus_v3"
+
+stage: "sft"
+framework: "unsloth"
+
+model:
+  config_path: null
+
+lora:
+  # Unchanged from C2 so LoRA capacity is not a confound.
+  rank: 16
+  alpha: 16
+  dropout: 0
+  target_modules: "auto"   # ignored for Gemma-4 (toggle-flag form used)
+  freeze_router: true
+  seed: 3407
+
+training:
+  precision: "bf16"
+  learning_rate: 5.0e-5
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.05
+  per_device_train_batch_size: 1
+  effective_batch_size: 8
+  optim: "adamw_8bit"
+  weight_decay: 0.001
+  num_epochs: 3
+  # 8192 covers 99% of Task A conversations (median 4,264 / p90 6,055 / max
+  # 9,108 tokens; scripts/measure_sft_token_budget.py). Verify this landed:
+  # R16 records every Cat A SFT run before 2026-08-13 silently training at
+  # max_length 1024 because TRL renamed the kwarg. Check train.log for
+  # max_length=8192, and that loss is not 0.0, before letting the run proceed.
+  max_seq_length: 8192
+  gradient_checkpointing: true
+  packing: false
+  # Loss only on assistant spans; system/user/tool -> -100.
+  #
+  # MANDATORY on this corpus, not a preference. v3 contains voice rows whose
+  # barge-in turn carries "loss": false, and all_tokens has no per-token
+  # masking to honour it — it would train the model to emit the <unspoken>
+  # marker (R20). sft.py logs all_tokens_ignores_loss_flag if this is wrong;
+  # grep train.log for it and expect no hit.
+  loss_mask: "response_only"
+
+data:
+  # task-a-sft-v3 (tag). Expected: 53f4fee095b3824b203344075cd3fdd7.dir
+  # (3 files), 8,441 train / 992 validation / 499 test over 9,932 conversations
+  # — 7,043 text and 2,889 voice.
+  #
+  # Note this is the same PATH the v2 run recorded, with different contents.
+  # The frozen config alone can no longer identify the corpus; train.log's
+  # row counts can (v2 logged 4,711 train / 554 validation). That is R13's
+  # method and it is why the run stamp and train.log matter.
+  source: "data/output/sft/task_a_splits"
+  format: "chatml"
+  splits:
+    train: 0.85
+    val: 0.10
+    test: 0.05
+
+logging:
+  wandb_project: "llm-workflow-agents-sft"
+  save_steps: 500
+  eval_steps: 500
+  # Ranks checkpoints WITHIN this run only. eval_loss cannot rank this run
+  # against the v2 one: each scores its own validation split, and v3's is a
+  # different, larger, part-voice set. Rank arms with the held-out audit.
+  metric_for_best_model: "eval_loss"
