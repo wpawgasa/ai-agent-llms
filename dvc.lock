@@ -171,19 +171,19 @@ stages:
     deps:
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: b6ac65a4ceae2f6fceb0abb2dd727804.dir
-      size: 178497572
-      nfiles: 5
+      md5: 00064a9eb6740ae2265e507a6b1eb683.dir
+      size: 309232126
+      nfiles: 10
     - path: scripts/split_task_a_sft.py
       hash: md5
-      md5: ffc86e6669759a6db26a240011c851d9
-      size: 5581
+      md5: 3a9e4fb69bb630e22f5ae4bef0337fb4
+      size: 11654
       isexec: true
     outs:
     - path: data/output/sft/task_a_splits
       hash: md5
-      md5: 21e33e25d7bbae63e97a89029b3b4705.dir
-      size: 178497572
+      md5: 53f4fee095b3824b203344075cd3fdd7.dir
+      size: 309232126
       nfiles: 3
   task_a_sft_generate:
     cmd: ./scripts/generate_sft_data.sh
@@ -198,39 +198,44 @@ stages:
       size: 757
     - path: scripts/generate_sft_data.sh
       hash: md5
-      md5: 47c0102aacda10ae78e3965e5134b72f
-      size: 7704
+      md5: a37f1e92c8390d4f5034c91778bea319
+      size: 13871
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: 74ad560b819135ce9f16d7c8cb9558ad
-      size: 83914
+      md5: c8a690f7c36ba290199a8a66387e249f
+      size: 112011
     outs:
     - path: data/output/sft/task_a
       hash: md5
-      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
-      size: 220921413
-      nfiles: 11
+      md5: 845f97208acc07407206568d70372e33.dir
+      size: 267834176
+      nfiles: 12
   task_a_sft_clean:
     cmd: python scripts/clean_task_a_sft.py --input-dir 
-      data/output/sft/task_a_remediated --output-dir 
-      data/output/sft/task_a_cleaned --quiet && python 
+      data/output/sft/task_a_remediated --input-dir data/output/sft/task_a_voice
+      --output-dir data/output/sft/task_a_cleaned --quiet && python 
       scripts/clean_corrupted_conversations.py 
       data/output/sft/task_a_cleaned/*.jsonl --no-backup --quiet
     deps:
     - path: data/output/sft/task_a_remediated
       hash: md5
-      md5: c6e77238c17e5e55a132ce6a76771f38.dir
-      size: 178495622
+      md5: ec7f820a15e2692bb25efb0659662813.dir
+      size: 250130386
       nfiles: 5
+    - path: data/output/sft/task_a_voice
+      hash: md5
+      md5: f91745b051e916580d22b6f4f3139410.dir
+      size: 59050615
+      nfiles: 20
     - path: scripts/clean_corrupted_conversations.py
       hash: md5
       md5: ee78878bfdadd1e6a1d8e3d713cb00d2
       size: 12556
     - path: scripts/clean_task_a_sft.py
       hash: md5
-      md5: 27f2c8e55d785e1f6e56ec0121104a4e
-      size: 7212
+      md5: 572d8784da192f61ed5cf71082463ad3
+      size: 7560
     - path: src/llm_workflow_agents/data/data_validator.py
       hash: md5
       md5: ff85112aafa0ba5f9cb64a90cd5af3b1
@@ -238,9 +243,9 @@ stages:
     outs:
     - path: data/output/sft/task_a_cleaned
       hash: md5
-      md5: b6ac65a4ceae2f6fceb0abb2dd727804.dir
-      size: 178497572
-      nfiles: 5
+      md5: 00064a9eb6740ae2265e507a6b1eb683.dir
+      size: 309232126
+      nfiles: 10
   task_a_sft_remediate:
     cmd: python scripts/remediate_task_a_states.py apply --input-dir 
       data/output/sft/task_a --output-dir data/output/sft/task_a_remediated 
@@ -254,9 +259,9 @@ stages:
       nfiles: 919
     - path: data/output/sft/task_a
       hash: md5
-      md5: 7e1f23914705dff9a1d278ece4e2d90f.dir
-      size: 220921413
-      nfiles: 11
+      md5: 845f97208acc07407206568d70372e33.dir
+      size: 267834176
+      nfiles: 12
     - path: scripts/remediate_task_a_states.py
       hash: md5
       md5: e97ff7d711291eb9df51e204d8d7b56d
@@ -273,8 +278,8 @@ stages:
     outs:
     - path: data/output/sft/task_a_remediated
       hash: md5
-      md5: c6e77238c17e5e55a132ce6a76771f38.dir
-      size: 178495622
+      md5: ec7f820a15e2692bb25efb0659662813.dir
+      size: 250130386
       nfiles: 5
   task_a_sft_gemma4_26b_a4b_c2:
     cmd: ./scripts/run_phase2_sft.sh --model-config 
@@ -410,3 +415,38 @@ stages:
       md5: 26f90ec951f8552a1b0517c2cbeb42c7.dir
       size: 690510834
       nfiles: 51
+  task_a_sft_generate_voice:
+    cmd: ./scripts/generate_voice_data.sh
+    deps:
+    - path: data/templates/tool_schemas_L1_to_L5.json
+      hash: md5
+      md5: 7e2c332fee106031da5a5262858ed1c1
+      size: 10197
+    - path: data/templates/workflow_prompt_template.txt
+      hash: md5
+      md5: a04ee8e972e0bdcfde570216f2f85010
+      size: 757
+    - path: scripts/check_voice_batch.py
+      hash: md5
+      md5: d8007b3009bad358c355795a3ad1fd7c
+      size: 12684
+      isexec: true
+    - path: scripts/generate_voice_data.sh
+      hash: md5
+      md5: b1b1f36db4cbad4fb017cd0e6cf75b7a
+      size: 10528
+      isexec: true
+    - path: src/llm_workflow_agents/data/generate_workflows.py
+      hash: md5
+      md5: c8a690f7c36ba290199a8a66387e249f
+      size: 112011
+    - path: src/llm_workflow_agents/data/voice_convention.py
+      hash: md5
+      md5: 78fad20736276c4fdda682fe8063ee38
+      size: 21528
+    outs:
+    - path: data/output/sft/task_a_voice
+      hash: md5
+      md5: f91745b051e916580d22b6f4f3139410.dir
+      size: 59050615
+      nfiles: 20
