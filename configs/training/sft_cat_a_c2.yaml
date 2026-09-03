@@ -1,5 +1,33 @@
 # Cat A SFT — cell C2: response_only @ 8192, on the task-a-sft-v2 corpus.
 #
+# ============================================================================
+# STOP — THIS CONFIG NO LONGER REPRODUCES THE RUN IT DESCRIBES.
+#
+# data.source below names data/output/sft/task_a_splits. That path held
+# task-a-sft-v2 when this run happened; it now holds task-a-sft-v3 (9,932 rows
+# incl. voice). The path did not change — its contents did. So running this
+# file today trains cell C2 on v3 while writing to output_dir "sft_cat_a_c2",
+# which is where the 0.7595 weights live. Nothing in the config or the command
+# line would look different while it happened.
+#
+#   To train on v3          -> configs/training/sft_cat_a_c2_corpus_v3.yaml
+#   To reproduce THIS run   -> materialize task-a-sft-v2 out of place first:
+#       scripts/materialize_dvc_lineage.py \
+#           --dir-hash 21e33e25d7bbae63e97a89029b3b4705 --out /tmp/v2_splits
+#     then point data.source at /tmp/v2_splits. Do not restore it in place.
+#
+# An overwrite is recoverable — tag sft-cat-a-c2-corpus-v2 pins the checkpoint
+# (50ed6597b51c313f06231ec6f13653d0.dir) and dvc pull restores it — but dvc gc
+# can prune blobs the current lock no longer references, so recovery is a
+# fallback, not a plan.
+#
+# This file is a runnable config, not the provenance record. The record is
+# checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/frozen_sft_config_*.yaml beside
+# its train.log, and train.log's row counts (4,711 train / 554 validation) are
+# what actually identify the corpus — R13's method, needed precisely because
+# data.source names a path rather than a version.
+# ============================================================================
+#
 # Factorial design from docs/cat_a_loss_mask_and_truncation_analysis.md §3:
 #   C0  all_tokens    @ 4096  — the baseline (sft-gemma4-v3 on v1, v4 on v2)
 #   C1  all_tokens    @ 8192  — isolates truncation
