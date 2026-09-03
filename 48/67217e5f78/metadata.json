@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4867217e5f78",
+  "strategy": "manual-commit",
+  "branch": "config/c2-corpus-v3",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "configs/training/sft_cat_a_c2_corpus_v3.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/48/67217e5f78/0/metadata.json",
+      "transcript": "/48/67217e5f78/0/full.jsonl",
+      "content_hash": "/48/67217e5f78/0/content_hash.txt",
+      "prompt": "/48/67217e5f78/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 372,
+    "cache_creation_tokens": 1836052,
+    "cache_read_tokens": 44053283,
+    "output_tokens": 175471,
+    "api_call_count": 186
+  }
+}
