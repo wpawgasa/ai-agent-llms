@@ -128,12 +128,24 @@ print(dict(sorted(c.items())), "total", sum(c.values()))
 PY
 
 # voice batch: placeholder share and realised barge-ins
-python3 scripts/check_voice_batch.py data/output/sft/task_a_voice
+.venv/bin/python scripts/check_voice_batch.py \
+    --input-dir data/output/sft/task_a_voice
 ```
+
+`--input-dir` is required — the directory is not accepted as a positional
+argument. Use the venv interpreter, not bare `python3`: the script's imports are
+stdlib-only at the top, but it imports `find_voice_violations` from the package
+inside the function that runs the format check, so a bare `python3` gets as far
+as printing the placeholder share and then dies on `ModuleNotFoundError`.
 
 Expect roughly 1,500 new L4/L5 rows and 3,000 voice rows. `check_voice_batch.py`
 warns where the teacher was asked for a barge-in and did not deliver one; a
 modest gap is normal, a total absence is not.
+
+It scores **every** `*.stats.json` in the directory, with no date filter, so
+point it at a directory holding only the batch you mean to judge. A smoke run
+reusing an output directory from an earlier run scores both together and can
+fail a batch that is fine on its own.
 
 ---
 
