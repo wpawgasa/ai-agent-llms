@@ -1,0 +1,252 @@
+/superpowers:brainstorming read last few commits. prepare commands to generate data as instructed.
+
+---
+
+Replace gemini-3.5-flash with gemini-3.7-flash. Install tmux, then run three commands in tmux session in order.
+
+---
+
+<task-notification>
+<task-id>buv3pxj5a</task-id>
+<summary>Monitor event: "task_a generation pipeline (smoke test → voice 3000 → hard L4/L5 1500) in tmux gen_task_a"</summary>
+<event>echo '=== [1/3] voice smoke test ===' &amp;&amp; ./scripts/generate_voice_data.sh --smok
+e-test --teacher-model gemini-3.7-flash --output-dir /tmp/voice_smoke &amp;&amp; echo '=
+== [2/3] voice batch (3000) ===' &amp;&amp; ./scripts/generate_voice_data.sh --total 300
+0 --teacher-model gemini-3.7-flash --barge-in-rate 0.25 --max-placeholder-share
+0.10 &amp;&amp; echo '=== [3/3] harder batch (L4/L5, 1500) ===' &amp;&amp; .venv/bin/python scri
+-tool-stay --max-workers 8; echo "=== PIPELINE EXIT: $? ==="
+vscode ➜ /workspaces/ai-agent-llms (main) $ echo '=== [1/3] voice smoke test ===
+' &amp;&amp; ./scripts/generate_voice_data.sh --smoke-test --teacher-model gemini-3.7-fl
+ash --output-dir /tmp/voice_smoke &amp;&amp; echo '=== [2/3] voice batch (3000) ===' &amp;&amp;
+-barge-in-rate 0.25 --max-placeholder-share 0.10 &amp;&amp; echo '=== [3/3] harder batch
+(L4/L5, 1500) ===' &amp;&amp; .venv/bin/python scripts/generate_sft_until_target.py --l
+= PIPELINE EXIT: $? ==="
+=== [1/3] voice smoke test ===
+=== Voice Data Generation ===
+Output dir:    /tmp/voice_smoke
+Gate:          max placeholder share 0.10
+===========================
+--- L1 (3 samples) ---
+Traceback (most recent call last):
+ModuleNotFoundError: No module named 'llm_workflow_agents'
+=== PIPELINE EXIT: 1 ===
+== [1/3] voice smoke test ===' &amp;&amp; ./scripts/generate_voice_data.sh --smoke-test
+--teacher-model gemini-3.7-flash --output-dir /tmp/voice_smoke &amp;&amp; echo '=== [2/3
+] voice batch (3000) ===' &amp;&amp; ./scripts/generate_voice_data.sh --total 3000 --tea
+cher-model gemini-3.7-flash --barge-in-rate 0.25 --max-placeholder-share 0.10 &amp;&amp;
+echo '=== [3/3] harder batch (L4/L5, 1500) ===' &amp;&amp; python scripts/generate_sft_
+workers 8; echo "=== PIPELINE EXIT: $? ==="
+=== [1/3] voice smoke test ===
+=== Voice Data Generation ===
+Output dir:    /tmp/voice_smoke
+Gate:          max placeholder share 0.10
+===========================
+--- L1 (3 samples) ---
+on={} output_file=/tmp/voice_smoke/l1_conversations_en_gemini-3-7-flash_20260831
+require_tool_stay=True retry_budget=2 retry_exhaustion=error_path rich_prompt_c
+file=/tmp/voice_smoke/l1_conversations_en_gemini-3-7-flash_20260831_053025.stats
+.json teacher_call_failures=0 tool_error_rate=0.0 total_tool_calls=1
+on={} output_file=/tmp/voice_smoke/l1_conversations_th_gemini-3-7-flash_20260831
+require_tool_stay=True retry_budget=2 retry_exhaustion=error_path rich_prompt_c
+file=/tmp/voice_smoke/l1_conversations_th_gemini-3-7-flash_20260831_053035.stats
+.json teacher_call_failures=0 tool_error_rate=0.0 total_tool_calls=1
+MONITOR: PIPELINE EXIT line seen, stopping</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>buv3pxj5a</task-id>
+<tool-use-id>toolu_013nZzFt9XVLWqFcDqeSvFEX</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/fc36c687-3311-4d34-91bf-f41bea5c41e1/tasks/buv3pxj5a.output</output-file>
+<status>completed</status>
+<summary>Monitor "task_a generation pipeline (smoke test → voice 3000 → hard L4/L5 1500) in tmux gen_task_a" stream ended</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bnqyp7anl</task-id>
+<summary>Monitor event: "task_a generation pipeline (smoke → voice 3000 → hard L4/L5 1500) in tmux gen_task_a, post scrollback-clear"</summary>
+<event>2026-08-31 05:33:07 [warning  ] teacher_model_fallback         error="Expecting
+2026-08-31 05:33:07 [warning  ] placeholder_barge_in_no_candidate language=code_</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bnqyp7anl</task-id>
+<summary>Monitor event: "task_a generation pipeline (smoke → voice 3000 → hard L4/L5 1500) in tmux gen_task_a, post scrollback-clear"</summary>
+<event>2026-08-31 05:34:33 [warning  ] placeholder_barge_in_no_candidate language=en
+2026-08-31 05:34:42 [warning  ] teacher_model_fallback         error="Expecting</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bnqyp7anl</task-id>
+<summary>Monitor event: "task_a generation pipeline (smoke → voice 3000 → hard L4/L5 1500) in tmux gen_task_a, post scrollback-clear"</summary>
+<event>2026-08-31 05:36:08 [warning  ] teacher_model_fallback         error="Expecting
+2026-08-31 05:36:08 [warning  ] placeholder_barge_in_no_candidate language=th</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>buekkj007</task-id>
+<summary>Monitor event: "task_a pipeline: stage transitions, gate pass/fail, and real errors only (noise-reduced)"</summary>
+<event>=== Voice batch gate ===
+FAIL: 15 of 45 conversations (33.3%) came from the placeholder generator, above
+=== Voice batch gate: FAILED ===
+=== PIPELINE EXIT: 1 ===
+MONITOR: pipeline finished, see final status</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>buekkj007</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/fc36c687-3311-4d34-91bf-f41bea5c41e1/tasks/buekkj007.output</output-file>
+<status>completed</status>
+<summary>Monitor "task_a pipeline: stage transitions, gate pass/fail, and real errors only (noise-reduced)" stream ended</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bfwgtcdqa</task-id>
+<summary>Monitor event: "resumed task_a pipeline (voice 3000 -&gt; hard L4/L5 1500), real output dirs this time"</summary>
+<event>--- L3 (3 samples) ---
+--- L4 (3 samples) ---
+--- L5 (3 samples) ---
+=== Voice batch gate ===
+FAIL: 15 of 45 conversations (33.3%) came from the placeholder generator, above
+=== Voice batch gate: FAILED ===
+=== PIPELINE EXIT: 1 ===
+=== [2/3] voice batch (3000) ===
+--- L1 (600 samples) ---
+MONITOR: pipeline finished, see final status</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bfwgtcdqa</task-id>
+<tool-use-id>toolu_01M8JkR4Y3Too21EW6ThHgYj</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/fc36c687-3311-4d34-91bf-f41bea5c41e1/tasks/bfwgtcdqa.output</output-file>
+<status>completed</status>
+<summary>Monitor "resumed task_a pipeline (voice 3000 -&gt; hard L4/L5 1500), real output dirs this time" stream ended</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>br8fk8c6w</task-id>
+<summary>Monitor event: "task_a pipeline via tail -f on fresh log file (follows new output, no stale scrollback)"</summary>
+<event>--- L2 (600 samples) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+what's the progress
+
+---
+
+<task-notification>
+<task-id>br8fk8c6w</task-id>
+<tool-use-id>toolu_01KRA7eFDtytbrzKRA1pNCFw</tool-use-id>
+<status>stopped</status>
+<summary>No completion record was found for this background shell command from the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check the output file for partial results before assuming it completed.</summary>
+</task-notification>
+
+---
+
+Pause step 3 after step 2 is done
+
+---
+
+<task-notification>
+<task-id>bvks45jh8</task-id>
+<task-id>bojd1a5cc</task-id>
+<task-id>__orphan_summary__:shell</task-id>
+<status>stopped</status>
+<summary>2 background shell command task(s) from the previous session have no completion record. They may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or they may have been running when the previous Claude Code process exited. They have been marked stopped. Task ids: bvks45jh8, bojd1a5cc. Task ids in this notification beginning with "__orphan_summary" are internal scan markers, not tasks.</summary>
+</task-notification>
+
+---
+
+Run step 3 in tmux session
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+--- L4 / th (target 250) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+--- L4 / code_switch (target 250) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+--- L5 / en (target 250) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+--- L5 / th (target 250) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+--- L5 / code_switch (target 250) ---</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzyv69fn0</task-id>
+<summary>Monitor event: "step 3 harder L4/L5 batch: leg transitions, qualified counts, errors, silent-death detection"</summary>
+<event>iter 1: +250 qualified (gen 250, clean-drop 0, corruption-drop 0, defect-drop 0, stay-drop 0/0 violating) -&gt; 250/250
+=== Done ===
+Kept 1500 qualified samples across 6 legs.
+=== STEP3 EXIT: 0 ===</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+fix step-4 runbook

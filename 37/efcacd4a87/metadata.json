@@ -1,0 +1,25 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "37efcacd4a87",
+  "strategy": "manual-commit",
+  "branch": "docs/fix-generation-runbook-step4",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs/generation_plan_voice_and_hard.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/37/efcacd4a87/0/metadata.json",
+      "transcript": "/37/efcacd4a87/0/full.jsonl",
+      "content_hash": "/37/efcacd4a87/0/content_hash.txt",
+      "prompt": "/37/efcacd4a87/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 184,
+    "cache_creation_tokens": 1116339,
+    "cache_read_tokens": 14868265,
+    "output_tokens": 71130,
+    "api_call_count": 92
+  }
+}
