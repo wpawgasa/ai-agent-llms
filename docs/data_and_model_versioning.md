@@ -52,19 +52,34 @@ R12 stale-corpus bug; see CLAUDE.md).
 ## 2. Current inventory
 
 ```bash
-git tag -n1 -l 'sft-gemma4-*' 'task_a-corpus-*'    # one-line summaries
-git tag -n30 sft-gemma4-v2                          # full annotation, incl. hash
+git tag -n1 -l 'corpus/*' 'model/*'    # one-line summaries
+git tag -n40 model/sft-gemma4-c2-on-task-a-v2   # full annotation, incl. hashes
 ```
 
-| Tag | Commit | Artifact | Hash | Size |
-|---|---|---|---|---|
-| `task_a-corpus-v1-2026-07-22` | `8b0ac40` | Task A corpus, registered via `dvc commit` on a dry-run check | `3d6a4d3e…` / `6bb5eb6f…` | ~110 MB |
-| `task_a-corpus-v2-2026-07-22` | `666fe86` | Same bytes, first actually executed via `dvc repro` | `3d6a4d3e…` / `6bb5eb6f…` | ~110 MB |
-| `sft-gemma4-v2` | `b0d53f9` | ckpt-1000 baseline lineage (pre-R12 corpus) | `f89238076f…` | 980 MB, 79 files |
-| `sft-gemma4-v3` | `480ffd0` | C0 control cell (clean corpus) | `d5438dced5…` | 560 MB, 47 files |
+### Corpora
 
-`sft-gemma4-v2` was created retroactively on 2026-07-25 — it did not exist when v3 was
-registered, even though v3's own tag message referred to it.
+| Tag | Commit | Contents | Hash (`task_a_splits`) |
+|---|---|---|---|
+| `corpus/task-a-v1` | `6a50272` | 5,549 convs, all text; 4,716 / 554 / 279 | `6bb5eb6f…` |
+| `corpus/task-a-v2` | `64e98e5` | 5,543 convs, tool-call stay convention; 4,711 / 554 / 278 | `21e33e25…` |
+| `corpus/task-a-v3` | `ba7b827` | 9,932 convs (7,043 text + 2,889 voice); 8,441 / 992 / 499 | see annotation |
+
+### Models
+
+| Tag | Commit | Cell / recipe | Hash | Held-out composite |
+|---|---|---|---|---|
+| `model/sft-gemma4-v2-on-pre-r12` | `b0d53f9` | ckpt-1000 baseline, untagged corpus | `f89238076f…` | 0.7271 (different set) |
+| `model/sft-gemma4-v3-on-task-a-v1` | `480ffd0` | C0, `all_tokens` @ 4096 | `d5438dced5…` | 0.5709 |
+| `model/sft-gemma4-v4-on-task-a-v2` | `602de60` | C0, `all_tokens` @ 4096 | `57e40028fe…` | 0.5120 |
+| `model/sft-gemma4-c2-step500-on-task-a-v2` | `8ec1929` | C2 snapshot, **incomplete** | `110bb1bf2e…` | — |
+| **`model/sft-gemma4-c2-on-task-a-v2`** | `7e758da` | **C2, `response_only` @ 8192 — best** | `50ed6597b5…` | **0.7595** |
+
+The three held-out composites above are all scored on the same 206-row set and are
+comparable to each other. None is comparable to a score on the `corpus/task-a-v3` held-out
+sets — see §3.3.
+
+`model/sft-gemma4-v2-on-pre-r12` was created retroactively on 2026-07-25 — it did not exist
+when the v3 lineage was registered, even though v3's own tag message referred to it.
 
 **Untagged as of 2026-07-25:** the GRPO Cat A checkpoint lineage
 (`checkpoints/grpo_cat_a/gemma-4-26B-A4B-it`, `e9b711c1f7…`, 487 MB, 35 files,
@@ -92,16 +107,39 @@ dvc push
 dvc status --cloud          # verify: no "missing" entries for this path
 
 # 3. Tag the commit from step 1 — AFTER it exists, never before.
-git tag -a sft-gemma4-v4 -m "..."   # see §3.2 for what belongs in the message
-git push origin main sft-gemma4-v4
+git tag -a model/sft-gemma4-v5-on-task-a-v3 -F msg.txt   # see §3.2 for the message
+git push origin main model/sft-gemma4-v5-on-task-a-v3
 ```
 
 ### 3.1 Naming convention
 
-- **Models:** `sft-<family>-v<N>` / `grpo-<family>-v<N>` — monotonic, no dates. The
-  lineage number is the identity; the date lives in the annotation.
-- **Corpora:** `task_<x>-corpus-v<N>-<YYYY-MM-DD>` — dated, because corpus regenerations
-  are the thing most often correlated against a calendar.
+Three namespaces, separated by a `/` prefix so a corpus and a model can never collide:
+
+```
+corpus/<task>-v<N>                             immutable corpus bytes
+model/<stage>-<family>-<lineage>-on-<corpus>   a trained artifact
+derived/<task>-<kind>-v<N>                     derived sets (grpo, preference, heldout)
+```
+
+- **`<lineage>`** is `v<N>` for the monotonic line, or the factorial cell name where the
+  cell is the identity (`c2`). Numbers never rewind and never name two different artifacts.
+- **`-on-<corpus>`** is **mandatory** on every model tag, and names a `corpus/` tag without
+  its prefix (`-on-task-a-v2`). If the training corpus has no tag, name the era instead
+  (`-on-pre-r12`) and say in the annotation why it is untagged and whether it is still
+  recoverable.
+- **No dates in names.** Git stores `creatordate` already, and the dated scheme this
+  replaced put `2026-07-22` on two artifacts registered on different days. Dates belong in
+  the annotation body, where they can be qualified.
+- **The third namespace is `derived/`, not `data/`.** A `data/…` ref would be ambiguous with
+  the `data/` directory in every `git checkout`, `git log`, and grep — git would need a `--`
+  to tell a ref from a path. No prefix may shadow a top-level directory name.
+
+Why `-on-<corpus>` is mandatory: the previous rule made model tags corpus-agnostic and
+recorded the corpus in the annotation only. That failed twice in six weeks — `sft-gemma4-c2`
+gave no way to tell which corpus it trained on, and the fix, `sft-cat-a-c2-corpus-v2`, put a
+corpus version where readers expected a lineage number, so its own annotation had to open by
+warning against the misreading. A name that carries the corpus makes the question
+unaskable.
 
 ### 3.2 What the tag annotation must contain
 
@@ -115,6 +153,50 @@ The annotation is the only durable record. At minimum:
 - What it supersedes, and whether the predecessor is still recoverable.
 - Any **path collisions** with sibling lineages (§4).
 
+### 3.3 Migration from the pre-2026-09 names
+
+Eleven tags were created under two conflicting schemes. As of 2026-09-10 each artifact also
+carries a conforming name. **The old tags are kept, not deleted** — they are referenced from
+`CLAUDE.md`, the docs, and any clone that already fetched them, and a deleted tag is exactly
+what `dvc gc` reads as "this lineage is garbage" (§6). Use the new names for new work.
+
+| Use this | Deprecated |
+|---|---|
+| `corpus/task-a-v1` | `task-a-sft-v1`, `task_a-corpus-v1-2026-07-22`, `task_a-corpus-v2-2026-07-22` |
+| `corpus/task-a-v2` | `task-a-sft-v2` |
+| `corpus/task-a-v3` | `task-a-sft-v3` |
+| `model/sft-gemma4-v2-on-pre-r12` | `sft-gemma4-v2` |
+| `model/sft-gemma4-v3-on-task-a-v1` | `sft-gemma4-v3` |
+| `model/sft-gemma4-v4-on-task-a-v2` | `sft-gemma4-v4` |
+| `model/sft-gemma4-c2-step500-on-task-a-v2` | `sft-gemma4-c2-step500` |
+| `model/sft-gemma4-c2-on-task-a-v2` | `sft-gemma4-c2`, `sft-cat-a-c2-corpus-v2` |
+
+Every new tag was verified to carry the DVC `.dir` hashes of the tag(s) it supersedes.
+
+#### The one number that changed meaning
+
+**Old `task_a-corpus-v2-2026-07-22` is new `corpus/task-a-v1`.**
+
+The dated scheme numbered two *registrations* of identical bytes as v1 and v2:
+`task_a-corpus-v1` was registered via `dvc commit` trusting a `--dry-run` equivalence check,
+and `task_a-corpus-v2` marked the first real `dvc repro` of the same data. Both name
+`3d6a4d3e…` / `6bb5eb6f…`, and so does `task-a-sft-v1`. Three tags, one corpus.
+
+The new numbering follows the `task-a-sft-v1/v2/v3` line, where each number is a genuinely
+different corpus. So under the new scheme there is exactly one v1, and the registration
+history that the old v1/v2 pair recorded lives in `corpus/task-a-v1`'s annotation instead.
+
+The visible consequence: `sft-gemma4-v3`'s old annotation says it trained on
+"task_a-corpus-v2-2026-07-22", which reads as a version mismatch against its new name
+`model/sft-gemma4-v3-on-task-a-v1`. It is not a mismatch — it is the same bytes under the
+corrected number.
+
+#### Not renamed: `CLAUDE.md`
+
+`CLAUDE.md`'s risk register (R15, R17, R22 and others) refers to tags as part of a
+historical account of what was known when. Rewriting those names would misrepresent the
+record. This table is the bridge; read a tag name in `CLAUDE.md` as the name it had at the
+time of writing.
 ---
 
 ## 4. Hazard: lineages sharing one DVC path
@@ -136,7 +218,7 @@ looks entirely plausible — the same class of provenance failure as R13.
 separate path instead:
 
 ```bash
-python3 scripts/materialize_dvc_lineage.py --rev sft-gemma4-v2 --out /tmp/sft_v2
+python3 scripts/materialize_dvc_lineage.py --rev model/sft-gemma4-v2-on-pre-r12 --out /tmp/sft_v2
 ```
 
 That script reads only the local cache, refuses to write a partial checkpoint if any member
@@ -154,11 +236,14 @@ Recovering any tagged lineage, on any machine:
 
 ```bash
 # Warm cache (same machine) — no network needed
-python3 scripts/materialize_dvc_lineage.py --rev sft-gemma4-v3 --out /tmp/sft_v3
+python3 scripts/materialize_dvc_lineage.py --rev model/sft-gemma4-v3-on-task-a-v1 --out /tmp/sft_v3
 
-# Cold cache (fresh machine) — fetch the blobs first
-dvc fetch --rev sft-gemma4-v3 checkpoints/sft_cat_a/gemma-4-26B-A4B-it
-python3 scripts/materialize_dvc_lineage.py --rev sft-gemma4-v3 --out /tmp/sft_v3
+# Cold cache (fresh machine) — fetch the blobs first.
+# NOTE: `dvc fetch --rev` is NOT supported by the DVC version pinned here (CLAUDE.md R22).
+# Use -T/--all-tags, or check the tag's lock file out first:
+dvc fetch -T checkpoints/sft_cat_a/gemma-4-26B-A4B-it
+#   or: git checkout model/sft-gemma4-v3-on-task-a-v1 -- dvc.lock && dvc fetch
+python3 scripts/materialize_dvc_lineage.py --rev model/sft-gemma4-v3-on-task-a-v1 --out /tmp/sft_v3
 ```
 
 To restore the lineage that `dvc.lock` currently points at, back into its normal workspace
@@ -185,7 +270,7 @@ done
 Note the substring matches **both** `checkpoints/sft_cat_a/…` and `checkpoints/grpo_cat_a/…`,
 so expect more than one hash per line; cross-reference against §8's stage-by-stage listing to
 tell them apart. Once found, tag it retroactively so nobody has to repeat the archaeology —
-that is exactly how `sft-gemma4-v2` came to exist.
+that is exactly how `model/sft-gemma4-v2-on-pre-r12` came to exist.
 
 ---
 
@@ -254,13 +339,19 @@ dvc status --cloud
 
 - **Untagged GRPO lineage** (§2) — `e9b711c1f7…` is protected only by `dvc.lock`'s current
   entry. Tag it before the GRPO stage reruns.
-- **Shared checkpoint path** (§4) — every SFT cell writes to one directory. Use the explicit
-  `output_dir` config key per cell; until then, materialize to separate paths for comparison.
+- **Shared checkpoint path** (§4) — the historical lineages (`v2`/`v3`/`v4`) all sit in
+  `checkpoints/sft_cat_a/gemma-4-26B-A4B-it`, so materialize to separate paths to compare
+  them. Fixed going forward: `_resolve_output_dir()` in `training/{sft,grpo,dpo}.py` honours
+  an explicit `output_dir` config key, and each new cell must set one.
 - **`dvc.lock` stage disagreement** (§1.1) — the GRPO stage's dep is pinned to v2 while the
   SFT stage's out is v3. Benign until the GRPO stage reruns, at which point it would consume
   v3 weights while its config names `checkpoint-500` — a different model in each lineage.
-- **`scripts/run_phase2_grpo.sh` fixed-path patched config** — the R13 bug fixed in
-  `run_phase2_sft.sh` is still present here (`PATCHED_CFG="$PATCHED_DIR/${GRPO_STEM}.yaml"`),
-  so GRPO run provenance is still clobberable by a later invocation.
+- **Untagged derived sets** — `data/output/grpo/task_a` and `data/output/preference/task_a`
+  have never been tagged and there is no `derived/` namespace tag yet (§3.1). Both are also
+  still derived from `corpus/task-a-v2` while the working corpus is v3.
+- **`corpus/task-a-v0` candidate** — the pre-R12 corpus that
+  `model/sft-gemma4-v2-on-pre-r12` trained on (`8ef8681808…`, 131 files, ~228 MB) has never
+  been tagged, and two annotations disagree about whether its bytes survive. Settle it with
+  the DVC CLI; if they are present, tag them and re-point that model tag's `-on-` suffix.
 - **`task_a_grpo` `dvc.yaml` `cmd:` indentation** — the block-folding bug fixed for
   `task_a_sft_clean` / `task_a_sft_splits` in `666fe86` was not fixed for this stage.

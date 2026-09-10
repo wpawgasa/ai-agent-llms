@@ -1,8 +1,10 @@
 # LLM Workflow-Orchestrating Agents with KV Cache Quantization
 
-**Version:** 3.0 — March 2026 | **Hardware:** Single NVIDIA H100 SXM 80GB | **Training:** Unsloth SFT + GRPO RL
+**Version:** 3.0 | **Hardware:** Single NVIDIA H100 SXM 80GB | **Training:** Unsloth SFT + preference learning
 
 A **benchmark-first, fine-tune-selectively** pipeline for deploying workflow-orchestrating LLM agents. Instead of fine-tuning every candidate, we benchmark all pre-trained models first, fine-tune only the three category winners, then compress them with novel KV cache quantization for concurrent serving on a single H100.
+
+**New here?** Go to [Bring-Up From Scratch](#bring-up-from-scratch). It restores the tracked corpora and checkpoints from DVC rather than regenerating them — regeneration costs API budget and produces *different* data.
 
 ---
 
@@ -11,48 +13,166 @@ A **benchmark-first, fine-tune-selectively** pipeline for deploying workflow-orc
 ```
 Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize           Phase 4: Deploy
 ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
-│ 11 pre-trained  │         │ 3 category       │         │ 6 KV cache      │         │ Multi-agent     │
+│ pre-trained     │         │ 3 category       │         │ 6 KV cache      │         │ Multi-agent     │
 │ candidates      │──rank──▶│ winners:         │──SFT──▶ │ methods ×       │──best──▶│ orchestrator    │
-│ × 3 task cats   │  &      │ Cat A (15–35B)   │  then   │ 10 models       │  config │ + Pareto        │
-│ → composite     │  pick   │ Cat B (2–5B)     │  GRPO   │ → quality /     │         │ analysis        │
-│   scores        │         │ Cat C (2–5B)     │         │   perf matrix   │         │                 │
+│ × 3 task cats   │  &      │ Cat A (15–35B)   │  then   │ models          │  config │ + Pareto        │
+│ → composite     │  pick   │ Cat B (2–5B)     │  pref.  │ → quality /     │         │ analysis        │
+│   scores        │         │ Cat C (2–5B)     │  learn  │   perf matrix   │         │                 │
 └─────────────────┘         └─────────────────┘         └─────────────────┘         └─────────────────┘
-  scripts/run_exp_a.sh        scripts/run_exp_b.sh         scripts/run_exp_d.sh        scripts/run_exp_e2e.sh
-  scripts/run_exp_c.sh                                                                 
+  scripts/run_exp_a.sh        scripts/run_phase2_sft.sh    scripts/run_exp_d.sh        scripts/run_exp_e2e.sh
+  scripts/run_exp_b.sh        scripts/run_phase2_dpo.sh
+  scripts/run_exp_c.sh
 ```
+
+**Status:** Phase 1 and Phase 2 (Cat A) have been run. Phases 3 and 4 are implemented but not yet executed. Current Cat A result, open questions, and the full risk register live in `CLAUDE.md`.
+
+---
+
+## Current Tags
+
+Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most recent** hash per stage output. An older lineage stays recoverable only through a git tag. These are the two to check out today:
+
+| What | Tag | Restores | Contents |
+|------|-----|----------|----------|
+| **Task A SFT corpus** | `corpus/task-a-v3` | `data/output/sft/task_a_splits` and the `data/output/heldout/` sets | 9,932 conversations — 7,043 text + 2,889 voice, teacher `gemini-3.7-flash`. Splits 8,441 / 992 / 499, shuffled per modality. |
+| **Best Cat A checkpoint** | `model/sft-gemma4-c2-on-task-a-v2` | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | Gemma-4 26B-A4B-it LoRA, `response_only` @ 8192, 48 files / 563 MB, holds checkpoint-500 / -1000 / -1500 / -1767. |
+
+Tags are namespaced `corpus/` and `model/`, and a model tag names the corpus it trained on. The older flat names (`task-a-sft-v3`, `sft-gemma4-c2`, `sft-cat-a-c2-corpus-v2`, …) still resolve but are deprecated — see the migration table in [Data & Model Versioning Procedure](docs/data_and_model_versioning.md) §3.3, which also covers the one number that changed meaning.
+
+**The checkpoint trained on `corpus/task-a-v2`, not v3 — which is why the tag says so.** Three consequences:
+
+- `checkpoint-1767` scores **0.7595** composite on a 206-row set derived from `corpus/task-a-v2` test minus `corpus/task-a-v1` train/validation. That number is bound to those rows and is **not** comparable to any score on the v3 held-out sets.
+- To get a comparable v3 baseline, re-score it against `data/output/heldout/cat_a_v3_test_not_in_v2` (304 text rows) or `cat_a_v3_test_voice` (146 voice rows).
+- `configs/training/sft_cat_a_c2.yaml` names `data/output/sft/task_a_splits`, and **that path now holds v3**. Re-running it as-is trains cell C2 on v3, not v2. Use `configs/training/sft_cat_a_c2_corpus_v3.yaml` when v3 is what you want — it writes to its own `output_dir` so the two lineages cannot collide.
+
+Superseded lineages (`corpus/task-a-v1`, `corpus/task-a-v2`, `model/sft-gemma4-v2/v3/v4-on-*`, `model/sft-gemma4-c2-step500-on-task-a-v2`), the GRPO and DPO checkpoints, the naming convention, the recovery recipes, and the path-collision hazard between lineages that share one checkpoint directory are all documented in **[Data & Model Versioning Procedure](docs/data_and_model_versioning.md)**.
+
+```bash
+git tag -n1 -l 'corpus/*' 'model/*'   # one-line summary of the current tags
+git tag -n40 corpus/task-a-v3         # full annotation, including DVC hashes
+```
+
+---
+
+## Bring-Up From Scratch
+
+Restores a working checkout with the tracked data and checkpoints. No API keys and no teacher-model spend are required for this path — API keys are needed only to *generate new* data (see [Data Generation](#data-generation)).
+
+### 1. Clone and install `uv`
+
+```bash
+git clone <repo-url> && cd ai-agent-llms
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### 2. Create the venv you need
+
+The venvs are mutually exclusive — see [Venv layout](#venv-layout). For data + training + audits use `.venv-train`; for vLLM serving and benchmarks use `.venv-infer`.
+
+```bash
+./scripts/install_train.sh     # .venv-train  (Unsloth SFT / DPO / audits)
+./scripts/install_infer.sh     # .venv-infer  (vLLM serving + Phase 1/3 benchmarks)
+```
+
+Inside the `Dockerfile.unsloth` devcontainer use `./scripts/install_train_unsloth.sh` instead — it layers the project onto the image's pre-installed stack rather than re-resolving it.
+
+### 3. Credentials
+
+```bash
+cp .env.example .env      # GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / HF_TOKEN
+```
+
+- `HF_TOKEN` is required for the gated Gemma and Mistral weights.
+- DVC needs the GCP service-account key. `.dvc/config` sets `credentialpath` relative to `.dvc/`, so the default resolves to the **project root** as `looloo-ocr-9e0b69945c03.json`. The key is gitignored, so it never travels with a clone — copy it out-of-band. Confirm what your checkout resolves it to:
+
+  ```bash
+  dvc config remote.gcs.credentialpath
+  # or bypass DVC config entirely:
+  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+  ```
+
+### 4. Pull the tracked data and checkpoints
+
+`dvc pull` restores whatever `dvc.lock` currently points at. To restore a *tagged* lineage instead, check the tag out first, or fetch by tag.
+
+```bash
+# Everything the current lock file names
+dvc pull
+
+# Or selectively — the corpus, the held-out sets, the best checkpoint
+dvc pull data/output/sft/task_a_splits
+dvc pull data/output/heldout
+dvc pull checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
+
+# A tagged lineage that the lock file no longer names
+git checkout corpus/task-a-v3 -- dvc.lock && dvc pull
+```
+
+`dvc fetch --rev <tag>` is **not** supported by the DVC version pinned here; use `dvc fetch -T` (all tags) or the `git checkout <tag> -- dvc.lock` form above. To materialize an old lineage side-by-side without disturbing the working copy, use `scripts/materialize_dvc_lineage.py --dir-hash <hash> --out <dir>`.
+
+### 5. Verify what landed
+
+```bash
+wc -l data/output/sft/task_a_splits/*.jsonl        # expect 8441 / 992 / 499
+wc -l data/output/heldout/*/test.jsonl             # expect 304 (text) and 146 (voice)
+ls checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/    # expect checkpoint-500 … -1767
+dvc status                                          # local cache vs remote + dep hashes
+```
+
+### 6. Smoke-test the benchmark path
+
+A small frontier-model run needs no GPU and confirms the eval harness end to end:
+
+```bash
+source .venv-infer/bin/activate
+bash scripts/run_exp_a_single.sh --frontier-model gemini/gemini-2.5-flash \
+    --data data/output/benchmark/task_a \
+    --max-samples 10 --stochastic-trials 0
+```
+
+For a local model, launch a server first and point the runner at its YAML — see [Running Experiments](#running-experiments).
 
 ---
 
 ## Model Inventory
 
-### Category A — Prompt-Encoded Business Logic (15–35B)
+Serving configs live in `configs/models_exp_a/` (Category A) and `configs/models_exp_bc/` (Category B–C); each has `_sglang` / `_trtllm` siblings. `configs/models/` holds the plain model definitions without benchmark parameters.
 
-| Model | Params | Active | Architecture | Context | Tool Parser | VRAM (BF16) |
-|-------|--------|--------|-------------|---------|-------------|-------------|
-| Gemma 3 27B-IT | 27B | 27B | Dense GQA | 128K | `gemma` | ~54 GB |
-| Qwen3-32B | 32B | 32B | Dense + `<think>` | 128K | `hermes` | ~64 GB |
-| Qwen3.5-35B-A3B | 35B | 3B | DeltaNet MoE | 262K | `qwen3_coder` | ~70 GB |
-| Mistral Small 3.1 24B | 24B | 24B | Dense sliding-window | 128K | `mistral` | ~48 GB |
-| Nemotron-3-Nano 30B | 30B | 3.6B | MoE + Mamba-2 | 1M | `nemotron` | ~60 GB |
-| GLM-4.7-Flash | 30B | 3.6B | MoE + MLA | 200K | `glm4` | ~60 GB |
-| Gemma 4 26B-A4B-IT | 26B | 4B | MoE GQA | 128K | `gemma` | ~52 GB |
-| Gemma 4 26B-A4B-IT (FP8) | 26B | 4B | MoE GQA | 128K | `gemma` | ~26 GB |
-| Gemma 4 31B-IT | 31B | 31B | Dense GQA | 128K | `gemma` | ~62 GB |
-| Gemma 4 31B-IT (FP8) | 31B | 31B | Dense GQA | 128K | `gemma` | ~31 GB |
-| Qwen3.6-35B-A3B | 35B | 3B | DeltaNet MoE | 262K | `qwen3_coder` | ~70 GB |
-| Qwen3.6-35B-A3B (FP8) | 35B | 3B | DeltaNet MoE | 262K | `qwen3_coder` | ~35 GB |
-| Qwen3.6-27B | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~54 GB |
-| Qwen3.6-27B (FP8) | 27B | 27B | Dense GQA | 262K | `qwen3_coder` | ~27 GB |
+### Category A — Prompt-Encoded Business Logic (12–35B)
 
-### Category B–C — Specialist Subagent & Graph Extraction (2–5B)
+The default `run_exp_a.sh` sweep launches the ten rows marked **✓**; the rest are available as configs.
 
-| Model | Params | Active | Architecture | Context | VRAM |
-|-------|--------|--------|-------------|---------|------|
-| Qwen2.5-3B-Instruct | 3B | 3B | Dense GQA | 32K | ~6 GB |
-| Qwen3.5-4B | 4B | ~3B | DeltaNet MoE | 262K | ~8 GB |
-| GLM-4.7-Flash | 30B | 3.6B | MoE + MLA | 200K | ~60 GB |
-| Gemma-2B | 2.5B | 2.5B | Dense MQA | 8K | ~5 GB |
-| Gemma-3-4B-it | 4B | 4B | Dense GQA | 128K | ~8 GB |
+| Model | Params | Active | Context | Tool parser | VRAM | Sweep |
+|-------|--------|--------|---------|-------------|------|-------|
+| Gemma 3 27B-IT | 27B | 27B | 128K | `pythonic` | ~54 GB | ✓ |
+| Qwen3-32B | 32B | 32B | 128K | `hermes` | ~64 GB | ✓ |
+| Qwen3.5-35B-A3B | 35B | 3B | 128K | `qwen3_coder` | ~70 GB | ✓ |
+| Mistral Small 3.1 24B | 24B | 24B | 32K | `mistral` | ~48 GB | ✓ |
+| Nemotron-3-Nano 30B | 30B | 3.6B | 128K | `hermes` | ~60 GB | ✓ |
+| GLM-4.7-Flash | 30B | 3.6B | 128K | `hermes` | ~60 GB | ✓ |
+| Gemma 4 26B-A4B-IT | 26B | 4B | 262K | `gemma4` | ~52 GB | ✓ |
+| Gemma 4 31B-IT | 31B | 31B | 262K | `gemma4` | ~62 GB | ✓ |
+| Qwen3.6-27B | 27B | 27B | 262K | `qwen3_coder` | ~54 GB | ✓ |
+| Qwen3.6-27B (FP8) | 27B | 27B | 262K | `qwen3_coder` | ~27 GB | ✓ |
+| Qwen3.6-35B-A3B (+ FP8) | 35B | 3B | 262K | `qwen3_coder` | ~70 / ~35 GB | |
+| Gemma 4 12B-IT (+ FP8, + QAT) | 12B | 12B | 262K | `gemma4` | ~24 / ~12 GB | |
+| Gemma 4 26B-A4B / 31B (FP8, QAT) | 26–31B | 4–31B | 262K | `gemma4` | ~26–52 GB | |
+| DiffusionGemma 26B-A4B (+ FP8) | 25.2B | 3.8B | 262K | `gemma4` | ~50 / ~26 GB | |
+
+Tool-parser values are the ones the vLLM serving configs actually carry — note **`pythonic` for Gemma 3 and `gemma4` for Gemma 4**, not the older `gemma`. DiffusionGemma and Gemma-4 12B need newer vLLM images than the pinned default (CLAUDE.md R10, R11).
+
+### Category B–C — Specialist Subagent & Graph Extraction (2–9B)
+
+| Model | Params | Active | Context | Tool parser | VRAM |
+|-------|--------|--------|---------|-------------|------|
+| Gemma-2B | 2.5B | 2.5B | 8K | `pythonic` | ~5 GB |
+| Gemma-4-E2B-it | 2B | 2B | 262K | `gemma4` | ~4 GB |
+| Qwen2.5-3B-Instruct | 3B | 3B | 32K | `hermes` | ~6 GB |
+| Gemma-3-4B-it | 4B | 4B | 128K | `pythonic` | ~8 GB |
+| Gemma-4-E4B-it (+ QAT) | 4B | 4B | 262K | `gemma4` | ~8 GB |
+| Qwen3.5-4B | 4B | ~3B | 128K | `hermes` | ~8 GB |
+| Qwen3.5-9B (+ FP8) | 9B | 9B | 128K | `qwen3_coder` | ~18 / ~9 GB |
+| GLM-4.7-Flash | 30B | 3.6B | 128K | `glm4` | ~60 GB |
 
 ---
 
@@ -61,42 +181,46 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 ```
 .
 ├── configs/
-│   ├── models/cat_a/          # 14 × Category A model configs
-│   ├── models/cat_bc/         # 5 × Category B–C model configs
-│   ├── models_exp_a/          # Experiment A serving configs (with benchmark params)
-│   ├── models_exp_bc/         # Experiment B/C serving configs
-│   ├── training/              # SFT + GRPO hyperparameter configs (6 files)
+│   ├── models/cat_a/          # Category A model definitions
+│   ├── models/cat_bc/         # Category B–C model definitions
+│   ├── models_exp_a/          # Cat A serving configs (+ _sglang / _trtllm siblings)
+│   ├── models_exp_bc/         # Cat B–C serving configs (+ backend siblings)
+│   ├── training/              # SFT / GRPO / DPO hyperparameter configs
 │   ├── quantization/          # 6 KV cache quantization method configs
 │   ├── benchmark/             # Phase 1 matrix + composite score weights
 │   └── serving/               # Single-model, multi-agent, E2E benchmark configs
 │
 ├── src/llm_workflow_agents/
-│   ├── data/                  # Synthetic data generation (Tasks A, B, C)
-│   ├── benchmark/             # Phase 1 orchestration + model selection
-│   ├── training/              # Unsloth SFT + GRPO RL + reward functions
+│   ├── data/                  # Synthetic data generation (Tasks A, B, C) + voice convention
+│   ├── training/              # Unsloth SFT, GRPO, DPO + reward functions
 │   ├── quantization/          # TurboQuant, RotorQuant, KIVI, KVQuant
-│   ├── eval/                  # All evaluation metrics
+│   ├── eval/                  # All evaluation metrics + agent_benchmark (Phase 1 entry point)
 │   ├── integration/           # Multi-agent orchestrator + Pareto analysis
-│   ├── serving/               # vLLM launch + adapter utilities
-│   └── analysis/              # Result visualization
+│   ├── serving/               # vLLM launch helpers + orchestrator + E2E benchmark
+│   ├── analysis/              # Result visualization
+│   └── webui/                 # Chat UI for manual inspection
+│
+├── serving/                   # launch.sh dispatcher + per-backend launchers
 │
 ├── scripts/
-│   ├── generate_benchmark_data.sh   # 1 000 benchmark samples (no API key)
-│   ├── generate_sft_data.sh         # ~12 504 SFT training samples
-│   ├── filter_grpo_data.py          # GRPO prompts: L3–L5 filter over cleaned SFT splits
-│   ├── generate_eval_data.sh        # 1 000 val + test samples
-│   ├── run_exp_a.sh                 # Experiment A: Cat A benchmark
-│   ├── run_exp_b.sh                 # Experiment B: Cat B–C fine-tuning
-│   ├── run_exp_c.sh                 # Experiment C: graph extraction
-│   ├── run_exp_d.sh                 # Experiment D: KV cache quant benchmark
-│   └── run_exp_e2e.sh               # E2E integration + Pareto
+│   ├── install_{train,infer,sglang,trtllm}.sh   # venv bootstrap
+│   ├── generate_benchmark_data.sh               # Phase 1 corpus (placeholder generator)
+│   ├── generate_benchmark_voice_data.sh         # Phase 1 voice stratum
+│   ├── generate_sft_data.sh                     # Task A SFT text corpus
+│   ├── generate_voice_data.sh                   # Task A SFT voice corpus
+│   ├── generate_eval_data.sh                    # val + test splits
+│   ├── clean_task_a_sft.py / split_task_a_sft.py / filter_grpo_data.py
+│   ├── build_preference_pairs.py / mine_model_negatives.py
+│   ├── build_heldout_clean_set.py / heldout_composite_audit.py
+│   ├── run_phase2_{sft,grpo,dpo}.sh             # Phase 2 training runners
+│   ├── run_exp_a.sh / run_exp_a_single.sh / run_exp_a_per_level.sh
+│   └── run_exp_{b,c,d,e2e}.sh                   # Phases 1–4 experiment runners
 │
-├── docs/
-│   ├── data_generation_recipes.md   # Data generation guide with cost estimates
-│   └── Codebase_Spec_LLM_Workflow_Agents_Experiment.md
-│
+├── docs/                      # Investigation write-ups, recipes, versioning procedure
 └── tests/                     # Unit + integration tests
 ```
+
+Phase 1 benchmarking runs through `eval/agent_benchmark.py`. The separate `benchmark/` package was removed; see git history.
 
 ---
 
@@ -160,7 +284,7 @@ configs/models_exp_bc/qwen25_3b_trtllm.yaml
 |-------------|---------------|
 | `hermes`, `qwen3_coder` | `qwen25` |
 | `mistral` | `mistral` |
-| `gemma`, `gemma4`, `glm4`, `nemotron` | `pythonic` |
+| `gemma4`, `glm4`, `nemotron`, `pythonic` | `pythonic` |
 
 **Nemotron-3-Nano (Mamba hybrid):** Not supported by SGLang or TRT-LLM in their current versions. The YAMLs carry `serving.skip_reason` and the runner shells skip them automatically.
 
@@ -176,10 +300,12 @@ All serving backends and training pin mutually-incompatible versions of `torch`,
 
 | Venv | Purpose | Key pins |
 |------|---------|----------|
-| `.venv-train` | Phase 2 SFT + GRPO (Unsloth) | torch 2.10.0+cu130, vllm 0.19.1+cu130, transformers 4.57.6, trl 0.24.0, unsloth 2026.4.x |
+| `.venv-train` | Phase 2 SFT / GRPO / DPO (Unsloth) | torch 2.10.0+cu130, vllm 0.19.1+cu130, unsloth from git `main` (`cu130-torch2100` extra), transformers 5.x, **trl 1.0.0** |
 | `.venv-infer` | Phase 1/3/4 vLLM serving + benchmarks | torch 2.11.0+cu130, vllm 0.20.0, transformers 5.6.2 |
 | `.venv-sglang` | SGLang serving + benchmarks | torch 2.11.0+cu130, sglang 0.5.11, transformers 5.6.0+ |
 | `.venv-trtllm` | TensorRT-LLM serving + benchmarks | torch 2.10.0+cu130, tensorrt_llm 1.2.1 |
+
+`install_train.sh` deliberately overrides two of Unsloth's own pins after the base install: it reinstalls Unsloth from git `main` with the `cu130-torch2100` extra, and bumps **trl to 1.0.0** (needed for the multi-turn trajectory rollout hooks). A `.venv-train` that ends up with trl 0.23.1 — for example, one rebuilt without letting the installer finish — cannot load Gemma-4 for DPO; see CLAUDE.md R19 for the exact failure and the one-line repair.
 
 Each venv is bootstrapped by its own installer script:
 
@@ -222,7 +348,9 @@ What it does:
 
 1. Creates `.venv-train` with `--system-site-packages` so the container's
    torch / Unsloth / vLLM are visible without redundant downloads.
-2. Freezes the container packages as uv constraints (all versions locked).
+2. Freezes the container packages as uv constraints (all versions locked),
+   excluding `transformers` / `huggingface-hub` / `tokenizers` so step 5 can
+   move them.
 3. Installs the project `src/` in editable mode (`--no-deps`) so that
    `from llm_workflow_agents import …` works without re-resolving the training
    stack.
@@ -251,7 +379,7 @@ source .venv-trtllm/bin/activate
 ```
 
 The runner scripts pick the right venv automatically:
-- `scripts/run_phase2_sft.sh` sources `.venv-train`.
+- `scripts/run_phase2_sft.sh`, `run_phase2_grpo.sh` and `run_phase2_dpo.sh` source `.venv-train`.
 - `serving/launch_vllm.sh` sources `.venv-infer` if no venv is currently active.
 - `serving/launch_sglang.sh` sources `.venv-sglang` if no venv is currently active.
 - `serving/launch_trtllm.sh` sources `.venv-trtllm` if no venv is currently active.
@@ -274,6 +402,7 @@ URL still has to be installed manually for training).
   ```bash
   UV_CACHE_DIR=/tmp/uv-cache ./scripts/install_train.sh
   ```
+- **Hugging Face cache is per-repo.** Unsloth's model mapper points Gemma-4 26B-A4B at `unsloth/gemma-4-26b-a4b-it`, not the `google/` repo. Pre-fetch the `unsloth/` one or you download ~51 GB the run will not use — the weights are byte-identical, only `config.json` and `tokenizer_config.json` differ.
 - **Using `.devcontainer/Dockerfile.unsloth` as the base image.** The image
   pre-installs a working Unsloth + torch + vLLM stack. Running
   `uv pip install -e ".[dev]"` would re-resolve those pins and clobber the
@@ -291,47 +420,88 @@ URL still has to be installed manually for training).
   uv pip install -e ".[dev]" -c /tmp/constraints.txt
   ```
 
-Copy `.env.example` to `.env` and fill in your API keys:
+Copy `.env.example` to `.env` and fill in your keys:
 
 ```bash
 cp .env.example .env
 # Edit .env:
+#   GEMINI_API_KEY=...      # teacher model for the current corpora
 #   OPENAI_API_KEY=...
-#   GEMINI_API_KEY=...
-#   WANDB_API_KEY=...
+#   ANTHROPIC_API_KEY=...
+#   HF_TOKEN=...            # gated Gemma / Mistral weights
 ```
 
 ---
 
 ## Data Generation
 
-See [`docs/data_generation_recipes.md`](docs/data_generation_recipes.md) for the full guide. Quick start:
+Generation is only needed when you want **new** data. To reproduce the current experiments, pull the tracked corpora instead — see [Bring-Up From Scratch](#bring-up-from-scratch).
+
+See [`docs/data_generation_recipes.md`](docs/data_generation_recipes.md) for the full guide.
 
 ```bash
-# Benchmark data — no API key needed
+# Phase 1 benchmark — placeholder generator, no API key needed
 ./scripts/generate_benchmark_data.sh
 
-# SFT training data (~12 504 samples, ~$42 in API costs)
-OPENAI_API_KEY=... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
+# Phase 1 voice stratum — additive to the frozen text stratum
+GEMINI_API_KEY=... ./scripts/generate_benchmark_voice_data.sh
 
-# GRPO training prompts — L3–L5 subset of the cleaned SFT splits (no new generation)
-python scripts/filter_grpo_data.py
+# Task A SFT text corpus
+GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
+
+# Task A SFT voice corpus (2 400 conversations, 20/50/30 en/th/code-switch)
+GEMINI_API_KEY=... ./scripts/generate_voice_data.sh
+
+# GRPO / preference prompts — L3–L5 subset of the cleaned SFT splits (no new generation).
+# NOT yet run against corpus v3; the existing output is v2-derived and stale.
+python scripts/filter_grpo_data.py \
+    --input-dir data/output/sft/task_a_splits \
+    --output-dir data/output/grpo/task_a
 
 # Validation + test splits
 OPENAI_API_KEY=... ./scripts/generate_eval_data.sh
 ```
 
-Each script accepts `--dry-run` to preview commands without executing, and `--output-dir` to redirect output.
+Each script accepts `--dry-run` to preview commands without executing, and `--output-dir` to redirect output. `--smoke-test` runs a handful of conversations first — for voice this is the only pre-flight signal that the teacher can hit the chunk format at all, and `scripts/check_voice_batch.py` runs at the end of every voice batch to fail a run that is mostly placeholder rows.
+
+> **The Phase 1 text benchmark stratum is FROZEN.** `data/output/benchmark/task_a` holds 258 teacher-generated conversations — it is the data behind the current Cat A ranking, and it is *not* what `generate_benchmark_data.sh` produces (that script emits 1,000 placeholder conversations). Its DVC stage carries `frozen: true` so `dvc repro` skips it. Regenerating would destroy the ranking's basis.
+
+### What is actually tracked
+
+Script defaults and the tracked artifacts are not the same thing. These are the artifacts on disk:
+
+| Artifact | Path | Size | Teacher |
+|----------|------|------|---------|
+| Benchmark, text (frozen) | `data/output/benchmark/task_a` | 258 conversations | `gemini-3-flash-preview` (L1–L3), `gemini-3-5-flash` (L4–L5) |
+| Benchmark, voice | `data/output/benchmark/task_a_voice` | 250 conversations, 50/level | `gemini-3.7-flash` |
+| SFT corpus, text | `data/output/sft/task_a` | 7,049 raw conversations | `gemini-3.7-flash` |
+| SFT corpus, voice | `data/output/sft/task_a_voice` | 2,889 conversations | `gemini-3.7-flash` |
+| Cleaned + split | `data/output/sft/task_a_splits` | 8,441 / 992 / 499 | — |
+| GRPO / preference prompts | `data/output/grpo/task_a` | 2,563 train / 290 validation — **stale, v2-derived** | — |
+| Held-out, text | `data/output/heldout/cat_a_v3_test_not_in_v2` | 304 rows | — |
+| Held-out, voice | `data/output/heldout/cat_a_v3_test_voice` | 146 rows | — |
+
+> **No GRPO or preference data has been derived from corpus v3 yet.** The files under
+> `data/output/grpo/task_a` date from 2026-07-14 and `dvc.lock` records their dependency as the
+> **v2** splits (`21e33e25…`), while `data/output/sft/task_a_splits` now holds v3. The
+> `data/output/preference/task_a/` outputs do not exist on disk at all. Anything downstream of
+> either path — GRPO training, DPO pair building, the R5 held-out guardrail — needs
+> `scripts/filter_grpo_data.py` re-run against the v3 splits first. Do not treat the existing
+> directory as current.
 
 ### Data Design
 
-| Split | Samples | Seed | Behavior preset | Languages |
-|-------|---------|------|-----------------|-----------|
-| Benchmark | 1 000 | 100 | default | mixed (en/th) |
-| SFT | ~12 504 | 42 | **adversarial** | en + th + code-switch |
-| GRPO | L3–L5 of cleaned SFT splits | — | inherits SFT | inherits SFT |
-| Validation | 500 | 300 | default | mixed |
-| Test | 500 | 400 | default | mixed |
+| Split | Seed | Behavior preset | Languages |
+|-------|------|-----------------|-----------|
+| Benchmark, text | 100 | default | mixed (en/th) |
+| Benchmark, voice | 777 | default | en/th at even odds |
+| SFT, text | 42 | **adversarial** | en + th + code-switch |
+| SFT, voice | 4242 | adversarial | 20 % en / 50 % th / 30 % code-switch |
+| GRPO / preference | — | inherits SFT | inherits SFT |
+| Validation | 300 | default | mixed |
+| Test | 400 | default | mixed |
+
+Seeds are deliberately distinct across batches so no two corpora draw the same domains and workflows.
 
 **Code-switching** (`language="code_switch"`) generates Thai-English mixed conversations — Thai sentence structure with embedded English terms — reflecting real call-centre interactions and providing harder training examples.
 
@@ -342,73 +512,53 @@ Each script accepts `--dry-run` to preview commands without executing, and `--ou
 | default | 60% | 15% | 10% | 15% |
 | adversarial | 45% | 25% | 15% | 15% |
 | balanced | 25% | 25% | 25% | 25% |
+| cooperative_only | 100% | 0% | 0% | 0% |
+
+**Voice modality.** A voice conversation splits every assistant turn into `<S>…</S>` chunks for a text-to-speech engine. The format contract is defined and enforced in one place, `src/llm_workflow_agents/data/voice_convention.py` — the prose rules the teacher and the served system prompt both render come from `render_voice_format_rules()` in that module, and `find_voice_violations` is what decides whether a row enters the corpus. Any corpus containing voice rows must be trained with the `response_only` loss mask: `all_tokens` cannot honour the per-message `loss: false` flag that keeps a barge-in marker out of the gradient.
 
 ---
 
 ## DVC Data Pipeline
 
-Data outputs are versioned with [DVC](https://dvc.org) and stored on GCS. Use `dvc pull` to restore any cached dataset without re-running generation scripts.
+Data outputs and checkpoints are versioned with [DVC](https://dvc.org) and stored on GCS.
 
 **Remote:** `gs://looloo-voicebot-llm-weights-and-data/llm-workflow-agents`
 
-### Authentication
-
-The remote uses a GCP service account key. `.dvc/config` sets `credentialpath` relative to the
-`.dvc/` directory, so the default resolves to the **project root**:
-
-```
-<project-root>/looloo-ocr-9e0b69945c03.json   ← expected default path
-```
-
-Confirm what your checkout resolves it to with `dvc config remote.gcs.credentialpath`. The key
-is gitignored (`*.json`), so it never travels with a clone — copy it out-of-band when setting up
-a new machine.
-
-Or override at runtime:
-
-```bash
-# Option A: override in DVC config
-dvc remote modify gcs credentialpath /path/to/key.json
-
-# Option B: standard GCP env var
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
-```
-
-### Pulling data
-
-```bash
-# Pull all tracked outputs
-dvc pull
-
-# Pull a specific stage output
-dvc pull data/output/benchmark/task_a
-```
+Authentication and pulling are covered in [Bring-Up From Scratch](#bring-up-from-scratch).
 
 ### Pipeline stages
 
-| Stage | Output | Samples | API key needed |
-|-------|--------|---------|----------------|
-| `task_a_benchmark` | `data/output/benchmark/task_a` | 1 000 | No |
-| `task_a_sft` | `data/output/sft/task_a` | ~12 504 | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
-| `task_a_grpo` | `data/output/grpo/task_a` | 2 250 | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
-| `task_a_eval` | `data/output/val/task_a`, `data/output/test/task_a` | 500 + 500 | `OPENAI_API_KEY` |
+`dvc repro` re-runs a stage only if its dependencies (scripts, templates, config params) have changed, then caches the result. Two stages are **frozen** and are skipped by `dvc repro` — their `cmd` is retained for provenance only and does not describe how the current artifact was made.
 
-### Reproducing a stage
-
-`dvc repro` re-runs a stage only if its dependencies (scripts, templates, config params) have changed, then caches the result:
+| Stage | Output | Keys needed |
+|-------|--------|-------------|
+| `task_a_benchmark` **(frozen)** | `data/output/benchmark/task_a` | — |
+| `task_a_benchmark_voice` | `data/output/benchmark/task_a_voice` | `GEMINI_API_KEY` |
+| `task_a_sft_generate` | `data/output/sft/task_a` | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
+| `task_a_sft_generate_voice` | `data/output/sft/task_a_voice` | `GEMINI_API_KEY` |
+| `task_a_sft_remediate` | `data/output/sft/task_a_remediated` | — |
+| `task_a_sft_clean` | `data/output/sft/task_a_cleaned` | — |
+| `task_a_sft_splits` | `data/output/sft/task_a_splits` | — |
+| `task_a_grpo` | `data/output/grpo/task_a` | — |
+| `task_a_preference_pairs` | `data/output/preference/task_a/{train,validation}.jsonl` | — |
+| `task_a_preference_model_negatives` | `data/output/preference/task_a/model_negatives.jsonl` | GPU |
+| `task_a_eval` | `data/output/{val,test}/task_a` | `OPENAI_API_KEY` |
+| `task_a_sft_gemma4_26b_a4b` | `checkpoints/sft_cat_a/gemma-4-26B-A4B-it` | GPU, `HF_TOKEN` |
+| `task_a_sft_gemma4_26b_a4b_c2` | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | GPU, `HF_TOKEN` |
+| `task_a_dpo_gemma4_26b_a4b` **(frozen)** | `checkpoints/dpo_cat_a/gemma-4-26B-A4B-it` | GPU, `HF_TOKEN` |
+| `task_a_grpo_gemma4_26b_a4b` | `checkpoints/grpo_cat_a/gemma-4-26B-A4B-it` | GPU, `HF_TOKEN` |
+| `task_c_pairs_generate` | `data/output/sft/task_c` | `OPENAI_API_KEY`, `GEMINI_API_KEY` |
+| `task_c_pairs_clean` | `data/output/sft/task_c_cleaned` | — |
+| `task_c_pairs_split` | `data/output/sft/task_c_splits` | — |
 
 ```bash
-dvc repro task_a_benchmark   # no API key required
-dvc repro task_a_sft         # requires API keys in .env
-dvc repro                    # run all out-of-date stages
+dvc repro task_a_sft_splits   # one stage
+dvc repro                      # all out-of-date stages
+dvc status                     # local cache vs remote + dep hashes
+dvc dag                        # dependency graph
 ```
 
-Check pipeline status without running anything:
-
-```bash
-dvc status     # compares local cache vs remote + dep hashes
-dvc dag        # print the dependency graph
-```
+`dvc.dvcignore` and `.dvc/config` are checked in; the GCS credential file is not.
 
 ### Versioning corpora and checkpoints
 
@@ -426,17 +576,40 @@ SFT lineages that share one checkpoint directory.
 
 ### Experiment A — Category A Benchmark
 
-Launches each 15–35B model sequentially via vLLM, runs workflow quality evaluation, saves results to `results/exp_a/`.
+Launches each Category A model sequentially through the engine dispatcher, runs workflow quality evaluation, and saves results to `results/exp_a/`.
 
 ```bash
 ./scripts/run_exp_a.sh
-./scripts/run_exp_a.sh --kv-cache-dtype fp8   # with quantization
+./scripts/run_exp_a.sh --backend sglang        # non-vLLM backend
+./scripts/run_exp_a.sh --kv-cache-dtype fp8    # with KV quantization
 ./scripts/run_exp_a.sh --dry-run
 ```
 
+**A single model**, either locally served or through the BiFrost gateway to a frontier API:
+
+```bash
+# Local vLLM
+bash scripts/run_exp_a_single.sh configs/models_exp_a/gemma4_26b_a4b.yaml
+
+# Frontier model via the gateway
+bash scripts/run_exp_a_single.sh --frontier-model gemini/gemini-2.5-flash \
+    --max-samples 0 --stochastic-trials 0
+```
+
+**Scoring both modality strata.** `--data` is repeatable and the two strata are sibling directories. Pass both to get the blended quality number; pass one to score that stratum alone:
+
+```bash
+bash scripts/run_exp_a_single.sh --frontier-model gemini/gemini-2.5-flash \
+    --data data/output/benchmark/task_a \
+    --data data/output/benchmark/task_a_voice \
+    --max-samples 0 --stochastic-trials 0
+```
+
+The blend is `0.30 × voice + 0.70 × text` and is written to `quality_summary.quality` in the result JSON. **Rank on that field, never on `metrics.weighted_workflow_score`** — the latter is pooled over raw rows, so its effective voice weight drifts with however many rows each stratum happens to hold. `scripts/run_exp_a_per_level.sh` runs the same thing once per complexity level (L1–L5) and is the consumer that ranks on `quality_summary.quality`.
+
 ### Experiment B — Specialist Subagent Fine-Tuning
 
-LoRA fine-tunes each 2–5B model (SFT then GRPO), evaluates tool-call F1.
+LoRA fine-tunes each 2–5B model, evaluates tool-call F1.
 
 ```bash
 ./scripts/run_exp_b.sh
@@ -453,7 +626,7 @@ Trains graph extractor variants with constrained JSON decoding (Outlines/XGramma
 
 ### Experiment D — KV Cache Quantization Benchmark
 
-Runs all (model, quantization method) pairs, measuring PPL, LongBench, Needle-in-Haystack, VRAM, and latency.
+Runs all (model, quantization method) pairs, measuring PPL, LongBench, Needle-in-Haystack, VRAM, and latency. vLLM only.
 
 ```bash
 ./scripts/run_exp_d.sh
@@ -467,7 +640,7 @@ Deploys the three fine-tuned + quantized winners as a multi-agent system, measur
 
 ```bash
 ./scripts/run_exp_e2e.sh
-./scripts/run_exp_e2e.sh --kv-cache-dtype turboquant
+./scripts/run_exp_e2e.sh --kv-cache-dtype turboquant_3bit_nc
 ```
 
 ---
@@ -483,6 +656,8 @@ Deploys the three fine-tuned + quantized winners as a multi-agent system, measur
 | **TurboQuant** | `turboquant.yaml` | Beta codebook + QR rotation + QJL residual, Triton kernels |
 | **RotorQuant** | `rotorquant.yaml` | Cl(3,0) rotor sandwich rotation, 10–19× faster than dense |
 
+Phase 3 uses the **upstream** vLLM TurboQuant variants (`turboquant_3bit_nc`, `turboquant_4bit_nc`, `turboquant_k3v4_nc`, `turboquant_k8v4`), not the project's custom `"turboquant"` string — the in-tree TurboQuant/RotorQuant code is scaffolding against current vLLM and does not compress at inference time. RotorQuant is provisionally deferred pending a standalone microbenchmark. See CLAUDE.md ADR-006 and "Pending Work: Custom KV Cache Backends".
+
 Expected concurrency at 4096-token context on H100 80 GB:
 
 | Method | Concurrent sessions |
@@ -497,102 +672,128 @@ Expected concurrency at 4096-token context on H100 80 GB:
 
 Fine-tuning uses [Unsloth](https://github.com/unslothai/unsloth) for 2× speed and 70% less VRAM vs standard PEFT/TRL.
 
-### Two-stage pipeline
-
-```
-SFT (format + domain adaptation)  →  GRPO RL (task metric optimisation)
-```
-
 ### Prerequisites
 
 ```bash
-# 1. Training venv with Unsloth installed
+# 1. Training venv
 ./scripts/install_train.sh
 source .venv-train/bin/activate
 
-# 2. Data: cleaned SFT corpus + deterministic 85/10/5 splits
-#    (skip if you've already run the data-generation pipeline)
-OPENAI_API_KEY=... GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
-python scripts/clean_task_a_sft.py \
-    --input-dir data/output/sft/task_a \
-    --output-dir data/output/sft/task_a_cleaned
-python scripts/split_task_a_sft.py    # → data/output/sft/task_a_splits/
+# 2. Data — pull the tracked corpus rather than regenerating it
+dvc pull data/output/sft/task_a_splits data/output/heldout
+
+# The GRPO/preference prompt set is NOT current — regenerate it from the v3 splits
+python scripts/filter_grpo_data.py \
+    --input-dir data/output/sft/task_a_splits \
+    --output-dir data/output/grpo/task_a
 
 # 3. HF token for gated models (Gemma, Mistral)
 export HF_TOKEN=hf_...
 ```
 
-The SFT and GRPO runners both auto-load `.env` and auto-activate `.venv-train/` if it exists, so steps 1 + 3 only need to be done once.
+The Phase 2 runners auto-load `.env` and auto-activate `.venv-train/`, so steps 1 and 3 only need doing once.
+
+If you do need to rebuild the corpus from raw generations:
+
+```bash
+python scripts/clean_task_a_sft.py \
+    --input-dir data/output/sft/task_a \
+    --output-dir data/output/sft/task_a_cleaned
+python scripts/split_task_a_sft.py --assert-unmoved data/output/sft/task_a_splits
+```
+
+`--assert-unmoved` matters: the splitter shuffles per modality, so adding rows to an existing modality group reshuffles that group. It exits non-zero if any row changed split, which is what protects the held-out sets from silent contamination.
 
 ### SFT — `run_phase2_sft.sh`
-
-Default invocation trains Gemma4-26B-A4B on Task A with the Cat A SFT config:
 
 ```bash
 ./scripts/run_phase2_sft.sh
 ```
 
-Common variations:
+Options:
 
 ```bash
 # Different base model (any YAML in configs/models_exp_a/)
 ./scripts/run_phase2_sft.sh --model-config configs/models_exp_a/qwen36_27b.yaml
 
-# Different SFT config (Cat B / Cat C use their own data sources)
-./scripts/run_phase2_sft.sh --sft-config configs/training/sft_cat_b.yaml
+# Different SFT config
+./scripts/run_phase2_sft.sh --sft-config configs/training/sft_cat_a_c2_corpus_v3.yaml
 
 # Smoke test: prepare splits + patched config, exit before training
 ./scripts/run_phase2_sft.sh --dry-run
 
-# Disable W&B for a local run
+# Disable W&B
 ./scripts/run_phase2_sft.sh --no-wandb
 
-# Resume after Ctrl+C (auto-picks latest checkpoint)
+# Resume after Ctrl+C (auto-picks latest checkpoint), or from a specific one
 ./scripts/run_phase2_sft.sh --resume
-
-# Resume from a specific checkpoint
-./scripts/run_phase2_sft.sh --resume-from checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-1500
+./scripts/run_phase2_sft.sh --resume-from checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1500
 ```
 
-**Outputs:** `checkpoints/sft_cat_a/<HF-model-basename>/checkpoint-N/` every `save_steps` (500 by default) plus `train.log`. Optimizer state, scheduler, RNG, and epoch counter are all restored on resume.
+**Give every training cell its own `output_dir`.** `training/sft.py` resolves the checkpoint directory from an explicit `output_dir` key in the config, falling back to the config stem with the run timestamp stripped. Without one, a second cell overwrites the first — the two C2 configs set `sft_cat_a_c2` and `sft_cat_a_c2_corpus_v3` precisely so the v2 and v3 lineages stay separate.
+
+**Outputs:** `checkpoints/<output_dir>/<HF-model-basename>/checkpoint-N/` every `save_steps` (500 by default), plus `train.log` and a per-run `frozen_sft_config_<RUN_TS>.yaml` beside it. Optimizer state, scheduler, RNG, and epoch counter are all restored on resume.
+
+### Preference learning (DPO/ORPO) — `run_phase2_dpo.sh`
+
+DPO replaces GRPO for Cat A. The GRPO reward saturates — roughly 59 % of prompts score exactly 1.0, so within-group variance, and therefore the gradient, is zero (CLAUDE.md R18). Preference pairs carry a guaranteed margin instead and need no reward variance.
+
+```bash
+# Build pairs and train from the C2 checkpoint
+./scripts/run_phase2_dpo.sh --chunk-steps 100
+
+# Pin a checkpoint, choose the method
+./scripts/run_phase2_dpo.sh --method orpo \
+    --sft-checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767
+
+./scripts/run_phase2_dpo.sh --dry-run
+```
+
+Three things to know before running it — plus the prerequisite that its input, `data/output/grpo/task_a`, is currently v2-derived and must be regenerated from the v3 splits first (see [Data Generation](#data-generation)):
+
+- **`--chunk-steps N` is effectively required on Gemma-4 26B-A4B, and `N` must equal `dpo.save_steps`.** `load_in_4bit` reaches only ~0.8 GiB of this model (the MoE experts are fused 3-D tensors bitsandbytes cannot swap), so training holds ~46 GiB and a second model copy for the held-out guardrail does not fit. Chunked mode scores the guardrail between chunks in a separate process.
+- **The pairs must be length-filtered to the training cap.** `chosen` and `rejected` differ only in the trailing assistant turn, so a pair truncated by the collator collapses to identical token ids and produces exactly zero gradient, silently. Build with `scripts/build_dpo_smoke_fixtures.py --cap <cap>`.
+- **The default `--heldout` path is the v2-derived clean set**, which is not on disk by default. Rebuild it with `scripts/build_heldout_clean_set.py`, or point `--heldout` at one of the v3 sets under `data/output/heldout/`.
+
+**Outputs:** `checkpoints/dpo_cat_a/<HF-model-basename>/`, plus guardrail audit JSONs per chunk.
 
 ### GRPO — `run_phase2_grpo.sh`
 
-GRPO consumes an SFT checkpoint plus the L3–L5 filtered prompt set. Rewards are recomputed online from policy generations, so no new ground truth is required.
+Retained and working, but **single-turn RL is closed for Cat A** — the headroom probe fails every pre-registered gate (CLAUDE.md R23). Use it only for Cat B/C or after changing the prompt distribution.
+
+It reads the same `data/output/grpo/task_a` prompt set, which is stale — regenerate it before any Cat A run.
 
 ```bash
-# Default: auto-picks latest SFT checkpoint, filters SFT splits to L3-L5
 ./scripts/run_phase2_grpo.sh
+./scripts/run_phase2_grpo.sh --sft-checkpoint <path> --levels L4 L5
+./scripts/run_phase2_grpo.sh --data-dir data/output/grpo/task_a --skip-filter
+./scripts/run_phase2_grpo.sh --dry-run
 ```
 
-Common variations:
+### Evaluating a checkpoint
+
+Held-out scoring is what makes two checkpoints comparable. Build the set once, then audit against it:
 
 ```bash
-# Pin a specific SFT checkpoint
-./scripts/run_phase2_grpo.sh \
-    --sft-checkpoint checkpoints/sft_cat_a/gemma-4-26B-A4B-it/checkpoint-2000
+# Rebuild a contamination-free set, verifying it reproduces a stored audit
+.venv-train/bin/python scripts/build_heldout_clean_set.py \
+    --candidate-split data/output/sft/task_a_splits/test.jsonl \
+    --exclusion-split /tmp/v2_splits/train.jsonl \
+    --exclusion-split /tmp/v2_splits/validation.jsonl \
+    --out-dir data/output/heldout/cat_a_v3_test_not_in_v2 \
+    --verify-against runs/audit/heldout_ckpt1767_v2corpus.json
 
-# Use a different complexity-level mix
-./scripts/run_phase2_grpo.sh --levels L4 L5
-
-# Use an already-prepared prompt directory, skip the filter step
-./scripts/run_phase2_grpo.sh --data-dir data/output/grpo/task_a --skip-filter
-
-# Different GRPO config (Cat B / Cat C reward functions)
-./scripts/run_phase2_grpo.sh --grpo-config configs/training/grpo_cat_b.yaml
-
-# Smoke test
-./scripts/run_phase2_grpo.sh --dry-run
-
-# Local run without W&B
-./scripts/run_phase2_grpo.sh --no-wandb
+# Score a checkpoint on it
+.venv-train/bin/python scripts/heldout_composite_audit.py \
+    --checkpoint checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it/checkpoint-1767 \
+    --data-dir data/output/heldout/cat_a_v3_test_not_in_v2 \
+    --split test --seed 42 --modality text \
+    --output runs/audit/<name>.json
 ```
 
-**Outputs:** `checkpoints/grpo_cat_a/<HF-model-basename>/` plus reward curves and held-out scores in the W&B run (and `train.log`).
+The composite is `0.4 × state_acc + 0.4 × tool_f1 + 0.2 × task`. **Text and voice are reported separately and never blended** — a mixed sample is flagged `mixed_modality` in the JSON and is not comparable to a single-modality score. `voice_format_compliance` is a guardrail beside the composite, never folded into it.
 
-> **Note:** `training/grpo.py` does not currently expose a resume hook, so re-launching starts a fresh trainer. Held-out evaluation runs every 50 steps; training auto-stops if the held-out metric drops while training reward increases (reward-hacking detector, Risk R5).
-
-### GRPO reward functions
+### Reward functions (GRPO)
 
 | Category | Reward components |
 |----------|-------------------|
@@ -616,6 +817,7 @@ Reward hacking is mitigated by held-out evaluation every 50 steps with auto-stop
 | Graph Edge F1 | ≥ 75% |
 | Normalised GED | ≤ 0.20 |
 | Full workflow success rate | ≥ 55% |
+| Cat A composite (held-out) | ≥ 0.75 |
 
 ---
 
@@ -625,9 +827,10 @@ Reward hacking is mitigated by held-out evaluation every 50 steps with auto-stop
 |-----|----------|-----------|
 | ADR-001 | Benchmark-first model selection | Avoids wasting compute fine-tuning sub-optimal models |
 | ADR-002 | Unsloth over standard PEFT/TRL | 2× speed, 70% less VRAM, native GRPO + MoE kernels |
-| ADR-003 | SFT then GRPO two-stage training | SFT establishes format; GRPO optimises task metrics |
-| ADR-004 | Shared SFT base for dual-category winners | Diverge only at GRPO stage (Risk R2) |
+| ADR-003 | SFT then RL/preference two-stage training | SFT establishes format; the second stage optimises task metrics |
+| ADR-004 | Shared SFT base for dual-category winners | Diverge only at the second stage (Risk R2) |
 | ADR-005 | Triton for custom quantization kernels | Fused encode/decode in PagedAttention cache path |
+| ADR-006 | Upstream vLLM TurboQuant variants for Phase 3 | vLLM v1 requires a full `AttentionBackend` subclass; upstream already ships one |
 
 ---
 
@@ -636,12 +839,14 @@ Reward hacking is mitigated by held-out evaluation every 50 steps with auto-stop
 | Risk | Description | Mitigation |
 |------|-------------|-----------|
 | R1 | Qwen3.5-35B-A3B BF16 ~70 GB | Unsloth QLoRA 4-bit (~17.5 GB) + FP8 RL |
-| R2 | Same model wins Cat B + Cat C | Share SFT base, diverge at GRPO |
+| R2 | Same model wins Cat B + Cat C | Share SFT base, diverge at the second stage |
 | R3 | Phase 1 winner doesn't respond to fine-tuning | 100-step pilot SFT on top-2 (`training/pilot_check.py`) |
 | R4 | TurboQuant PR not merged upstream | Use `0xSero/turboquant` fork |
-| R5 | GRPO reward hacking | Held-out eval every 50 steps, KL monitoring, auto-stop |
-| R6 | Nemotron Mamba + vLLM incompatibility | HF `generate()` fallback in `task_runner.py` |
+| R5 | Reward hacking | Held-out eval every 50 steps, KL monitoring, auto-stop |
+| R6 | Nemotron Mamba + vLLM incompatibility | HF `generate()` fallback; SGLang/TRT-LLM skip it via `serving.skip_reason` |
 | R7 | GLM LoRA VRAM overflow | Auto-reduce LoRA rank 64 → 32 |
+
+**R8–R25 are recorded in `CLAUDE.md`** and are not duplicated here — they cover Gemma-4 serving and training compatibility, the SFT truncation and loss-mask bugs, the GRPO reward-resolution and DPO memory investigations, the corpus provenance defects, and the voice-modality contract. Read them before changing training configs or comparing scores across runs.
 
 ---
 
@@ -649,11 +854,12 @@ Reward hacking is mitigated by held-out evaluation every 50 steps with auto-stop
 
 | Component | Library |
 |-----------|---------|
-| Training | PyTorch ≥ 2.4, Unsloth ≥ 2025.3, TRL ≥ 0.15, PEFT ≥ 0.14 |
-| Inference | vLLM ≥ 0.8 (PagedAttention v2) |
+| Training | PyTorch 2.10 (cu130), Unsloth (git `main`), TRL 1.0.0, PEFT |
+| Inference | vLLM 0.20.0 (PagedAttention v2), SGLang 0.5.11, TensorRT-LLM 1.2.1 |
 | Quantization kernels | Triton ≥ 3.0 |
 | Constrained decoding | Outlines / XGrammar |
 | Experiment tracking | Weights & Biases |
+| Data versioning | DVC (GCS remote) |
 | Data & config | HF Datasets, Pydantic, PyYAML, structlog |
 
 ---
