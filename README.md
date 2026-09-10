@@ -36,8 +36,9 @@ Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most 
 |------|-----|----------|----------|
 | **Task A SFT corpus** | `corpus/task-a-v3` | `data/output/sft/task_a_splits` and the `data/output/heldout/` sets | 9,932 conversations — 7,043 text + 2,889 voice, teacher `gemini-3.7-flash`. Splits 8,441 / 992 / 499, shuffled per modality. |
 | **Best Cat A checkpoint** | `model/sft-gemma4-c2-on-task-a-v2` | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | Gemma-4 26B-A4B-it LoRA, `response_only` @ 8192, 48 files / 563 MB, holds checkpoint-500 / -1000 / -1500 / -1767. |
+| **GRPO prompt set** | `derived/task-a-grpo-v3` | `data/output/grpo/task_a` | L3–L5 subset of the v3 splits: 5,304 train / 596 validation, 27.7% voice. `P(tool call \| advancing turn)` verified 0.0000. |
 
-Tags are namespaced `corpus/` and `model/`, and a model tag names the corpus it trained on. The older flat names (`task-a-sft-v3`, `sft-gemma4-c2`, `sft-cat-a-c2-corpus-v2`, …) still resolve but are deprecated — see the migration table in [Data & Model Versioning Procedure](docs/data_and_model_versioning.md) §3.3, which also covers the one number that changed meaning.
+Tags are namespaced `corpus/`, `model/` and `derived/`, and a model tag names the corpus it trained on. The older flat names (`task-a-sft-v3`, `sft-gemma4-c2`, `sft-cat-a-c2-corpus-v2`, …) still resolve but are deprecated — see the migration table in [Data & Model Versioning Procedure](docs/data_and_model_versioning.md) §3.3, which also covers the one number that changed meaning.
 
 **The checkpoint trained on `corpus/task-a-v2`, not v3 — which is why the tag says so.** Three consequences:
 
@@ -452,8 +453,9 @@ GEMINI_API_KEY=... ./scripts/generate_sft_data.sh
 # Task A SFT voice corpus (2 400 conversations, 20/50/30 en/th/code-switch)
 GEMINI_API_KEY=... ./scripts/generate_voice_data.sh
 
-# GRPO / preference prompts — L3–L5 subset of the cleaned SFT splits (no new generation).
-# NOT yet run against corpus v3; the existing output is v2-derived and stale.
+# GRPO prompts — L3–L5 subset of the cleaned SFT splits (no new generation).
+# Already built from corpus v3 and tagged derived/task-a-grpo-v3; re-run only
+# after the splits change, then re-verify P(tool call | advancing turn) == 0.0000.
 python scripts/filter_grpo_data.py \
     --input-dir data/output/sft/task_a_splits \
     --output-dir data/output/grpo/task_a
@@ -477,17 +479,21 @@ Script defaults and the tracked artifacts are not the same thing. These are the 
 | SFT corpus, text | `data/output/sft/task_a` | 7,049 raw conversations | `gemini-3.7-flash` |
 | SFT corpus, voice | `data/output/sft/task_a_voice` | 2,889 conversations | `gemini-3.7-flash` |
 | Cleaned + split | `data/output/sft/task_a_splits` | 8,441 / 992 / 499 | — |
-| GRPO / preference prompts | `data/output/grpo/task_a` | 2,563 train / 290 validation — **stale, v2-derived** | — |
+| GRPO prompts (L3–L5) | `data/output/grpo/task_a` | 5,304 train / 596 validation, 27.7% voice | — |
 | Held-out, text | `data/output/heldout/cat_a_v3_test_not_in_v2` | 304 rows | — |
 | Held-out, voice | `data/output/heldout/cat_a_v3_test_voice` | 146 rows | — |
 
-> **No GRPO or preference data has been derived from corpus v3 yet.** The files under
-> `data/output/grpo/task_a` date from 2026-07-14 and `dvc.lock` records their dependency as the
-> **v2** splits (`21e33e25…`), while `data/output/sft/task_a_splits` now holds v3. The
-> `data/output/preference/task_a/` outputs do not exist on disk at all. Anything downstream of
-> either path — GRPO training, DPO pair building, the R5 held-out guardrail — needs
-> `scripts/filter_grpo_data.py` re-run against the v3 splits first. Do not treat the existing
-> directory as current.
+> **The GRPO prompt set is v3-derived and tagged; the preference set is not built.**
+> `data/output/grpo/task_a` was regenerated from the v3 splits on 2026-09-10
+> (`derived/task-a-grpo-v3`) and verified to carry the tool-call stay convention —
+> `P(tool call | advancing turn)` is exactly **0.0000** across 54,344 train and 6,134
+> validation advancing turns. The set it replaced measured 0.1033, so it had never carried
+> the convention at all. **27.7% of the new set is voice** (1,471 of 5,304 train rows) where
+> the old one was all text; its validation split feeds the R5 held-out guardrail, which per
+> R20 must not blend modalities — pass `--modality`.
+>
+> `data/output/preference/task_a/` still does not exist. Mining on-distribution negatives
+> needs a GPU pass over a checkpoint, and no model has been trained on corpus v3 yet.
 
 ### Data Design
 
@@ -680,12 +686,7 @@ Fine-tuning uses [Unsloth](https://github.com/unslothai/unsloth) for 2× speed a
 source .venv-train/bin/activate
 
 # 2. Data — pull the tracked corpus rather than regenerating it
-dvc pull data/output/sft/task_a_splits data/output/heldout
-
-# The GRPO/preference prompt set is NOT current — regenerate it from the v3 splits
-python scripts/filter_grpo_data.py \
-    --input-dir data/output/sft/task_a_splits \
-    --output-dir data/output/grpo/task_a
+dvc pull data/output/sft/task_a_splits data/output/grpo/task_a data/output/heldout
 
 # 3. HF token for gated models (Gemma, Mistral)
 export HF_TOKEN=hf_...
@@ -749,7 +750,7 @@ DPO replaces GRPO for Cat A. The GRPO reward saturates — roughly 59 % of promp
 ./scripts/run_phase2_dpo.sh --dry-run
 ```
 
-Three things to know before running it — plus the prerequisite that its input, `data/output/grpo/task_a`, is currently v2-derived and must be regenerated from the v3 splits first (see [Data Generation](#data-generation)):
+Three things to know before running it. Its prompt input, `data/output/grpo/task_a`, is current (`derived/task-a-grpo-v3`), but the pair files it consumes are not built — see the callout in [Data Generation](#data-generation):
 
 - **`--chunk-steps N` is effectively required on Gemma-4 26B-A4B, and `N` must equal `dpo.save_steps`.** `load_in_4bit` reaches only ~0.8 GiB of this model (the MoE experts are fused 3-D tensors bitsandbytes cannot swap), so training holds ~46 GiB and a second model copy for the held-out guardrail does not fit. Chunked mode scores the guardrail between chunks in a separate process.
 - **The pairs must be length-filtered to the training cap.** `chosen` and `rejected` differ only in the trailing assistant turn, so a pair truncated by the collator collapses to identical token ids and produces exactly zero gradient, silently. Build with `scripts/build_dpo_smoke_fixtures.py --cap <cap>`.
@@ -761,7 +762,7 @@ Three things to know before running it — plus the prerequisite that its input,
 
 Retained and working, but **single-turn RL is closed for Cat A** — the headroom probe fails every pre-registered gate (CLAUDE.md R23). Use it only for Cat B/C or after changing the prompt distribution.
 
-It reads the same `data/output/grpo/task_a` prompt set, which is stale — regenerate it before any Cat A run.
+It reads `data/output/grpo/task_a` (`derived/task-a-grpo-v3`), which is current. Note that 27.7% of that set is voice, so the in-run held-out guardrail draws a mixed-modality sample unless told otherwise.
 
 ```bash
 ./scripts/run_phase2_grpo.sh
