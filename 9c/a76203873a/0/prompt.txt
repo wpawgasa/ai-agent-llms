@@ -1,0 +1,21 @@
+/brainstorming Correct and Revise README.md to reflect current setup and procedure to bring up the tracked models, benchmark and training data from scratch. Note the current tags for models and data.
+
+---
+
+approve
+
+---
+
+We haven't generate GRPO data yet
+
+---
+
+Should we generate current GRPO and preference v3 data and tag similar to sft data
+
+---
+
+fix data tagging convention
+
+---
+
+approve

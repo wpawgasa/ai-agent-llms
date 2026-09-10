@@ -1,0 +1,26 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "9ca76203873a",
+  "strategy": "manual-commit",
+  "branch": "data/grpo-v3-and-tag-convention",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "README.md",
+    "docs/data_and_model_versioning.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9c/a76203873a/0/metadata.json",
+      "transcript": "/9c/a76203873a/0/full.jsonl",
+      "content_hash": "/9c/a76203873a/0/content_hash.txt",
+      "prompt": "/9c/a76203873a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 168,
+    "cache_creation_tokens": 237874,
+    "cache_read_tokens": 17182758,
+    "output_tokens": 100285,
+    "api_call_count": 84
+  }
+}
