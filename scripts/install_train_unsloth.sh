@@ -40,6 +40,19 @@ VENV="$PROJECT_ROOT/.venv-train"
 
 cd "$PROJECT_ROOT"
 
+# The editable build (step 3) runs setuptools-scm, which calls git to list
+# tracked files.  In the container the repo is a host bind mount owned by the
+# host uid while we run as root, so git refuses with "detected dubious
+# ownership" and the build fails.  VS Code regenerates ~/.gitconfig on every
+# container rebuild, so a manually added safe.directory does not survive.
+# It must go in global config: setuptools-scm strips every GIT_* variable
+# before calling git (setuptools_scm/_run_cmd.py::no_git_env), so the
+# GIT_CONFIG_COUNT command-scope route never reaches it.  Idempotent.
+if ! git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$PROJECT_ROOT"; then
+    echo "Marking $PROJECT_ROOT as a git safe.directory (bind-mount ownership) ..."
+    git config --global --add safe.directory "$PROJECT_ROOT"
+fi
+
 # ── 1. Virtual environment ────────────────────────────────────────────────────
 if [[ ! -d "$VENV" ]]; then
     echo "Creating $VENV (--system-site-packages) ..."
@@ -48,18 +61,31 @@ else
     echo "Reusing existing $VENV ..."
 fi
 
-# The unsloth/unsloth image keeps its training stack in /opt/venv (a venv
-# whose python is a symlink to /usr/bin/python3.12).  --system-site-packages
-# inherits the *base interpreter's* site-packages — /usr/lib/python3.12/...,
-# not /opt/venv/lib/python3.12/site-packages — so unsloth/trl/vllm/torch
-# would be invisible and uv would re-download ~3GB of CUDA wheels.
-# A .pth file in our venv's site-packages restores /opt/venv on sys.path
-# before uv runs its resolver, so uv detects torch/peft/etc. as already
-# installed and skips them.
+# The unsloth/unsloth image keeps its training stack in its own venv — the
+# one whose python3 is first on PATH (/opt/venv in older images,
+# /opt/unsloth-venv since the 2026-09 rebuild).  --system-site-packages
+# inherits the *base interpreter's* site-packages, not that venv's, so
+# unsloth/trl/vllm/torch would be invisible at runtime.  A .pth file in our
+# venv's site-packages puts the stack on sys.path for Python.  Note that uv
+# does NOT follow .pth entries (verified with uv 0.12.13, for both a bare path
+# and an addsitedir line), so step 4 still installs a duplicate
+# torch/triton/nvidia-* set (~7GB) into the venv.  The step 2 constraints pin
+# it to the container's exact versions, so the two copies are identical.
+#
+# The path is derived from the same python3 that step 2 freezes, so the
+# constraints and the visible packages always come from one place.  The .pth
+# is rewritten on every run: .venv-train lives on the bind mount and outlives
+# container rebuilds, so a link written by an older image would otherwise
+# point at a directory that no longer exists.  site.addsitedir (rather than a
+# bare path line) also processes the stack's own .pth files, e.g.
+# nvidia_cutlass_dsl's.
+STACK_SITE="$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 PTH_FILE="$VENV/lib/python3.12/site-packages/_opt_venv.pth"
-if [[ -d /opt/venv/lib/python3.12/site-packages && ! -f "$PTH_FILE" ]]; then
-    echo "Linking /opt/venv site-packages into venv via _opt_venv.pth ..."
-    echo "/opt/venv/lib/python3.12/site-packages" > "$PTH_FILE"
+if [[ "$STACK_SITE" != "$VENV"/* && -d "$STACK_SITE" ]]; then
+    echo "Linking container stack $STACK_SITE into venv via _opt_venv.pth ..."
+    echo "import site; site.addsitedir('$STACK_SITE')" > "$PTH_FILE"
+else
+    echo "WARNING: no container stack found at '$STACK_SITE'; torch/unsloth will be missing from the venv" >&2
 fi
 
 # ── 2. Freeze container packages as constraints (minus transformers) ───────────
@@ -78,6 +104,13 @@ echo "Capturing container package versions as constraints ..."
 #   tokenizers             — travels with transformers; 5.x needs tokenizers
 #                            from the same major as the matched transformers
 #   llm-workflow-agents    — project src, installed editable in step 3
+#   websockets             — the 2026-09 image ships 17.1, but every
+#                            google-genai release (through 2.23.0) requires
+#                            websockets<17, so pinning it makes step 4
+#                            unsatisfiable.  Nothing in the container needs 17
+#                            (only optional extras reference websockets), so a
+#                            16.x copy installed into the venv is safe; it
+#                            shadows 17.1 inside .venv-train only.
 # Note: pip freeze emits the dist's declared name verbatim, so e.g.
 # huggingface-hub is reported as "huggingface_hub==" (underscore).  Match
 # both separators to be safe.
@@ -85,9 +118,10 @@ python3 -m pip freeze 2>/dev/null \
     | grep -ivE "^transformers==" \
     | grep -ivE "^huggingface[-_]hub==" \
     | grep -ivE "^tokenizers==" \
+    | grep -ivE "^websockets==" \
     | grep -ivE "^llm[-_]workflow[-_]agents" \
     > "$CONSTRAINTS_FILE" || true
-echo "  -> $(wc -l < "$CONSTRAINTS_FILE") constraints captured (transformers/hf-hub/tokenizers excluded)"
+echo "  -> $(wc -l < "$CONSTRAINTS_FILE") constraints captured (transformers/hf-hub/tokenizers/websockets excluded)"
 
 # Overrides: torch's +cu128 wheel pins an exact cuda-bindings build in its
 # metadata, and the unsloth container may ship a different build than that
