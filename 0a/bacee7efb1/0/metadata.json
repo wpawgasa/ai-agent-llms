@@ -1,0 +1,23 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "0abacee7efb1",
+  "session_id": "dd355b16-d359-4080-af24-550eae36106d",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-11T09:44:01.69225459Z",
+  "branch": "data/tag-benchmark-corpora",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "5b37aaecd331",
+  "token_usage": {
+    "input_tokens": 340,
+    "cache_creation_tokens": 844355,
+    "cache_read_tokens": 43014134,
+    "output_tokens": 163403,
+    "api_call_count": 170
+  },
+  "session_metrics": {
+    "turn_count": 9
+  }
+}
