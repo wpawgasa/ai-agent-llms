@@ -19,6 +19,8 @@
 #   4. Install dev tools (pytest, ruff, mypy) under the same constraints.
 #   5. Upgrade transformers to >=5.6.0 inside the venv (overrides the system
 #      pin only within the venv; the system-level install is untouched).
+#   5b. Pin trl==1.0.0 inside the venv (image ships 0.24.0; DPO and
+#      trajectory GRPO need 1.0.0) and clear unsloth_compiled_cache/.
 #   6. Install dvc[gs] (not present in the base image).
 #
 # Differences vs install_train.sh / install_train_cu128.sh:
@@ -198,6 +200,24 @@ VIRTUAL_ENV="$VENV" uv pip install \
 # activates this venv.
 echo "Upgrading transformers to >=5.6.0 ..."
 VIRTUAL_ENV="$VENV" uv pip install "transformers>=5.6.0"
+
+# ── 5b. Pin trl==1.0.0 ────────────────────────────────────────────────────────
+# The image ships trl 0.24.0, but the training code targets 1.0.0: DPO needs
+# its processing-class row path (dpo.py::_assert_dpo_row_processing_support,
+# R19) and trajectory GRPO needs its rollout_func/env_mask hooks
+# (trajectory_rollout.py::assert_trajectory_rollout_support).  Mirrors
+# install_train.sh.  --no-deps and outside the constraints: unsloth and
+# unsloth_zoo declare trl<=0.24.0 and step 2 froze trl==0.24.0, but those
+# caps lag reality (the same metadata caps transformers at <=5.5.0 while the
+# image ships 5.17.0).  Exact pin, not the latest release: 1.0.0 is the
+# version the GRPO/DPO work was validated on.
+#
+# Unsloth inlines TRL trainer source into unsloth_compiled_cache/ (created in
+# the working directory); a cache compiled against the old trl would keep
+# running 0.24.0 code, so clear it whenever trl changes.
+echo "Pinning trl==1.0.0 (DPO + trajectory GRPO) ..."
+VIRTUAL_ENV="$VENV" uv pip install --no-deps "trl==1.0.0"
+rm -rf "$PROJECT_ROOT/unsloth_compiled_cache"
 
 # ── 6. Install dvc[gs] ────────────────────────────────────────────────────────
 echo "Installing dvc[gs] ..."
