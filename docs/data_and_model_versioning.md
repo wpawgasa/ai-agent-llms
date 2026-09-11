@@ -34,18 +34,28 @@ the pipeline produced most recently; it cannot tell you what it produced before 
 ### 1.1 Why `dvc.lock` can name two lineages at once
 
 Each stage independently freezes the hashes it observed during *its own* last run. Two
-stages that last ran at different times will disagree about the same path. Currently:
+stages that last ran at different times will disagree about the same path. As of 2026-09-11,
+verified directly from `dvc.lock`:
 
-| Stage | Role | Lineage | Last ran |
-|---|---|---|---|
-| `task_a_sft_gemma4_26b_a4b` | `outs` | v3 (560 MB) | 2026-07-22 |
-| `task_a_grpo_gemma4_26b_a4b` | `deps` | v2 (980 MB) | 2026-07-06 |
+| Stage | Role | Path | Hash | Lineage |
+|---|---|---|---|---|
+| `task_a_sft_gemma4_26b_a4b` | `outs` | `checkpoints/sft_cat_a/gemma-4-26B-A4B-it` | `57e40028fe…` | `model/sft-gemma4-v4-on-task-a-v2` |
+| `task_a_grpo_gemma4_26b_a4b` | `deps` | `checkpoints/sft_cat_a/gemma-4-26B-A4B-it` | `f89238076f…` | `model/sft-gemma4-v2-on-pre-r12` |
+| `task_a_grpo_gemma4_26b_a4b` | `deps` | `data/output/grpo/task_a` | `60831c6695…` | untagged; matches no known `derived/` tag |
+
+Three-way, not two: the GRPO **training** stage's checkpoint dependency is pinned to the
+*oldest* SFT lineage while the SFT stage's own output has since moved through v3 and to v4,
+and its GRPO-prompt dependency is a third, still older hash that predates both
+`derived/task-a-grpo-v3` and the pre-v3 set it replaced (§9) — evidence this stage has not
+rerun since very early in the project.
 
 This is not corruption — it is the format working as designed. But it *is* a signal that
-the GRPO stage is stale with respect to its dependency, and `dvc status` reports it as
-`changed deps`. Treat a same-path disagreement between two stages as a prompt to check
-which one is out of date before running anything (this same signature is what exposed the
-R12 stale-corpus bug; see CLAUDE.md).
+the GRPO training stage is stale with respect to both its dependencies, and `dvc status`
+reports it as `changed deps`. Treat a same-path disagreement between two stages as a prompt
+to check which one is out of date before running anything (this same signature is what
+exposed the R12 stale-corpus bug; see CLAUDE.md). **Do not confuse this with the `task_a_grpo`
+*data* stage** (singular — the L3–L5 prompt filter, distinct from `task_a_grpo_gemma4_26b_a4b`
+the training run): that one's dependency was found stale and fixed on 2026-09-10 (§9).
 
 ---
 
@@ -56,7 +66,17 @@ git tag -n1 -l 'corpus/*' 'model/*'    # one-line summaries
 git tag -n40 model/sft-gemma4-c2-on-task-a-v2   # full annotation, incl. hashes
 ```
 
-### Corpora
+### Benchmark corpora
+
+Independent of the SFT lineage below — a different generation pipeline, used for Phase 1
+evaluation rather than training. Both stages carry `frozen: true` in `dvc.yaml`.
+
+| Tag | Commit | Contents | Hash |
+|---|---|---|---|
+| `corpus/task-a-benchmark-v1` | `f4bf688` | 258 convs, text, 17 files — the data behind the current Cat A ranking | `0522f8fa…` |
+| `corpus/task-a-benchmark-voice-v1` | `f4bf688` | 250 convs, voice, 50/level, 10 files — voice half of the composite blend | `6fea777d…` |
+
+### Corpora (SFT training)
 
 | Tag | Commit | Contents | Hash (`task_a_splits`) |
 |---|---|---|---|
@@ -343,15 +363,29 @@ dvc status --cloud
   `checkpoints/sft_cat_a/gemma-4-26B-A4B-it`, so materialize to separate paths to compare
   them. Fixed going forward: `_resolve_output_dir()` in `training/{sft,grpo,dpo}.py` honours
   an explicit `output_dir` config key, and each new cell must set one.
-- **`dvc.lock` stage disagreement** (§1.1) — the GRPO stage's dep is pinned to v2 while the
-  SFT stage's out is v3. Benign until the GRPO stage reruns, at which point it would consume
-  v3 weights while its config names `checkpoint-500` — a different model in each lineage.
-- **Untagged derived sets** — `data/output/grpo/task_a` and `data/output/preference/task_a`
-  have never been tagged and there is no `derived/` namespace tag yet (§3.1). Both are also
-  still derived from `corpus/task-a-v2` while the working corpus is v3.
+- **`dvc.lock` stage disagreement (§1.1) — STILL OPEN, and worse than previously described.**
+  `task_a_grpo_gemma4_26b_a4b` (the GRPO **training** run) depends on
+  `checkpoints/sft_cat_a/gemma-4-26B-A4B-it` at `f89238076f…` — `model/sft-gemma4-v2-on-pre-r12`,
+  the oldest tagged lineage — while the SFT stage's own output has since moved through v3 to
+  v4. Its dependency on `data/output/grpo/task_a` (`60831c6695…`) is a third, still older hash
+  matching no known `derived/` tag. Benign until this stage reruns, at which point it would
+  train on stale prompts against a config that may still name an old checkpoint. **Correction:**
+  an earlier revision of this document marked this resolved by conflating it with the
+  `task_a_grpo` *data* stage fix below — a different stage, on a different dependency. This one
+  is untouched.
+- **Untagged derived sets — PARTIALLY RESOLVED.** The `task_a_grpo` *data* stage (the L3–L5
+  prompt filter — not the training stage above) was regenerated from `corpus/task-a-v3` on
+  2026-09-10 and tagged `derived/task-a-grpo-v3`; its dependency on the SFT splits now matches
+  current. `data/output/preference/task_a` remains untagged because it does not exist yet —
+  mining on-distribution negatives needs a GPU pass over a checkpoint, and no model has been
+  trained on `corpus/task-a-v3`.
 - **`corpus/task-a-v0` candidate** — the pre-R12 corpus that
   `model/sft-gemma4-v2-on-pre-r12` trained on (`8ef8681808…`, 131 files, ~228 MB) has never
   been tagged, and two annotations disagree about whether its bytes survive. Settle it with
   the DVC CLI; if they are present, tag them and re-point that model tag's `-on-` suffix.
 - **`task_a_grpo` `dvc.yaml` `cmd:` indentation** — the block-folding bug fixed for
   `task_a_sft_clean` / `task_a_sft_splits` in `666fe86` was not fixed for this stage.
+- **Benchmark corpora — RESOLVED 2026-09-11.** `task_a_benchmark`'s stale lock (11 of 17
+  files recorded) and `task_a_benchmark_voice`'s complete absence from `dvc.lock` (CLAUDE.md
+  R21) are both fixed: re-committed, pushed, frozen, and tagged as
+  `corpus/task-a-benchmark-v1` / `corpus/task-a-benchmark-voice-v1`.
