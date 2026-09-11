@@ -33,12 +33,20 @@ stages:
     # Levels L1–L5, 200 samples/level, seed=100, lang=mixed, behavior=default
 
   task_a_benchmark_voice:
+    # FROZEN 2026-09-11. `dvc repro` skips this stage. In production use as
+    # the voice half of the Cat A composite blend since 2026-08-24 (see
+    # CLAUDE.md R20/R24/R25); its deps (generate_workflows.py,
+    # voice_convention.py, the tool-schema template) have since changed, so
+    # an unfrozen `dvc repro` today would silently regenerate and swap the
+    # data those risk entries are measured against.
+    frozen: true
     desc: >-
-      Voice stratum for Phase 1, 250 conversations at 50 per level. Additive:
-      the text stratum at data/output/benchmark/task_a is FROZEN and must not
-      be regenerated. Matched to it on size, language mix and generation
-      source so modality is the only difference between the strata. Teacher
-      model: gemini-3.5-flash (requires GEMINI_API_KEY).
+      FROZEN — voice stratum for Phase 1, 250 conversations at 50 per level.
+      Additive: the text stratum at data/output/benchmark/task_a is also
+      FROZEN and must not be regenerated. Matched to it on size, language mix
+      and generation source so modality is the only difference between the
+      strata. Teacher model: gemini-3.5-flash (requires GEMINI_API_KEY). The
+      `cmd` below is retained for provenance only.
     cmd: ./scripts/generate_benchmark_voice_data.sh
     deps:
       - scripts/generate_benchmark_voice_data.sh

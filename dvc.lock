@@ -18,8 +18,8 @@ stages:
       isexec: true
     - path: src/llm_workflow_agents/data/generate_workflows.py
       hash: md5
-      md5: bd954fa91cf9b2f05a3dbdab4a6893df
-      size: 77496
+      md5: c8a690f7c36ba290199a8a66387e249f
+      size: 112011
     params:
       configs/benchmark/phase1_matrix.yaml:
         task_a:
@@ -49,9 +49,9 @@ stages:
     outs:
     - path: data/output/benchmark/task_a
       hash: md5
-      md5: 2a0d3203e1d4f0b0cb4b3780deff8fba.dir
-      size: 4874485
-      nfiles: 11
+      md5: 0522f8fa001af4f9ad694a8b36f7de24.dir
+      size: 4876325
+      nfiles: 17
   task_a_sft_gemma4_26b_a4b:
     cmd: ./scripts/run_phase2_sft.sh --model-config 
       configs/models_exp_a/gemma4_26b_a4b.yaml --sft-config 
@@ -450,3 +450,29 @@ stages:
       md5: f91745b051e916580d22b6f4f3139410.dir
       size: 59050615
       nfiles: 20
+  task_a_benchmark_voice:
+    cmd: ./scripts/generate_benchmark_voice_data.sh
+    deps:
+    - path: data/templates/tool_schemas_L1_to_L5.json
+      hash: md5
+      md5: 7e2c332fee106031da5a5262858ed1c1
+      size: 10197
+    - path: scripts/generate_benchmark_voice_data.sh
+      hash: md5
+      md5: e6e546d087393fa7ad9e9032a6ee9d07
+      size: 9572
+      isexec: true
+    - path: src/llm_workflow_agents/data/generate_workflows.py
+      hash: md5
+      md5: c8a690f7c36ba290199a8a66387e249f
+      size: 112011
+    - path: src/llm_workflow_agents/data/voice_convention.py
+      hash: md5
+      md5: 78fad20736276c4fdda682fe8063ee38
+      size: 21528
+    outs:
+    - path: data/output/benchmark/task_a_voice
+      hash: md5
+      md5: 6fea777dd9b8f0fe08d613117933cfb7.dir
+      size: 5095131
+      nfiles: 10
