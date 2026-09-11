@@ -1,4 +1,4 @@
-"""The Phase 1 text benchmark stage must stay frozen.
+"""Both Phase 1 benchmark stages must stay frozen.
 
 `data/output/benchmark/task_a` holds 258 conversations, 250 of them
 teacher-generated across two models, plus one hand-added file. It is the data
@@ -9,6 +9,15 @@ That mismatch sat dormant for months because nothing had touched the stage's
 declared dependencies. The voice branches changed `generate_workflows.py`,
 which IS a declared dependency, so `dvc repro` would now fire it rather than
 skip it. `frozen: true` is what stops that.
+
+`data/output/benchmark/task_a_voice` holds 250 conversations, the voice half
+of the Cat A composite blend. It was left unfrozen while it had never been
+generated — freezing it then would have prevented the run that creates it.
+That run has since happened and the data is registered with DVC (2026-09-11),
+so the same hazard applies: its declared deps (`generate_workflows.py`,
+`voice_convention.py`, the tool-schema template) already show as modified,
+and an unfrozen `dvc repro` would silently regenerate and swap the data
+CLAUDE.md R20/R24/R25 measure against.
 
 This test exists because unfreezing is a one-word edit whose cost is the
 corpus, and nothing else would notice. See CLAUDE.md R21.
@@ -24,6 +33,7 @@ yaml = pytest.importorskip("yaml")
 
 DVC_YAML = Path(__file__).resolve().parents[2] / "dvc.yaml"
 STAGE = "task_a_benchmark"
+VOICE_STAGE = "task_a_benchmark_voice"
 
 
 @pytest.fixture(scope="module")
@@ -31,6 +41,13 @@ def stage() -> dict:
     stages = yaml.safe_load(DVC_YAML.read_text())["stages"]
     assert STAGE in stages, f"{STAGE} stage is missing from dvc.yaml"
     return stages[STAGE]
+
+
+@pytest.fixture(scope="module")
+def voice_stage() -> dict:
+    stages = yaml.safe_load(DVC_YAML.read_text())["stages"]
+    assert VOICE_STAGE in stages, f"{VOICE_STAGE} stage is missing from dvc.yaml"
+    return stages[VOICE_STAGE]
 
 
 def test_stage_is_frozen(stage: dict) -> None:
@@ -61,13 +78,22 @@ def test_output_path_is_unchanged(stage: dict) -> None:
     assert stage.get("outs") == ["data/output/benchmark/task_a"]
 
 
-def test_voice_stratum_is_a_separate_additive_stage() -> None:
+def test_voice_stratum_is_a_separate_additive_stage(voice_stage: dict) -> None:
     """The voice stratum must never be folded into the frozen text stage."""
-    stages = yaml.safe_load(DVC_YAML.read_text())["stages"]
-    voice = stages.get("task_a_benchmark_voice")
-    assert voice is not None, "the voice stratum stage is missing"
-    assert voice.get("outs") == ["data/output/benchmark/task_a_voice"]
-    assert voice.get("frozen") is not True, (
-        "the voice stratum is not frozen — it has never been generated, and "
-        "freezing it would prevent the run that creates it"
+    assert voice_stage.get("outs") == ["data/output/benchmark/task_a_voice"]
+
+
+def test_voice_stage_is_frozen(voice_stage: dict) -> None:
+    assert voice_stage.get("frozen") is True, (
+        f"{VOICE_STAGE} must stay frozen. It has been generated and registered "
+        "with DVC; its cmd and declared deps (generate_workflows.py, "
+        "voice_convention.py, the tool-schema template) can drift and an "
+        "unfrozen `dvc repro` would silently regenerate and swap the data "
+        "CLAUDE.md R20/R24/R25 measure against. See CLAUDE.md R21."
     )
+
+
+def test_voice_description_states_the_stage_is_frozen(voice_stage: dict) -> None:
+    desc = voice_stage.get("desc", "")
+    assert "FROZEN" in desc, "desc must say the stage is frozen"
+    assert "250" in desc, "desc must state the real conversation count"
