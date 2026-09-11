@@ -1,0 +1,67 @@
+/brainstorming Correct and Revise README.md to reflect current setup and procedure to bring up the tracked models, benchmark and training data from scratch. Note the current tags for models and data.
+
+---
+
+approve
+
+---
+
+We haven't generate GRPO data yet
+
+---
+
+Should we generate current GRPO and preference v3 data and tag similar to sft data
+
+---
+
+fix data tagging convention
+
+---
+
+approve
+
+---
+
+generate GRPO data then tag. Skip preference data as it requires GPU.
+
+---
+
+`dvc push` GRPO data and corpus v3. Push branch + tags and open a PR. Update README.md
+
+---
+
+<task-notification>
+<task-id>b2o0znx6t</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/827e1f36-cd0c-4814-90f3-3b621e70eeee/tasks/b2o0znx6t.output</output-file>
+<status>completed</status>
+<summary>Background command "Push GRPO data and corpus v3 to GCS" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+also push to https://code.loolootech.com/wichai.p/voicebot-llms.git
+
+---
+
+<task-notification>
+<task-id>bns1inizx</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<status>stopped</status>
+<summary>Background shell command didn't finish before the previous session ended</summary>
+<note>No completion record was found for it in the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check the output file for partial results before assuming it completed.</note>
+</task-notification>
+
+---
+
+Look like benchmark data is not tagged yet
+
+---
+
+<task-notification>
+<task-id>b5t4sh34n</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-workspaces-ai-agent-llms/9a4c93d8-e585-441c-8243-b23259935dfb/tasks/b5t4sh34n.output</output-file>
+<status>completed</status>
+<summary>Background command "Push both benchmark strata to GCS" completed (exit code 0)</summary>
+</task-notification>
