@@ -5,10 +5,18 @@
 # sft-cat-a-c2-corpus-v2), which scored 0.7595. This file changes the corpus and
 # NOTHING else, so a difference between the two is attributable to the data.
 #
-# Every hyperparameter below is byte-identical to sft_cat_a_c2.yaml. Do not
-# "improve" any of them here. The corpus is larger and harder, which invites
-# raising the LR or the epoch count; doing so spends the experiment, and R15 and
-# R16 are both cases where a confounded comparison had to be withdrawn.
+# Every hyperparameter below is byte-identical to sft_cat_a_c2.yaml EXCEPT
+# lora.freeze_router, which is false here and true there (see the comment on
+# that key). Do not "improve" any of the others. The corpus is larger and
+# harder, which invites raising the LR or the epoch count; doing so spends the
+# experiment, and R15 and R16 are both cases where a confounded comparison had
+# to be withdrawn.
+#
+# That exception is a SECOND variable against the v2 run: comparing this arm
+# with sft_cat_a_c2.yaml's checkpoint now changes the corpus AND the trained
+# parameter set. To attribute a difference to the corpus alone, re-run the v2
+# corpus with freeze_router: false as well. The E4B arm
+# (sft_cat_a_e4b.yaml) is unaffected — it matches this file exactly.
 #
 # WHAT THE CORPUS ADDS, and the confound it carries:
 #   +1,500 harder L4/L5 text (L4/L5 share 32.5% -> 46.9%)
@@ -51,7 +59,19 @@ lora:
   alpha: 16
   dropout: 0
   target_modules: "auto"   # ignored for Gemma-4 (toggle-flag form used)
-  freeze_router: true
+  # false, unlike C2 on v2. When C2 on v2 trained, true never froze a router:
+  # sft.py called _freeze_modules(model, ["mlp.gate"]), which then matched by
+  # SUBSTRING, so it froze every mlp.gate_proj LoRA adapter instead, while
+  # Gemma-4's router (layers.N.router) never matched. Measured on the C2 v2
+  # checkpoint (checkpoints/sft_cat_a_c2_step500): gate_proj lora_B is exactly
+  # zero in 30/30 layers while the other six adapted modules trained.
+  #
+  # Since fixed: matching is segment-aligned and sft.py takes the router name
+  # from the LoRA registry ("router" for Gemma-4), so true would now freeze
+  # only the router. That is a no-op under LoRA — every base weight is already
+  # frozen and the router carries no adapter — so true and false train the
+  # same parameters. false is kept because it is what was decided and tested.
+  freeze_router: false
   seed: 3407
 
 training:

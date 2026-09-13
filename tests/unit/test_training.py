@@ -149,7 +149,8 @@ class TestLoRATargetRegistry:
 
     def test_nemotron_30b_has_mamba_warning(self) -> None:
         spec = LORA_TARGET_MODULES["nemotron_30b"]
-        assert "mlp.gate" in spec.modules_to_freeze
+        # NemotronH routes through layers.N.mixer.gate; it has no mlp.gate.
+        assert spec.modules_to_freeze == ("mixer.gate",)
         assert any("Mamba" in w for w in spec.warnings)
 
     def test_cat_a_standard_models(self) -> None:
@@ -157,6 +158,15 @@ class TestLoRATargetRegistry:
             spec = LORA_TARGET_MODULES[key]
             assert "q_proj" in spec.target_modules
             assert len(spec.target_modules) == 7
+
+    def test_gemma4_moe_freezes_its_router_not_mlp_gate(self) -> None:
+        # Gemma-4's router lives at layers.N.router. The old "mlp.gate" pattern
+        # named no Gemma-4 module and, as a substring, froze mlp.gate_proj.
+        assert LORA_TARGET_MODULES["gemma4_26b_a4b"].modules_to_freeze == ("router",)
+
+    def test_dense_gemma4_models_declare_nothing_to_freeze(self) -> None:
+        for key in ("gemma4_31b", "gemma4_e4b", "gemma4_e2b"):
+            assert LORA_TARGET_MODULES[key].modules_to_freeze == ()
 
 
 class TestDetectModelKey:
@@ -392,6 +402,69 @@ class TestFreezeModules:
         frozen = _freeze_modules(model, ["nonexistent"])
         assert frozen == 0
         assert dict(model.named_parameters())["layer.weight"].requires_grad
+
+    @staticmethod
+    def _model_with_params(names: list[str]):
+        """Build a module tree whose named_parameters() are exactly `names`."""
+        import torch
+
+        root = torch.nn.Module()
+        for name in names:
+            *path, leaf = name.split(".")
+            node = root
+            for part in path:
+                if not hasattr(node, part):
+                    node.add_module(part, torch.nn.Module())
+                node = getattr(node, part)
+            node.register_parameter(leaf, torch.nn.Parameter(torch.randn(2)))
+        return root
+
+    @staticmethod
+    def _frozen(model) -> list[str]:
+        return sorted(n for n, p in model.named_parameters() if not p.requires_grad)
+
+    def test_freeze_does_not_match_a_longer_segment(self) -> None:
+        # The bug: "mlp.gate" in "layers.0.mlp.gate_proj.lora_B.default.weight"
+        # is True, so every gate_proj LoRA adapter was frozen and never trained.
+        model = self._model_with_params([
+            "layers.0.mlp.gate.weight",
+            "layers.0.mlp.gate_proj.base_layer.weight",
+            "layers.0.mlp.gate_proj.lora_A.default.weight",
+            "layers.0.mlp.gate_proj.lora_B.default.weight",
+        ])
+
+        frozen = _freeze_modules(model, ["mlp.gate"])
+
+        assert frozen == 1
+        assert self._frozen(model) == ["layers.0.mlp.gate.weight"]
+
+    def test_freeze_pattern_must_align_to_segment_boundaries(self) -> None:
+        model = self._model_with_params([
+            "layers.0.mlp.gate.weight",
+            "layers.0.per_layer_input_gate.weight",
+        ])
+
+        assert _freeze_modules(model, ["lp.gate"]) == 0
+        assert _freeze_modules(model, ["gate"]) == 1
+        assert self._frozen(model) == ["layers.0.mlp.gate.weight"]
+
+    def test_freeze_single_segment_pattern_covers_the_whole_submodule(self) -> None:
+        # Gemma-4's router: proj.weight plus two scale parameters.
+        model = self._model_with_params([
+            "layers.3.router.proj.weight",
+            "layers.3.router.scale",
+            "layers.3.router.per_expert_scale",
+            "layers.3.mlp.gate_proj.weight",
+        ])
+
+        frozen = _freeze_modules(model, ["router"])
+
+        assert frozen == 3
+        assert self._frozen(model) == [
+            "layers.3.router.per_expert_scale",
+            "layers.3.router.proj.weight",
+            "layers.3.router.scale",
+        ]
 
 
 # --- Training Result Tests ---
