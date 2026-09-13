@@ -59,14 +59,18 @@ lora:
   alpha: 16
   dropout: 0
   target_modules: "auto"   # ignored for Gemma-4 (toggle-flag form used)
-  # false, unlike C2 on v2. true never froze a router: sft.py calls
-  # _freeze_modules(model, ["mlp.gate"]), which matches by SUBSTRING, so it
-  # froze every mlp.gate_proj LoRA adapter instead, while Gemma-4's router
-  # (layers.N.router) never matched. Measured on the C2 v2 checkpoint
-  # (checkpoints/sft_cat_a_c2_step500): gate_proj lora_B is exactly zero in
-  # 30/30 layers while the other six adapted modules trained. The router
-  # needs no freezing — under LoRA every base weight is already frozen and it
-  # carries no adapter.
+  # false, unlike C2 on v2. When C2 on v2 trained, true never froze a router:
+  # sft.py called _freeze_modules(model, ["mlp.gate"]), which then matched by
+  # SUBSTRING, so it froze every mlp.gate_proj LoRA adapter instead, while
+  # Gemma-4's router (layers.N.router) never matched. Measured on the C2 v2
+  # checkpoint (checkpoints/sft_cat_a_c2_step500): gate_proj lora_B is exactly
+  # zero in 30/30 layers while the other six adapted modules trained.
+  #
+  # Since fixed: matching is segment-aligned and sft.py takes the router name
+  # from the LoRA registry ("router" for Gemma-4), so true would now freeze
+  # only the router. That is a no-op under LoRA — every base weight is already
+  # frozen and the router carries no adapter — so true and false train the
+  # same parameters. false is kept because it is what was decided and tested.
   freeze_router: false
   seed: 3407
 

@@ -466,6 +466,16 @@ def _lora_spec_for(config: dict[str, Any], model_name: str) -> Any:
     return get_lora_target_spec(model_name)
 
 
+def _router_freeze_patterns(config: dict[str, Any], model_name: str) -> tuple[str, ...]:
+    """Module-name patterns that `lora.freeze_router` freezes for this model.
+
+    Taken from the LoRA registry's `modules_to_freeze`, because routers are
+    named per architecture (Gemma-4 `router`, NemotronH `mixer.gate`, Qwen MoE
+    and GLM `mlp.gate`). Empty for dense models.
+    """
+    return tuple(_lora_spec_for(config, model_name).modules_to_freeze)
+
+
 def _resolve_lora_targets(config: dict[str, Any], model_name: str = "") -> list[str]:
     """Resolve LoRA targets from config, falling back to registry.
 
@@ -903,11 +913,32 @@ def train_sft(
             use_gradient_checkpointing="unsloth",
         )
 
-    # Freeze router weights if configured
+    # Freeze router weights if configured. The patterns come from the LoRA
+    # registry because every MoE family names its router differently; a fixed
+    # "mlp.gate" froze nothing on Gemma-4 and NemotronH.
     if lora_cfg.get("freeze_router", False):
         from llm_workflow_agents.training.train_specialist import _freeze_modules
 
-        _freeze_modules(model, ["mlp.gate"])
+        router_patterns = _router_freeze_patterns(config, model_name)
+        frozen_count = _freeze_modules(model, router_patterns)
+        if frozen_count == 0:
+            logger.warning(
+                "freeze_router_matched_nothing",
+                model=model_name,
+                patterns=list(router_patterns),
+                detail=(
+                    "No router parameters were frozen. Expected on a dense "
+                    "model; on an MoE model, add its router name to "
+                    "modules_to_freeze in training/lora_targets.py."
+                ),
+            )
+        else:
+            logger.info(
+                "freeze_router_applied",
+                model=model_name,
+                patterns=list(router_patterns),
+                frozen_params=frozen_count,
+            )
 
     # Load dataset.
     # We bypass `load_dataset("json", ...)` because PyArrow's JSON reader

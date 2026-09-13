@@ -27,10 +27,12 @@
 # separately on data/output/heldout/cat_a_v3_test_voice (146 rows) and never
 # blend it into the composite (R20).
 #
-# freeze_router is false in BOTH arms. true froze every mlp.gate_proj LoRA
-# adapter (a substring match on "mlp.gate") and never the router; see the
-# comment on that key in sft_cat_a_c2_corpus_v3.yaml. Both arms carry the fix,
-# so they still train identical parameter sets.
+# freeze_router is false in BOTH arms. Before the _freeze_modules fix, true
+# froze every mlp.gate_proj LoRA adapter (a substring match on "mlp.gate") and
+# never the router; see the comment on that key in
+# sft_cat_a_c2_corpus_v3.yaml. E4B is dense and has no router, so under the
+# fixed code the flag freezes nothing here either way. Both arms match, so
+# they train identical parameter sets.
 #
 # output_dir keeps this run off every C2 checkpoint path (CLAUDE.md R13).
 output_dir: "sft_cat_a_e4b"

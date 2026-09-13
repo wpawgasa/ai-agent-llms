@@ -61,10 +61,12 @@ def test_e4b_sft_uses_response_only_at_8192():
 
 
 def test_neither_arm_freezes_gate_proj_via_freeze_router():
-    # freeze_router: true calls _freeze_modules(model, ["mlp.gate"]), a
-    # substring match that freezes every mlp.gate_proj LoRA adapter and never
+    # freeze_router: true once called _freeze_modules(model, ["mlp.gate"]) as a
+    # substring match, freezing every mlp.gate_proj LoRA adapter and never
     # Gemma-4's router. The C2 v2 checkpoint trained with it has gate_proj
-    # lora_B exactly zero in 30/30 layers.
+    # lora_B exactly zero in 30/30 layers. The matching is fixed
+    # (tests/unit/test_training.py::TestFreezeModules), but these two arms
+    # were decided and specified with false, so pin it.
     assert _load(E4B_SFT)["lora"]["freeze_router"] is False
     assert _load(C2_V3_SFT)["lora"]["freeze_router"] is False
 
