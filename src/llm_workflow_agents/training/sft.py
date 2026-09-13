@@ -1187,6 +1187,8 @@ def train_sft(
     # gradient_accumulation_steps when per_device is fixed at 1.
     from trl import SFTConfig, SFTTrainer
 
+    from llm_workflow_agents.training._utils import warmup_kwargs
+
     output_dir = _resolve_output_dir(config, Path(config_path), model_name)
     effective_bs = training_cfg.get("effective_batch_size", 8)
     per_device_bs = training_cfg.get("per_device_train_batch_size", 1)
@@ -1206,7 +1208,9 @@ def train_sft(
         dataset_text_field="text",
         learning_rate=training_cfg.get("learning_rate", 5e-5),
         lr_scheduler_type=training_cfg.get("lr_scheduler", "cosine"),
-        warmup_ratio=training_cfg.get("warmup_ratio", 0.05),
+        # warmup_ratio on transformers <= 5.6, warmup_steps (float ratio) on
+        # 5.17+, which removed warmup_ratio. See _utils.warmup_kwargs.
+        **warmup_kwargs(training_cfg.get("warmup_ratio", 0.05), SFTConfig),
         per_device_train_batch_size=per_device_bs,
         per_device_eval_batch_size=_sft_eval_batch_size(training_cfg, per_device_bs),
         gradient_accumulation_steps=grad_accum,
