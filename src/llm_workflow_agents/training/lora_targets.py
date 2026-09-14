@@ -153,6 +153,17 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
             "q_proj", "k_proj", "v_proj", "o_proj",
         ),
     ),
+    "gemma4_12b": LoRATargetSpec(
+        # Dense gemma4_unified model (Gemma4UnifiedForConditionalGeneration):
+        # the text decoder uses self_attn.{q,k,v,o}_proj and
+        # mlp.{gate,up,down}_proj like the other Gemma-4 models, with no
+        # router and no KV-shared layers. Without this entry no targets
+        # resolve and sft.py stops before training.
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ),
+    ),
     "gemma4_e4b": LoRATargetSpec(
         target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
@@ -188,6 +199,7 @@ _MODEL_NAME_PATTERNS: dict[str, str] = {
     "qwen2.5-3b": "qwen25_3b",
     "gemma-4-26b": "gemma4_26b_a4b",
     "gemma-4-31b": "gemma4_31b",
+    "gemma-4-12b": "gemma4_12b",
     "gemma-4-e4b": "gemma4_e4b",
     "gemma-4-e2b": "gemma4_e2b",
     "gemma-3-27b": "gemma3_27b",

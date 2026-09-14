@@ -110,7 +110,7 @@ class TestLoRATargetRegistry:
             "qwen25_3b", "qwen35_4b", "glm47_flash", "gemma_2b", "gemma3_4b",
             "qwen3_32b", "qwen35_35b_a3b", "qwen36_35b_a3b", "qwen36_27b", "nemotron_30b",
             "mistral_24b", "gemma3_27b",
-            "gemma4_26b_a4b", "gemma4_31b", "gemma4_e4b", "gemma4_e2b",
+            "gemma4_26b_a4b", "gemma4_31b", "gemma4_12b", "gemma4_e4b", "gemma4_e2b",
         }
         assert set(LORA_TARGET_MODULES.keys()) == expected
 
@@ -165,7 +165,7 @@ class TestLoRATargetRegistry:
         assert LORA_TARGET_MODULES["gemma4_26b_a4b"].modules_to_freeze == ("router",)
 
     def test_dense_gemma4_models_declare_nothing_to_freeze(self) -> None:
-        for key in ("gemma4_31b", "gemma4_e4b", "gemma4_e2b"):
+        for key in ("gemma4_31b", "gemma4_12b", "gemma4_e4b", "gemma4_e2b"):
             assert LORA_TARGET_MODULES[key].modules_to_freeze == ()
 
 
@@ -201,6 +201,12 @@ class TestDetectModelKey:
 
     def test_detect_gemma3_27b(self) -> None:
         assert detect_model_key("google/gemma-3-27b-it") == "gemma3_27b"
+
+    def test_detect_gemma4_12b(self) -> None:
+        # Without this entry no LoRA targets resolve and sft.py stops before
+        # training. Both the Google and Unsloth spellings must match.
+        assert detect_model_key("google/gemma-4-12B-it") == "gemma4_12b"
+        assert detect_model_key("unsloth/gemma-4-12b-it") == "gemma4_12b"
 
     def test_unknown_model(self) -> None:
         assert detect_model_key("unknown/model-7b") is None
@@ -772,7 +778,7 @@ class TestModuleImports:
 
     def test_import_lora_targets(self) -> None:
         from llm_workflow_agents.training.lora_targets import LORA_TARGET_MODULES
-        assert len(LORA_TARGET_MODULES) == 16
+        assert len(LORA_TARGET_MODULES) == 17
 
     def test_import_training_result(self) -> None:
         from llm_workflow_agents.training.train_specialist import TrainingResult
