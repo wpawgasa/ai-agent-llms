@@ -7,8 +7,12 @@ measured, Gemini included. Task completion did not move at all, and that one
 term is most of what still separates it from gemma-4-12B and the Gemini
 Flash-Lite models.
 
-This is the **Phase 1 benchmark**, not the held-out audit. It is **not
-comparable to C2's 0.7595**, which is bound to a different 206-row set.
+The held-out audit agrees. On the contamination-free corpus-v3 sets, SFT
+raises the composite from **0.7127 to 0.7828 on text** and **0.7080 to 0.7894
+on voice**, both significant in a row-paired test (section 3.1).
+
+Neither number is **comparable to C2's 0.7595**, which is bound to a different
+206-row set.
 
 ---
 
@@ -93,6 +97,81 @@ Result files in `results/exp_a/` (DVC dir `82a957ed…`):
 `google_gemma-4-E4B-it_auto.json`, `sft_cat_a_e4b_ckpt3168_auto.json`,
 `google_gemma-4-12B-it_auto.json`, `gemini_gemini-3.5-flash-lite_frontier.json`,
 `gemini_gemini-3.1-flash-lite_frontier.json`.
+
+### 3.1 Held-out audit (added 2026-09-14)
+
+The Phase 1 benchmark replays conversations that were generated for ranking,
+not held out from training. The held-out audit uses corpus-v3 test
+conversations that appear in neither the v2 train nor the v2 validation split,
+and scores the untrained E4B and `checkpoint-3168` on exactly the same rows.
+
+| | |
+|---|---|
+| Sets | `cat_a_v3_test_not_in_v2` (text) and `cat_a_v3_test_voice` (voice), tag `derived/task-a-heldout-v3` |
+| Rows scored | 303 text, 145 voice (one sampled assistant turn per conversation) |
+| Settings | `scripts/heldout_composite_audit.py --split test --seed 42`, greedy, 4-bit loading, text and voice as separate runs |
+| Composite | `0.4 × state_acc + 0.4 × tool_f1 + 0.2 × task` |
+
+| | Text: untrained | Text: SFT | Voice: untrained | Voice: SFT |
+|---|---|---|---|---|
+| **Composite** | 0.7127 | **0.7828** | 0.7080 | **0.7894** |
+| State accuracy | 0.8911 | 0.9835 | 0.9172 | 0.9862 |
+| Tool F1 (all rows) | 0.8212 | 0.9076 | 0.7908 | 0.9218 |
+| Task | 0.1386 | 0.1320 | 0.1241 | 0.1310 |
+
+**The improvement is real.** Rows are paired by `row_index`, and the ground
+truth is identical in every one of them across the two audits.
+`scripts/stratify_heldout_audit.py` gives:
+
+| | Composite delta | 95% CI (10k bootstrap) | SFT better / worse | Sign test |
+|---|---|---|---|---|
+| Text | **+0.0702** | [+0.0475, +0.0944] | 60 / 14 (229 tied) | p = 6.2e-08 |
+| Voice | **+0.0814** | [+0.0492, +0.1159] | 31 / 10 (104 tied) | p = 0.0015 |
+
+State accuracy and tool F1 are each significant on both sets as well.
+
+**Where it improved.** About 69% of rows need no tool call, and staying silent
+earns full tool F1 on them, so the aggregate hides tool-calling ability. The
+stratified rows show it:
+
+| | Text: untrained | Text: SFT | Voice: untrained | Voice: SFT |
+|---|---|---|---|---|
+| Rows needing a tool call | 94 | 94 | 46 | 46 |
+| Tool F1 on those rows | 0.6578 | 0.7553 | 0.7971 | 0.8188 |
+| Emits no tool call | 6.4% | 1.1% | 8.7% | 0.0% |
+| Exact call (name + arguments) | 53.2% | **71.3%** | 58.7% | **84.8%** |
+| Spurious call on rows needing none | 10.5% | 2.4% | 21.2% | 3.0% |
+| Stays in the same state when it should advance | 25.4% | **1.1%** | 10.0% | **2.2%** |
+
+- **The tool-call stay convention was learned.** Corpus v3 annotates a
+  tool-calling turn as staying in its state. The untrained model over-applies
+  staying: it wrongly stays put on 25.4% of turns that should advance. SFT cuts
+  that to 1.1%, while still staying correctly on 98–100% of turns that should.
+- **Arguments improved most.** Exact calls on rows needing a tool rose by 18
+  points on text and 26 on voice. This matches the Phase 1 benchmark, where
+  argument exact match was the largest gain.
+- **Spurious tool calls nearly disappeared.** The untrained model calls a tool
+  on 10.5% (text) and 21.2% (voice) of turns that need none.
+- **Voice formatting is a guardrail, not part of the composite:** voice format
+  compliance 0.9586 → 0.9724.
+
+**The task column is not a completion measure here.** It scores whether a
+single sampled turn reaches the conversation's terminal state, so it is low for
+any model on mid-conversation turns (CLAUDE.md R17). Its flat value says nothing
+about the benchmark's unchanged task completion in section 4.3.
+
+**Remaining error is arguments.** On rows that need a tool call, 28% (text)
+and 15% (voice) get the right tool name with wrong arguments, while the right
+tool name is chosen 99–100% of the time. The same bottleneck R23 found for the 26B.
+
+**These composites form a new scale.** They are not comparable to C2's 0.7595,
+and no fine-tuned 26B has been scored on these sets. To place C2 on this scale,
+audit `model/sft-gemma4-c2-on-task-a-v2` against these sets with the same
+settings — that needs the 26B weights, so not on this machine.
+
+Audit files: `runs/audit/heldout_e4b_base_v3text.json`,
+`heldout_e4b_base_v3voice.json`, `heldout_e4b_ckpt3168_v3text.json`,
+`heldout_e4b_ckpt3168_v3voice.json`.
 
 ---
 
@@ -203,10 +282,12 @@ the result files as descriptive, not as a ranking.
 
 ## 5. What this result does not show
 
-- **It is not the held-out audit.** Nothing here is comparable to C2's 0.7595.
-  The corpus-v3 held-out sets are `data/output/heldout/cat_a_v3_test_not_in_v2`
-  (304 text rows) and `cat_a_v3_test_voice` (146 voice rows). They have not been
-  run on this checkpoint.
+- **Nothing here is comparable to C2's 0.7595.** The benchmark in section 3
+  is a different measure, and the held-out audit in section 3.1 uses the
+  corpus-v3 sets, a different scale from C2's 206-row set.
+- **The held-out audit scores single turns.** One sampled assistant turn per
+  conversation, 303 text and 145 voice. It does not test whether a whole
+  conversation finishes correctly.
 - **No confidence intervals.** Each model ran once, greedily, on 508
   conversations. Differences of a few thousandths (for example tool F1 0.6112
   against 0.6055) are within what a re-run could move. The large differences,
@@ -266,9 +347,10 @@ None of these changed the result, but each would have cost a later run.
 
 ## 7. Next steps
 
-1. **Run the held-out audit** on `checkpoint-3168` against the corpus-v3 sets,
-   text and voice reported separately (R20). That is the number that can be
-   compared with other fine-tuned checkpoints.
+1. **Score C2 on the corpus-v3 held-out sets.** The held-out audit is done for
+   E4B (section 3.1). Auditing `model/sft-gemma4-c2-on-task-a-v2` on the same
+   sets and settings would put the best 26B checkpoint on the same scale. It
+   needs the 26B weights, so it has to run on another machine.
 2. **Train the 26B C2-v3 arm on a machine with enough disk.** Only that
    completes the size comparison this run was built for.
 3. **Investigate task completion.** Start from the 252 conversations: which end
@@ -305,3 +387,36 @@ source .venv-infer/bin/activate
 
 The model YAML used was `configs/models_exp_a/gemma4_e4b.yaml` with only
 `model.name` changed.
+
+The held-out audit (section 3.1). The sets are gitignored and rebuilt from two
+tagged corpora; `git tag -n60 derived/task-a-heldout-v3` holds the full recipe,
+input hashes and file checksums.
+
+```bash
+# Rebuild the sets, verifying each against the stored checkpoint-3168 audit
+dvc fetch -T data/output/sft/task_a_splits
+.venv-train/bin/python scripts/materialize_dvc_lineage.py \
+    --dir-hash 21e33e25d7bbae63e97a89029b3b4705 --out /tmp/v2_splits
+.venv-train/bin/python scripts/build_heldout_clean_set.py \
+    --candidate-split data/output/sft/task_a_splits/test.jsonl \
+    --exclusion-split /tmp/v2_splits/train.jsonl \
+    --exclusion-split /tmp/v2_splits/validation.jsonl \
+    --out-dir data/output/heldout/cat_a_v3_test_not_in_v2 \
+    --modality text --expect-clean 304 --n-prompts 304 --seed 42 \
+    --verify-against runs/audit/heldout_e4b_ckpt3168_v3text.json
+# ... and the same with --modality voice --expect-clean 146 --n-prompts 146
+#     --out-dir data/output/heldout/cat_a_v3_test_voice
+#     --verify-against runs/audit/heldout_e4b_ckpt3168_v3voice.json
+
+# Audit a checkpoint; use --checkpoint unsloth/gemma-4-E4B-it for the baseline
+env -u UNSLOTH_VLLM_STANDBY .venv-train/bin/python scripts/heldout_composite_audit.py \
+    --checkpoint checkpoints/sft_cat_a_e4b/gemma-4-E4B-it/checkpoint-3168 \
+    --data-dir data/output/heldout/cat_a_v3_test_not_in_v2 \
+    --split test --n-prompts 304 --seed 42 --modality text \
+    --output runs/audit/heldout_e4b_ckpt3168_v3text.json
+
+# Paired comparison, untrained model first
+.venv-train/bin/python scripts/stratify_heldout_audit.py \
+    base=runs/audit/heldout_e4b_base_v3text.json \
+    sft=runs/audit/heldout_e4b_ckpt3168_v3text.json
+```
