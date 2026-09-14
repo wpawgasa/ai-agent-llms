@@ -53,6 +53,7 @@ from llm_workflow_agents.data.heldout_clean_set import (
 )
 from llm_workflow_agents.training._utils import (
     unwrap_unsloth_gemma4_kv_zero_proxy,
+    warmup_kwargs,
 )
 from llm_workflow_agents.training.reward_utils import (
     heldout_composite_score,
@@ -440,6 +441,11 @@ def _dpo_trainer_kwargs(
     TRL 1.0.0's ``DPOConfig``; ``dpo.max_completion_length`` bounds the
     held-out guardrail's generation only, never training.
     """
+    # DPOConfig and ORPOConfig both inherit their warmup fields from
+    # TrainingArguments, so check that class — resolving the TRL class here
+    # would raise for a method the installed TRL does not ship.
+    from transformers import TrainingArguments
+
     per_device_bs = int(dpo_cfg.get("per_device_train_batch_size", 1))
     kwargs: dict[str, Any] = dict(
         output_dir=output_dir,
@@ -450,7 +456,9 @@ def _dpo_trainer_kwargs(
             dpo_cfg.get("per_device_eval_batch_size", per_device_bs)
         ),
         gradient_accumulation_steps=dpo_cfg.get("gradient_accumulation_steps", 8),
-        warmup_ratio=dpo_cfg.get("warmup_ratio", 0.05),
+        # transformers 5.17 removed warmup_ratio; _filter_dpo_config_kwargs
+        # would then drop it and train with NO warmup.
+        **warmup_kwargs(float(dpo_cfg.get("warmup_ratio", 0.05)), TrainingArguments),
         max_length=int(dpo_cfg.get("max_seq_length", 8192)),
         # Cache the reference logps up front instead of re-deriving them every
         # step. See the note below on why this is the difference between an

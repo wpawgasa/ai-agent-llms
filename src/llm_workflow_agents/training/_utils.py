@@ -104,8 +104,43 @@ def normalize_chat_template_ids(out: Any) -> list[int]:
     return [int(x) for x in out]
 
 
+def warmup_kwargs(warmup_ratio: float, config_cls: type) -> dict[str, Any]:
+    """Warmup kwarg for ``config_cls``, keyed to the installed transformers.
+
+    transformers removed ``TrainingArguments.warmup_ratio`` between 5.6.2 and
+    5.17.0; ``warmup_steps`` became a float where a value in ``[0, 1)`` is a
+    ratio of total steps (``get_warmup_steps`` computes
+    ``ceil(num_training_steps * warmup_steps)``). TRL's SFT/GRPO/DPO configs
+    inherit the change.
+
+    Passing ``warmup_ratio`` anyway fails two different ways: ``SFTConfig``
+    raises ``TypeError`` after the model and dataset have loaded, while GRPO
+    and DPO filter unknown kwargs and would train with NO warmup, logging only
+    a warning. Pass whichever field ``config_cls`` accepts so the ratio holds
+    on both versions.
+    """
+    import dataclasses
+    import inspect
+
+    if not 0 <= warmup_ratio < 1:
+        # warmup_steps >= 1 is read as an absolute step count, so a ratio of
+        # 1.0 or more would silently mean something else under the new API.
+        raise ValueError(f"warmup_ratio must be in [0, 1), got {warmup_ratio!r}")
+    if dataclasses.is_dataclass(config_cls):
+        fields = {f.name for f in dataclasses.fields(config_cls)}
+    else:
+        # Not a dataclass: a stand-in such as a test double for
+        # TrainingArguments. Its call signature is the best evidence available.
+        fields = set(inspect.signature(config_cls).parameters)
+    if "warmup_ratio" in fields:
+        return {"warmup_ratio": warmup_ratio}
+    return {"warmup_steps": warmup_ratio}
+
+
 def _build_training_arguments(config: TrainingModelConfig, output_dir: Path) -> dict[str, Any]:
     """Build HuggingFace TrainingArguments kwargs from config."""
+    from transformers import TrainingArguments
+
     micro_batch_size = config.training.effective_batch_size // config.training.gradient_accumulation_steps
 
     args_kwargs: dict[str, Any] = {
@@ -114,7 +149,7 @@ def _build_training_arguments(config: TrainingModelConfig, output_dir: Path) -> 
         "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
         "learning_rate": config.training.learning_rate,
         "lr_scheduler_type": config.training.lr_scheduler,
-        "warmup_ratio": config.training.warmup_ratio,
+        **warmup_kwargs(config.training.warmup_ratio, TrainingArguments),
         "num_train_epochs": config.training.num_epochs,
         "max_seq_length": config.training.max_seq_length,
         "logging_steps": 10,
