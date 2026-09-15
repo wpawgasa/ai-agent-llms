@@ -347,19 +347,40 @@ None of these changed the result, but each would have cost a later run.
 
 ## 7. Next steps
 
-1. **Score C2 on the corpus-v3 held-out sets.** The held-out audit is done for
+1. **Do not start single-turn GRPO, DPO or RFT on this checkpoint.** The
+   go/no-go probe (`scripts/rft_headroom_probe.py`) returned **NO_GO** on
+   2026-09-15, against the gates fixed in advance in
+   `docs/grpo_viability_investigation.md` section 4. Settings: checkpoint-3168,
+   500 prompts from `data/output/grpo/task_a` train, 8 samples each at
+   temperature 0.8, top-p 0.95, seed 42; 4.4 h on the H100 NVL.
+
+   | | E4B SFT | Gate | C2 26B (R23) |
+   |---|---|---|---|
+   | `frontier_frac` | **0.078** | ≥ 0.15 for RFT; < 0.10 is NO_GO | 0.052 |
+   | `mean_headroom` | **0.0183** | ≥ 0.03 | 0.0177 |
+   | `frac_collapsed_groups` | **0.746** | < 0.50 for GRPO | 0.876 |
+   | `median_reward_std` | **0.0000** | ≥ 0.05 | 0.0000 |
+
+   Best-of-8 beats greedy on only 7.8% of prompts, so RFT has little to distil,
+   and 74.6% of groups score all eight samples identically, so GRPO gets no
+   gradient from most of a batch. E4B leaves slightly more room than C2 but
+   fails every gate. The prompt set is 27.7% voice while C2's was text only, so
+   the two rows are not strictly comparable. As for C2, the open direction is
+   multi-turn. Raw output: `runs/audit/rft_headroom_e4b_ckpt3168.json`.
+2. **Score C2 on the corpus-v3 held-out sets.** The held-out audit is done for
    E4B (section 3.1). Auditing `model/sft-gemma4-c2-on-task-a-v2` on the same
    sets and settings would put the best 26B checkpoint on the same scale. It
    needs the 26B weights, so it has to run on another machine.
-2. **Train the 26B C2-v3 arm on a machine with enough disk.** Only that
+3. **Train the 26B C2-v3 arm on a machine with enough disk.** Only that
    completes the size comparison this run was built for.
-3. **Investigate task completion.** Start from the 252 conversations: which end
+4. **Investigate task completion.** Start from the 252 conversations: which end
    on a non-terminal state, and at which complexity level.
    `scripts/run_exp_a_per_level.sh` gives the per-level split this document
    lacks.
-4. **Fix the tooling:** put the verified merge (including the 54-tensor
+5. **Fix the tooling:** put the verified merge (including the 54-tensor
    completion) into `training/merge_adapter.py`, and set `WANDB_PROJECT` from
-   the SFT config.
+   the SFT config. The verified merge script is now committed as
+   `scripts/merge_lora_verified.py`.
 
 ---
 
