@@ -841,6 +841,47 @@ For the voice set use `--modality voice`, `--out-dir data/output/heldout/cat_a_v
 
 The composite is `0.4 × state_acc + 0.4 × tool_f1 + 0.2 × task`. **Text and voice are reported separately and never blended** — a mixed sample is flagged `mixed_modality` in the JSON and is not comparable to a single-modality score. `voice_format_compliance` is a guardrail beside the composite, never folded into it.
 
+### Merging and serving the 12B SFT checkpoint
+
+SFT checkpoints are LoRA adapters. vLLM serves the merged model, so merge first. These steps are for `model/sft-gemma4-12b-c2-on-task-a-v3`; the merge script also handles the other Gemma-4 adapters (E4B, 26B-A4B).
+
+**1. Pull the adapter** (3.00 GB, all seven checkpoints; the best is checkpoint-3168):
+
+```bash
+dvc pull task_a_sft_gemma4_12b
+```
+
+**2. Merge.** You need transformers that knows `Gemma4UnifiedForConditionalGeneration`; this was run with transformers 5.12.1, peft 0.20.0 and vLLM 0.24.0 (`.venv-infer-v024` on the H100). The merge runs on CPU in bf16, so no GPU is needed. Budget about 25 GB of disk for the output, plenty of RAM (the base and the merge are both held in memory; the peak was not measured), and a 24 GB download of `google/gemma-4-12B-it` on first run (accept the Gemma licence on your HF account).
+
+```bash
+python scripts/merge_lora_verified.py \
+    checkpoints/sft_cat_a_12b/gemma-4-12B-it/checkpoint-3168 \
+    /dev/shm/sft_cat_a_12b_ckpt3168
+```
+
+The base model and its class come from the adapter's `adapter_config.json`. The script refuses to write a result unless:
+- every non-zero `lora_B` tensor in the adapter loaded into the model;
+- sampled layer-0 `q_proj` and `gate_proj` weights changed;
+- the saved tensor names match the base exactly.
+
+It copies the adapter's tokenizer and `chat_template.jinja` into the output and writes `merge_ok.json`. Re-running on a finished output only re-checks it.
+
+**Do not use `training/merge_adapter.py` for Gemma-4.** It loads `AutoModelForCausalLM`, but these adapters were trained on the multimodal `ConditionalGeneration` class, and PEFT only warns about adapter keys it cannot place. A mismatched load can save the unchanged base.
+
+**3. Serve.** `gemma4_unified` needs vLLM ≥ 0.23 (R11):
+
+```bash
+VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve /dev/shm/sft_cat_a_12b_ckpt3168 \
+    --dtype bfloat16 --max-model-len 32768 \
+    --enable-auto-tool-choice --tool-call-parser gemma4
+```
+
+`VLLM_USE_FLASHINFER_SAMPLER=0` was needed on the H100 image because FlashInfer's sampler JIT failed to compile (`curand.h` missing). BF16 weights are ~24 GB, so they do not fit on an L4; see R11 for the FP8 route.
+
+To run the Phase 1 benchmark instead, copy `configs/models_exp_a/gemma4_12b.yaml`, set `model.name` to the merged path, and pass it to `scripts/run_exp_a_single.sh` with the settings in [Latest Task A benchmark results](#latest-task-a-benchmark-results-2026-09-14).
+
+**Known issue: the leaked `model` word.** With the stock chat template this checkpoint starts 54.6% of replies with the literal word `model`. The template appends an empty thought block to the generation prompt that training never saw ([the 12B result](docs/cat_a_12b_sft_result.md), section 5). The benchmark numbers in this README were measured with the stock template. A template without that block is being tested; until that result is in, treat the leak as expected behaviour of this checkpoint, not a serving misconfiguration.
+
 ### Reward functions (GRPO)
 
 | Category | Reward components |
