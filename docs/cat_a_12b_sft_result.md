@@ -67,7 +67,7 @@ comparison is like for like.
 | **Blended quality** | 0.8299 | 0.8113 | **0.7186** | 0.7098 | 0.6678 | 0.6131 |
 | Text | 0.8179 | 0.7976 | **0.6662** | 0.6964 | 0.6315 | 0.6035 |
 | Voice | 0.8579 | 0.8434 | **0.8409** | 0.7409 | 0.7526 | 0.6356 |
-| State sequence accuracy | 0.6839 | 0.6880 | 0.6476 | 0.6148 | 0.6125 | 0.5517 |
+| State sequence accuracy † | n/a | n/a | 0.9132 | 0.8680 | 0.8713 | 0.7884 |
 | Task completion | 0.9390 | 0.9665 | **0.6752** | 0.7559 | 0.4961 | 0.4961 |
 | Recovery rate | 0.9910 | 0.9970 | **0.9580** | 0.6096 | 0.6276 | 0.4925 |
 | Tool-call F1 | 0.6598 | 0.6055 | 0.6322 | 0.5512 | 0.6112 | 0.5135 |
@@ -216,7 +216,7 @@ table above was an earlier count by a different method.
 | Tool-call F1 | 0.6322 | 0.6365 | 0.5512 |
 | Tool name accuracy | 0.7937 | 0.8052 | 0.6613 |
 | Argument exact match | 0.5358 | 0.5321 | 0.3803 |
-| State sequence accuracy | 0.6476 | 0.6551 | 0.6148 |
+| State sequence accuracy † | 0.9132 | 0.9256 | 0.8680 |
 | Full workflow success | 0.2351 | 0.2311 | 0.2010 |
 | Early-termination log lines | 493 | 485 | 571 |
 
@@ -246,8 +246,19 @@ Results: `results/exp_a/sft_cat_a_12b_ckpt3168_notmpl_auto.{json,log}` (DVC,
   this scale yet.
 - **Single runs with greedy decoding.** The held-out deltas have paired
   confidence intervals; the benchmark numbers do not.
-- **The benchmark text drop is not explained.** Section 5.1 rules the leak out
-  as its main cause; the real cause is still unknown.
+- **The benchmark text drop is mostly the text set, not the model** (added
+  2026-09-16). The whole drop is task completion (0.7403 → 0.5155). The June
+  text set predates the tool-call stay rule: on its 81 non-compliant
+  conversations completion falls 0.605 → 0.198, on the 177 compliant ones
+  0.802 → 0.661. That remaining drop is still unexplained. See
+  [the text-set findings](cat_a_benchmark_text_set_convention_mismatch.md).
+- **† State sequence accuracy corrected 2026-09-16.** The originally reported
+  values (12B SFT 0.6476, 12B base 0.6148, E4B SFT 0.6125, E4B base 0.5517, and
+  0.6551 with the patched template) scored text conversations against voice
+  ground truth, because the two strata reuse conversation ids. The values shown
+  are recomputed from the logged replies. Gemini's cannot be recomputed from its
+  logs, so they are shown as n/a. Blended quality, per-stratum scores, task
+  completion and tool metrics were not affected.
 - **Clipped gradients.** Most 12B steps were clipped at 1.0 and E4B's were not,
   so the two arms did not take equally sized optimizer steps despite identical
   configs.
@@ -256,10 +267,12 @@ Results: `results/exp_a/sft_cat_a_12b_ckpt3168_notmpl_auto.{json,log}` (DVC,
 
 ## 7. Next steps
 
-1. **Find the cause of the text and task-completion drop before retraining.**
-   Start from the benchmark logs, which need no GPU: which conversations end on
-   a non-terminal state, at which complexity level
-   (`scripts/run_exp_a_per_level.sh`), compared with the untrained 12B.
+1. **Explain the 12B's completion drop on the compliant text conversations**
+   (0.802 → 0.661 on the 177 that follow the stay rule; E4B improves there). The
+   drop on the other 81 comes from the text set, which predates the rule. Fixing
+   that set needs authored inserts and a new frozen stratum; a relabel alone does
+   not change the score. See
+   [the text-set findings](cat_a_benchmark_text_set_convention_mismatch.md).
 2. **Find which turns still leak under the patched template** (section 5.1),
    and check how the training renderer handles turns that follow a tool result.
 3. **Fix the render mismatch in training** once 1 and 2 are understood. It will
