@@ -114,7 +114,8 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
         ),
-        modules_to_freeze=("mlp.gate",),
+        # NemotronH's router is layers.N.mixer.gate; there is no mlp.gate.
+        modules_to_freeze=("mixer.gate",),
         warnings=("Mamba layers: Unsloth auto-detect. vLLM compat uncertain (R6).",),
     ),
     "mistral_24b": LoRATargetSpec(
@@ -135,8 +136,12 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
         ),
-        modules_to_freeze=("mlp.gate",),
-        warnings=("MoE variant: freeze mlp.gate to avoid router destabilisation.",),
+        # Gemma-4's router is layers.N.router (proj.weight, scale,
+        # per_expert_scale). "mlp.gate" named no Gemma-4 module.
+        # Keep "MoE" in the warning: sft.py detects MoE from it to force
+        # lora_dropout to 0.
+        modules_to_freeze=("router",),
+        warnings=("MoE variant: freeze router to avoid router destabilisation.",),
     ),
     "gemma4_31b": LoRATargetSpec(
         # Attention-only LoRA. Dense 31B with FA2 disabled (head_dim=512)
@@ -146,6 +151,17 @@ LORA_TARGET_MODULES: dict[str, LoRATargetSpec] = {
         # FFN-bound parts of the workflow domain.
         target_modules=(
             "q_proj", "k_proj", "v_proj", "o_proj",
+        ),
+    ),
+    "gemma4_12b": LoRATargetSpec(
+        # Dense gemma4_unified model (Gemma4UnifiedForConditionalGeneration):
+        # the text decoder uses self_attn.{q,k,v,o}_proj and
+        # mlp.{gate,up,down}_proj like the other Gemma-4 models, with no
+        # router and no KV-shared layers. Without this entry no targets
+        # resolve and sft.py stops before training.
+        target_modules=(
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
         ),
     ),
     "gemma4_e4b": LoRATargetSpec(
@@ -183,6 +199,7 @@ _MODEL_NAME_PATTERNS: dict[str, str] = {
     "qwen2.5-3b": "qwen25_3b",
     "gemma-4-26b": "gemma4_26b_a4b",
     "gemma-4-31b": "gemma4_31b",
+    "gemma-4-12b": "gemma4_12b",
     "gemma-4-e4b": "gemma4_e4b",
     "gemma-4-e2b": "gemma4_e2b",
     "gemma-3-27b": "gemma3_27b",

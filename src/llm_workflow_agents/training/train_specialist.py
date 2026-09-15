@@ -72,15 +72,33 @@ def _build_peft_config(config: TrainingModelConfig) -> dict[str, Any]:
     return peft_kwargs
 
 
-def _freeze_modules(model: Any, patterns: list[str]) -> int:
-    """Freeze parameters matching given name patterns. Returns count frozen."""
+def _name_contains_segments(name: str, pattern: str) -> bool:
+    """True if `pattern`'s dotted segments appear contiguously in `name`'s.
+
+    Segment-aligned, not substring: "mlp.gate" matches
+    "layers.0.mlp.gate.weight" but not "layers.0.mlp.gate_proj.weight".
+    """
+    name_parts = name.split(".")
+    pattern_parts = pattern.split(".")
+    width = len(pattern_parts)
+    return any(
+        name_parts[i : i + width] == pattern_parts
+        for i in range(len(name_parts) - width + 1)
+    )
+
+
+def _freeze_modules(model: Any, patterns: list[str] | tuple[str, ...]) -> int:
+    """Freeze parameters whose names contain a pattern as whole segments.
+
+    Returns the number of parameters frozen. Matching was a substring test
+    until it was found that "mlp.gate" also caught every mlp.gate_proj LoRA
+    adapter, so those adapters never trained.
+    """
     frozen = 0
     for name, param in model.named_parameters():
-        for pattern in patterns:
-            if pattern in name:
-                param.requires_grad = False
-                frozen += 1
-                break
+        if any(_name_contains_segments(name, pattern) for pattern in patterns):
+            param.requires_grad = False
+            frozen += 1
     return frozen
 
 

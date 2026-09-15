@@ -381,6 +381,90 @@ stages:
     outs:
       - checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it
 
+  task_a_sft_gemma4_e4b:
+    # FROZEN. `dvc repro` skips this stage: its cmd is a ~6.3 h GPU run that
+    # would overwrite the registered weights the first time a dep changes.
+    # Unfreeze only to retrain on purpose.
+    frozen: true
+    desc: >-
+      FROZEN — Phase 2 SFT of gemma-4-E4B with the C2 recipe (response_only
+      @ 8192) on corpus/task-a-v3. The size arm of the E4B-vs-C2-v3 comparison
+      (docs/training_plan_voice_and_e4b.md); the 26B C2-v3 arm is not trained on
+      this machine, so that comparison is still open.
+
+      RESULT: 3 epochs, 3,168 steps, best eval_loss 0.4314 at the final
+      checkpoint-3168. On the Phase 1 Task A benchmark (text + voice, 0
+      stochastic trials, 32K context) it scores 0.6678 blended quality against
+      the untrained E4B's 0.6131 (results/exp_a/sft_cat_a_e4b_ckpt3168_auto.json).
+      That is not a held-out audit and is not comparable to C2's 0.7595.
+
+      Trained with lora.freeze_router: false, so the gate_proj adapters trained
+      (CLAUDE.md R24), on code 84c9f00, whose warmup fix the run needed under
+      transformers 5.17. Three invocations wrote frozen_sft_config_*.yaml into
+      the checkpoint directory. The first two failed before step 1 (a
+      warmup_ratio TypeError, then a rejected W&B key) and wrote no weights; the
+      weights come from the third, frozen_sft_config_20260913T165120Z.yaml.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_e4b
+          dvc push  task_a_sft_gemma4_e4b
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_e4b.yaml
+      --sft-config configs/training/sft_cat_a_e4b.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/_utils.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_e4b.yaml
+      - configs/training/sft_cat_a_e4b.yaml
+      - data/output/sft/task_a_splits
+    outs:
+      - checkpoints/sft_cat_a_e4b/gemma-4-E4B-it
+
+  task_a_sft_gemma4_12b:
+    # FROZEN. `dvc repro` skips this stage: its cmd is a ~16 h GPU run that
+    # would overwrite the registered weights the first time a dep changes.
+    # Unfreeze only to retrain on purpose.
+    frozen: true
+    desc: >-
+      FROZEN — Phase 2 SFT of gemma-4-12B with the C2 recipe (response_only
+      @ 8192) on corpus/task-a-v3. A size arm next to E4B
+      (task_a_sft_gemma4_e4b) on the same corpus and recipe; the config differs
+      from E4B's in output_dir only (tests/unit/test_sft_cat_a_12b_config.py).
+
+      RESULT: 3 epochs, 3,168 steps in 58,820 s (16.3 h), best eval_loss
+      0.39895 at the final checkpoint-3168 (E4B: 0.4314 on the same validation
+      split; eval_loss does not rank models of different size).
+
+      gemma-4-12B is a dense gemma4_unified model. It trained through
+      Unsloth's generic path (Unsloth 2026.9.4 has no mapper entry for it),
+      needed the gemma4_12b LoRA registry entry from d899b55, and trained with
+      lora.freeze_router: false (no router, so nothing to freeze). One
+      invocation; frozen_sft_config_20260914T112605Z.yaml beside train.log is
+      its record. Grad norm ran higher than E4B's (median 1.6-1.8 early against
+      0.34), so most steps were clipped at the default max_grad_norm 1.0; loss
+      fell smoothly throughout.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_12b
+          dvc push  task_a_sft_gemma4_12b
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_12b.yaml
+      --sft-config configs/training/sft_cat_a_12b.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/_utils.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_12b.yaml
+      - configs/training/sft_cat_a_12b.yaml
+      - data/output/sft/task_a_splits
+    outs:
+      - checkpoints/sft_cat_a_12b/gemma-4-12B-it
+
   # ---------------------------------------------------------------------------
   # Phase 2 — GRPO RL fine-tuning
   # ---------------------------------------------------------------------------

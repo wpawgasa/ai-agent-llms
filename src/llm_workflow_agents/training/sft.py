@@ -466,6 +466,16 @@ def _lora_spec_for(config: dict[str, Any], model_name: str) -> Any:
     return get_lora_target_spec(model_name)
 
 
+def _router_freeze_patterns(config: dict[str, Any], model_name: str) -> tuple[str, ...]:
+    """Module-name patterns that `lora.freeze_router` freezes for this model.
+
+    Taken from the LoRA registry's `modules_to_freeze`, because routers are
+    named per architecture (Gemma-4 `router`, NemotronH `mixer.gate`, Qwen MoE
+    and GLM `mlp.gate`). Empty for dense models.
+    """
+    return tuple(_lora_spec_for(config, model_name).modules_to_freeze)
+
+
 def _resolve_lora_targets(config: dict[str, Any], model_name: str = "") -> list[str]:
     """Resolve LoRA targets from config, falling back to registry.
 
@@ -903,11 +913,32 @@ def train_sft(
             use_gradient_checkpointing="unsloth",
         )
 
-    # Freeze router weights if configured
+    # Freeze router weights if configured. The patterns come from the LoRA
+    # registry because every MoE family names its router differently; a fixed
+    # "mlp.gate" froze nothing on Gemma-4 and NemotronH.
     if lora_cfg.get("freeze_router", False):
         from llm_workflow_agents.training.train_specialist import _freeze_modules
 
-        _freeze_modules(model, ["mlp.gate"])
+        router_patterns = _router_freeze_patterns(config, model_name)
+        frozen_count = _freeze_modules(model, router_patterns)
+        if frozen_count == 0:
+            logger.warning(
+                "freeze_router_matched_nothing",
+                model=model_name,
+                patterns=list(router_patterns),
+                detail=(
+                    "No router parameters were frozen. Expected on a dense "
+                    "model; on an MoE model, add its router name to "
+                    "modules_to_freeze in training/lora_targets.py."
+                ),
+            )
+        else:
+            logger.info(
+                "freeze_router_applied",
+                model=model_name,
+                patterns=list(router_patterns),
+                frozen_params=frozen_count,
+            )
 
     # Load dataset.
     # We bypass `load_dataset("json", ...)` because PyArrow's JSON reader
@@ -1156,6 +1187,8 @@ def train_sft(
     # gradient_accumulation_steps when per_device is fixed at 1.
     from trl import SFTConfig, SFTTrainer
 
+    from llm_workflow_agents.training._utils import warmup_kwargs
+
     output_dir = _resolve_output_dir(config, Path(config_path), model_name)
     effective_bs = training_cfg.get("effective_batch_size", 8)
     per_device_bs = training_cfg.get("per_device_train_batch_size", 1)
@@ -1175,7 +1208,9 @@ def train_sft(
         dataset_text_field="text",
         learning_rate=training_cfg.get("learning_rate", 5e-5),
         lr_scheduler_type=training_cfg.get("lr_scheduler", "cosine"),
-        warmup_ratio=training_cfg.get("warmup_ratio", 0.05),
+        # warmup_ratio on transformers <= 5.6, warmup_steps (float ratio) on
+        # 5.17+, which removed warmup_ratio. See _utils.warmup_kwargs.
+        **warmup_kwargs(training_cfg.get("warmup_ratio", 0.05), SFTConfig),
         per_device_train_batch_size=per_device_bs,
         per_device_eval_batch_size=_sft_eval_batch_size(training_cfg, per_device_bs),
         gradient_accumulation_steps=grad_accum,

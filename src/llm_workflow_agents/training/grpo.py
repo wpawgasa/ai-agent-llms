@@ -26,6 +26,7 @@ import structlog
 from llm_workflow_agents.training._utils import (
     unwrap_unsloth_gemma4_kv_zero_proxy as _unwrap_unsloth_gemma4_kv_zero_proxy,
 )
+from llm_workflow_agents.training._utils import warmup_kwargs
 from llm_workflow_agents.training.reward_utils import (
     heldout_composite_score as _heldout_composite_score,
 )
@@ -983,7 +984,10 @@ def train_grpo(config_path: Path) -> GRPOResult:
         # Short warmup — default behavior reached peak LR only at ~step 750
         # of 1000, leaving the policy almost untrained. 5% warmup hits peak
         # by ~step 50.
-        warmup_ratio=float(grpo_cfg.get("warmup_ratio", 0.05)),
+        # transformers 5.17 removed warmup_ratio; _filter_grpo_config_kwargs
+        # would then drop it and train with NO warmup. warmup_kwargs passes the
+        # field GRPOConfig actually has.
+        **warmup_kwargs(float(grpo_cfg.get("warmup_ratio", 0.05)), GRPOConfig),
         # Checkpoint cadence — default `save_steps=500` was too sparse for
         # resumability (a killed run lost everything below optimizer step
         # 500). 100 gives a ~30-min safety net; cap retention to 3 to bound
