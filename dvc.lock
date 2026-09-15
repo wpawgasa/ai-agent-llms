@@ -558,3 +558,41 @@ stages:
       md5: c6d0f566c401364eba158524ce7f7c9a.dir
       size: 3001045379
       nfiles: 80
+  task_a_benchmark_text_v2:
+    cmd: rm -rf data/output/benchmark/task_a_v2 && python 
+      scripts/remediate_task_a_states.py apply --input-dir 
+      data/output/benchmark/task_a --output-dir data/output/benchmark/task_a_v2 
+      --ledger-dir data/interim/task_a_benchmark_remediation_ledger 
+      --on-unrepairable drop && cp 
+      data/output/benchmark/task_a/l3_insurance_premium_payment_th_20260609.jsonl
+      data/output/benchmark/task_a_v2/
+    deps:
+    - path: data/interim/task_a_benchmark_remediation_ledger
+      hash: md5
+      md5: 2578dc9fe66269b2249152ff1e6348c4.dir
+      size: 1315081
+      nfiles: 38
+    - path: data/output/benchmark/task_a
+      hash: md5
+      md5: 0522f8fa001af4f9ad694a8b36f7de24.dir
+      size: 4876325
+      nfiles: 17
+    - path: scripts/remediate_task_a_states.py
+      hash: md5
+      md5: e97ff7d711291eb9df51e204d8d7b56d
+      size: 18521
+      isexec: true
+    - path: src/llm_workflow_agents/data/state_convention.py
+      hash: md5
+      md5: 0086a92d59ea7d78cb1e48e7475da855
+      size: 4493
+    - path: src/llm_workflow_agents/data/state_convention_repair.py
+      hash: md5
+      md5: f93217bc2a8734ab5f80ed3657625f04
+      size: 26393
+    outs:
+    - path: data/output/benchmark/task_a_v2
+      hash: md5
+      md5: 5670e85e425b6adc9c4218fb3b2fa39d.dir
+      size: 4905207
+      nfiles: 6

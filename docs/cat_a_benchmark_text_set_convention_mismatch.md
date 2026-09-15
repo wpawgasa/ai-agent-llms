@@ -228,3 +228,56 @@ python .runs/eval_12b_template/corrected_state_metrics.py
 ```
 
 The `.runs/` scripts are not in git.
+
+---
+
+## 7. The v2 text set (built 2026-09-15)
+
+`data/output/benchmark/task_a_v2`, frozen DVC stage `task_a_benchmark_text_v2`.
+The v1 text set at `data/output/benchmark/task_a` is unchanged and stays frozen.
+
+**How it was made.**
+1. `scripts/build_remediation_ledger.py` drove the `corpus-remediator` agent
+   over the 56 conversations that need authored turns: 143 inserts in 17
+   batches, **143 accepted, 0 rejected**, about 4.5 minutes. The ledger and the
+   triage report it was built from are DVC-tracked at
+   `data/interim/task_a_benchmark_remediation_ledger`.
+2. `scripts/remediate_task_a_states.py apply` replayed the ledger over the v1
+   text set: 255 conversations kept, the 3 dropped ones being
+   `INS_PREMIUM_001`–`003`.
+3. The hand-added `l3_insurance_premium_payment_th_20260609.jsonl` was copied
+   over unchanged. None of its 8 rows needs a convention change, but `apply`
+   drops three of them for an unrelated shape rule (consecutive assistant prose
+   turns).
+
+**What it contains.**
+
+| Check | Result |
+|---|---|
+| Conversations | 258, same order and same 6 files as v1 |
+| Conversations changed | 81 (25 relabelled, 56 with inserts) |
+| Messages added | 143 (87 assistant, 56 user) |
+| System messages | byte-identical to v1 |
+| Terminal state | `TERMINAL` for all 258 |
+| `P(tool call \| advancing turn)` | **0 / 1,914** (v1: 7.8%) |
+| `verify` violations | 3, all `INS_PREMIUM_001`–`003`, unrelated to the stay rule |
+
+**Automated checks on the inserts.** Every assistant insert starts with its
+required `[STATE:]` marker; every Thai conversation got Thai text and every
+English one English; lengths are short (assistant median 63 characters after
+the marker, user median 35). Two short Thai farewells each appear twice across
+different conversations. A side-by-side review file of all 143 inserts in
+context is at `.runs/eval_12b_template/bench_remediation/ledger_review.md` (not
+in git; re-render with `render_ledger_review.py` there).
+
+**Watch for in the scores.** Some inserted hand-offs are "one moment"-style
+assistant lines answered by a user "take your time". Individually harmless, but
+a repeated filler shape is what R15 found models learn as a habit, and here it
+is test input.
+
+**Using it.** Scores on v2 are a new scale, not comparable to v1 or to any
+number above. Run the text and voice strata together as
+`--data data/output/benchmark/task_a_v2 --data data/output/benchmark/task_a_voice`.
+Never pass `task_a` and `task_a_v2` in one run: they hold the same
+conversation ids and the same conversations. No model has been scored on v2
+yet.
