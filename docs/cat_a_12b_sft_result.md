@@ -182,17 +182,60 @@ leaks `thought` from the channel block on some turns.
 - **Held-out composite:** little. The state and tool scorers find annotations
   and calls anywhere in the text, so a leading `model` line costs nothing.
   Held-out still rose +0.065 / +0.070.
-- **Benchmark text and task completion: possibly, not proven.** The benchmark
-  replays whole conversations, feeding each reply back as history, so more than
-  half of the 12B SFT's replayed assistant turns carry a stray `model` line. That
-  is the kind of difference that could affect later turns and reaching the end
-  state. The stored results cannot separate this from other causes.
+- **Benchmark text and task completion: tested, and mostly not.** Section 5.1
+  removes most of the leak without retraining; text barely moves and task
+  completion falls.
 
 **What would fix it (not done).** Either render training turns so the reply
 content starts where the inference prompt ends (for this template, after the
 empty channel block), or mask the header tokens out of the loss. Both change
 the recipe, so they would need a re-run and a fresh comparison. A serving-side
 strip of a leading `model` line would only hide the symptom.
+
+### 5.1 Template test (2026-09-15): the leak is not the main cause
+
+Same checkpoint-3168 and benchmark settings, with one change: a copy of the
+chat template with the empty thought block deleted from the generation prompt
+(`{{- '<|channel>thought\n<channel|>' -}}`, line 385), so the prompt ends at
+`<|turn>model\n` where trained reply content starts. Rendering both templates
+on the same conversations confirmed that the block is the only difference;
+earlier turns render byte-identically.
+
+Leak counts below come from the `model_response` lines of both benchmark logs,
+counted the same way (5,959 responses each). The 3,233 / 5,917 figure in the
+table above was an earlier count by a different method.
+
+| | Stock template | Without the block | Untrained 12B |
+|---|---|---|---|
+| Replies starting with `model` | 3,221 (54.1%) | **1,285 (21.6%)** | 0 |
+| Blended quality | 0.7186 | 0.7230 | 0.7098 |
+| Text | 0.6662 | 0.6743 | **0.6964** |
+| Voice | 0.8409 | 0.8366 | 0.7409 |
+| Task completion | 0.6752 | **0.6516** | 0.7559 |
+| Recovery rate | 0.9580 | 0.9640 | 0.6096 |
+| Tool-call F1 | 0.6322 | 0.6365 | 0.5512 |
+| Tool name accuracy | 0.7937 | 0.8052 | 0.6613 |
+| Argument exact match | 0.5358 | 0.5321 | 0.3803 |
+| State sequence accuracy | 0.6476 | 0.6551 | 0.6148 |
+| Full workflow success | 0.2351 | 0.2311 | 0.2010 |
+| Early-termination log lines | 493 | 485 | 571 |
+
+- **Cutting the leak by 60% did not recover text or task completion.** Text
+  rose +0.008 and stays 0.022 below the untrained 12B; task completion fell
+  0.024. If the leak drove the drop, removing most of it should have recovered a
+  visible share. Single greedy runs, so differences of about 0.01 are within
+  re-run noise; the direction is what matters.
+- **The patched template does not remove the whole leak (21.6% remain).** The
+  likely source is turns that follow a tool result, where this template's
+  generation prompt emits no `<|turn>model\n` header at all. Not verified.
+- **Voice format compliance under the patched template was not measured.** The
+  held-out audit loads its tokenizer through Unsloth, and its outputs came back
+  identical to the stock-template audit, row for row (68 / 37 leaks), so the
+  patched template was never applied. Those audits were discarded.
+
+Results: `results/exp_a/sft_cat_a_12b_ckpt3168_notmpl_auto.{json,log}` (DVC,
+`results/exp_a` hash `e024c3d9…`). The launcher and patched template are in
+`.runs/eval_12b_template/`, which git ignores.
 
 ---
 
@@ -203,8 +246,8 @@ strip of a leading `model` line would only hide the symptom.
   this scale yet.
 - **Single runs with greedy decoding.** The held-out deltas have paired
   confidence intervals; the benchmark numbers do not.
-- **The benchmark text drop is not explained.** The leak is a plausible
-  contributor, but the stored results cannot attribute it.
+- **The benchmark text drop is not explained.** Section 5.1 rules the leak out
+  as its main cause; the real cause is still unknown.
 - **Clipped gradients.** Most 12B steps were clipped at 1.0 and E4B's were not,
   so the two arms did not take equally sized optimizer steps despite identical
   configs.
@@ -213,14 +256,21 @@ strip of a leading `model` line would only hide the symptom.
 
 ## 7. Next steps
 
-1. **Fix the header/channel mismatch and re-run the 12B** (section 5), then
-   re-benchmark. That tests whether the leak caused the text and completion drop.
-2. **Check other templates for the same mismatch** before fine-tuning any model
+1. **Find the cause of the text and task-completion drop before retraining.**
+   Start from the benchmark logs, which need no GPU: which conversations end on
+   a non-terminal state, at which complexity level
+   (`scripts/run_exp_a_per_level.sh`), compared with the untrained 12B.
+2. **Find which turns still leak under the patched template** (section 5.1),
+   and check how the training renderer handles turns that follow a tool result.
+3. **Fix the render mismatch in training** once 1 and 2 are understood. It will
+   fix voice format compliance; section 5.1 says not to expect it to fix text.
+4. **Check other templates for the same mismatch** before fine-tuning any model
    whose generation prompt adds content after the turn header.
-3. **Consider `max_grad_norm`** for the 12B only after the leak is fixed, so the
+5. **Consider `max_grad_norm`** for the 12B only after the leak is fixed, so the
    two effects are not confounded.
-4. **The E4B go/no-go RL probe** (`scripts/rft_headroom_probe.py`) is running
-   and decides whether GRPO or DPO is worth trying on E4B.
+6. **Do not expect single-turn RL to help.** The 12B was not probed, but E4B on
+   the same corpus and recipe returned NO_GO (E4B result, section 7), as did C2
+   (CLAUDE.md R23).
 
 ---
 
