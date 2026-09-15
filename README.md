@@ -635,7 +635,7 @@ All six scored on the same 508 conversations (258 text + 250 voice), 0 stochasti
 
 - **SFT added +0.055 to E4B**, mostly through tool calling: argument exact match rose from 0.29 to 0.50, the highest of any model here. Voice gained +0.117 against +0.028 for text.
 - **Task completion did not move (0.4961 both).** It is now the main gap to the 12B and to Gemini.
-- **SFT added only +0.009 to the 12B:** voice rose +0.100 but text fell −0.030 and task completion fell 0.7559 → 0.6752. The fine-tuned 12B starts 54.6% of its replies with the leaked word `model`, because its chat template adds an empty thinking block to the generation prompt that training never saw. See [the 12B result](docs/cat_a_12b_sft_result.md).
+- **SFT added only +0.009 to the 12B:** voice rose +0.100 but text fell −0.030 and task completion fell 0.7559 → 0.6752. The fine-tuned 12B starts 54.6% of its replies with the leaked word `model`, because its chat template adds an empty thinking block to the generation prompt that training never saw. Removing that block from the template cut the leak to 21.6% but moved text only to 0.6743 and task completion down to 0.6516, so the leak is not the main cause of the drop. See [the 12B result](docs/cat_a_12b_sft_result.md), section 5.1.
 - **These are Phase 1 benchmark scores, not held-out audits.** None is comparable to C2's 0.7595.
 
 **Held-out audit on the corpus-v3 sets** (`derived/task-a-heldout-v3`; one sampled turn per conversation, seed 42, 4-bit, text and voice never blended):
@@ -801,7 +801,7 @@ Three things to know before running it. Its prompt input, `data/output/grpo/task
 
 ### GRPO — `run_phase2_grpo.sh`
 
-Retained and working, but **single-turn RL is closed for Cat A** — the headroom probe fails every pre-registered gate (CLAUDE.md R23). Use it only for Cat B/C or after changing the prompt distribution.
+Retained and working, but **single-turn RL is closed for Cat A** — the headroom probe fails every pre-registered gate (CLAUDE.md R23). The E4B SFT checkpoint returned NO_GO too (2026-09-15, `frontier_frac` 0.078; [the E4B result](docs/cat_a_e4b_sft_benchmark_result.md), section 7). Use it only for Cat B/C or after changing the prompt distribution.
 
 It reads `data/output/grpo/task_a` (`derived/task-a-grpo-v3`), which is current. Note that 27.7% of that set is voice, so the in-run held-out guardrail draws a mixed-modality sample unless told otherwise.
 
@@ -880,7 +880,7 @@ VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve /dev/shm/sft_cat_a_12b_ckpt3168 \
 
 To run the Phase 1 benchmark instead, copy `configs/models_exp_a/gemma4_12b.yaml`, set `model.name` to the merged path, and pass it to `scripts/run_exp_a_single.sh` with the settings in [Latest Task A benchmark results](#latest-task-a-benchmark-results-2026-09-14).
 
-**Known issue: the leaked `model` word.** With the stock chat template this checkpoint starts 54.6% of replies with the literal word `model`. The template appends an empty thought block to the generation prompt that training never saw ([the 12B result](docs/cat_a_12b_sft_result.md), section 5). The benchmark numbers in this README were measured with the stock template. A template without that block is being tested; until that result is in, treat the leak as expected behaviour of this checkpoint, not a serving misconfiguration.
+**Known issue: the leaked `model` word.** With the stock chat template this checkpoint starts 54.6% of replies with the literal word `model`. The template appends an empty thought block to the generation prompt that training never saw ([the 12B result](docs/cat_a_12b_sft_result.md), section 5). The benchmark numbers in this README were measured with the stock template. Deleting that block from the template's generation prompt cuts the leak to 21.6% of replies and moves blended quality to 0.7230, but does not recover text or task completion ([the 12B result](docs/cat_a_12b_sft_result.md), section 5.1). The patched template is not committed. Treat the leak as expected behaviour of this checkpoint, not a serving misconfiguration.
 
 ### Reward functions (GRPO)
 
