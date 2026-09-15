@@ -83,7 +83,7 @@ text + `corpus/task-a-benchmark-voice-v1`, 250 voice), 0 stochastic trials,
 | **Blended quality** | 0.6131 | **0.6678** | +0.0547 | 0.7098 | 0.8113 | 0.8299 |
 | Text | 0.6035 | 0.6315 | +0.0280 | 0.6964 | 0.7976 | 0.8179 |
 | Voice | 0.6356 | **0.7526** | **+0.1170** | 0.7409 | 0.8434 | 0.8579 |
-| State sequence accuracy | 0.5517 | 0.6125 | +0.0608 | 0.6148 | 0.6880 | 0.6839 |
+| State sequence accuracy † | 0.7884 | 0.8713 | +0.0829 | 0.8680 | n/a | n/a |
 | Task completion | 0.4961 | 0.4961 | 0.0000 | 0.7559 | 0.9665 | 0.9390 |
 | Recovery rate | 0.4925 | 0.6276 | +0.1351 | 0.6096 | 0.9970 | 0.9910 |
 | Tool-call F1 | 0.5135 | 0.6112 | +0.0977 | 0.5512 | 0.6055 | 0.6598 |
@@ -264,12 +264,21 @@ both fine-tuned) is still the one that answers the size question.
 
 ### 4.5 State accuracy
 
-State sequence accuracy rose 0.5517 → 0.6125, level with the untrained 12B
-(0.6148). The per-turn transition accuracy is low for every model (0.2192 →
-0.2613 for E4B; 0.3494 for gemini-3.1-flash-lite), and the invalid-transition
-rate is 0.42–0.50 for all five, including both Gemini models. Read those two as
-relative measures only; their absolute level reflects how strictly the
-benchmark scores transitions, not how bad the models are.
+State sequence accuracy rose 0.7884 → 0.8713, level with the untrained 12B
+(0.8680). Per-turn transition accuracy rose 0.4102 → 0.4853, and the
+invalid-transition rate fell 0.1517 → 0.0716.
+
+† **Corrected 2026-09-16.** The originally reported whole-run state metrics
+(sequence 0.5517 → 0.6125, transition 0.2192 → 0.2613, invalid 0.42–0.50 for
+every model) scored text conversations against voice ground truth, because the
+two strata reuse conversation ids. The values above are recomputed from the
+logged replies. The Gemini runs cannot be recomputed from their logs, so their
+state metrics are shown as n/a. Blended quality, the per-stratum scores, task
+completion and tool metrics were not affected. See
+[the text-set and id-collision findings](cat_a_benchmark_text_set_convention_mismatch.md),
+which also show that E4B SFT's flat task completion hides a text-set effect:
+most of its text completion drop is in conversations written before the
+tool-call stay rule.
 
 ### 4.6 Latency is not comparable
 

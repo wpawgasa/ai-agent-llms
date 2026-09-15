@@ -261,6 +261,13 @@ class TestEvaluateStateMachine:
         metrics = evaluate_state_machine([], [])
         assert metrics.state_transition_accuracy == 0.0
 
+    def test_duplicate_ground_truth_ids_raise(self) -> None:
+        """A repeated id used to let the last ground truth win silently."""
+        gt = ConversationGroundTruth(conversation_id="L1_001", messages=[], terminal_states=["DONE"])
+        pred = ConversationPrediction(conversation_id="L1_001", messages=[])
+        with pytest.raises(ValueError, match="duplicate ground-truth conversation_id 'L1_001'"):
+            evaluate_state_machine([pred, pred], [gt, gt])
+
 
 # ============================================================
 # Tool Call F1 Tests
