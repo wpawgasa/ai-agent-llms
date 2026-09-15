@@ -39,6 +39,7 @@ Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most 
 | **Task A SFT corpus** | `corpus/task-a-v3` | `data/output/sft/task_a_splits` and the `data/output/heldout/` sets | 9,932 conversations — 7,043 text + 2,889 voice, teacher `gemini-3.7-flash`. Splits 8,441 / 992 / 499, shuffled per modality. |
 | **Best Cat A checkpoint** | `model/sft-gemma4-c2-on-task-a-v2` | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | Gemma-4 26B-A4B-it LoRA, `response_only` @ 8192, 48 files / 563 MB, holds checkpoint-500 / -1000 / -1500 / -1767. |
 | **E4B on corpus v3** | `model/sft-gemma4-e4b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_e4b/gemma-4-E4B-it` (stage `task_a_sft_gemma4_e4b`) | Gemma-4-E4B-it LoRA, C2 recipe on `corpus/task-a-v3`, 82 files / 1.70 GB, best checkpoint-3168. Phase 1 benchmark 0.6678; held-out composite 0.7828 text / 0.7894 voice on the corpus-v3 sets — see [the result](docs/cat_a_e4b_sft_benchmark_result.md). |
+| **12B on corpus v3** | `model/sft-gemma4-12b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_12b/gemma-4-12B-it` (stage `task_a_sft_gemma4_12b`) | Gemma-4-12B-it LoRA, C2 recipe on `corpus/task-a-v3`, 80 files / 3.00 GB, best checkpoint-3168. Phase 1 benchmark 0.7186; held-out composite 0.7809 text / 0.7766 voice. Leaks the word `model` at the start of 54.6% of replies — see [the result](docs/cat_a_12b_sft_result.md). |
 | **Corpus-v3 held-out sets** | `derived/task-a-heldout-v3` | `data/output/heldout/cat_a_v3_test_not_in_v2` and `cat_a_v3_test_voice` (gitignored, rebuilt) | 304 text + 146 voice conversations from `corpus/task-a-v3` test, none in `corpus/task-a-v2` train/validation. Not stored: rebuild from the two corpus tags and verify against the committed audits; the annotation holds the commands and checksums. |
 | **GRPO prompt set** | `derived/task-a-grpo-v3` | `data/output/grpo/task_a` | L3–L5 subset of the v3 splits: 5,304 train / 596 validation, 27.7% voice. `P(tool call \| advancing turn)` verified 0.0000. |
 
@@ -621,18 +622,20 @@ The blend is `0.30 × voice + 0.70 × text` and is written to `quality_summary.q
 
 ### Latest Task A benchmark results (2026-09-14)
 
-All five scored on the same 508 conversations (258 text + 250 voice), 0 stochastic trials, 32K context, voice weight 0.30. Ranked on `quality_summary.quality`.
+All six scored on the same 508 conversations (258 text + 250 voice), 0 stochastic trials, 32K context, voice weight 0.30. Ranked on `quality_summary.quality`.
 
 | Model | Blended quality | Text | Voice | Task completion | Tool F1 | Argument exact match |
 |---|---|---|---|---|---|---|
 | gemini-3.1-flash-lite | **0.8299** | 0.8179 | 0.8579 | 0.9390 | 0.6598 | 0.4546 |
 | gemini-3.5-flash-lite | 0.8113 | 0.7976 | 0.8434 | 0.9665 | 0.6055 | 0.3889 |
+| **gemma-4-12B-it, SFT on corpus v3** | **0.7186** | 0.6662 | **0.8409** | 0.6752 | 0.6322 | **0.5358** |
 | gemma-4-12B-it (untrained) | 0.7098 | 0.6964 | 0.7409 | 0.7559 | 0.5512 | 0.3803 |
 | **gemma-4-E4B-it, SFT on corpus v3** | **0.6678** | 0.6315 | **0.7526** | 0.4961 | 0.6112 | **0.5011** |
 | gemma-4-E4B-it (untrained) | 0.6131 | 0.6035 | 0.6356 | 0.4961 | 0.5135 | 0.2927 |
 
 - **SFT added +0.055 to E4B**, mostly through tool calling: argument exact match rose from 0.29 to 0.50, the highest of any model here. Voice gained +0.117 against +0.028 for text.
 - **Task completion did not move (0.4961 both).** It is now the main gap to the 12B and to Gemini.
+- **SFT added only +0.009 to the 12B:** voice rose +0.100 but text fell −0.030 and task completion fell 0.7559 → 0.6752. The fine-tuned 12B starts 54.6% of its replies with the leaked word `model`, because its chat template adds an empty thinking block to the generation prompt that training never saw. See [the 12B result](docs/cat_a_12b_sft_result.md).
 - **These are Phase 1 benchmark scores, not held-out audits.** None is comparable to C2's 0.7595.
 
 **Held-out audit on the corpus-v3 sets** (`derived/task-a-heldout-v3`; one sampled turn per conversation, seed 42, 4-bit, text and voice never blended):
@@ -641,9 +644,12 @@ All five scored on the same 508 conversations (258 text + 250 voice), 0 stochast
 |---|---|---|
 | gemma-4-E4B-it, SFT on corpus v3 | **0.7828** | **0.7894** |
 | gemma-4-E4B-it (untrained) | 0.7127 | 0.7080 |
-| Paired difference, 95% CI | +0.0702 [+0.0475, +0.0944] | +0.0814 [+0.0492, +0.1159] |
+| E4B paired difference, 95% CI | +0.0702 [+0.0475, +0.0944] | +0.0814 [+0.0492, +0.1159] |
+| gemma-4-12B-it, SFT on corpus v3 | **0.7809** | **0.7766** |
+| gemma-4-12B-it (untrained) | 0.7155 | 0.7062 |
+| 12B paired difference, 95% CI | +0.0653 [+0.0429, +0.0884] | +0.0703 [+0.0303, +0.1103] |
 
-SFT's gain holds on held-out conversations and is significant on both sets. These composites are a new scale: no other checkpoint has been scored on these sets, and they are not comparable to C2's 0.7595.
+SFT's gain holds on held-out conversations for both models and is significant on every set. Fine-tuned, the two sizes score about the same. The 12B's benchmark text drop does not appear on held-out text. These composites are a new scale, not comparable to C2's 0.7595.
 - The E4B runs used vLLM 0.20.0. The 12B needed vLLM 0.24.0 with transformers 5.12.1. Gemini ran through its API, so latency is not comparable across rows.
 
 Full discussion, caveats and reproduction: **[Cat A — gemma-4-E4B fine-tuned on corpus v3](docs/cat_a_e4b_sft_benchmark_result.md)**.

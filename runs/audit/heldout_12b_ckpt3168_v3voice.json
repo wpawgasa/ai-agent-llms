@@ -1,0 +1,4930 @@
+{
+  "summary": {
+    "n_rows": 145,
+    "requested_modality": "voice",
+    "modalities": {
+      "voice": {
+        "n_rows": 145,
+        "mean_composite": 0.776551724137931,
+        "mean_state_acc": 0.9586206896551724,
+        "mean_tool_f1": 0.9241379310344827,
+        "mean_task": 0.11724137931034483
+      }
+    },
+    "mixed_modality": false,
+    "mean_composite": 0.776551724137931,
+    "mean_state_acc": 0.9586206896551724,
+    "mean_tool_f1": 0.9241379310344827,
+    "mean_task": 0.11724137931034483,
+    "frac_state_acc_zero": 0.041379310344827586,
+    "frac_tool_f1_zero": 0.07586206896551724,
+    "frac_task_zero": 0.8827586206896552,
+    "frac_gt_has_no_tools": 0.6827586206896552,
+    "wall_time_s": 607.1,
+    "voice_format_compliance": 0.7241379310344828,
+    "voice_rows": 145
+  },
+  "rows": [
+    {
+      "row_index": 16,
+      "completion": "model\n[STATE: SELECT_SLOT → CONFIRM_BOOKING]\n<S>I will book the 09:00 slot for you now.</S>",
+      "modality": "voice",
+      "composite": 0.0,
+      "state_acc": 0.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "SELECT_SLOT",
+          "to": "SELECT_SLOT"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "book_appointment",
+          "arguments": {
+            "customer_id": "CUST101",
+            "preferred_date": "2025-05-10",
+            "preferred_time": "09:00",
+            "service_type": "dental cleaning"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SELECT_SLOT",
+          "CONFIRM_BOOKING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 71,
+      "completion": "[STATE: ISSUE_DOCUMENTS → CONFIRM_DETAILS]\n<S>ออก E-ticket เรียบร้อยแล้วค่ะ</S><S>เที่ยวบิน TG910 ไป London วันที่ 2025-05-10 สำหรับคุณ Somchai Jaidee นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.0,
+      "state_acc": 0.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "ISSUE_DOCUMENTS",
+          "to": "ISSUE_DOCUMENTS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_visa_requirements",
+          "arguments": {
+            "destination": "LHR",
+            "nationality": "Thai"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ISSUE_DOCUMENTS",
+          "CONFIRM_DETAILS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 84,
+      "completion": "ะครับ</S>\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-1002\"}}</tool_call>[STATE: ASSESS_COVERAGE → REQUEST_DOCUMENTATION]\n<S>การเคลมอยู่ในเงื่อนไขความคุ้มครองครับ</S><S>แต่ระบบจำเป็นต้องขอเอกสารรูปถ่ายความเสียหายเพิ่มเติมครับ</S>",
+      "modality": "voice",
+      "composite": 0.0,
+      "state_acc": 0.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ASSESS_COVERAGE",
+          "REQUEST_DOCUMENTATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-1002"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 118,
+      "completion": "[STATE: SELECT_SLOT → CONFIRM_BOOKING]\n<S>รับทราบค่ะ นัดหมายเวลา 09:00 สำหรับรหัสลูกค้า CUST101 นะคะ</S><S>กำลังดำเนินการจองให้ค่ะ</S>[STATE: CONFIRM_BOOKING → CONFIRM_BOOKING]\n<tool_call>{\"name\": \"book_appointment\", \"arguments\": {\"service_type\": \"ตรวจสุขภาพทั่วไป\", \"customer_id\": \"CUST101\", \"preferred_time\": \"09:00\"}}</tool_call>[STATE: CONFIRM_BOOKING → SEND_CONFIRMATION]\n<S>จองนัดหมายเรียบร้อยแล้วค่ะ</S><S>ต้องการให้ส่งข้อความยืนยันผ่านช่องทาง SMS หรือ Email ดีคะ</S>",
+      "modality": "voice",
+      "composite": 0.0,
+      "state_acc": 0.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 3,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SELECT_SLOT",
+          "to": "SELECT_SLOT"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "book_appointment",
+          "arguments": {
+            "customer_id": "CUST101",
+            "preferred_date": "2026-04-10",
+            "preferred_time": "09:00",
+            "service_type": "ตรวจสุขภาพทั่วไป"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SELECT_SLOT",
+          "CONFIRM_BOOKING"
+        ],
+        [
+          "CONFIRM_BOOKING",
+          "CONFIRM_BOOKING"
+        ],
+        [
+          "CONFIRM_BOOKING",
+          "SEND_CONFIRMATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "book_appointment",
+          "arguments": {
+            "service_type": "ตรวจสุขภาพทั่วไป",
+            "customer_id": "CUST101",
+            "preferred_time": "09:00"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 9,
+      "completion": "[STATE: VERIFY_IDENTITY → VERIFY_IDENTITY]\n<S>ขอบคุณค่ะคุณธนพล</S><S>ขออนุญาตตรวจสอบข้อมูลในระบบสักครู่นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 0.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 17,
+      "completion": ",000 บาทค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 0.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 0,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_SETTLEMENT",
+          "to": "NOTIFY_OUTCOME"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [],
+      "pred_tools": []
+    },
+    {
+      "row_index": 31,
+      "completion": "[STATE: PROCESS_CHANGE → PROCESS_CHANGE]\n<S>กำลังดำเนินการเปลี่ยนแพ็กเกจให้สักครู่นะคะ</S>\n<tool_call>{\"name\": \"change_plan\", \"arguments\": {\"account_id\": \"ACC-88392\", \"new_plan_id\": \"Ultra Max\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "PROCESS_CHANGE",
+          "to": "PROCESS_CHANGE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "change_plan",
+          "arguments": {
+            "account_id": "ACC-88392",
+            "new_plan_id": "ULTRA_MAX_50GB"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PROCESS_CHANGE",
+          "PROCESS_CHANGE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "change_plan",
+          "arguments": {
+            "account_id": "ACC-88392",
+            "new_plan_id": "Ultra Max"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 52,
+      "completion": "[STATE: SCHEDULE_SERVICE → SCHEDULE_SERVICE]\n<S>ร้านกาแฟแถวอารีย์น่าไปมากเลยค่ะ</S><S>ขอทราบ preferred date ที่สะดวกนัดหมายด้วยนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "SCHEDULE_SERVICE",
+          "to": "SCHEDULE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "schedule_appointment",
+          "arguments": {
+            "patient_id": "P-8821",
+            "appointment_type": "consultation"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SCHEDULE_SERVICE",
+          "SCHEDULE_SERVICE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 69,
+      "completion": "model\n[STATE: LISTEN_COMPLAINT → LISTEN_COMPLAINT]\n<S>Thank you for providing those details.</S><S>I am registering your complaint now.</S>\n<tool_call>{\"name\": \"register_complaint\", \"arguments\": {\"customer_id\": \"CUST-8821\", \"category\": \"billing\", \"description\": \"charged twice for monthly subscription\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "LISTEN_COMPLAINT",
+          "to": "LISTEN_COMPLAINT"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "register_complaint",
+          "arguments": {
+            "customer_id": "CUST-8821",
+            "category": "billing",
+            "description": "I was charged twice for my monthly subscription."
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "LISTEN_COMPLAINT",
+          "LISTEN_COMPLAINT"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "register_complaint",
+          "arguments": {
+            "customer_id": "CUST-8821",
+            "category": "billing",
+            "description": "charged twice for monthly subscription"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 95,
+      "completion": "[STATE: INITIATE_RETURN → INITIATE_RETURN]\n<S>ได้เลยค่ะ</S><S>กำลังดำเนินการ initiate return ให้สักครู่นะคะ</S>\n<tool_call>{\"name\": \"initiate_return\", \"arguments\": {\"order_id\": \"ORD-9821\", \"items\": [\"Wireless Headphone\"], \"return_type\": \"return\"}}</tool_call>[STATE: INITIATE_RETURN → CONFIRM_ACTION]\n<S>ทำรายการ return ให้เรียบร้อยแล้วค่ะ</S><S>ระบบจะส่ง label สำหรับส่งคืนไปให้ทาง SMS นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "INITIATE_RETURN",
+          "to": "INITIATE_RETURN"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "initiate_return",
+          "arguments": {
+            "order_id": "ORD-9821",
+            "items": [
+              "Wireless Headphone"
+            ],
+            "return_type": "return",
+            "reason": "เปิดไม่ติด"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "INITIATE_RETURN",
+          "INITIATE_RETURN"
+        ],
+        [
+          "INITIATE_RETURN",
+          "CONFIRM_ACTION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "initiate_return",
+          "arguments": {
+            "order_id": "ORD-9821",
+            "items": [
+              "Wireless Headphone"
+            ],
+            "return_type": "return"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 141,
+      "completion": "[STATE: PROCESS_MODIFICATION → PROCESS_MODIFICATION]\n<tool_call>{\"name\": \"cancel_order\", \"arguments\": {\"order_id\": \"ORD-98765\", \"reason\": \"สั่งผิดรุ่น\"}}</tool_call>[STATE: PROCESS_MODIFICATION → CONFIRM_ACTION]\n<S>ระบบได้ยกเลิกคำสั่งซื้อ ORD-98765 ให้เรียบร้อยแล้วค่ะ</S><S>มีรายการอื่นให้ช่วยเหลือเพิ่มเติมไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "PROCESS_MODIFICATION",
+          "to": "PROCESS_MODIFICATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "cancel_order",
+          "arguments": {
+            "order_id": "ORD-98765",
+            "reason": "สั่งผิดรุ่นครับ"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PROCESS_MODIFICATION",
+          "PROCESS_MODIFICATION"
+        ],
+        [
+          "PROCESS_MODIFICATION",
+          "CONFIRM_ACTION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "cancel_order",
+          "arguments": {
+            "order_id": "ORD-98765",
+            "reason": "สั่งผิดรุ่น"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 142,
+      "completion": "[STATE: CONFIRM_ACTION → GENERATE_DOCUMENT]\n<S>I will generate that statement for you now.</S>[STATE: GENERATE_DOCUMENT → GENERATE_DOCUMENT]\n<tool_call>{\"name\": \"generate_receipt\", \"arguments\": {\"transaction_id\": \"INV-4401\", \"document_type\": \"statement\"}}</tool_call>[STATE: GENERATE_DOCUMENT → RESOLVE]\n<S>Your updated statement has been generated.</S><S>Is there anything else I can help you with today?</S>",
+      "modality": "voice",
+      "composite": 0.4,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 3,
+      "n_gt_tools": 0,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_ACTION",
+          "to": "GENERATE_DOCUMENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CONFIRM_ACTION",
+          "GENERATE_DOCUMENT"
+        ],
+        [
+          "GENERATE_DOCUMENT",
+          "GENERATE_DOCUMENT"
+        ],
+        [
+          "GENERATE_DOCUMENT",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "generate_receipt",
+          "arguments": {
+            "transaction_id": "INV-4401",
+            "document_type": "statement"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 8,
+      "completion": "model\n[STATE: CHECK_AVAILABILITY → CHECK_AVAILABILITY]\n<S>Checking stock availability now.</S>\n<tool_call>{\"name\": \"check_stock\", \"arguments\": {\"product_id\": \"P-100\"}}</tool_call>[STATE: CHECK_AVAILABILITY → TERMINAL]\n<S>The AcousticMax Pro is in stock and ready to ship.</S><S>Thank you for shopping with us, and have a wonderful day!</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 0.6000000000000001,
+      "state_acc": 1.0,
+      "tool_f1": 0.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CHECK_AVAILABILITY",
+          "to": "CHECK_AVAILABILITY"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_stock",
+          "arguments": {
+            "product_id": "PROD-99"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CHECK_AVAILABILITY",
+          "CHECK_AVAILABILITY"
+        ],
+        [
+          "CHECK_AVAILABILITY",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_stock",
+          "arguments": {
+            "product_id": "P-100"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 0,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขบัญชีผู้ใช้บริการเพื่อตรวจสอบข้อมูลหน่อยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 1,
+      "completion": "model\n[STATE: LOOKUP_ACCOUNT → LOOKUP_ACCOUNT]\n<tool_call>{\"name\": \"check_balance\", \"arguments\": {\"account_id\": \"ACC-8899\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "LOOKUP_ACCOUNT",
+          "to": "LOOKUP_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_balance",
+          "arguments": {
+            "account_id": "ACC-8899"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "LOOKUP_ACCOUNT",
+          "LOOKUP_ACCOUNT"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_balance",
+          "arguments": {
+            "account_id": "ACC-8899"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 2,
+      "completion": "[STATE: REVIEW_POLICY → CLAIM_INTAKE]\n<S>รับทราบค่ะ</S><S>จะดำเนินการบันทึกข้อมูลการเคลมตามวันที่แจ้งนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_POLICY",
+          "to": "CLAIM_INTAKE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_POLICY",
+          "CLAIM_INTAKE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 4,
+      "completion": "[STATE: ACTIVATE_SERVICE → ACTIVATE_SERVICE]\n<S>ขอให้เดินทางปลอดภัยและสนุกกับการเดินทางนะคะ</S><S>ขออนุญาตเปิดใช้งานโรมมิ่งประเทศญี่ปุ่นให้สักครู่ค่ะ</S>\n<tool_call>{\"name\": \"activate_roaming\", \"arguments\": {\"account_id\": \"ACC-8891\", \"destination_country\": \"Japan\"}}</tool_call>[STATE: ACTIVATE_SERVICE → CONFIRM_CHANGES]\n<S>เปิดบริการโรมมิ่งประเทศญี่ปุ่นเรียบร้อยแล้วค่ะ</S><S>ขอสรุปรายการเปลี่ยนเป็นแพ็กเกจ PLAN_UNLIMITED_MAX และเปิดโรมมิ่งญี่ปุ่นนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "ACTIVATE_SERVICE",
+          "to": "ACTIVATE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "activate_roaming",
+          "arguments": {
+            "account_id": "ACC-8891",
+            "destination_country": "Japan"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ACTIVATE_SERVICE",
+          "ACTIVATE_SERVICE"
+        ],
+        [
+          "ACTIVATE_SERVICE",
+          "CONFIRM_CHANGES"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "activate_roaming",
+          "arguments": {
+            "account_id": "ACC-8891",
+            "destination_country": "Japan"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 5,
+      "completion": "[STATE: APPROVE_OR_DENY → PROCESS_PAYOUT]\n<S>ยินดีด้วยค่ะ</S><S>ทางเรากำลังดำเนินการสั่งจ่ายเงินชดเชยให้ตามขั้นตอนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "APPROVE_OR_DENY",
+          "to": "PROCESS_PAYOUT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "APPROVE_OR_DENY",
+          "PROCESS_PAYOUT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 6,
+      "completion": "model\n[STATE: REVIEW_RECORDS → SCHEDULE_SERVICE]\n<S>I can schedule that for you.</S><S>Please confirm if you would like to book a routine check for April 10, 2026.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_RECORDS",
+          "to": "SCHEDULE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_RECORDS",
+          "SCHEDULE_SERVICE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 7,
+      "completion": "model\n[STATE: REVIEW_PLAN → REVIEW_PLAN]\n<tool_call>{\"name\": \"check_data_usage\", \"arguments\": {\"account_id\": \"TEL-98765\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_PLAN",
+          "to": "REVIEW_PLAN"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_data_usage",
+          "arguments": {
+            "account_id": "TEL-98765"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_PLAN",
+          "REVIEW_PLAN"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_data_usage",
+          "arguments": {
+            "account_id": "TEL-98765"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 10,
+      "completion": "[STATE: VERIFY_PATIENT → CHECK_ELIGIBILITY]\n<S>Thank you, John.</S><S>What is the procedure code for your MRI?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_PATIENT",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_PATIENT",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 11,
+      "completion": "model\n[STATE: SCHEDULE_SERVICE → SCHEDULE_SERVICE]\n<S>Scheduling your consultation for May 18th now.</S>\n<tool_call>{\"name\": \"schedule_appointment\", \"arguments\": {\"patient_id\": \"P98765\", \"appointment_type\": \"consultation\", \"preferred_date\": \"2026-05-18\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SCHEDULE_SERVICE",
+          "to": "SCHEDULE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "schedule_appointment",
+          "arguments": {
+            "appointment_type": "consultation",
+            "patient_id": "P98765",
+            "preferred_date": "2026-05-18"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SCHEDULE_SERVICE",
+          "SCHEDULE_SERVICE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "schedule_appointment",
+          "arguments": {
+            "patient_id": "P98765",
+            "appointment_type": "consultation",
+            "preferred_date": "2026-05-18"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 12,
+      "completion": "[STATE: VERIFY_CITIZEN → VERIFY_CITIZEN]\n<S>รับทราบค่ะ</S><S>รบกวนแจ้งเลขบัตรประชาชนสิบสามหลักและวันเดือนปีเกิดเพื่อยืนยันตัวตนได้เลยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_CITIZEN",
+          "to": "VERIFY_CITIZEN"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_CITIZEN",
+          "VERIFY_CITIZEN"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 14,
+      "completion": "model\n[STATE: PROCESS_CHANGE → ACTIVATE_SERVICE]\n<S>ได้เลยค่ะ เดี๋ยวจะเปิดใช้งาน roaming ให้ทันทีนะคะ</S><S>ขออนุญาตเปิดบริการ roaming สำหรับประเทศ Japan สักครู่ค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PROCESS_CHANGE",
+          "to": "ACTIVATE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PROCESS_CHANGE",
+          "ACTIVATE_SERVICE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 15,
+      "completion": "model\n[STATE: SEARCH_CATALOG → SEARCH_CATALOG]\n<S>Searching our catalog for the CloudStride Pro now.</S>\n<tool_call>{\"name\": \"search_products\", \"arguments\": {\"query\": \"CloudStride Pro\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SEARCH_CATALOG",
+          "to": "SEARCH_CATALOG"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "search_products",
+          "arguments": {
+            "query": "CloudStride Pro"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SEARCH_CATALOG",
+          "SEARCH_CATALOG"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "search_products",
+          "arguments": {
+            "query": "CloudStride Pro"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 19,
+      "completion": "model\n[STATE: CREATE_PROPOSAL → CREATE_PROPOSAL]\n<tool_call>{\"name\": \"create_quote\", \"arguments\": {\"customer_id\": \"CUST-442\", \"products\": [\"Enterprise CRM\"]}}</tool_call>[STATE: CREATE_PROPOSAL → FOLLOW_UP]\n<S>I have created quote Q-8821 for $45,000.</S><S>What is your email address so I can send the formal proposal?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CREATE_PROPOSAL",
+          "to": "CREATE_PROPOSAL"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "create_quote",
+          "arguments": {
+            "customer_id": "CUST-442",
+            "products": [
+              "Enterprise CRM"
+            ]
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CREATE_PROPOSAL",
+          "CREATE_PROPOSAL"
+        ],
+        [
+          "CREATE_PROPOSAL",
+          "FOLLOW_UP"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "create_quote",
+          "arguments": {
+            "customer_id": "CUST-442",
+            "products": [
+              "Enterprise CRM"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 20,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขโทรศัพท์และชื่อผู้จดทะเบียนเพื่อตรวจสอบข้อมูลค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 21,
+      "completion": "[STATE: WELLNESS_ENROLL → NOTIFY_PATIENT]\n<S>Your enrollment is complete, and a confirmation packet has been sent to your email.</S><S>Your authorization is also confirmed for your upcoming surgery.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "WELLNESS_ENROLL",
+          "to": "NOTIFY_PATIENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "WELLNESS_ENROLL",
+          "NOTIFY_PATIENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 22,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>Hello! I would be glad to help you with your account and CD rates.</S><S>Could you please provide your full name and account ID?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 23,
+      "completion": "[STATE: CLAIM_INTAKE → CLAIM_INTAKE]\n<tool_call>{\"name\": \"file_claim\", \"arguments\": {\"policy_id\": \"POL-9872\", \"claim_type\": \"auto\", \"incident_date\": \"2023-11-04\", \"description\": \"another car backed into my bumper\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CLAIM_INTAKE",
+          "to": "CLAIM_INTAKE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "file_claim",
+          "arguments": {
+            "policy_id": "POL-9872",
+            "claim_type": "auto",
+            "incident_date": "2023-11-04",
+            "description": "another car backed into my bumper"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CLAIM_INTAKE",
+          "CLAIM_INTAKE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "file_claim",
+          "arguments": {
+            "policy_id": "POL-9872",
+            "claim_type": "auto",
+            "incident_date": "2023-11-04",
+            "description": "another car backed into my bumper"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 24,
+      "completion": "[STATE: GREETING → VERIFY_CITIZEN]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบเลขประจำตัวประชาชน 13 หลักเพื่อตรวจสอบข้อมูลค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_CITIZEN"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_CITIZEN"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 25,
+      "completion": "[STATE: GREETING → VERIFY_PATIENT]\n<S>Hello! I would be happy to help you with your coverage today.</S><S>Could you please provide your patient ID and full name?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_PATIENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_PATIENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 26,
+      "completion": "model\n[STATE: SEND_CONFIRMATION → SEND_CONFIRMATION]\n<S>Sending your confirmation reminder now.</S>\n<tool_call>{\"name\": \"send_reminder\", \"arguments\": {\"appointment_id\": \"APT-4401\", \"channel\": \"sms\"}}</tool_call>[STATE: SEND_CONFIRMATION → RESOLVE]\n<S>Your confirmation has been sent.</S><S>Is there anything else I can help you with today?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SEND_CONFIRMATION",
+          "to": "SEND_CONFIRMATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "send_reminder",
+          "arguments": {
+            "appointment_id": "APT-4401",
+            "channel": "sms"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SEND_CONFIRMATION",
+          "SEND_CONFIRMATION"
+        ],
+        [
+          "SEND_CONFIRMATION",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "send_reminder",
+          "arguments": {
+            "appointment_id": "APT-4401",
+            "channel": "sms"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 27,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขคำสั่งซื้อและชื่อผู้สั่งซื้อเพื่อตรวจสอบข้อมูลค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 28,
+      "completion": "[STATE: VERIFY_TRAVELER → SEARCH_OPTIONS]\n<S>Thank you, Alex.</S><S>Where will you be departing from, and on what date?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_TRAVELER",
+          "to": "SEARCH_OPTIONS"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_TRAVELER",
+          "SEARCH_OPTIONS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 29,
+      "completion": "[STATE: NOTIFY_CUSTOMER → RESOLVE]\n<S>ยินดีให้บริการค่ะ</S><S>มีข้อมูลหรือบริการด้านอื่นให้ช่วยเหลือเพิ่มเติมไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "NOTIFY_CUSTOMER",
+          "to": "RESOLVE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "NOTIFY_CUSTOMER",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 30,
+      "completion": "model\n[STATE: PAYMENT_PROCESSING → PAYMENT_PROCESSING]\n<S>ได้เลยค่ะ</S><S>กำลังดำเนินการตัดคะแนนสะสมให้นะคะ</S>\n<tool_call>{\"name\": \"redeem_points\", \"arguments\": {\"loyalty_id\": \"MB-8899\", \"points_to_redeem\": 20000, \"reservation_id\": \"BK-9988\"}}</tool_call>[STATE: PAYMENT_PROCESSING → LOYALTY_UPGRADE]\n<S>ตัดคะแนนเรียบร้อยค่ะ</S><S>คุณได้รับสิทธิ์อัปเกรดเป็น Gold Tier ด้วยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "PAYMENT_PROCESSING",
+          "to": "PAYMENT_PROCESSING"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "redeem_points",
+          "arguments": {
+            "loyalty_id": "MB-8899",
+            "points_to_redeem": 20000,
+            "reservation_id": "BK-9988"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PAYMENT_PROCESSING",
+          "PAYMENT_PROCESSING"
+        ],
+        [
+          "PAYMENT_PROCESSING",
+          "LOYALTY_UPGRADE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "redeem_points",
+          "arguments": {
+            "loyalty_id": "MB-8899",
+            "points_to_redeem": 20000,
+            "reservation_id": "BK-9988"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 32,
+      "completion": "model\n[STATE: PAYMENT_PROCESSING → LOYALTY_UPGRADE]\n<S>Yes, we can apply your loyalty points for the upgrade.</S><S>Let me process that redemption for you now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PAYMENT_PROCESSING",
+          "to": "LOYALTY_UPGRADE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PAYMENT_PROCESSING",
+          "LOYALTY_UPGRADE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 33,
+      "completion": "model\n[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]\n<tool_call>{\"name\": \"verify_policy\", \"arguments\": {\"policy_id\": \"POL-9872\", \"policyholder_id\": \"CUST-441\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_POLICYHOLDER",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9872",
+            "policyholder_id": "CUST-441"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_POLICYHOLDER",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9872",
+            "policyholder_id": "CUST-441"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 34,
+      "completion": "model\n[STATE: VERIFY_IDENTITY → VERIFY_IDENTITY]\n<S>Thank you.</S><S>Let me verify your identity in our secure system.</S>\n<tool_call>{\"name\": \"verify_identity\", \"arguments\": {\"customer_id\": \"CUST-882\", \"verification_method\": \"security_question\", \"verification_value\": \"Fluffy\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_identity",
+          "arguments": {
+            "customer_id": "CUST-882",
+            "verification_method": "security_question",
+            "verification_value": "Fluffy"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_identity",
+          "arguments": {
+            "customer_id": "CUST-882",
+            "verification_method": "security_question",
+            "verification_value": "Fluffy"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 35,
+      "completion": "[STATE: REVIEW_RECORDS → REVIEW_RECORDS]\n<S>ขอตรวจสอบสถานะเคลมสักครู่นะคะ</S>\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-1122\", \"patient_id\": \"P98765\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_RECORDS",
+          "to": "REVIEW_RECORDS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-1122",
+            "patient_id": "P98765"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_RECORDS",
+          "REVIEW_RECORDS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-1122",
+            "patient_id": "P98765"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 36,
+      "completion": "[STATE: VERIFY_PATIENT → CHECK_ELIGIBILITY]\n<S>ขอบคุณค่ะ ยืนยันข้อมูลคนไข้เรียบร้อยแล้วค่ะ</S><S>สำหรับ MRI เข่า รบกวนขอทราบรหัสการรักษา หรือ Procedure Code ด้วยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_PATIENT",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_PATIENT",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 37,
+      "completion": "model\n[STATE: VERIFY_PATIENT → CHECK_ELIGIBILITY]\n<S>I am now checking your benefits.</S><S>What is the procedure code for the physical therapy session?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_PATIENT",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_PATIENT",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 38,
+      "completion": "model\n[STATE: PRESENT_ITINERARY → PROCESS_BOOKING]\n<S>รับทราบค่ะ</S><S>จะดำเนินการ book reservation ให้ทันทีนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PRESENT_ITINERARY",
+          "to": "PROCESS_BOOKING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PRESENT_ITINERARY",
+          "PROCESS_BOOKING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 40,
+      "completion": "[STATE: APPROVAL_CHECK → CONFIRM_ACTION]\n<S>การตรวจสอบเบื้องต้นผ่านเรียบร้อยค่ะ</S><S>ขอสรุปการสมัครสินเชื่อส่วนบุคคลวงเงินหนึ่งแสนบาท รบกวนยืนยันการทำรายการนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "APPROVAL_CHECK",
+          "to": "CONFIRM_ACTION"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "APPROVAL_CHECK",
+          "CONFIRM_ACTION"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 41,
+      "completion": "[STATE: VERIFY_PATIENT → CHECK_ELIGIBILITY]\n<S>ขอบคุณค่ะคุณผู้ใช้</S><S>ขออนุญาตตรวจสอบ insurance coverage สำหรับ code 27447 สักครู่นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_PATIENT",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_PATIENT",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 42,
+      "completion": "[STATE: GREETING → VERIFY_POLICYHOLDER]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขกรมธรรม์และรหัสผู้ถือกรมธรรม์ด้วยนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 44,
+      "completion": "[STATE: REVIEW_RECORDS → REVIEW_RECORDS]\n<S>ขอตรวจสอบ claim status ในระบบสักครู่นะคะ</S>\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-9912\", \"patient_id\": \"P1029\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_RECORDS",
+          "to": "REVIEW_RECORDS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-9912",
+            "patient_id": "P1029"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_RECORDS",
+          "REVIEW_RECORDS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-9912",
+            "patient_id": "P1029"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 45,
+      "completion": "[STATE: PRESENT_ITINERARY → PROCESS_BOOKING]\n<S>ได้เลยค่ะ</S><S>จะดำเนินการจองเที่ยวบินให้ทันทีนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PRESENT_ITINERARY",
+          "to": "PROCESS_BOOKING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PRESENT_ITINERARY",
+          "PROCESS_BOOKING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 46,
+      "completion": "model\n[STATE: CHECK_VISA_REQUIREMENTS → CHECK_VISA_REQUIREMENTS]\n<S>Mount Fuji is absolutely stunning.</S><S>Let me check the visa requirements for you now.</S>\n<tool_call>{\"name\": \"check_visa_requirements\", \"arguments\": {\"nationality\": \"US\", \"destination\": \"Tokyo\", \"trip_purpose\": \"tourism\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CHECK_VISA_REQUIREMENTS",
+          "to": "CHECK_VISA_REQUIREMENTS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_visa_requirements",
+          "arguments": {
+            "nationality": "US",
+            "destination": "Tokyo",
+            "trip_purpose": "tourism"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CHECK_VISA_REQUIREMENTS",
+          "CHECK_VISA_REQUIREMENTS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_visa_requirements",
+          "arguments": {
+            "nationality": "US",
+            "destination": "Tokyo",
+            "trip_purpose": "tourism"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 47,
+      "completion": "model\n[STATE: USAGE_ANALYSIS → USAGE_ANALYSIS]\n<tool_call>{\"name\": \"check_data_usage\", \"arguments\": {\"account_id\": \"TH-88219\", \"period\": \"last_month\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "USAGE_ANALYSIS",
+          "to": "USAGE_ANALYSIS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_data_usage",
+          "arguments": {
+            "account_id": "TH-88219",
+            "period": "last_month"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "USAGE_ANALYSIS",
+          "USAGE_ANALYSIS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_data_usage",
+          "arguments": {
+            "account_id": "TH-88219",
+            "period": "last_month"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 50,
+      "completion": "[STATE: CLAIM_INTAKE → CLAIM_INTAKE]\n<tool_call>{\"name\": \"file_claim\", \"arguments\": {\"policy_id\": \"POL-8821\", \"claim_type\": \"auto\", \"incident_date\": \"2023-10-25\", \"description\": \"ขับชนเสาไฟ กันชนหน้าเสียหาย\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CLAIM_INTAKE",
+          "to": "CLAIM_INTAKE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "file_claim",
+          "arguments": {
+            "policy_id": "POL-8821",
+            "claim_type": "auto",
+            "incident_date": "2023-10-25",
+            "description": "ขับชนเสาไฟ กันชนหน้าเสียหาย"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CLAIM_INTAKE",
+          "CLAIM_INTAKE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "file_claim",
+          "arguments": {
+            "policy_id": "POL-8821",
+            "claim_type": "auto",
+            "incident_date": "2023-10-25",
+            "description": "ขับชนเสาไฟ กันชนหน้าเสียหาย"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 53,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขโทรศัพท์และชื่อผู้จดทะเบียนเพื่อตรวจสอบข้อมูลหน่อยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 54,
+      "completion": "model\n[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]\n<S>Thank you.</S><S>Let me verify your policy details now.</S>\n<tool_call>{\"name\": \"verify_policy\", \"arguments\": {\"policy_id\": \"POL-9876\", \"policyholder_id\": \"USR-5432\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_POLICYHOLDER",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9876",
+            "policyholder_id": "USR-5432"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_POLICYHOLDER",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9876",
+            "policyholder_id": "USR-5432"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 55,
+      "completion": "[STATE: APPLY_COMPENSATION → APPLY_COMPENSATION]\n<S>กำลังดำเนินการให้ค่ะ</S>\n<tool_call>{\"name\": \"offer_goodwill\", \"arguments\": {\"customer_id\": \"CUST-8899\", \"gesture_type\": \"credit\", \"value\": 300}}</tool_call>[STATE: APPLY_COMPENSATION → VERIFY_SATISFACTION]\n<S>ระบบได้ทำการปรับเครดิตชดเชย 300 บาทให้เรียบร้อยแล้วค่ะ</S><S>คุณลูกค้าพึงพอใจกับการดูแลในครั้งนี้ไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "APPLY_COMPENSATION",
+          "to": "APPLY_COMPENSATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "offer_goodwill",
+          "arguments": {
+            "customer_id": "CUST-8899",
+            "gesture_type": "credit",
+            "value": 300
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "APPLY_COMPENSATION",
+          "APPLY_COMPENSATION"
+        ],
+        [
+          "APPLY_COMPENSATION",
+          "VERIFY_SATISFACTION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "offer_goodwill",
+          "arguments": {
+            "customer_id": "CUST-8899",
+            "gesture_type": "credit",
+            "value": 300
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 56,
+      "completion": "[STATE: SUBMIT_AUTHORIZATION → SUBMIT_AUTHORIZATION]\n<S>กำลังยื่นคำขอ prior authorization ให้ทันทีค่ะ</S>\n<tool_call>{\"name\": \"submit_prior_auth\", \"arguments\": {\"patient_id\": \"P-8821\", \"procedure_code\": \"73721\"}}</tool_call>[STATE: SUBMIT_AUTHORIZATION → REVIEW_AUTHORIZATION]\n<S>ยื่นคำขอเรียบร้อยแล้วค่ะ</S><S>ขอตรวจสอบผลการอนุมัติในระบบต่อทันทีนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SUBMIT_AUTHORIZATION",
+          "to": "SUBMIT_AUTHORIZATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "submit_prior_auth",
+          "arguments": {
+            "patient_id": "P-8821",
+            "procedure_code": "73721"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SUBMIT_AUTHORIZATION",
+          "SUBMIT_AUTHORIZATION"
+        ],
+        [
+          "SUBMIT_AUTHORIZATION",
+          "REVIEW_AUTHORIZATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "submit_prior_auth",
+          "arguments": {
+            "patient_id": "P-8821",
+            "procedure_code": "73721"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 57,
+      "completion": "[STATE: EXPLAIN_SURVEY → EXPLAIN_SURVEY]\n<S>รับทราบค่ะ</S><S>เมื่อสักครู่แจ้งว่าใช้เวลาประมาณสองถึงสามนาทีเท่านั้นนะคะ</S><S>เพื่อความรวดเร็วค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "EXPLAIN_SURVEY",
+          "to": "EXPLAIN_SURVEY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "EXPLAIN_SURVEY",
+          "EXPLAIN_SURVEY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 58,
+      "completion": "model\n[STATE: REVIEW_RECORDS → REVIEW_RECORDS]\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-9912\", \"patient_id\": \"P88321\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_RECORDS",
+          "to": "REVIEW_RECORDS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-9912"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_RECORDS",
+          "REVIEW_RECORDS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-9912",
+            "patient_id": "P88321"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 59,
+      "completion": "model\n[STATE: VERIFY_ACCOUNT → REVIEW_BILLING]\n<S>I can submit a dispute for your October 2023 bill.</S><S>Let me process that request for you now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_ACCOUNT",
+          "to": "REVIEW_BILLING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_ACCOUNT",
+          "REVIEW_BILLING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 60,
+      "completion": "model\n[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]\n<S>ขอบคุณค่ะ</S><S>ขออนุญาต verify ข้อมูลในระบบสักครู่นะคะ</S>\n<tool_call>{\"name\": \"verify_policy\", \"arguments\": {\"policy_id\": \"POL-8821\", \"policyholder_id\": \"CUST-404\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_POLICYHOLDER",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-8821",
+            "policyholder_id": "CUST-404"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_POLICYHOLDER",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-8821",
+            "policyholder_id": "CUST-404"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 61,
+      "completion": "[STATE: DISPATCH_RESPONSE → DISPATCH_RESPONSE]\n<tool_call>{\"name\": \"dispatch_emergency\", \"arguments\": {\"emergency_type\": \"fire\", \"location\": \"DataCenter-BKK1\", \"severity\": \"critical\"}}</tool_call>[STATE: DISPATCH_RESPONSE → COORDINATE_TEAMS]\n<S>ส่งทีมดับเพลิงเรียบร้อยแล้วครับ</S><S>กำลัง coordinate ทีม onsite และเตรียม activate backup systems ครับ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "DISPATCH_RESPONSE",
+          "to": "DISPATCH_RESPONSE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "dispatch_emergency",
+          "arguments": {
+            "emergency_type": "fire",
+            "location": "DataCenter-BKK1",
+            "severity": "critical"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "DISPATCH_RESPONSE",
+          "DISPATCH_RESPONSE"
+        ],
+        [
+          "DISPATCH_RESPONSE",
+          "COORDINATE_TEAMS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "dispatch_emergency",
+          "arguments": {
+            "emergency_type": "fire",
+            "location": "DataCenter-BKK1",
+            "severity": "critical"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 62,
+      "completion": "model\n[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]\n<tool_call>{\"name\": \"verify_policy\", \"arguments\": {\"policy_id\": \"POL-98765\", \"policyholder_id\": \"USR-4321\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_POLICYHOLDER",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-98765",
+            "policyholder_id": "USR-4321"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_POLICYHOLDER",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-98765",
+            "policyholder_id": "USR-4321"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 63,
+      "completion": "model\n[STATE: VERIFY_PATIENT → CHECK_ELIGIBILITY]\n<S>Thank you for verifying your ID.</S><S>What procedure code would you like to check coverage for?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_PATIENT",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_PATIENT",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 64,
+      "completion": "[STATE: GREETING → VERIFY_POLICYHOLDER]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบหมายเลขกรมธรรม์และรหัสผู้ถือกรมธรรม์เพื่อตรวจสอบข้อมูลค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 65,
+      "completion": "[STATE: COLLECT_DOCUMENTS → SUBMIT_LOAN_APPLICATION]\n<S>ได้รับเอกสารครบถ้วนแล้วค่ะ</S><S>กำลังดำเนินการ submit loan application ให้ทันทีนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "COLLECT_DOCUMENTS",
+          "to": "SUBMIT_LOAN_APPLICATION"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "COLLECT_DOCUMENTS",
+          "SUBMIT_LOAN_APPLICATION"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 67,
+      "completion": "[STATE: GREETING → IDENTIFY_SERVICE]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ต้องการนัดหมายตรวจสุขภาพประเภทใดคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "IDENTIFY_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "IDENTIFY_SERVICE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 68,
+      "completion": "[STATE: NOTIFY_OUTCOME → RESOLVE]\n<S>ยินดีเป็นอย่างยิ่งค่ะ</S><S>มีข้อมูลส่วนอื่นให้ช่วยเหลือเพิ่มเติมอีกไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "NOTIFY_OUTCOME",
+          "to": "RESOLVE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "NOTIFY_OUTCOME",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 70,
+      "completion": "model\n[STATE: COLLECT_DOCUMENTS → SUBMIT_LOAN_APPLICATION]\n<S>Thank you, I have confirmed your documents are received.</S><S>I will now submit your loan application.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "COLLECT_DOCUMENTS",
+          "to": "SUBMIT_LOAN_APPLICATION"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "COLLECT_DOCUMENTS",
+          "SUBMIT_LOAN_APPLICATION"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 72,
+      "completion": "[STATE: LOYALTY_UPGRADE → LOYALTY_UPGRADE]\n<S>กำลังดำเนินการแลกคะแนนเพื่ออัปเกรดสถานะให้ครับ</S>\n<tool_call>{\"name\": \"redeem_points\", \"arguments\": {\"loyalty_id\": \"MEM12345\", \"points_to_redeem\": 5000, \"reservation_id\": \"RES9988\"}}</tool_call>[STATE: LOYALTY_UPGRADE → ISSUE_DOCUMENTS]\n<S>อัปเกรดเป็น Gold เรียบร้อยแล้วครับ</S><S>ขอตรวจสอบเอกสารการเดินทางและออกตั๋วให้สักครู่นะครับ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "LOYALTY_UPGRADE",
+          "to": "LOYALTY_UPGRADE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "redeem_points",
+          "arguments": {
+            "loyalty_id": "MEM12345",
+            "points_to_redeem": 5000,
+            "reservation_id": "RES9988"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "LOYALTY_UPGRADE",
+          "LOYALTY_UPGRADE"
+        ],
+        [
+          "LOYALTY_UPGRADE",
+          "ISSUE_DOCUMENTS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "redeem_points",
+          "arguments": {
+            "loyalty_id": "MEM12345",
+            "points_to_redeem": 5000,
+            "reservation_id": "RES9988"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 75,
+      "completion": "model\n[STATE: AUTHENTICATE_2FA → LOOKUP_ACCOUNT]\n<S>Thank you, that code is verified.</S><S>Let me pull up your account details now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "AUTHENTICATE_2FA",
+          "to": "LOOKUP_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "AUTHENTICATE_2FA",
+          "LOOKUP_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 76,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>Hello! I would be happy to help you with your mobile plan.</S><S>Could you please provide your account ID and full name?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 77,
+      "completion": "[STATE: IDENTIFY_ISSUE → IDENTIFY_ISSUE]\n<S>Could you please provide the full model name and the target software version?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "IDENTIFY_ISSUE",
+          "to": "IDENTIFY_ISSUE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "IDENTIFY_ISSUE",
+          "IDENTIFY_ISSUE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 78,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>Hello! I would be happy to help with your billing statement.</S><S>Could you please provide your full name and account number?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 79,
+      "completion": "[STATE: PRESENT_OPTIONS → COMPARE_FEATURES]\n<S>เข้าใจเลยค่ะ เดี๋ยวขอเปรียบเทียบคุณสมบัติของทั้งสองรุ่นให้เห็นภาพชัดเจนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PRESENT_OPTIONS",
+          "to": "COMPARE_FEATURES"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PRESENT_OPTIONS",
+          "COMPARE_FEATURES"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 80,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบชื่อผู้สั่งซื้อและหมายเลขคำสั่งซื้อด้วยนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 81,
+      "completion": "model\n[STATE: GREETING → UNDERSTAND_NEEDS]\n<S>Hello! I can certainly help you find the perfect headphones.</S><S>What is your primary use case for them?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "UNDERSTAND_NEEDS"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "UNDERSTAND_NEEDS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 82,
+      "completion": "model\n[STATE: ACTIVATE_SERVICE → ACTIVATE_SERVICE]\n<tool_call>{\"name\": \"activate_roaming\", \"arguments\": {\"account_id\": \"ACC-9821\", \"destination_country\": \"France\", \"roaming_plan\": \"basic\"}}</tool_call>[STATE: ACTIVATE_SERVICE → CONFIRM_CHANGES]\n<S>Basic roaming for France has been activated.</S><S>To summarize, we upgraded you to PLAN-UNLTD and activated basic roaming.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "ACTIVATE_SERVICE",
+          "to": "ACTIVATE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "activate_roaming",
+          "arguments": {
+            "account_id": "ACC-9821",
+            "destination_country": "France",
+            "roaming_plan": "basic"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ACTIVATE_SERVICE",
+          "ACTIVATE_SERVICE"
+        ],
+        [
+          "ACTIVATE_SERVICE",
+          "CONFIRM_CHANGES"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "activate_roaming",
+          "arguments": {
+            "account_id": "ACC-9821",
+            "destination_country": "France",
+            "roaming_plan": "basic"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 83,
+      "completion": "[STATE: EXPLAIN_SURVEY → COLLECT_RATING]\n<S>เป็นแบบสอบถามความพึงพอใจการใช้บริการค่ะ</S><S>ใช้เวลาไม่เกิน 1 นาทีค่ะ</S><S>ขอทราบ Customer ID และคะแนนความพึงพอใจ 0 ถึง 10 ได้เลยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "EXPLAIN_SURVEY",
+          "to": "COLLECT_RATING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "EXPLAIN_SURVEY",
+          "COLLECT_RATING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 85,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขออนุญาตทราบชื่อ-นามสกุล และ Customer ID เพื่อ verify ข้อมูลก่อนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 86,
+      "completion": "[STATE: UPGRADE_OFFER → PROCESS_CHANGE]\n<S>รับเรื่องการเปลี่ยนแพ็กเกจให้ค่ะ</S><S>กำลังดำเนินการเปลี่ยนแพ็กเกจในระบบให้นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "UPGRADE_OFFER",
+          "to": "PROCESS_CHANGE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "UPGRADE_OFFER",
+          "PROCESS_CHANGE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 88,
+      "completion": "model\n[STATE: REVIEW_APPLICATION → REVIEW_APPLICATION]\n<S>Checking your application status now.</S>\n<tool_call>{\"name\": \"check_application_status\", \"arguments\": {\"application_id\": \"APP-4421\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_APPLICATION",
+          "to": "REVIEW_APPLICATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_application_status",
+          "arguments": {
+            "application_id": "APP-4421"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_APPLICATION",
+          "REVIEW_APPLICATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_application_status",
+          "arguments": {
+            "application_id": "APP-4421"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 89,
+      "completion": "[STATE: IDENTIFY_NEEDS → PRESENT_SOLUTION]\n<S>เข้าใจเลยครับ เรื่องแอร์เสียนี่น่าปวดหัวจริงๆ</S><S>ระบบ CRM ของเรามีระบบ auto-follow up ช่วยแก้ปัญหานี้ได้แน่นอนครับ</S><S>สนใจนัด demo เพื่อดูการทำงานเลยไหมครับ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "IDENTIFY_NEEDS",
+          "to": "PRESENT_SOLUTION"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "IDENTIFY_NEEDS",
+          "PRESENT_SOLUTION"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 90,
+      "completion": "[STATE: GREETING → VERIFY_PATIENT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบชื่อ-นามสกุล และ Patient ID เพื่อ verify ข้อมูลก่อนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_PATIENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_PATIENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 91,
+      "completion": "[STATE: COMPARE_FEATURES → COMPARE_FEATURES]\n<S>ได้เลยค่ะ</S><S>ขอ compare features ให้เห็นชัดๆ สักครู่นะคะ</S>[STATE: COMPARE_FEATURES → COMPARE_FEATURES]\n<tool_call>{\"name\": \"compare_products\", \"arguments\": {\"product_ids\": [\"HP-100\", \"HP-200\"]}}</tool_call>[STATE: COMPARE_FEATURES → CHECK_AVAILABILITY]\n<S>SonicPro 5 แบตอึดกว่าและมี ANC ที่ดีกว่าค่ะ</S><S>สนใจให้เช็ก stock ของ SonicPro 5 เลยไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 3,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "COMPARE_FEATURES",
+          "to": "COMPARE_FEATURES"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "compare_products",
+          "arguments": {
+            "product_ids": [
+              "HP-100",
+              "HP-200"
+            ]
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "COMPARE_FEATURES",
+          "COMPARE_FEATURES"
+        ],
+        [
+          "COMPARE_FEATURES",
+          "COMPARE_FEATURES"
+        ],
+        [
+          "COMPARE_FEATURES",
+          "CHECK_AVAILABILITY"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "compare_products",
+          "arguments": {
+            "product_ids": [
+              "HP-100",
+              "HP-200"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 92,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>เพื่อความปลอดภัยในการให้ข้อมูล รบกวนขอทราบชื่อ-นามสกุล และหมายเลขบัตรประชาชนด้วยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 93,
+      "completion": "[STATE: PROCESS_PAYOUT → CONFIRM_SETTLEMENT]\n<S>Your direct deposit of twelve hundred dollars has been scheduled.</S><S>Please confirm if you accept this settlement.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "PROCESS_PAYOUT",
+          "to": "CONFIRM_SETTLEMENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PROCESS_PAYOUT",
+          "CONFIRM_SETTLEMENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 94,
+      "completion": "[STATE: GREETING → IDENTIFY_SERVICE]\n<S>Hello! I am here to help you schedule an appointment.</S><S>What service would you like to book today?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "IDENTIFY_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "IDENTIFY_SERVICE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 96,
+      "completion": "model\n[STATE: REVIEW_RECORDS → REVIEW_RECORDS]\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-5541\", \"patient_id\": \"P98765\"}}</tool_call>[STATE: REVIEW_RECORDS → SUBMIT_AUTHORIZATION]\n<S>ระบบพบข้อมูลเรียบร้อยค่ะ</S><S>ต้องการให้ดำเนินการยื่นคำขออนุมัติล่วงหน้าสำหรับรหัส 73721 เลยไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_RECORDS",
+          "to": "REVIEW_RECORDS"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-5541",
+            "patient_id": "P98765"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_RECORDS",
+          "REVIEW_RECORDS"
+        ],
+        [
+          "REVIEW_RECORDS",
+          "SUBMIT_AUTHORIZATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-5541",
+            "patient_id": "P98765"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 97,
+      "completion": "[STATE: GREETING → VERIFY_CITIZEN]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบเลขบัตรประชาชน 13 หลักเพื่อ verify ข้อมูลก่อนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_CITIZEN"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_CITIZEN"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 98,
+      "completion": "model\n[STATE: SUBMIT_AUTHORIZATION → SUBMIT_AUTHORIZATION]\n<tool_call>{\"name\": \"submit_prior_auth\", \"arguments\": {\"patient_id\": \"P98765\", \"procedure_code\": \"MRI-70551\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SUBMIT_AUTHORIZATION",
+          "to": "SUBMIT_AUTHORIZATION"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "submit_prior_auth",
+          "arguments": {
+            "patient_id": "P98765",
+            "procedure_code": "MRI-70551"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SUBMIT_AUTHORIZATION",
+          "SUBMIT_AUTHORIZATION"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "submit_prior_auth",
+          "arguments": {
+            "patient_id": "P98765",
+            "procedure_code": "MRI-70551"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 99,
+      "completion": "[STATE: REVIEW_CHARGES → PROCESS_PAYMENT]\n<S>ได้ค่ะ สามารถชำระผ่านบัตรเครดิตได้ค่ะ</S><S>ต้องการให้ดำเนินการชำระยอด 1,200 บาทเลยไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_CHARGES",
+          "to": "PROCESS_PAYMENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_CHARGES",
+          "PROCESS_PAYMENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 100,
+      "completion": "[STATE: VERIFY_TRAVELER → SEARCH_OPTIONS]\n<S>ขอบคุณค่ะคุณ Somchai</S><S>ขอทราบสนามบินต้นทาง ปลายทาง และ cabin class ที่ต้องการด้วยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_TRAVELER",
+          "to": "SEARCH_OPTIONS"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_TRAVELER",
+          "SEARCH_OPTIONS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 101,
+      "completion": "[STATE: EXPLAIN_SURVEY → EXPLAIN_SURVEY]\n<S>รับทราบค่ะ</S><S>ใช้เวลาเพียงสามนาทีเท่านั้นค่ะ</S><S>เพื่อนำข้อมูลไปปรับปรุงการบริการให้ดียิ่งขึ้นค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "EXPLAIN_SURVEY",
+          "to": "EXPLAIN_SURVEY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "EXPLAIN_SURVEY",
+          "EXPLAIN_SURVEY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 102,
+      "completion": "model\n[STATE: ASSESS_COVERAGE → ASSESS_COVERAGE]\n<S>Checking the claim status now.</S>\n<tool_call>{\"name\": \"check_claim_status\", \"arguments\": {\"claim_id\": \"CLM-909\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "ASSESS_COVERAGE",
+          "to": "ASSESS_COVERAGE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-909"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ASSESS_COVERAGE",
+          "ASSESS_COVERAGE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_claim_status",
+          "arguments": {
+            "claim_id": "CLM-909"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 103,
+      "completion": "[STATE: QUALIFY_PROSPECT → QUALIFY_PROSPECT]\n<S>รับทราบค่ะ</S><S>และไม่ทราบว่ามีระยะเวลาที่ต้องการเริ่มใช้งานระบบภายในเมื่อไหร่คะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "QUALIFY_PROSPECT",
+          "to": "QUALIFY_PROSPECT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "QUALIFY_PROSPECT",
+          "QUALIFY_PROSPECT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 104,
+      "completion": "[STATE: CONFIRM_ACTION → RESOLVE]\n<S>You are very welcome.</S><S>Is there anything else I can help you with today?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_ACTION",
+          "to": "RESOLVE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CONFIRM_ACTION",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 105,
+      "completion": "[STATE: REVIEW_POLICY → REVIEW_POLICY]\n<S>ได้เลยค่ะ</S><S>ขอคำนวณเบี้ยประกันสุขภาพวงเงิน 1 ล้านบาทให้นะคะ</S>\n<tool_call>{\"name\": \"quote_premium\", \"arguments\": {\"coverage_type\": \"health\", \"coverage_amount\": 1000000, \"age\": 35}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "REVIEW_POLICY",
+          "to": "REVIEW_POLICY"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "quote_premium",
+          "arguments": {
+            "coverage_type": "health",
+            "coverage_amount": 1000000,
+            "age": 35
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "REVIEW_POLICY",
+          "REVIEW_POLICY"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "quote_premium",
+          "arguments": {
+            "coverage_type": "health",
+            "coverage_amount": 1000000,
+            "age": 35
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 106,
+      "completion": "[STATE: EXPLAIN_SURVEY → EXPLAIN_SURVEY]\n<S>แถวนี้ฝนตกปรอยๆ ค่ะ</S><S>แบบสำรวจนี้ใช้เวลาสั้นมากเพียง 1 นาที เพื่อนำไปปรับปรุงการบริการค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "EXPLAIN_SURVEY",
+          "to": "EXPLAIN_SURVEY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "EXPLAIN_SURVEY",
+          "EXPLAIN_SURVEY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 108,
+      "completion": "[STATE: VERIFY_CITIZEN → CHECK_ELIGIBILITY]\n<S>ขอบคุณค่ะ แถวนี้แดดแรงเหมือนกัน รักษาสุขภาพด้วยนะคะ</S><S>ขออนุญาตตรวจสอบสิทธิ์เงินช่วยเหลือว่างงานสักครู่นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_CITIZEN",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_CITIZEN",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 109,
+      "completion": "[STATE: WELLNESS_ENROLL → NOTIFY_PATIENT]\n<S>ลงทะเบียนโปรแกรมสุขภาพให้เรียบร้อยแล้วครับ</S><S>ระบบได้ส่งเอกสารยืนยันการอนุมัติและรายละเอียดโปรแกรมให้ทาง SMS แล้วครับ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "WELLNESS_ENROLL",
+          "to": "NOTIFY_PATIENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "WELLNESS_ENROLL",
+          "NOTIFY_PATIENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 112,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>Hello! I would be happy to help you with your order.</S><S>Could you please provide your order ID and your full name?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 113,
+      "completion": "model\n[STATE: VERIFY_POLICYHOLDER → VERIFY_POLICYHOLDER]\n<S>Thank you.</S><S>Let me verify your policy details now.</S>\n<tool_call>{\"name\": \"verify_policy\", \"arguments\": {\"policy_id\": \"POL-9812\", \"policyholder_id\": \"USR-441\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_POLICYHOLDER",
+          "to": "VERIFY_POLICYHOLDER"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9812",
+            "policyholder_id": "USR-441"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_POLICYHOLDER",
+          "VERIFY_POLICYHOLDER"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_policy",
+          "arguments": {
+            "policy_id": "POL-9812",
+            "policyholder_id": "USR-441"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 115,
+      "completion": "[STATE: NOTIFY_PATIENT → RESOLVE]\n<S>You are very welcome.</S><S>Is there anything else I can assist you with today?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "NOTIFY_PATIENT",
+          "to": "RESOLVE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "NOTIFY_PATIENT",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 116,
+      "completion": "[STATE: CONFIRM_DETAILS → NOTIFY_PATIENT]\n<S>ยินดีด้วยค่ะ</S><S>ทางเราได้ส่งเอกสารยืนยันการอนุมัติไปยังอีเมลของคุณเรียบร้อยแล้วค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_DETAILS",
+          "to": "NOTIFY_PATIENT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CONFIRM_DETAILS",
+          "NOTIFY_PATIENT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 117,
+      "completion": "[STATE: THANK_CUSTOMER → RESOLVE]\n<S>Yes, the survey is now complete.</S><S>Thank you again for your time, and have a wonderful day!</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "THANK_CUSTOMER",
+          "to": "RESOLVE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "THANK_CUSTOMER",
+          "RESOLVE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 119,
+      "completion": "model\n[STATE: EXPLAIN_SURVEY → COLLECT_RATING]\n<S>Great, thank you.</S><S>On a scale of 1 to 5, how satisfied were you with your recent support experience?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "EXPLAIN_SURVEY",
+          "to": "COLLECT_RATING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "EXPLAIN_SURVEY",
+          "COLLECT_RATING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 120,
+      "completion": "[STATE: CHECK_ELIGIBILITY → CHECK_ELIGIBILITY]\n<S>รับทราบค่ะ ระบบมีบริการ unemployment นะคะ</S><S>ขออนุญาตตรวจสอบ eligibility ในระบบสักครู่นะคะ</S>\n<tool_call>{\"name\": \"check_benefit_eligibility\", \"arguments\": {\"citizen_id\": \"1100400998877\", \"benefit_type\": \"unemployment\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "CHECK_ELIGIBILITY",
+          "to": "CHECK_ELIGIBILITY"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "check_benefit_eligibility",
+          "arguments": {
+            "citizen_id": "1100400998877",
+            "benefit_type": "unemployment"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CHECK_ELIGIBILITY",
+          "CHECK_ELIGIBILITY"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "check_benefit_eligibility",
+          "arguments": {
+            "citizen_id": "1100400998877",
+            "benefit_type": "unemployment"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 121,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบเบอร์โทรศัพท์และชื่อผู้จดทะเบียนเพื่อ verify account สักนิดนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 122,
+      "completion": "[STATE: PROCESS_CHANGE → PROCESS_CHANGE]\n<S>กำลังดำเนินการเปลี่ยนแพ็กเกจในระบบสักครู่นะคะ</S>\n<tool_call>{\"name\": \"change_plan\", \"arguments\": {\"account_id\": \"ACC-99482\", \"new_plan_id\": \"PLAN-MAX30\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "PROCESS_CHANGE",
+          "to": "PROCESS_CHANGE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "change_plan",
+          "arguments": {
+            "account_id": "ACC-99482",
+            "new_plan_id": "PLAN-MAX30"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "PROCESS_CHANGE",
+          "PROCESS_CHANGE"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "change_plan",
+          "arguments": {
+            "account_id": "ACC-99482",
+            "new_plan_id": "PLAN-MAX30"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 123,
+      "completion": "[STATE: UNDERSTAND_NEEDS → UNDERSTAND_NEEDS]\n<S>รับทราบค่ะ</S><S>เมื่อสักครู่แจ้งว่าแบตเตอรี่ใช้งานได้นานยี่สิบชั่วโมงค่ะ</S><S>ตอนนี้มีโปรโมชั่นลดพิเศษ 10% เหลือเพียงหนึ่งพันสามร้อยหกสิบบาทค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "UNDERSTAND_NEEDS",
+          "to": "UNDERSTAND_NEEDS"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "UNDERSTAND_NEEDS",
+          "UNDERSTAND_NEEDS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 124,
+      "completion": "[STATE: SCHEDULE_SERVICE → SCHEDULE_SERVICE]\n<tool_call>{\"name\": \"schedule_appointment\", \"arguments\": {\"patient_id\": \"P98765\", \"appointment_type\": \"consultation\", \"preferred_date\": \"2024-11-15\"}}</tool_call>[STATE: SCHEDULE_SERVICE → CONFIRM_DETAILS]\n<S>นัดหมายการปรึกษาแพทย์ในวันที่ 15 พฤศจิกายน 2024 ได้รับการยืนยันแล้วค่ะ</S><S>มีข้อมูลอื่นให้ดูแลเพิ่มเติมไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 2,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "SCHEDULE_SERVICE",
+          "to": "SCHEDULE_SERVICE"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "schedule_appointment",
+          "arguments": {
+            "appointment_type": "consultation",
+            "patient_id": "P98765",
+            "preferred_date": "2024-11-15"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "SCHEDULE_SERVICE",
+          "SCHEDULE_SERVICE"
+        ],
+        [
+          "SCHEDULE_SERVICE",
+          "CONFIRM_DETAILS"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "schedule_appointment",
+          "arguments": {
+            "patient_id": "P98765",
+            "appointment_type": "consultation",
+            "preferred_date": "2024-11-15"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 125,
+      "completion": "[STATE: VERIFY_IDENTITY → AUTHENTICATE_2FA]\n<S>Thank you, David.</S><S>I have sent a one-time passcode to your registered mobile number ending in 4321.</S><S>Could you please read that back to me?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "AUTHENTICATE_2FA"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "AUTHENTICATE_2FA"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 126,
+      "completion": "[STATE: OFFER_RESOLUTION → APPLY_COMPENSATION]\n<S>Thank you.</S><S>I will apply the credit to your account now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "OFFER_RESOLUTION",
+          "to": "APPLY_COMPENSATION"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "OFFER_RESOLUTION",
+          "APPLY_COMPENSATION"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 127,
+      "completion": "[STATE: ACKNOWLEDGE_ISSUE → INVESTIGATE]\n<S>ขออนุญาตตรวจสอบ SLA status ของเคส CASE-9901 ให้สักครู่นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "ACKNOWLEDGE_ISSUE",
+          "to": "INVESTIGATE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "ACKNOWLEDGE_ISSUE",
+          "INVESTIGATE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 128,
+      "completion": "[STATE: INVESTIGATE → INVESTIGATE]\n<S>รับทราบครับ</S><S>เดี๋ยวผมส่งเรื่องต่อให้หัวหน้างานเพื่อเร่งตรวจสอบทันทีครับ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "INVESTIGATE",
+          "to": "INVESTIGATE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "INVESTIGATE",
+          "INVESTIGATE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 129,
+      "completion": "[STATE: CONFIRM_CHANGES → UPDATE_RECORDS]\n<S>Thank you for confirming.</S><S>I will now apply the update to your profile.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_CHANGES",
+          "to": "UPDATE_RECORDS"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CONFIRM_CHANGES",
+          "UPDATE_RECORDS"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 130,
+      "completion": "[STATE: CHECK_ELIGIBILITY → REVIEW_PLAN]\n<S>ตรวจสอบเรียบร้อยค่ะ บัญชีของคุณมีสิทธิ์เปลี่ยนแพ็กเกจได้ตามปกติค่ะ</S><S>เดี๋ยวขอตรวจสอบปริมาณการใช้งานอินเทอร์เน็ตปัจจุบันให้นะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CHECK_ELIGIBILITY",
+          "to": "REVIEW_PLAN"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CHECK_ELIGIBILITY",
+          "REVIEW_PLAN"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 131,
+      "completion": "[STATE: GREETING → IDENTIFY_ISSUE]\n<S>สวัสดีค่ะ ยินดีดูแลให้นะคะ</S><S>ขอทราบชื่อระบบ Payment Gateway ที่ใช้งานอยู่ได้ไหมคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "IDENTIFY_ISSUE"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "IDENTIFY_ISSUE"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 132,
+      "completion": "[STATE: VERIFY_ACCOUNT → REVIEW_BILLING]\n<S>Thank you for verifying your account.</S><S>Let me pull up your billing and usage details now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_ACCOUNT",
+          "to": "REVIEW_BILLING"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_ACCOUNT",
+          "REVIEW_BILLING"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 133,
+      "completion": "/model\nmodel\n[STATE: VERIFY_IDENTITY → VERIFY_IDENTITY]\n<S>รับทราบค่ะ</S><S>ขออนุญาตตรวจสอบข้อมูล security question สักครู่นะคะ</S>\n<tool_call>{\"name\": \"verify_identity\", \"arguments\": {\"customer_id\": \"CUST-8821\", \"verification_method\": \"security_question\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "verify_identity",
+          "arguments": {
+            "customer_id": "CUST-8821",
+            "verification_method": "security_question"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "verify_identity",
+          "arguments": {
+            "customer_id": "CUST-8821",
+            "verification_method": "security_question"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 134,
+      "completion": "[STATE: GREETING → VERIFY_ACCOUNT]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบเบอร์โทรศัพท์และชื่อผู้จดทะเบียนเพื่อ verify account สักครู่ค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_ACCOUNT"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_ACCOUNT"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 135,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>Hello! I can certainly help you with your payment.</S><S>Could you please provide your full name and account ID?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 136,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>ขอทราบชื่อ-นามสกุล และเลขบัตรประชาชนเพื่อ verify identity ก่อนนะคะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 137,
+      "completion": "model\n[STATE: CONFIRM_DETAILS → WELLNESS_ENROLL]\n<S>Our wellness program includes free physical therapy consultations and home recovery support.</S><S>Would you like me to enroll you in it today?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "CONFIRM_DETAILS",
+          "to": "WELLNESS_ENROLL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "CONFIRM_DETAILS",
+          "WELLNESS_ENROLL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 138,
+      "completion": "[STATE: VERIFY_IDENTITY → LOOKUP_ORDER]\n<S>Thank you, Sarah.</S><S>Let me look up your order details right now.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "LOOKUP_ORDER"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 139,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>สวัสดีค่ะ ยินดีให้บริการค่ะ</S><S>เพื่อความปลอดภัยในการเข้าถึงข้อมูล รบกวนขอทราบชื่อ-นามสกุล และเลขบัตรประชาชนด้วยค่ะ</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 140,
+      "completion": "[STATE: IDENTIFY_SERVICE → CHECK_AVAILABILITY]\n<S>Thank you.</S><S>Let me check availability for an oil change on November 15th.</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "IDENTIFY_SERVICE",
+          "to": "CHECK_AVAILABILITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "IDENTIFY_SERVICE",
+          "CHECK_AVAILABILITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 143,
+      "completion": "model\n[STATE: LISTEN_COMPLAINT → LISTEN_COMPLAINT]\n<S>รับทราบค่ะ</S><S>ขออนุญาต register complaint ในระบบสักครู่นะคะ</S>\n<tool_call>{\"name\": \"register_complaint\", \"arguments\": {\"customer_id\": \"CUST-8891\", \"category\": \"technical issue\", \"description\": \"internet drop บ่อยมาก\"}}</tool_call>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 1,
+      "n_pred_tools": 1,
+      "gt_state_sequence": [
+        {
+          "from": "LISTEN_COMPLAINT",
+          "to": "LISTEN_COMPLAINT"
+        }
+      ],
+      "gt_tool_calls": [
+        {
+          "name": "register_complaint",
+          "arguments": {
+            "category": "technical issue",
+            "customer_id": "CUST-8891",
+            "description": "internet drop บ่อยมาก"
+          }
+        }
+      ],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "LISTEN_COMPLAINT",
+          "LISTEN_COMPLAINT"
+        ]
+      ],
+      "pred_tools": [
+        {
+          "name": "register_complaint",
+          "arguments": {
+            "customer_id": "CUST-8891",
+            "category": "technical issue",
+            "description": "internet drop บ่อยมาก"
+          }
+        }
+      ]
+    },
+    {
+      "row_index": 144,
+      "completion": "[STATE: GREETING → VERIFY_IDENTITY]\n<S>Hello! I would be happy to help you with your bill.</S><S>Could you please provide your full name and account number?</S>",
+      "modality": "voice",
+      "composite": 0.8,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 0.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "GREETING",
+          "to": "VERIFY_IDENTITY"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "GREETING",
+          "VERIFY_IDENTITY"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 3,
+      "completion": "[STATE: VERIFY_TRAVELER → TERMINAL]\n<S>Thank you, David. I have successfully verified your reservation for your upcoming trip.</S><S>Is there anything else I can help you with today?</S>",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_TRAVELER",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_TRAVELER",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 13,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ขอบคุณที่ร่วมทำ survey นะคะ</S><S>ขอให้มีวันที่ดีค่ะ สวัสดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 18,
+      "completion": "[STATE: UNDERSTAND_NEEDS → TERMINAL]\n<S>ยินดีให้บริการค่ะ</S><S>หากต้องการสอบถามข้อมูลเพิ่มเติม สามารถติดต่อได้ตลอดเลยนะคะ</S><S>ขอบคุณที่ไว้วางใจเราค่ะ</S>\n[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "UNDERSTAND_NEEDS",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "UNDERSTAND_NEEDS",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 39,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ขอบคุณที่ไว้วางใจให้เราดูแลค่ะ</S><S>ขอให้มีความสุขกับการใช้งานและเดินทางปลอดภัยนะคะ สวัสดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 43,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ขอบคุณที่ใช้บริการค่ะ</S><S>ขอให้มีสุขภาพร่างกายที่แข็งแรงนะคะ สวัสดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 48,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ยินดีให้บริการค่ะ</S><S>หากต้องการสอบถามเพิ่มเติมสามารถติดต่อได้ตลอดเวลานะคะ</S><S>ขอบคุณและสวัสดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 49,
+      "completion": "[STATE: VERIFY_IDENTITY → TERMINAL]\n<S>ขอบคุณค่ะคุณสมชาย ตรวจสอบแล้วบิลรอบล่าสุดยอด 1,200 บาท รวมค่าบริการปกติค่ะ</S><S>ตอนนี้เรามีโปรโมชั่น Auto-Pay ลด 50 บาทต่อรอบ สนใจรับสิทธิ์ไหมคะ</S>",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 51,
+      "completion": "[STATE: VERIFY_SATISFACTION → TERMINAL]\n<S>ยินดีเป็นอย่างยิ่งค่ะ หากมีข้อสงสัยเพิ่มเติมสามารถติดต่อได้ตลอดนะคะ</S><S>ขอบคุณที่ใช้บริการและขอให้มีวันที่ดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_SATISFACTION",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_SATISFACTION",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 66,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ยินดีให้บริการค่ะ</S><S>ขอบคุณที่ไว้วางใจเรานะคะ ขอให้มีความสุขกับการใช้งานค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 73,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>Thank you for choosing our banking services.</S><S>Have a wonderful day!</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 74,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ขอบคุณที่ใช้บริการค่ะ</S><S>ขอให้มีสุขภาพร่างกายที่แข็งแรงนะคะ สวัสดีค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 87,
+      "completion": "[STATE: VERIFY_CITIZEN → TERMINAL]\n<S>You are very welcome.</S><S>Thank you for contacting public services, and have a wonderful day!</S>\n[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_CITIZEN",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_CITIZEN",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 107,
+      "completion": "[STATE: USAGE_ANALYSIS → TERMINAL]\n<S>ขอแนะนำแพ็กเกจ Max Speed 5G 599 บาท ได้ data 60 GB ต่อเดือนค่ะ</S><S>สามารถสมัครผ่านแอปได้เลย หรือให้เจ้าหน้าที่ดำเนินการให้ได้เลยนะคะ</S>",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "USAGE_ANALYSIS",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "USAGE_ANALYSIS",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 110,
+      "completion": "[STATE: TERMINAL → TERMINAL]\n<S>ขอบคุณที่ใช้บริการค่ะ</S><S>หากต้องการความช่วยเหลือเพิ่มเติม สามารถติดต่อได้ตลอดเวลานะคะ</S><S>Have a great day ค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "TERMINAL",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "TERMINAL",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 111,
+      "completion": "[STATE: RESOLVE → TERMINAL]\n<S>ยินดีให้บริการค่ะ</S><S>หากต้องการสอบถามเพิ่มเติมสามารถติดต่อได้ตลอดเวลานะคะ ขอบคุณค่ะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "RESOLVE",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "RESOLVE",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    },
+    {
+      "row_index": 114,
+      "completion": "[STATE: VERIFY_IDENTITY → TERMINAL]\n<S>ขอบคุณค่ะ คุณ Somchai</S><S>ตรวจสอบแล้ว Order TH-4092 จัดส่งเรียบร้อยแล้วเมื่อวันที่ 24 ต.ค. ค่ะ</S><S>ขอบคุณที่ใช้บริการนะคะ</S>[END_CONVERSATION]",
+      "modality": "voice",
+      "composite": 1.0,
+      "state_acc": 1.0,
+      "tool_f1": 1.0,
+      "task": 1.0,
+      "n_gt_trans": 1,
+      "n_pred_trans": 1,
+      "n_gt_tools": 0,
+      "n_pred_tools": 0,
+      "gt_state_sequence": [
+        {
+          "from": "VERIFY_IDENTITY",
+          "to": "TERMINAL"
+        }
+      ],
+      "gt_tool_calls": [],
+      "gt_terminal": "TERMINAL",
+      "pred_trans": [
+        [
+          "VERIFY_IDENTITY",
+          "TERMINAL"
+        ]
+      ],
+      "pred_tools": []
+    }
+  ]
+}

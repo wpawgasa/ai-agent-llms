@@ -25,3 +25,4 @@ def test_nemotron_resolves_to_mixer_gate():
 
 def test_dense_model_resolves_to_nothing():
     assert _router_freeze_patterns({}, "google/gemma-4-E4B-it") == ()
+    assert _router_freeze_patterns({}, "google/gemma-4-12B-it") == ()
