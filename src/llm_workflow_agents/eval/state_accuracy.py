@@ -260,7 +260,20 @@ def evaluate_state_machine(
     Returns:
         StateMachineMetrics with all computed metrics.
     """
-    gt_map = {gt.conversation_id: gt for gt in ground_truth}
+    # Predictions find their ground truth by conversation_id, so a repeated id
+    # would silently score some predictions against another conversation's
+    # ground truth. The Task A text and voice benchmark strata reuse ids
+    # (L1_001, ...), which did exactly that to every two-stratum run. Fail
+    # instead; callers with non-unique ids must key rows themselves (see
+    # agent_benchmark.build_state_machine_inputs).
+    gt_map: dict[str, ConversationGroundTruth] = {}
+    for gt in ground_truth:
+        if gt.conversation_id in gt_map:
+            raise ValueError(
+                f"duplicate ground-truth conversation_id {gt.conversation_id!r}: "
+                "every ground-truth conversation needs a unique id"
+            )
+        gt_map[gt.conversation_id] = gt
 
     total_accuracy = 0.0
     total_seq_accuracy = 0.0

@@ -862,6 +862,39 @@ def _replay_conversation(
     return predicted, latencies_ms, ttfts_ms
 
 
+def build_state_machine_inputs(
+    samples: list[dict[str, Any]],
+    predicted_messages: list[list[dict[str, Any]]],
+) -> tuple[list[ConversationPrediction], list[ConversationGroundTruth]]:
+    """Pair each sample's replayed messages with its own ground truth.
+
+    ``evaluate_state_machine`` matches predictions to ground truth by
+    ``conversation_id``, but ids are not unique across a run: the text and
+    voice strata both number their conversations ``L1_001``, ``L1_002``, ...
+    Keyed by id, every text prediction was scored against the voice
+    conversation sharing its id, understating whole-run state accuracy.
+    Keys here combine the row position with the id, so each row can only
+    ever meet its own ground truth.
+    """
+    if len(samples) != len(predicted_messages):
+        raise ValueError(
+            f"{len(samples)} samples but {len(predicted_messages)} predicted conversations"
+        )
+    predictions: list[ConversationPrediction] = []
+    ground_truths: list[ConversationGroundTruth] = []
+    for idx, (sample, messages) in enumerate(zip(samples, predicted_messages)):
+        key = f"{idx}:{sample.get('conversation_id', f'sample_{idx}')}"
+        gt_truth = sample.get("ground_truth", {})
+        terminal_states = [gt_truth["terminal_state"]] if gt_truth.get("terminal_state") else []
+        predictions.append(ConversationPrediction(conversation_id=key, messages=messages))
+        ground_truths.append(ConversationGroundTruth(
+            conversation_id=key,
+            messages=sample.get("messages", []),
+            terminal_states=terminal_states,
+        ))
+    return predictions, ground_truths
+
+
 if __name__ == "__main__":
     import argparse
     import json
@@ -1017,8 +1050,7 @@ if __name__ == "__main__":
     )
 
     # --- Run deterministic evaluation pass (temperature=0.0) ---
-    state_predictions: list[ConversationPrediction] = []
-    state_ground_truths: list[ConversationGroundTruth] = []
+    all_pred_messages: list[list[dict[str, Any]]] = []
     tool_predictions: list[TurnPrediction] = []
     tool_ground_truths: list[TurnGroundTruth] = []
     # Per-conversation tool call lists for conversation-level eval
@@ -1032,8 +1064,6 @@ if __name__ == "__main__":
     for idx, sample in enumerate(samples):
         conv_id = sample.get("conversation_id", f"sample_{idx}")
         tool_schemas = sample.get("tool_schemas", [])
-        gt_truth = sample.get("ground_truth", {})
-        terminal_states = [gt_truth.get("terminal_state", "")] if gt_truth.get("terminal_state") else []
 
         logger.info("evaluating_sample", idx=idx + 1, total=len(samples), conversation_id=conv_id)
 
@@ -1043,17 +1073,7 @@ if __name__ == "__main__":
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
-
-        # State machine inputs
-        state_predictions.append(ConversationPrediction(
-            conversation_id=conv_id,
-            messages=pred_messages,
-        ))
-        state_ground_truths.append(ConversationGroundTruth(
-            conversation_id=conv_id,
-            messages=sample.get("messages", []),
-            terminal_states=terminal_states,
-        ))
+        all_pred_messages.append(pred_messages)
 
         # Tool-call inputs — one TurnPrediction/GroundTruth per assistant turn
         this_conv_preds: list[TurnPrediction] = []
@@ -1083,22 +1103,19 @@ if __name__ == "__main__":
         chain_predictions.append({"messages": pred_messages})
         chain_ground_truths.append({"messages": sample.get("messages", [])})
 
+    # Keyed by row position, never by conversation_id: the text and voice
+    # strata reuse ids (see build_state_machine_inputs).
+    state_predictions, state_ground_truths = build_state_machine_inputs(samples, all_pred_messages)
+
     # --- Stochastic trials for pass^k ---
-    stochastic_map: dict[str, list[list[dict[str, Any]]]] = {
-        s.conversation_id: [] for s in state_predictions
-    }
     for trial_num in range(args.stochastic_trials):
         logger.info("stochastic_trial", trial=trial_num + 1, total=args.stochastic_trials)
         for idx, sample in enumerate(samples):
-            conv_id = sample.get("conversation_id", f"sample_{idx}")
             trial_messages, _, _ = _replay_conversation(
                 args.endpoint, args.model, sample, temperature=0.7,
                 enable_thinking=args.enable_thinking, engine=args.engine,
             )
-            stochastic_map[conv_id].append(trial_messages)
-
-    for pred in state_predictions:
-        pred.stochastic_trials = stochastic_map.get(pred.conversation_id, [])
+            state_predictions[idx].stochastic_trials.append(trial_messages)
 
     # --- Compute metrics ---
     state_metrics = evaluate_state_machine(state_predictions, state_ground_truths)
