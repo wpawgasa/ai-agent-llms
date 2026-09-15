@@ -32,6 +32,44 @@ stages:
       - data/output/benchmark/task_a
     # Levels L1–L5, 200 samples/level, seed=100, lang=mixed, behavior=default
 
+  task_a_benchmark_text_v2:
+    # FROZEN 2026-09-15. `dvc repro` skips this stage. Scores on this set are
+    # a separate scale from the v1 text stratum. See CLAUDE.md R25.
+    frozen: true
+    desc: >-
+      FROZEN — the Phase 1 text benchmark stratum brought onto the tool-call
+      stay rule (CLAUDE.md R25). The v1 text stratum at
+      data/output/benchmark/task_a stays frozen and unchanged; this is a
+      separate, versioned copy of the same 258 conversations. 177 need no
+      change, 25 are relabelled in place, and 56 receive 143 authored inserts
+      (87 assistant hand-off and closing turns, 56 user turns) replayed from
+      the DVC-tracked ledger data/interim/task_a_benchmark_remediation_ledger,
+      authored 2026-09-15 by the corpus-remediator agent (claude-opus-5[1m]),
+      143 accepted and 0 rejected. System messages are byte-identical to v1.
+      The hand-added l3_insurance_premium_payment_th file is copied unchanged:
+      none of its 8 rows needs a convention change, but `apply` drops 3 of
+      them (INS_PREMIUM_001-003) for an unrelated shape rule (consecutive
+      assistant prose turns). Deterministic, no LLM calls at repro time.
+      Frozen so a change to the repair code cannot silently change a test set
+      that scores are measured on.
+    cmd: >-
+      rm -rf data/output/benchmark/task_a_v2 &&
+      python scripts/remediate_task_a_states.py apply
+      --input-dir data/output/benchmark/task_a
+      --output-dir data/output/benchmark/task_a_v2
+      --ledger-dir data/interim/task_a_benchmark_remediation_ledger
+      --on-unrepairable drop &&
+      cp data/output/benchmark/task_a/l3_insurance_premium_payment_th_20260609.jsonl
+      data/output/benchmark/task_a_v2/
+    deps:
+      - data/output/benchmark/task_a
+      - data/interim/task_a_benchmark_remediation_ledger
+      - scripts/remediate_task_a_states.py
+      - src/llm_workflow_agents/data/state_convention.py
+      - src/llm_workflow_agents/data/state_convention_repair.py
+    outs:
+      - data/output/benchmark/task_a_v2
+
   task_a_benchmark_voice:
     # FROZEN 2026-09-11. `dvc repro` skips this stage. In production use as
     # the voice half of the Cat A composite blend since 2026-08-24 (see

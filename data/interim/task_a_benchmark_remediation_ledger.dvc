@@ -1,0 +1,6 @@
+outs:
+- md5: 2578dc9fe66269b2249152ff1e6348c4.dir
+  size: 1315081
+  nfiles: 38
+  hash: md5
+  path: task_a_benchmark_remediation_ledger
