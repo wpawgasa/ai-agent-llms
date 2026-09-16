@@ -156,15 +156,38 @@ _VERDICT_ACTION = {
 }
 
 
-def _score(completions_per_prompt: list[list[str]], gts: list[dict[str, Any]]) -> list[list[float]]:
-    from llm_workflow_agents.training.rewards.reward_business_logic import (
-        reward_business_logic,
-    )
+#: Rewards the probe can score with. "graded" is the reward every stored probe
+#: and the pre-registered gates were measured on; "strict" is a new scale.
+REWARDS = ("graded", "strict")
+
+
+def _reward_fn(name: str):
+    if name == "graded":
+        from llm_workflow_agents.training.rewards.reward_business_logic import (
+            reward_business_logic,
+        )
+
+        return reward_business_logic
+    if name == "strict":
+        from llm_workflow_agents.training.rewards.reward_business_logic_strict import (
+            reward_business_logic_strict,
+        )
+
+        return reward_business_logic_strict
+    raise ValueError(f"unknown reward {name!r}; expected one of {REWARDS}")
+
+
+def _score(
+    completions_per_prompt: list[list[str]],
+    gts: list[dict[str, Any]],
+    reward: str = "graded",
+) -> list[list[float]]:
+    reward_fn = _reward_fn(reward)
 
     out: list[list[float]] = []
     for comps, gt in zip(completions_per_prompt, gts):
         out.append(
-            reward_business_logic(
+            reward_fn(
                 prompts=[""] * len(comps),
                 completions=comps,
                 ground_truths=[gt] * len(comps),
@@ -187,6 +210,18 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--reward", choices=REWARDS, default="graded",
+        help="graded: the reward the gates were set on (default). strict: exact "
+             "arguments, no name-only or partial state credit — a new scale.",
+    )
+    parser.add_argument(
+        "--prompt-filter", default="none",
+        choices=("none", "tool_bearing", "chain_dependent"),
+        help="none (default): every row. tool_bearing: turns whose ground truth "
+             "calls a tool. chain_dependent: tool turns with an argument carried "
+             "from an earlier tool result, where R23's argument errors live.",
+    )
     args = parser.parse_args()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +232,16 @@ def main() -> int:
         _sample_prompts,
     )
 
-    prompts = _sample_prompts(args.data_dir, args.split, args.n_prompts, args.seed)
+    from llm_workflow_agents.training.prompt_filters import keep_row
+
+    row_filter = None
+    if args.prompt_filter != "none":
+        def row_filter(msgs, gt, _name=args.prompt_filter):
+            return keep_row(_name, msgs, gt)
+
+    prompts = _sample_prompts(
+        args.data_dir, args.split, args.n_prompts, args.seed, row_filter=row_filter
+    )
     gts = [_decode_gt(p["ground_truth"]) for p in prompts]
     print(f"[data] sampled {len(prompts)} prompts from {args.data_dir}/{args.split}.jsonl",
           flush=True)
@@ -222,9 +266,9 @@ def main() -> int:
         n_completions=args.n_completions, do_sample=True, **gen_kwargs
     )
 
-    greedy_rewards = _score([[t] for t in greedy_texts], gts)
+    greedy_rewards = _score([[t] for t in greedy_texts], gts, reward=args.reward)
     greedy_scalar = [r[0] for r in greedy_rewards]
-    sampled_rewards = _score(sampled, gts)
+    sampled_rewards = _score(sampled, gts, reward=args.reward)
 
     summary = summarize_headroom(sampled_rewards, greedy_scalar)
     summary["wall_time_s"] = round(time.time() - t0, 1)
@@ -240,6 +284,8 @@ def main() -> int:
             "top_p": args.top_p,
             "seed": args.seed,
             "headroom_threshold": HEADROOM_THRESHOLD,
+            "reward": args.reward,
+            "prompt_filter": args.prompt_filter,
         },
         "summary": {k: v for k, v in summary.items() if k != "per_prompt"},
         "gate": {"verdict": verdict, **detail, "action": _VERDICT_ACTION[verdict]},
