@@ -638,6 +638,20 @@ All six scored on the same 508 conversations (258 text + 250 voice), 0 stochasti
 - **SFT added only +0.009 to the 12B:** voice rose +0.100 but text fell −0.030 and task completion fell 0.7559 → 0.6752. The fine-tuned 12B starts 54.6% of its replies with the leaked word `model`, because its chat template adds an empty thinking block to the generation prompt that training never saw. Removing that block from the template cut the leak to 21.6% but moved text only to 0.6743 and task completion down to 0.6516, so the leak is not the main cause of the drop. See [the 12B result](docs/cat_a_12b_sft_result.md), section 5.1.
 - **These are Phase 1 benchmark scores, not held-out audits.** None is comparable to C2's 0.7595.
 
+**On the v2 text set** (`corpus/task-a-benchmark-v2`, 2026-09-15): the same 258 text conversations brought onto the tool-call stay rule the models are trained on and prompted with, plus the unchanged voice set. Scores on v2 are a new scale; the table above stays the v1 record. Gemini has not been run on v2 yet.
+
+| Model | Blended quality (v1 → v2) | Text (v1 → v2) | Voice | Text task completion (v1 → v2) |
+|---|---|---|---|---|
+| **gemma-4-12B-it, SFT on corpus v3** | 0.7186 → **0.7367** | 0.6662 → 0.6920 | 0.8409 | 0.516 → 0.609 |
+| gemma-4-12B-it (untrained) | 0.7098 → 0.7209 | 0.6964 → **0.7123** | 0.7409 | 0.740 → **0.798** |
+| **gemma-4-E4B-it, SFT on corpus v3** | 0.6678 → **0.6881** | 0.6315 → 0.6617 | 0.7498 | 0.450 → 0.543 |
+| gemma-4-E4B-it (untrained) | 0.6131 → 0.6182 | 0.6035 → 0.6107 | 0.6356 | 0.535 → 0.562 |
+
+- **Every model scores higher on v2, untrained ones included.** The authored closing pairs give each model an extra turn to reach the terminal state.
+- **The fine-tuned models gain more.** E4B SFT's text lead over untrained E4B grows from +0.028 to +0.051; the 12B SFT's text deficit shrinks from −0.030 to −0.020.
+- **The 12B SFT still trails the untrained 12B on text (0.6920 vs 0.7123).** Most of the gap is on the 177 conversations v2 leaves unchanged (completion 0.661 vs 0.802), so it is not the text-set issue. The ranking does not change.
+- Why v2 exists: [the text-set findings](docs/cat_a_benchmark_text_set_convention_mismatch.md) (CLAUDE.md R25).
+
 **Held-out audit on the corpus-v3 sets** (`derived/task-a-heldout-v3`; one sampled turn per conversation, seed 42, 4-bit, text and voice never blended):
 
 | Model | Text composite (303 rows) | Voice composite (145 rows) |

@@ -279,5 +279,53 @@ is test input.
 number above. Run the text and voice strata together as
 `--data data/output/benchmark/task_a_v2 --data data/output/benchmark/task_a_voice`.
 Never pass `task_a` and `task_a_v2` in one run: they hold the same
-conversation ids and the same conversations. No model has been scored on v2
-yet.
+conversation ids and the same conversations.
+
+---
+
+## 8. Results on v2 (2026-09-15)
+
+The four local models, re-run with the v1 settings: the same model revisions
+(E4B untrained at `ee0ef60`, 12B untrained at `707f0a3`), venvs and merge
+scripts, the stock chat template, `--stochastic-trials 0 --max-model-len 32768`,
+on `task_a_v2` plus `task_a_voice`. Launcher: `.runs/eval_textv2/run_textv2_all.sh`
+(not in git). Results: `results/exp_a/*_textv2_auto.{json,log}` (DVC
+`results/exp_a` `28ba039c…`). All four runs exited 0, scored 508 conversations
+and 6,046 replies, with no errors or failed requests. Rebuilding every run
+from its log reproduces its stored scores exactly, on v1 and on v2. Gemini has
+not been run on v2.
+
+| Model | Blended (v1 → v2) | Text (v1 → v2) | Voice (v1 → v2) | Text state | Text tool F1 | Text completion |
+|---|---|---|---|---|---|---|
+| E4B untrained | 0.6131 → 0.6182 | 0.6035 → 0.6107 | 0.6356 → 0.6356 | 0.7900 → 0.7976 | 0.4513 → 0.4481 | 0.5349 → 0.5620 |
+| E4B SFT | 0.6678 → 0.6881 | 0.6315 → 0.6617 | 0.7526 → 0.7498 | 0.8475 → 0.8719 | 0.5065 → 0.5111 | 0.4496 → 0.5426 |
+| 12B untrained | 0.7098 → 0.7209 | 0.6964 → 0.7123 | 0.7409 → 0.7409 | 0.8707 → 0.8779 | 0.5003 → 0.5036 | 0.7403 → 0.7984 |
+| 12B SFT | 0.7186 → 0.7367 | 0.6662 → 0.6920 | 0.8409 → 0.8409 | 0.8721 → 0.8899 | 0.5357 → 0.5358 | 0.5155 → 0.6085 |
+
+Text completion by triage group, v1 → v2:
+
+| Group | n | E4B untrained | E4B SFT | 12B untrained | 12B SFT |
+|---|---|---|---|---|---|
+| `none` | 177 | 0.525 → 0.525 | 0.593 → 0.599 | 0.802 → 0.802 | 0.661 → 0.661 |
+| `relabel` | 25 | 0.760 → 0.760 | 0.320 → 0.360 | 0.680 → 0.680 | 0.360 → 0.360 |
+| `insert_handoff_turn` | 32 | 0.562 → 0.531 | 0.094 → 0.406 | 0.688 → 0.812 | 0.156 → 0.438 |
+| `append_closing_pair` | 24 | 0.333 → 0.667 | 0.000 → 0.500 | 0.417 → 0.875 | 0.083 → 0.708 |
+
+- **v2 raises every model, untrained ones included.** Most of the lift is the
+  closing pairs, which give each model one more turn to reach the terminal
+  state; the untrained 12B goes 0.417 → 0.875 there. v2 removes a penalty every
+  model paid, not only the fine-tuned ones.
+- **The fine-tuned models gain more.** E4B SFT's text lead over untrained E4B
+  grows from +0.028 to +0.051. The 12B SFT's text deficit narrows from −0.030 to
+  −0.020.
+- **The 12B SFT's remaining text deficit is mostly on the unchanged
+  conversations** (177 `none`: 0.661 vs 0.802, identical on v1 and v2), and it
+  still trails on the inserted groups (0.438 vs 0.812, 0.708 vs 0.875). That is a
+  12B-specific problem the text set does not explain.
+- **Relabels still change nothing** (section 4): the `relabel` group is identical
+  on v1 and v2 for three of the four models. E4B SFT's small changes there, and its
+  voice score moving 0.7526 → 0.7498 on unchanged voice data, show that its runs
+  are not bit-reproducible; differences of that size are noise.
+- **Tool F1 is unchanged** and state accuracy rises slightly, as expected: the
+  inserts add no tool calls.
+- **The ranking is unchanged:** 12B SFT, 12B untrained, E4B SFT, E4B untrained.
