@@ -267,12 +267,16 @@ Results: `results/exp_a/sft_cat_a_12b_ckpt3168_notmpl_auto.{json,log}` (DVC,
 
 ## 7. Next steps
 
-1. **Explain the 12B's completion drop on the compliant text conversations**
-   (0.802 → 0.661 on the 177 that follow the stay rule; E4B improves there). The
-   drop on the other 81 comes from the text set, which predates the rule. Fixing
-   that set needs authored inserts and a new frozen stratum; a relabel alone does
-   not change the score. See
-   [the text-set findings](cat_a_benchmark_text_set_convention_mismatch.md).
+1. **The completion drop is explained** (added 2026-09-16). On the 81
+   conversations that predate the tool-call stay rule it is the text set, fixed
+   by the v2 stratum. On the 177 compliant ones it is mostly the metric: task
+   completion reads only the last state annotation, so the untrained 12B's 164
+   skip-ahead jumps (against this model's 21) are paid as completions, while a
+   self-consistent trajectory that lags by one turn scores zero. See
+   [the text-set findings](cat_a_benchmark_text_set_convention_mismatch.md),
+   sections 8 and 9. What is left to fix in the model is the one-turn lag and
+   the missing `[` in `STATE: X → Y]` (2.7% of turns; the patched template of
+   section 5.1 removes it).
 2. **Find which turns still leak under the patched template** (section 5.1),
    and check how the training renderer handles turns that follow a tool result.
 3. **Fix the render mismatch in training** once 1 and 2 are understood. It will

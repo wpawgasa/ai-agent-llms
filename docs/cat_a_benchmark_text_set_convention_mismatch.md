@@ -329,3 +329,64 @@ Text completion by triage group, v1 → v2:
 - **Tool F1 is unchanged** and state accuracy rises slightly, as expected: the
   inserts add no tool calls.
 - **The ranking is unchanged:** 12B SFT, 12B untrained, E4B SFT, E4B untrained.
+
+---
+
+## 9. Why the fine-tuned 12B still scores lower on text (2026-09-16)
+
+Section 8 left one gap open: on the 177 conversations v2 leaves unchanged, the
+12B SFT completes 0.661 against the untrained 12B's 0.802, and E4B SFT improves
+there (0.525 → 0.593). Those conversations are byte-identical in v1 and v2, so
+this is measured on the stored v1 logs, rebuilt per conversation. No GPU.
+
+**Most of the gap is the metric, not a regression.** `check_task_completion`
+reads one thing: whether the LAST `[STATE: ...]` annotation names the terminal
+state. It never checks that the trajectory was continuous, so a model that
+jumps straight to the terminal state from wherever it happens to be scores a
+completion.
+
+| On the 177 compliant conversations | 12B untrained | 12B SFT | E4B untrained | E4B SFT |
+|---|---|---|---|---|
+| Task completion | 0.802 | 0.661 | 0.525 | 0.593 |
+| **Skip-ahead jumps** (annotation's `from` is not the model's own previous `to`) | **164** | **21** | **162** | **10** |
+| Behind the key's state at the terminal turn | 46% | 42% | 62% | 44% |
+| … and enters terminal anyway | **62%** | **32%** | 31% | 17% |
+| In step at the terminal turn, enters terminal | 91% | 86% | 76% | 88% |
+
+The untrained 12B teleports: 164 discontinuous annotations against the SFT
+model's 21. When it arrives at the final turn holding the wrong state it
+declares TERMINAL regardless, 62% of the time, and the metric pays for it. The
+fine-tuned model keeps a self-consistent trajectory, so the same lag ends on a
+non-terminal state and scores zero. This is the same fine-tuning effect the
+corrected whole-run metrics show (section 5): state sequence accuracy
+0.8680 → 0.9132, invalid-transition rate 0.0933 → 0.0655.
+
+**Two real defects remain, both smaller.**
+
+1. **A one-turn lag.** Of the 39 conversations the untrained 12B completes and
+   the SFT model does not, 26 stop one state short and 23 end exactly on the
+   key's second-to-last move. The first divergence is usually the model staying
+   where the key advances (21 of 39; 14 of those turns carry a tool call).
+   Per turn, though, the SFT model does this *less often* than untrained
+   (18.9% vs 20.4% of advancing turns) — it simply cannot recover, because it
+   will not skip.
+2. **A missing `[`.** The 12B SFT writes `STATE: X → Y]` without the opening
+   bracket on 2.7% of turns (51 of 1,140 scored turns here), which voids the
+   annotation; 8 of the 15 "no state line" first-divergences are this. It is
+   the chat-template mismatch of section 5: the patched template takes it to
+   0.0%.
+
+**Ruled out: extra tool calls.** Across the 177 the SFT model emits 545 tool
+calls against the key's 580 and the untrained model's 498, and lost
+conversations carry the same per-conversation delta as kept ones (−0.18 vs
+−0.20).
+
+**Consequences.**
+- The fine-tuned 12B is not worse at the task; it is worse at a metric that
+  rewards jumping to the terminal state. The held-out audit, which scores each
+  turn against its own answer key, has it ahead (+0.0653 text, section 4 of the
+  12B result).
+- Requiring a continuous trajectory for `task_completion_rate`, or reporting
+  both, would stop rewarding teleportation — but it changes what Phase 1
+  measures and so moves the bar, like the v2 stratum itself. Not done.
+- The missing `[` is worth fixing in training (12B result, section 7).
