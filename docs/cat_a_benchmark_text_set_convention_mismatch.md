@@ -390,3 +390,41 @@ conversations carry the same per-conversation delta as kept ones (−0.18 vs
   both, would stop rewarding teleportation — but it changes what Phase 1
   measures and so moves the bar, like the v2 stratum itself. Not done.
 - The missing `[` is worth fixing in training (12B result, section 7).
+
+
+---
+
+## 10. Reporting completion by the trajectory the model walked (2026-09-16)
+
+Section 9 showed `task_completion_rate` paying models for jumping to the
+terminal state. `state_accuracy.py` now also reports
+`task_completion_rate_continuous` — a terminal final state AND every
+annotation continuing from the previous one — plus `trajectory_continuity_rate`
+and `skip_ahead_transition_rate`.
+
+**Reported beside the original, never in place of it.** The Phase 1 composite
+still takes `task_completion_rate` (`compute_weighted_score`), so no score or
+ranking in this repository moved; a test pins that. Existing result JSONs
+predate the fields.
+
+Recomputed from the stored logs, text stratum:
+
+| Run | v1: original → continuous | v2: original → continuous | Continuity rate (v2) |
+|---|---|---|---|
+| E4B untrained | 0.535 → **0.256** | 0.562 → **0.267** | 0.554 |
+| E4B SFT | 0.450 → 0.442 | 0.543 → **0.535** | **0.981** |
+| 12B untrained | 0.740 → **0.399** | 0.798 → **0.419** | 0.550 |
+| 12B SFT | 0.516 → 0.442 | 0.609 → **0.516** | 0.829 |
+
+**The apparent regression reverses.** On both text sets the fine-tuned models
+complete MORE conversations than their untrained counterparts once the
+trajectory has to be walked: 12B 0.516 against 0.419 on v2 (0.442 against 0.399
+on v1), E4B 0.535 against 0.267. The untrained models lose roughly half their
+completions, because barely half their trajectories are continuous, while
+fine-tuning takes continuity to 83-98%.
+
+**What it does not settle.** Which number Phase 1 should rank on is a decision
+about what the benchmark measures, not a measurement — a model could in
+principle walk a continuous but wrong path. The continuous rate is the stricter
+reading and the honest one for "did the model drive the workflow to the end";
+the original stays the ranking metric until someone decides otherwise.
