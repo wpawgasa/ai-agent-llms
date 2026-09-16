@@ -46,6 +46,12 @@ class StateMachineMetrics:
     state_transition_accuracy: float = 0.0  # Target: >=85% (per-turn)
     state_sequence_accuracy: float = 0.0  # Conversation-level (LCS recall)
     task_completion_rate: float = 0.0  # Target: >=70%
+    # Same, but only counting conversations whose annotated trajectory is
+    # continuous. Reported beside task_completion_rate, never in place of it:
+    # the composite keeps the original definition so rankings stay comparable.
+    task_completion_rate_continuous: float = 0.0
+    trajectory_continuity_rate: float = 0.0  # conversations with no skip-ahead
+    skip_ahead_transition_rate: float = 0.0  # transitions that jump states
     invalid_transition_rate: float = 0.0  # Target: <=5%
     recovery_rate: float = 0.0  # Target: >=60%
     consistency_pass5: float = 0.0  # Target: >=0.40
@@ -55,6 +61,9 @@ class StateMachineMetrics:
             "state_transition_accuracy": self.state_transition_accuracy,
             "state_sequence_accuracy": self.state_sequence_accuracy,
             "task_completion_rate": self.task_completion_rate,
+            "task_completion_rate_continuous": self.task_completion_rate_continuous,
+            "trajectory_continuity_rate": self.trajectory_continuity_rate,
+            "skip_ahead_transition_rate": self.skip_ahead_transition_rate,
             "invalid_transition_rate": self.invalid_transition_rate,
             "recovery_rate": self.recovery_rate,
             "consistency_pass5": self.consistency_pass5,
@@ -191,6 +200,42 @@ def check_task_completion(
     return final_state in terminal_states
 
 
+def count_skip_ahead_transitions(predicted: list[tuple[str, str]]) -> int:
+    """Count annotations that start from a state the model was not in.
+
+    A model that writes `[STATE: A → B]` and then `[STATE: X → TERMINAL]` never
+    travelled from B to X: it teleported. The first annotation is free — it
+    establishes where the conversation starts.
+    """
+    return sum(
+        1
+        for previous, current in zip(predicted, predicted[1:])
+        if current[0] != previous[1]
+    )
+
+
+def trajectory_is_continuous(predicted: list[tuple[str, str]]) -> bool:
+    """True when every annotation continues from the previous one."""
+    return count_skip_ahead_transitions(predicted) == 0
+
+
+def check_task_completion_continuous(
+    predicted: list[tuple[str, str]],
+    terminal_states: list[str],
+) -> bool:
+    """Reached a terminal state, by a trajectory the model actually walked.
+
+    ``check_task_completion`` reads only the final annotation, so a model that
+    jumps straight to the terminal state from the wrong state scores a
+    completion. Measured on the Phase 1 text benchmark, the untrained
+    gemma-4-12B made 164 such jumps against a fine-tuned model's 21, and
+    out-scored it on completion for that reason (CLAUDE.md R25).
+    """
+    return check_task_completion(predicted, terminal_states) and trajectory_is_continuous(
+        predicted
+    )
+
+
 def check_recovery(messages: list[dict[str, Any]]) -> tuple[int, int]:
     """Count error recovery attempts and successes.
 
@@ -278,6 +323,10 @@ def evaluate_state_machine(
     total_accuracy = 0.0
     total_seq_accuracy = 0.0
     total_completions = 0
+    total_completions_continuous = 0
+    total_continuous = 0
+    total_skip_ahead = 0
+    total_pred_transitions = 0
     total_invalid = 0
     total_transitions = 0
     total_recoveries = 0
@@ -304,9 +353,14 @@ def evaluate_state_machine(
         # Conversation-level sequence accuracy (LCS recall)
         total_seq_accuracy += compute_sequence_accuracy(pred_transitions, gt_transitions)
 
-        # Task completion
+        # Task completion, both definitions
         if check_task_completion(pred_transitions, gt.terminal_states):
             total_completions += 1
+        if check_task_completion_continuous(pred_transitions, gt.terminal_states):
+            total_completions_continuous += 1
+        total_continuous += trajectory_is_continuous(pred_transitions)
+        total_skip_ahead += count_skip_ahead_transitions(pred_transitions)
+        total_pred_transitions += max(len(pred_transitions) - 1, 0)
 
         # Recovery
         recoveries, errors = check_recovery(pred.messages)
@@ -325,6 +379,9 @@ def evaluate_state_machine(
         state_transition_accuracy=total_accuracy / n,
         state_sequence_accuracy=total_seq_accuracy / n,
         task_completion_rate=total_completions / n,
+        task_completion_rate_continuous=total_completions_continuous / n,
+        trajectory_continuity_rate=total_continuous / n,
+        skip_ahead_transition_rate=total_skip_ahead / max(total_pred_transitions, 1),
         invalid_transition_rate=total_invalid / max(total_transitions, 1),
         recovery_rate=total_recoveries / max(total_errors, 1),
         consistency_pass5=total_pass5 / n,

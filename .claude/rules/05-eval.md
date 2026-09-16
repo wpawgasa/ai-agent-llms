@@ -9,6 +9,9 @@
 class StateMachineMetrics:
     state_transition_accuracy: float    # Target: >=85%
     task_completion_rate: float         # Target: >=70%
+    task_completion_rate_continuous: float  # same, walked trajectories only
+    trajectory_continuity_rate: float   # conversations with no skip-ahead
+    skip_ahead_transition_rate: float   # transitions that jump states
     invalid_transition_rate: float      # Target: <=5%
     recovery_rate: float                # Target: >=60%
     consistency_pass5: float            # Target: >=0.40
@@ -19,6 +22,21 @@ def evaluate_state_machine(
 ```
 - Parse `[STATE: X → Y]` annotations from model output
 - pass^5: all 5 temperature=0.7 trials must reach correct terminal state
+
+### Completion, and the trajectory behind it
+
+`task_completion_rate` reads ONE thing: whether the last `[STATE: ...]`
+annotation names a terminal state. A model that jumps there from a state it
+was never in scores a completion, and untrained models do exactly that — the
+untrained gemma-4-12B's annotated trajectory is continuous in only 55% of
+Phase 1 text conversations against a fine-tuned 83-98% (CLAUDE.md R25).
+
+`task_completion_rate_continuous` requires both: a terminal final state AND a
+trajectory where every annotation continues from the previous one
+(`trajectory_is_continuous`). It is reported BESIDE the original and is never
+used by the composite — `compute_weighted_score` still takes
+`task_completion_rate`, so adding it moved no Phase 1 score. Read the pair:
+a large gap between them means the model is teleporting, not finishing.
 
 ## Tool-Calling Accuracy (`tool_call_f1.py`)
 ```python
