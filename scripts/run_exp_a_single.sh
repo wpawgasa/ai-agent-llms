@@ -24,6 +24,7 @@
 #   --stochastic-trials <n>   Override stochastic trial count from YAML
 #   --max-model-len <n>       Override serving.max_model_len from YAML [vLLM mode only]
 #   --max-num-seqs <n>        Cap max concurrent requests [vLLM mode only]
+#   --tool-turn-format <f>    native (default) | text — see agent_benchmark --help
 #   --dry-run                 Print commands without executing
 
 set -euo pipefail
@@ -50,6 +51,7 @@ MAX_SAMPLES_SET=false
 MAX_MODEL_LEN=""
 MAX_NUM_SEQS=""
 STOCHASTIC_TRIALS_OVERRIDE=""
+TOOL_TURN_FORMAT="native"
 DRY_RUN=false
 
 # First positional arg (if not a flag) is the vLLM config path
@@ -68,6 +70,7 @@ while [[ $# -gt 0 ]]; do
         --stochastic-trials) STOCHASTIC_TRIALS_OVERRIDE="$2";         shift 2 ;;
         --max-model-len)     MAX_MODEL_LEN="$2";                      shift 2 ;;
         --max-num-seqs)      MAX_NUM_SEQS="$2";                       shift 2 ;;
+        --tool-turn-format)  TOOL_TURN_FORMAT="$2";                   shift 2 ;;
         --dry-run)           DRY_RUN=true;                            shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -307,6 +310,7 @@ python3 -m llm_workflow_agents.eval.agent_benchmark \
     "${DATA_ARGS[@]}" \
     --max-samples       "$MAX_SAMPLES" \
     --stochastic-trials "$STOCHASTIC_TRIALS" \
+    --tool-turn-format  "$TOOL_TURN_FORMAT" \
     --log-level         DEBUG \
     2>&1 | tee "${RESULT_FILE%.json}.log" || true
 

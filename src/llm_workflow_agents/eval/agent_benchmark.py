@@ -702,6 +702,7 @@ def _replay_conversation(
     temperature: float = 0.0,
     enable_thinking: bool = False,
     engine: str = "vllm",
+    tool_turn_format: str = "native",
 ) -> tuple[list[dict[str, Any]], list[float], list[float]]:
     """Replay a conversation, substituting model completions at assistant turns.
 
@@ -761,8 +762,18 @@ def _replay_conversation(
                 predicted.append(msg)
                 continue
 
+            if tool_turn_format == "text":
+                # Same format the model trained in: tool calls as text, tool
+                # results as prefixed user turns, and no native tool
+                # declarations (training never had them; the schemas are in
+                # the system prompt). data/tool_turns.py.
+                from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
+                request_messages, request_tools = to_text_tool_turns(context), None
+            else:
+                request_messages, request_tools = context, tools
             content, raw_tool_calls, latency, ttft = _call_vllm(
-                endpoint, model, context, temperature, tools=tools,
+                endpoint, model, request_messages, temperature, tools=request_tools,
                 enable_thinking=enable_thinking, engine=engine,
             )
             latencies_ms.append(latency)
@@ -814,8 +825,14 @@ def _replay_conversation(
                 ).strip()
             else:
                 text_content = content
+            if tool_turn_format == "text":
+                # Keep the reply exactly as generated. Training sees tool calls
+                # as text in place, so rebuilding them from structured calls
+                # (which re-joins prose and <tool_call> with a newline the model
+                # may not have written) would make the context drift from it.
+                text_content = content
             ctx_msg: dict[str, Any] = {"role": "assistant", "content": text_content}
-            if raw_tool_calls:
+            if raw_tool_calls and tool_turn_format != "text":
                 ctx_msg["tool_calls"] = raw_tool_calls
                 # Store the ids so the next tool message(s) can reference them
                 pending_tool_call_ids.clear()
@@ -986,6 +1003,18 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--tool-turn-format",
+        choices=["native", "text"],
+        default="native",
+        help=(
+            "native (default): past tool calls and results go to the server as "
+            "structured tool_calls / tool messages, with tools=. text: tool calls "
+            "as <tool_call> text and results as '[Tool result]: ' user turns, no "
+            "tools= — the format models trained on the Task A corpus since "
+            "2026-09-17 see in training. Compare models only within one format."
+        ),
+    )
+    parser.add_argument(
         "--voice-weight",
         type=float,
         default=DEFAULT_VOICE_WEIGHT,
@@ -1070,6 +1099,7 @@ if __name__ == "__main__":
         pred_messages, latencies, ttfts = _replay_conversation(
             args.endpoint, args.model, sample, temperature=0.0,
             enable_thinking=args.enable_thinking, engine=args.engine,
+                tool_turn_format=args.tool_turn_format,
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
@@ -1114,6 +1144,7 @@ if __name__ == "__main__":
             trial_messages, _, _ = _replay_conversation(
                 args.endpoint, args.model, sample, temperature=0.7,
                 enable_thinking=args.enable_thinking, engine=args.engine,
+                tool_turn_format=args.tool_turn_format,
             )
             state_predictions[idx].stochastic_trials.append(trial_messages)
 
@@ -1181,6 +1212,7 @@ if __name__ == "__main__":
         "complexity_level": level_tag,
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
+        "tool_turn_format": args.tool_turn_format,
         "metrics": quality.to_dict(),
         # quality_summary now also carries a "chunk_diagnostics" key
         # (guardrails, computed over the voice stratum only; see

@@ -274,6 +274,17 @@ def _load_grpo_jsonl(data_dir: Path, split: str = "train") -> "Dataset":
                     *raw_msgs[1:],
                 ]
 
+            # Tool results as prefixed user turns, tool calls as text: the
+            # Gemma-4 template drops `tool` messages otherwise, so no prompt
+            # built here — GRPO rows, the held-out audit, the headroom probes,
+            # DPO pairs — contained a tool result. It also makes an assistant
+            # turn that follows a tool result a valid row (its predecessor is
+            # now a user turn), admitting the turns that consume tool results.
+            # docs/superpowers/specs/2026-09-17-gemma4-tool-results-design.md
+            from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
+            raw_msgs = to_text_tool_turns(raw_msgs)
+
             gt_full = raw.get("ground_truth") or {}
             terminal_state = gt_full.get("terminal_state", "") or ""
             terminal_reached_overall = bool(gt_full.get("terminal_reached", True))

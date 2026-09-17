@@ -199,12 +199,14 @@ def _generate_for_checkpoint(
     # template rendering and tokenization.
     inner_tok = getattr(tokenizer, "tokenizer", tokenizer)
 
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
     # Render prompts once; reuse the tokenized form across the K rollouts.
     rendered: list[str] = []
     for p in prompts:
         rendered.append(
             inner_tok.apply_chat_template(
-                p["prompt_messages"],
+                to_text_tool_turns(p["prompt_messages"]),
                 tokenize=False,
                 add_generation_prompt=True,
             )

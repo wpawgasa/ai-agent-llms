@@ -129,69 +129,164 @@ def _corpus_has_loss_false(
     return found
 
 
-def render_response_only_sample(
-    messages: list[dict[str, str]],
-    tokenizer: Any,
-    max_seq_length: int,
-) -> dict[str, list[int]]:
-    """Tokenize one conversation, masking non-assistant spans to -100.
+def _render_incremental(
+    messages: list[dict[str, Any]], encode: Any
+) -> "tuple[list[int], list[int]]":
+    """Per-turn delta walk labelling each assistant turn whole, header included.
 
-    Walks `messages` incrementally: for each turn, tokenizes
-    `apply_chat_template(prefix)` and `apply_chat_template(prefix + turn)` and
-    takes the delta. Tokens from non-assistant turns get label -100; assistant
-    tokens carry through unmasked. Truncates from the left so the final
-    assistant turn always survives.
-
-    Chat-template-agnostic — relies only on `apply_chat_template`'s
-    deterministic prefix-extension behavior. Used by Recipe B (response_only)
-    in docs/fine_tuning_recipes.md.
-
-    Returns {"input_ids", "attention_mask", "labels"} for a single sample.
+    Only a fallback, for tokenizers without character offsets (stub tokenizers
+    in tests, slow tokenizers). It assumes the template extends its own prefix,
+    which Gemma-4 breaks on consecutive assistant turns.
     """
-    from llm_workflow_agents.training._utils import normalize_chat_template_ids
-
     ids: list[int] = []
     labels: list[int] = []
-
-    def _encode(msgs: list[dict[str, str]]) -> list[int]:
-        if not msgs:
-            return []
-        # Normalization lives in _utils so sft.py and trajectory_rollout.py
-        # share one implementation. Keeping a private copy here is what let
-        # transformers 5.x break the rollout path months after bac1d98 fixed
-        # the identical issue in this function. See the helper's docstring for
-        # why the mapping must be unwrapped before any list coercion.
-        return normalize_chat_template_ids(
-            tokenizer.apply_chat_template(
-                msgs, tokenize=True, add_generation_prompt=False
-            )
-        )
-
     prev_encoded: list[int] = []
     for i, msg in enumerate(messages):
-        extended = _encode(messages[: i + 1])
-        # Guard against tokenizers that don't deterministically extend
-        # (rare; e.g. some templates re-render BOS). Fall back to encoding
-        # this turn alone if the prefix doesn't match the head of `extended`.
+        extended = encode(messages[: i + 1])
         if (
             len(extended) >= len(prev_encoded)
             and extended[: len(prev_encoded)] == prev_encoded
         ):
             new = extended[len(prev_encoded) :]
         else:
-            new = _encode([msg])
+            new = encode([msg])
             extended = prev_encoded + new
         ids.extend(new)
-        # A message marked loss:false stays in the prompt prefix but is never
-        # a target. The orchestrator writes the <unspoken> barge-in marker
-        # into the model's own past turn, so training on it would teach the
-        # model to emit the marker. The key is absent from every pre-existing
-        # row, and its default of True keeps those rows unchanged.
         if msg.get("role") == "assistant" and msg.get("loss", True) is not False:
             labels.extend(new)
         else:
             labels.extend([-100] * len(new))
         prev_encoded = extended
+    return ids, labels
+
+
+_TERMINATOR_PROBE = "Zq9probe"
+_TERMINATORS: dict[int, str] = {}
+
+
+def _turn_terminator(tokenizer: Any) -> str:
+    """The text a chat template writes right after an assistant turn's content.
+
+    Gemma-4 writes ``<turn|>\n``, ChatML ``<|im_end|>\n``. Measured once per
+    tokenizer from a one-exchange render, never hardcoded.
+    """
+    key = id(tokenizer)
+    if key not in _TERMINATORS:
+        text = tokenizer.apply_chat_template(
+            [
+                {"role": "user", "content": "u"},
+                {"role": "assistant", "content": _TERMINATOR_PROBE},
+            ],
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        at = text.rfind(_TERMINATOR_PROBE) if isinstance(text, str) else -1
+        _TERMINATORS[key] = text[at + len(_TERMINATOR_PROBE) :] if at >= 0 else ""
+    return _TERMINATORS[key]
+
+
+def _assistant_char_spans(
+    messages: list[dict[str, Any]], text: str, terminator: str
+) -> "tuple[list[tuple[int, int]], int]":
+    """Character spans to train on: each trainable assistant content + terminator.
+
+    Walks every message in order with a cursor, so an assistant reply cannot
+    match an identical string earlier in the conversation. Templates trim
+    content, so the trimmed string is what is searched for. Returns the spans
+    and how many trainable turns could not be located (those train nothing).
+    """
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    missed = 0
+    for message in messages:
+        content = str(message.get("content") or "").strip()
+        trainable = message.get("role") == "assistant" and message.get("loss", True) is not False
+        if not content:
+            continue
+        at = text.find(content, cursor)
+        if at < 0:
+            missed += trainable
+            continue
+        end = at + len(content)
+        cursor = end
+        if trainable:
+            if terminator and text.startswith(terminator, end):
+                end += len(terminator)
+            spans.append((at, end))
+    return spans, missed
+
+
+def render_response_only_sample(
+    messages: list[dict[str, Any]],
+    tokenizer: Any,
+    max_seq_length: int,
+) -> dict[str, list[int]]:
+    """Tokenize one conversation, training only on what the model generates.
+
+    Tool calls and tool results first go through
+    :func:`~llm_workflow_agents.data.tool_turns.to_text_tool_turns`: the
+    Gemma-4 template drops ``tool`` messages that do not answer structured
+    ``tool_calls``, so without it no training sequence contained a tool result
+    (docs/superpowers/specs/2026-09-17-gemma4-tool-results-design.md).
+
+    The conversation is then rendered ONCE as text and tokenized with character
+    offsets. Every token overlapping a trainable assistant message's content, or
+    the turn terminator right after it, is a target; everything else (system,
+    user, tool results, the turn header the template writes before the content)
+    is -100. A token straddling a boundary — Gemma-4 merges ``>`` and ``[`` into
+    one token — is kept, so content is never cut. A message carrying
+    ``loss: false`` is never a target. Truncates from the left so the final
+    assistant turn survives.
+
+    Falls back to :func:`_render_incremental` only for tokenizers that cannot
+    return offsets.
+
+    Returns {"input_ids", "attention_mask", "labels"} for a single sample.
+    """
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+    from llm_workflow_agents.training._utils import normalize_chat_template_ids
+
+    msgs = to_text_tool_turns(messages)
+
+    def _encode(chunk: list[dict[str, Any]]) -> list[int]:
+        if not chunk:
+            return []
+        # Normalization lives in _utils so sft.py and trajectory_rollout.py
+        # share one implementation (bac1d98's BatchEncoding unwrap).
+        return normalize_chat_template_ids(
+            tokenizer.apply_chat_template(
+                chunk, tokenize=True, add_generation_prompt=False
+            )
+        )
+
+    ids: "list[int] | None" = None
+    offsets: list[Any] = []
+    text: Any = None
+    inner = getattr(tokenizer, "tokenizer", tokenizer)
+    try:
+        text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)
+        if isinstance(text, str):
+            encoded = inner(text, add_special_tokens=False, return_offsets_mapping=True)
+            ids = list(encoded["input_ids"])
+            offsets = list(encoded["offset_mapping"])
+    except (TypeError, NotImplementedError, KeyError, AttributeError, ValueError):
+        ids = None
+
+    if ids is None or len(ids) != len(offsets):
+        ids, labels = _render_incremental(msgs, _encode)
+    else:
+        spans, missed = _assistant_char_spans(msgs, text, _turn_terminator(tokenizer))
+        if missed:
+            logger.warning("response_only_turn_not_located", unlocated_turns=missed)
+        labels = [-100] * len(ids)
+        j = 0
+        for position, (start, stop) in enumerate(offsets):
+            if stop <= start:
+                continue
+            while j < len(spans) and spans[j][1] <= start:
+                j += 1
+            if j < len(spans) and stop > spans[j][0] and start < spans[j][1]:
+                labels[position] = ids[position]
 
     # Left-truncate to preserve the final assistant turn.
     if len(ids) > max_seq_length:
@@ -208,7 +303,7 @@ def render_response_only_sample(
 
 #: Bump to invalidate every cached render at once, e.g. when the cache
 #: format itself changes rather than the rendering code.
-_RENDER_CACHE_VERSION = 1
+_RENDER_CACHE_VERSION = 2
 
 _RENDER_CACHE_DEFAULT_DIR = Path(".cache/sft_render")
 
@@ -237,7 +332,16 @@ def _render_code_version() -> str:
 
     h = hashlib.blake2b(digest_size=16)
     h.update(str(_RENDER_CACHE_VERSION).encode())
-    h.update(inspect.getsource(render_response_only_sample).encode())
+    from llm_workflow_agents.data import tool_turns as _tool_turns
+
+    for fn in (
+        render_response_only_sample,
+        _render_incremental,
+        _turn_terminator,
+        _assistant_char_spans,
+    ):
+        h.update(inspect.getsource(fn).encode())
+    h.update(Path(_tool_turns.__file__).read_bytes())
     h.update(Path(_system_prompt.__file__).read_bytes())
     return h.hexdigest()
 
@@ -1018,9 +1122,11 @@ def train_sft(
     max_seq_length_for_tokenize = training_cfg.get("max_seq_length", 8192)
 
     def _render_chat(batch: dict[str, Any]) -> dict[str, Any]:
+        from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
         texts = [
             tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=False
+                to_text_tool_turns(msgs), tokenize=False, add_generation_prompt=False
             )
             for msgs in batch["messages"]
         ]
