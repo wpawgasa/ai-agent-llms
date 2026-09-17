@@ -35,6 +35,7 @@ from typing import Any
 import structlog
 
 from llm_workflow_agents.eval.state_accuracy import (
+    STATE_ANNOTATION_PATTERN,
     ConversationGroundTruth,
     ConversationPrediction,
     StateMachineMetrics,
@@ -535,6 +536,55 @@ def _downgrade_tool_turns_to_text(messages: list[dict[str, Any]]) -> list[dict[s
     return out
 
 
+#: Chars of a leaked/missing prefix kept in a log line — enough to see the
+#: shape without flooding logs on a run where it recurs many times.
+_LEAK_PREFIX_LOG_CHARS = 200
+
+
+def _strip_leaked_reasoning_prefix(content: str) -> str:
+    """Detect and strip a leaked-reasoning prefix before the mandatory annotation.
+
+    FORMAT_RULES rule 1 requires every assistant turn's visible text to begin
+    with a ``[STATE: X → Y]`` annotation; ``NO_REASONING_LEAK_RULE`` (added
+    2026-09-07, ``system_prompt.py``) additionally forbids anything else
+    appearing before it. A frontier-model benchmark run observed one turn whose
+    visible content opened with internal self-talk ("So the tool was executed
+    even with speech! Then why didn't `change_plan` execute? Wait!...") instead
+    of the annotation — a decoding-side artifact that did not reproduce
+    byte-for-byte on a second call at the same temperature, so a system-prompt
+    instruction alone cannot be relied on to prevent it (see that rule's
+    docstring). This is the harness-side guardrail:
+
+    - If a valid ``[STATE: ...]`` annotation is found LATER in the content,
+      strip everything before it, so the leaked prefix doesn't pollute the
+      conversation context forwarded to subsequent turns (which would risk the
+      model imitating its own error) and log the event for auditability.
+    - If no annotation is found anywhere, the content is left untouched —
+      state/tool scoring already treats a turn with no parseable annotation as
+      a missing transition, so there is nothing to recover — but the event is
+      still logged so a run can be diagnosed from its log alone, the way this
+      exact issue first required a manual replay to find.
+    - Empty or whitespace-only content (e.g. from an HTTP-error turn) is
+      already logged separately (``http_error_during_call``) and is left alone.
+    """
+    match = STATE_ANNOTATION_PATTERN.search(content)
+    if match is None:
+        if content.strip():
+            logger.warning(
+                "turn_missing_state_annotation",
+                content_preview=content[:_LEAK_PREFIX_LOG_CHARS],
+            )
+        return content
+    prefix = content[: match.start()]
+    if prefix.strip():
+        logger.warning(
+            "leaked_reasoning_prefix_stripped",
+            prefix_preview=prefix[:_LEAK_PREFIX_LOG_CHARS],
+        )
+        return content[match.start():]
+    return content
+
+
 def _call_vllm(
     endpoint: str,
     model: str,
@@ -677,7 +727,7 @@ def _call_vllm(
     for idx in sorted(tool_call_accum):
         raw_tool_calls.append(tool_call_accum[idx])
 
-    content = "".join(content_parts)
+    content = _strip_leaked_reasoning_prefix("".join(content_parts))
 
     # Append any structured tool calls as <tool_call> tags so that
     # parse_tool_calls() can extract them.
@@ -734,31 +784,60 @@ def _replay_conversation(
             predicted.append(msg)
 
         elif role == "assistant":
-            # Some samples open with a system-initiated assistant greeting
-            # before any user turn (system → assistant → user → ...). Models
-            # can't be asked to predict a preamble issued before any user
-            # input, and Qwen3-family chat templates explicitly reject a
-            # message list with no user query. Use the ground-truth turn
-            # as a fixed preamble: append to context and predictions, no
-            # model call, no recorded latency.
-            if not any(c.get("role") == "user" for c in context):
+            # A model completion can only be fairly solicited when the
+            # trailing context entry carries something new the model hasn't
+            # reacted to yet — a user utterance or a tool result. Two
+            # situations produce a context that doesn't:
+            #
+            # (1) An opening assistant turn with no user turn before it at
+            #     all (some samples are system-initiated:
+            #     system → assistant → user → ...). Qwen3-family chat
+            #     templates explicitly reject a message list with no user
+            #     query.
+            # (2) A GT assistant turn immediately following another GT
+            #     assistant turn with nothing between them. The corpus does
+            #     this routinely — measured at 295/296 such adjacent pairs
+            #     across the benchmark corpus, nearly always a text-only
+            #     state-transition turn immediately followed by a
+            #     tool-call turn, with no new user input in between.
+            #
+            # Both send Gemini (via BiFrost) a request whose trailing
+            # message is already model-authored, which its API flatly
+            # refuses ("Requests ending with a model turn are not
+            # supported") — a real constraint, not a bug in that provider:
+            # there is no such thing as "continue the model's own last
+            # utterance" in a turn-based chat API when nothing new has been
+            # said. Case (2) previously reached ``_call_vllm`` anyway, which
+            # is why ~5% of calls on this corpus failed with that exact 400
+            # and scored as a missing state annotation *and* a missing tool
+            # call — every one of those failures was structurally
+            # unanswerable, not a model shortcoming. Use the GT turn
+            # verbatim in both cases: no model call, no recorded latency —
+            # case (1)'s existing treatment, now extended to case (2).
+            last_role = context[-1].get("role") if context else None
+            if last_role not in ("user", "tool"):
                 logger.info(
-                    "skip_preamble_assistant_turn",
-                    reason="no_user_in_context",
+                    "skip_unsolicitable_assistant_turn",
+                    reason=(
+                        "no_user_in_context"
+                        if not any(c.get("role") == "user" for c in context)
+                        else "consecutive_assistant_turn"
+                    ),
+                    last_context_role=last_role,
                     turn=len(predicted),
                 )
-                preamble: dict[str, Any] = {
+                verbatim_turn: dict[str, Any] = {
                     "role": "assistant",
                     "content": msg.get("content", ""),
                 }
                 if msg.get("tool_calls"):
-                    preamble["tool_calls"] = msg["tool_calls"]
+                    verbatim_turn["tool_calls"] = msg["tool_calls"]
                     pending_tool_call_ids.clear()
                     for tc in msg["tool_calls"]:
                         tc_id = tc.get("id", "")
                         if tc_id:
                             pending_tool_call_ids.append(tc_id)
-                context.append(preamble)
+                context.append(verbatim_turn)
                 predicted.append(msg)
                 continue
 
