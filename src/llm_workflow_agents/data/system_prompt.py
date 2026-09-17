@@ -104,6 +104,49 @@ _RETRY_RULE_WITH_RETRIES = """\
 # is part of the bytes the checkpoints saw, so it is reproduced exactly here.
 _RETRY_RULE_V1 = "{n}. If a tool returns an error, attempt recovery before escalating."
 
+# Added 2026-09-07 after a frontier-model benchmark comparison (gemini-3.8-flash
+# vs gemini-3.5-flash-lite) traced a large chunk of both models' low scores to
+# one root cause: a non-tool state's ``Instruction:`` text (e.g. "Verify the
+# customer's account and identity before making any changes") states a GOAL but
+# no state in this codebase's rendering ever lists which fields satisfy it —
+# there is no bound tool, so no schema's "required" array exists to consult
+# either. Both models filled the gap with their own prior (name + account
+# number) while every domain's ground truth treats one reasonable identifier as
+# sufficient, and then re-asked for the unstated field turn after turn without
+# ever advancing — measured at up to 14 consecutive re-asks in one L4 telecom
+# conversation, driving state_transition_accuracy to ~0.07 and
+# task_completion_rate to 0 for that row. This affects every model this rule
+# reaches (measured on the shared corpus: 91/508 turns for gemini-3.8-flash,
+# 67/508 for gemini-3.5-flash-lite contained a "full name" re-ask), so the fix
+# targets the ambiguity rather than one model.
+ANTI_OVERASK_RULE = """\
+{n}. Non-tool state instructions describe a GOAL, not a fixed checklist of fields. A state
+   like "verify the customer's account" is satisfied once the user has given ONE reasonable
+   piece of identifying information (e.g. an account ID, order number, phone number, or
+   email) — do not invent additional required fields (full name, date of birth, address)
+   that neither the workflow script nor a tool schema named. Never repeat the same request
+   turn after turn: if the user has already answered it, declines to answer, or pushes back,
+   resolve the turn — advance, escalate, or state plainly that you cannot proceed — instead
+   of re-asking for the same thing again."""
+
+# Added alongside ANTI_OVERASK_RULE. A live benchmark replay observed one
+# gemini-3.8-flash turn whose visible content was internal self-talk ("So the
+# tool was executed even with speech! Then why didn't `change_plan` execute?
+# Wait!...") with no [STATE: ...] annotation at all — text that reads as
+# leaked reasoning, not a reply. This did not reproduce byte-for-byte on a
+# second call (temperature 0 is not fully deterministic on that backend), so
+# it looks like an intermittent decoding-side artifact rather than the model
+# knowingly disobeying an instruction; this rule is a soft mitigation, and
+# agent_benchmark.py additionally guards against it at the harness level (see
+# ``_strip_leaked_reasoning_prefix``) since a prompt instruction cannot be
+# relied on alone for a decoding-level artifact.
+NO_REASONING_LEAK_RULE = """\
+{n}. Never expose your internal reasoning, deliberation, or self-talk in the response. The
+   visible text of a turn is the in-character reply ONLY — no "wait, let me reconsider", no
+   narrating your own tool-call decisions, no asides about what a trace or log shows. Every
+   turn's visible text must begin directly with the [STATE: ...] annotation from rule 1 and
+   contain nothing before it."""
+
 
 def _retry_rule(n: int, retry_budget: int) -> str:
     """Render the v2 tool-error rule for *retry_budget* total attempts.
@@ -208,6 +251,12 @@ def _format_rules(retry_budget: int = 1, stay_rule: bool | None = None) -> str:
         rules.append(_retry_rule(next_num, retry_budget))
         rules.append(terminal_rule)
         rules.append(never_skip_rule)
+        # Appended only on the v2+ path — the v1 opt-out (TASK_A_STAY_RULE=0)
+        # must stay byte-identical to what ckpt-500/ckpt-1770 were trained
+        # against, so these two new rules (added 2026-09-07) are never rendered
+        # there. See ANTI_OVERASK_RULE / NO_REASONING_LEAK_RULE above for why.
+        rules.append(ANTI_OVERASK_RULE.format(n=next_num + 3))
+        rules.append(NO_REASONING_LEAK_RULE.format(n=next_num + 4))
     else:
         # Frozen v1 spacing: the last three rules form one single-newline block.
         rules.append(
