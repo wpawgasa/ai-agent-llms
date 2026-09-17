@@ -145,7 +145,13 @@ def test_consecutive_assistant_turn_is_not_solicited():
     recorded: list[list[dict[str, Any]]] = []
     with patch(
         "llm_workflow_agents.eval.agent_benchmark._call_vllm",
-        side_effect=_fake_call_vllm_factory(recorded, "[STATE: VERIFY → VERIFY]\nok"),
+        # The reply calls the tool: a tool result is only shown after a call
+        # the model made (test_replay_tool_result_gating.py), and this test is
+        # about the consecutive-turn skip, not about a missed call.
+        side_effect=_fake_call_vllm_factory(
+            recorded,
+            '[STATE: VERIFY → VERIFY]\n<tool_call>{"name": "verify_identity", "arguments": {}}</tool_call>',
+        ),
     ):
         predicted, latencies, ttfts = _replay_conversation(ENDPOINT, MODEL, sample)
 

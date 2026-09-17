@@ -25,6 +25,12 @@
 #   --max-model-len <n>       Override serving.max_model_len from YAML [vLLM mode only]
 #   --max-num-seqs <n>        Cap max concurrent requests [vLLM mode only]
 #   --tool-turn-format <f>    native (default) | text — see agent_benchmark --help
+#   --split-tool-call-content <auto|on|off>
+#                             Native format: send a reply's text and its tool call as
+#                             two messages. auto (default) turns it on when the config's
+#                             serving.tool_call_parser is gemma4 — Gemma-4 templates
+#                             leave no generation cue after a merged message's tool
+#                             result, and the model replies with nothing.
 #   --dry-run                 Print commands without executing
 
 set -euo pipefail
@@ -52,6 +58,7 @@ MAX_MODEL_LEN=""
 MAX_NUM_SEQS=""
 STOCHASTIC_TRIALS_OVERRIDE=""
 TOOL_TURN_FORMAT="native"
+SPLIT_TOOL_CALL_CONTENT="auto"
 DRY_RUN=false
 
 # First positional arg (if not a flag) is the vLLM config path
@@ -71,6 +78,7 @@ while [[ $# -gt 0 ]]; do
         --max-model-len)     MAX_MODEL_LEN="$2";                      shift 2 ;;
         --max-num-seqs)      MAX_NUM_SEQS="$2";                       shift 2 ;;
         --tool-turn-format)  TOOL_TURN_FORMAT="$2";                   shift 2 ;;
+        --split-tool-call-content) SPLIT_TOOL_CALL_CONTENT="$2";      shift 2 ;;
         --dry-run)           DRY_RUN=true;                            shift ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -115,6 +123,20 @@ with open(sys.argv[1]) as f:
     c = yaml.safe_load(f)
 print(c.get('serving', {}).get('engine', 'vllm'))
 " "$MODEL_CONFIG")
+
+TOOL_CALL_PARSER=$(python3 -c "
+import yaml, sys
+with open(sys.argv[1]) as f:
+    c = yaml.safe_load(f)
+print((c.get('serving') or {}).get('tool_call_parser') or '')
+" "$MODEL_CONFIG")
+
+case "$SPLIT_TOOL_CALL_CONTENT" in
+    auto) if [[ "$TOOL_CALL_PARSER" == "gemma4" ]]; then SPLIT_ARGS=(--split-tool-call-content); else SPLIT_ARGS=(); fi ;;
+    on)   SPLIT_ARGS=(--split-tool-call-content) ;;
+    off)  SPLIT_ARGS=() ;;
+    *)    echo "ERROR: --split-tool-call-content must be auto, on or off" >&2; exit 1 ;;
+esac
 
 SERVING_ENDPOINT=$(python3 -c "
 import yaml, sys
@@ -257,7 +279,7 @@ if [ "$DRY_RUN" = true ]; then
         [ -n "$MAX_NUM_SEQS" ]  && DRY_LAUNCH_ARGS+=(--max-num-seqs  "$MAX_NUM_SEQS")
         echo "[DRY RUN] Would launch: bash $LAUNCH_SCRIPT $MODEL_CONFIG ${DRY_LAUNCH_ARGS[*]}"
     fi
-    echo "[DRY RUN] Would evaluate: python3 -m llm_workflow_agents.eval.agent_benchmark ${DATA_ARGS[*]}"
+    echo "[DRY RUN] Would evaluate: python3 -m llm_workflow_agents.eval.agent_benchmark ${DATA_ARGS[*]} --tool-turn-format $TOOL_TURN_FORMAT ${SPLIT_ARGS[*]}"
     echo "[DRY RUN] Would write results to $RESULT_FILE"
     exit 0
 fi
@@ -311,6 +333,7 @@ python3 -m llm_workflow_agents.eval.agent_benchmark \
     --max-samples       "$MAX_SAMPLES" \
     --stochastic-trials "$STOCHASTIC_TRIALS" \
     --tool-turn-format  "$TOOL_TURN_FORMAT" \
+    "${SPLIT_ARGS[@]}" \
     --log-level         DEBUG \
     2>&1 | tee "${RESULT_FILE%.json}.log" || true
 

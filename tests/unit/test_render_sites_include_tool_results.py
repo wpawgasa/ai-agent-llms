@@ -95,6 +95,10 @@ def test_benchmark_text_mode_sends_no_tool_role_and_no_tools(monkeypatch):
 
     def fake_call(endpoint, model, messages, temperature, tools=None, **_):
         seen.append((messages, tools))
+        # Call the tool on the first turn: a result is shown only for a call
+        # the model made (test_replay_tool_result_gating.py).
+        if len(seen) == 1:
+            return CONVERSATION[2]["content"], [], 1.0, 1.0
         return "[STATE: CHECK → DOCS]\nok", [], 1.0, 1.0
 
     monkeypatch.setattr(ab, "_call_vllm", fake_call)
