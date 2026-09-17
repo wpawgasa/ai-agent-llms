@@ -64,7 +64,7 @@ def _training_messages(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _header(tok: Any) -> str:
+def _unused_header(tok: Any) -> str:
     text = tok.apply_chat_template(
         [{"role": "user", "content": "u"}, {"role": "assistant", "content": "Zq9probe"}],
         tokenize=False,
@@ -73,44 +73,79 @@ def _header(tok: Any) -> str:
     return after_user[after_user.rfind("u") + 1 :]
 
 
+def _message_char_spans(messages: list[dict[str, Any]], text: str) -> list[tuple[int, int] | None]:
+    """Each message's own trimmed content span in the rendered text, in order."""
+    spans: list[tuple[int, int] | None] = []
+    cursor = 0
+    for m in messages:
+        content = str(m.get("content") or "").strip()
+        at = text.find(content, cursor) if content else -1
+        if at < 0:
+            spans.append(None)
+            continue
+        spans.append((at, at + len(content)))
+        cursor = at + len(content)
+    return spans
+
+
 def audit_render(tok: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+    """Position-based: a message is trained if any token wholly inside its own span is.
+
+    A substring test cannot work here — an assistant reply that quotes the user
+    or a tool result verbatim would make that text look trained.
+    """
+    from llm_workflow_agents.data.tool_turns import TOOL_RESULT_PREFIX, to_text_tool_turns
     from llm_workflow_agents.training import sft
 
-    header = _header(tok).split("\n")[-2] if "\n" in _header(tok) else _header(tok)
-    header = header.strip() or _header(tok).strip()
+    inner = getattr(tok, "tokenizer", tok)
     c: Counter = Counter()
     failures: list[dict[str, Any]] = []
     for idx, raw in enumerate(rows):
         msgs = _training_messages(raw)
+        converted = to_text_tool_turns(msgs)
         out = sft.render_response_only_sample(msgs, tok, BIG)
-        text = tok.decode(out["input_ids"], skip_special_tokens=False)
-        trained = tok.decode([i for i, l in zip(out["input_ids"], out["labels"]) if l != -100], skip_special_tokens=False)
-        rendered = tok.apply_chat_template(to_text_tool_turns(msgs), tokenize=False)
-        _, missed = sft._assistant_char_spans(to_text_tool_turns(msgs), rendered, sft._turn_terminator(tok))
+        text = tok.apply_chat_template(converted, tokenize=False)
+        offsets = inner(text, add_special_tokens=False, return_offsets_mapping=True)["offset_mapping"]
+        labelled = [l != -100 for l in out["labels"]]
+        if len(offsets) != len(labelled):
+            c["conversations_failing"] += 1
+            failures.append({"row": idx, "conversation_id": raw.get("conversation_id"), "problems": ["token count mismatch"]})
+            continue
+        _, missed = sft._assistant_char_spans(converted, text, sft._turn_terminator(tok))
+        spans = _message_char_spans(converted, text)
         c["conversations"] += 1
         c["unlocated_turns"] += missed
         problems = []
-        for m in msgs:
-            content = (m.get("content") or "").strip()
-            if m["role"] == "tool":
+
+        def trained_inside(span):
+            s, e = span
+            return any(lab for (a, b), lab in zip(offsets, labelled) if b > a and a >= s and b <= e)
+
+        def fully_trained(span):
+            s, e = span
+            inside = [lab for (a, b), lab in zip(offsets, labelled) if b > a and b > s and a < e]
+            return bool(inside) and all(inside)
+
+        for original, m, span in zip(msgs, converted, spans):
+            if original["role"] == "tool":
                 c["tool_results"] += 1
-                if content not in text:
+                if span is None or not m["content"].startswith(TOOL_RESULT_PREFIX):
                     problems.append("tool result missing from input")
-                elif len(content) >= 20 and content in trained:
+                elif trained_inside(span):
                     problems.append("tool result trained")
                 else:
                     c["tool_results_ok"] += 1
-            elif m["role"] == "assistant" and m.get("loss", True) is not False and content:
+            elif m["role"] == "assistant" and m.get("loss", True) is not False and span is not None:
                 c["trainable_turns"] += 1
-                if content in trained:
+                if fully_trained(span):
                     c["turns_trained_whole"] += 1
                 else:
                     problems.append("assistant reply not trained whole")
-            elif m["role"] == "user" and len(content) >= 20 and content in trained:
-                problems.append("user text trained")
-        if header and header in trained:
-            problems.append(f"turn header {header!r} trained")
+            elif m["role"] == "assistant" and m.get("loss", True) is False and span is not None:
+                if trained_inside(span):
+                    problems.append("loss:false turn trained")
+            elif m["role"] in ("user", "system") and span is not None and trained_inside(span):
+                problems.append(f"{m['role']} text trained")
         if missed:
             problems.append(f"{missed} trainable turn(s) not located")
         if problems:
