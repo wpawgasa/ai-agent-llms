@@ -39,6 +39,7 @@ def _sample_prompts(
     split: str,
     n_prompts: int,
     seed: int,
+    row_filter: Any = None,
 ) -> list[dict[str, Any]]:
     """Slice validation conversations into GRPO-format rows, then pick N unique prompts.
 
@@ -62,6 +63,11 @@ def _sample_prompts(
     for i in indices:
         row = ds[i]
         msgs = row["prompt"]
+        # Optional filter over (prompt messages, decoded ground truth), applied
+        # BEFORE the per-conversation dedupe so a conversation whose first row
+        # fails the filter can still contribute a later row that passes.
+        if row_filter is not None and not row_filter(msgs, _decode_gt(row["ground_truth"])):
+            continue
         first_user = next(
             (m["content"] for m in msgs if m["role"] == "user"), ""
         )

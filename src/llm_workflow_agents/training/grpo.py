@@ -42,6 +42,7 @@ logger = structlog.get_logger(__name__)
 _REWARD_REGISTRY: dict[str, str] = {
     "reward_business_logic": "llm_workflow_agents.training.rewards.reward_business_logic",
     "reward_business_logic_trajectory": "llm_workflow_agents.training.rewards.reward_business_logic_trajectory",
+    "reward_business_logic_strict": "llm_workflow_agents.training.rewards.reward_business_logic_strict",
     "reward_subagent": "llm_workflow_agents.training.rewards.reward_subagent",
     "reward_graph_extraction": "llm_workflow_agents.training.rewards.reward_graph_extraction",
 }
