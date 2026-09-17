@@ -3,13 +3,16 @@
   "checkpoint_id": "4d5ff93ce782",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 4,
+  "checkpoints_count": 5,
   "files_touched": [
+    "data/output/benchmark/.gitignore",
     "deployments/local/data/bifrost/config.json",
     "src/llm_workflow_agents/data/system_prompt.py",
     "src/llm_workflow_agents/eval/agent_benchmark.py",
     "src/llm_workflow_agents/eval/state_accuracy.py",
     "tests/fixtures/text_prompt_baseline.json",
+    "tests/unit/test_leaked_reasoning_guardrail.py",
+    "tests/unit/test_replay_unsolicitable_assistant_turns.py",
     "tests/unit/test_stay_rule_flag.py"
   ],
   "sessions": [
@@ -24,13 +27,19 @@
       "transcript": "/4d/5ff93ce782/1/full.jsonl",
       "content_hash": "/4d/5ff93ce782/1/content_hash.txt",
       "prompt": "/4d/5ff93ce782/1/prompt.txt"
+    },
+    {
+      "metadata": "/4d/5ff93ce782/2/metadata.json",
+      "transcript": "/4d/5ff93ce782/2/full.jsonl",
+      "content_hash": "/4d/5ff93ce782/2/content_hash.txt",
+      "prompt": "/4d/5ff93ce782/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 38,
-    "cache_creation_tokens": 185326,
-    "cache_read_tokens": 2232154,
-    "output_tokens": 4057,
-    "api_call_count": 20
+    "input_tokens": 70,
+    "cache_creation_tokens": 276322,
+    "cache_read_tokens": 4112017,
+    "output_tokens": 11444,
+    "api_call_count": 36
   }
 }
