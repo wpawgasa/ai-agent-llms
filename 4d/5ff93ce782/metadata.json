@@ -3,7 +3,7 @@
   "checkpoint_id": "4d5ff93ce782",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 5,
+  "checkpoints_count": 6,
   "files_touched": [
     "data/output/benchmark/.gitignore",
     "deployments/local/data/bifrost/config.json",
@@ -33,13 +33,19 @@
       "transcript": "/4d/5ff93ce782/2/full.jsonl",
       "content_hash": "/4d/5ff93ce782/2/content_hash.txt",
       "prompt": "/4d/5ff93ce782/2/prompt.txt"
+    },
+    {
+      "metadata": "/4d/5ff93ce782/3/metadata.json",
+      "transcript": "/4d/5ff93ce782/3/full.jsonl",
+      "content_hash": "/4d/5ff93ce782/3/content_hash.txt",
+      "prompt": "/4d/5ff93ce782/3/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 70,
-    "cache_creation_tokens": 276322,
-    "cache_read_tokens": 4112017,
-    "output_tokens": 11444,
-    "api_call_count": 36
+    "input_tokens": 232,
+    "cache_creation_tokens": 353326,
+    "cache_read_tokens": 4660405,
+    "output_tokens": 14311,
+    "api_call_count": 42
   }
 }
