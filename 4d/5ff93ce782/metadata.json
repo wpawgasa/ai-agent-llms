@@ -1,0 +1,30 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4d5ff93ce782",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "deployments/local/data/bifrost/config.json",
+    "src/llm_workflow_agents/data/system_prompt.py",
+    "src/llm_workflow_agents/eval/agent_benchmark.py",
+    "src/llm_workflow_agents/eval/state_accuracy.py",
+    "tests/fixtures/text_prompt_baseline.json",
+    "tests/unit/test_stay_rule_flag.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4d/5ff93ce782/0/metadata.json",
+      "transcript": "/4d/5ff93ce782/0/full.jsonl",
+      "content_hash": "/4d/5ff93ce782/0/content_hash.txt",
+      "prompt": "/4d/5ff93ce782/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 24,
+    "cache_creation_tokens": 105492,
+    "cache_read_tokens": 1498391,
+    "output_tokens": 2811,
+    "api_call_count": 12
+  }
+}

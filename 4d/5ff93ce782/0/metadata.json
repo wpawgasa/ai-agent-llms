@@ -1,0 +1,39 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "4d5ff93ce782",
+  "session_id": "0a1fccaa-2bb7-4696-a3be-9200651ef62a",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-17T04:11:04.089848541Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "deployments/local/data/bifrost/config.json",
+    "src/llm_workflow_agents/data/system_prompt.py",
+    "src/llm_workflow_agents/eval/agent_benchmark.py",
+    "src/llm_workflow_agents/eval/state_accuracy.py",
+    "tests/fixtures/text_prompt_baseline.json",
+    "tests/unit/test_stay_rule_flag.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "ebd2c790344d",
+  "token_usage": {
+    "input_tokens": 24,
+    "cache_creation_tokens": 105492,
+    "cache_read_tokens": 1498391,
+    "output_tokens": 2811,
+    "api_call_count": 12
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-17T04:11:02.647930719Z",
+    "agent_lines": 167,
+    "human_added": 69160,
+    "human_modified": 24,
+    "human_removed": 0,
+    "total_committed": 69351,
+    "agent_percentage": 0.24080402589724734
+  }
+}
