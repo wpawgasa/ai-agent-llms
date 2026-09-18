@@ -83,3 +83,18 @@ def test_e4b_model_config_does_not_force_the_trl_framework():
     # E4B is dense, and copying that pin would change the training path
     # between the two arms without anyone deciding to.
     assert "framework" not in _load(E4B_MODEL).get("training", {})
+
+
+E4B_TEXTTURNS_SFT = PROJECT_ROOT / "configs/training/sft_cat_a_e4b_textturns.yaml"
+
+
+def test_the_textturns_rerun_differs_from_the_first_e4b_run_only_in_output_dir():
+    """The re-run with tool results in the training sequence (data/tool_turns.py)
+    must isolate that fix: any other difference would confound it."""
+    first = _flatten(_load(E4B_SFT))
+    rerun = _flatten(_load(E4B_TEXTTURNS_SFT))
+    assert sorted(k for k in first.keys() | rerun.keys() if first.get(k) != rerun.get(k)) == ["output_dir"]
+
+
+def test_the_textturns_rerun_keeps_the_first_run_checkpoints():
+    assert _load(E4B_TEXTTURNS_SFT)["output_dir"] == "sft_cat_a_e4b_textturns"

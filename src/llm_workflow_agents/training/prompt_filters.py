@@ -69,8 +69,12 @@ def propagated_arguments(
     value that only the user typed is not carried: copying from the user's own
     message is not the chain-propagation failure this filter targets.
     """
+    from llm_workflow_agents.data.tool_turns import is_tool_result_turn, tool_result_text
+
+    # Loaders now hand prompts over with tool results as prefixed user turns
+    # (data/tool_turns.py); raw `tool` messages are still accepted.
     tool_results = "\n".join(
-        str(m.get("content") or "") for m in prompt_messages if m.get("role") == "tool"
+        tool_result_text(m) for m in prompt_messages if is_tool_result_turn(m)
     )
     if not tool_results:
         return []

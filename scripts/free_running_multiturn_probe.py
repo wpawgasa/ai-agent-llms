@@ -416,8 +416,12 @@ def _generate(
     if seed is not None:
         torch.manual_seed(seed)
 
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
     rendered = [
-        inner_tok.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
+        inner_tok.apply_chat_template(
+            to_text_tool_turns(m), tokenize=False, add_generation_prompt=True
+        )
         for m in message_lists
     ]
     out_texts: list[str] = []

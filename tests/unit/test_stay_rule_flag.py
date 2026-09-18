@@ -168,12 +168,49 @@ def test_stay_rule_states_the_policy_not_just_syntax():
 
 
 # --------------------------------------------------------------------------
+# Rules 11-12 (added 2026-09-07): anti-over-verification-loop and
+# no-reasoning-leak. See ANTI_OVERASK_RULE / NO_REASONING_LEAK_RULE in
+# system_prompt.py for the frontier-benchmark finding that motivated these.
+# --------------------------------------------------------------------------
+
+
+def test_anti_overask_rule_is_rule_11_by_default():
+    assert system_prompt.FORMAT_RULES.count("\n\n11. ") == 1
+    assert "11. Non-tool state instructions describe a GOAL" in system_prompt.FORMAT_RULES
+
+
+def test_anti_overask_rule_forbids_inventing_fields_and_repeating():
+    rule = system_prompt.ANTI_OVERASK_RULE.format(n=11)
+    assert "ONE reasonable" in rule
+    assert "Never repeat the same request" in rule
+
+
+def test_no_reasoning_leak_rule_is_rule_12_by_default():
+    assert system_prompt.FORMAT_RULES.count("\n\n12. ") == 1
+    assert "12. Never expose your internal reasoning" in system_prompt.FORMAT_RULES
+
+
+def test_no_reasoning_leak_rule_requires_state_annotation_first():
+    rule = system_prompt.NO_REASONING_LEAK_RULE.format(n=12)
+    assert "must begin directly with the [STATE: ...] annotation" in rule
+
+
+def test_v1_path_omits_the_two_new_rules(monkeypatch):
+    """Rules 11-12 must never reach the frozen v1 opt-out (TASK_A_STAY_RULE=0) —
+    that path's bytes must stay identical to what ckpt-500/ckpt-1770 were
+    trained against."""
+    reloaded = _reload_with(monkeypatch, "0")
+    assert "Non-tool state instructions describe a GOAL" not in reloaded.FORMAT_RULES
+    assert "Never expose your internal reasoning" not in reloaded.FORMAT_RULES
+
+
+# --------------------------------------------------------------------------
 # Rule numbering — a gap or duplicate here ships into every corpus row
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("stay_rule", "expected_count"), [(True, 10), (False, 9)]
+    ("stay_rule", "expected_count"), [(True, 12), (False, 9)]
 )
 def test_rules_are_numbered_consecutively(stay_rule, expected_count):
     text = system_prompt._format_rules(stay_rule=stay_rule)

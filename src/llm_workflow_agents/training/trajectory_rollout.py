@@ -275,9 +275,15 @@ def _segment_suffix_ids(tokenizer: Any, segment_msgs: list[dict[str, str]]) -> l
             dummy, add_generation_prompt=False, tokenize=True
         )
     )
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
+    # Tool results as prefixed user turns, or Gemma-4 drops them from the
+    # injected segment (data/tool_turns.py).
     full = normalize_chat_template_ids(
         tokenizer.apply_chat_template(
-            dummy + list(segment_msgs), add_generation_prompt=True, tokenize=True
+            dummy + to_text_tool_turns(list(segment_msgs)),
+            add_generation_prompt=True,
+            tokenize=True,
         )
     )
     n = len(prefix)
@@ -369,12 +375,16 @@ def run_replay_rollout(
             except StopIteration:
                 gen_device = None
 
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
     states = [
         _RolloutState(
             script=sc,
             prompt_ids=normalize_chat_template_ids(
                 tokenizer.apply_chat_template(
-                    sc.prompt_messages, add_generation_prompt=True, tokenize=True
+                    to_text_tool_turns(sc.prompt_messages),
+                    add_generation_prompt=True,
+                    tokenize=True,
                 )
             ),
         )

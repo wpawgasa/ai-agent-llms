@@ -42,8 +42,10 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 def _pair_len(tok, row: dict, side: str) -> int:
     """Token length of prompt + one completion side, as the collator sees it."""
+    from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
     text = tok.apply_chat_template(
-        list(row["prompt"]) + list(row[side]), tokenize=False
+        to_text_tool_turns(list(row["prompt"]) + list(row[side])), tokenize=False
     )
     return len(tok(text, add_special_tokens=False)["input_ids"])
 

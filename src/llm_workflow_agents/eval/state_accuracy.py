@@ -20,6 +20,14 @@ _STATE_PATTERN = re.compile(
     r"\[STATE:\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:→|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]"
 )
 
+#: Public alias for :data:`_STATE_PATTERN`, for callers outside this module.
+#: agent_benchmark.py's leaked-reasoning-prefix guardrail needs the exact same
+#: pattern this module scores against — reaching for the underscored name
+#: would make this module's private surface part of its contract by accident
+#: (the same reasoning system_prompt.py gives for its own ``render_format_rules``
+#: alias). Same object, so the two can never drift.
+STATE_ANNOTATION_PATTERN = _STATE_PATTERN
+
 
 @dataclass
 class ConversationPrediction:

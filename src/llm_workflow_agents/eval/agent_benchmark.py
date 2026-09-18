@@ -35,6 +35,7 @@ from typing import Any
 import structlog
 
 from llm_workflow_agents.eval.state_accuracy import (
+    STATE_ANNOTATION_PATTERN,
     ConversationGroundTruth,
     ConversationPrediction,
     StateMachineMetrics,
@@ -535,6 +536,55 @@ def _downgrade_tool_turns_to_text(messages: list[dict[str, Any]]) -> list[dict[s
     return out
 
 
+#: Chars of a leaked/missing prefix kept in a log line — enough to see the
+#: shape without flooding logs on a run where it recurs many times.
+_LEAK_PREFIX_LOG_CHARS = 200
+
+
+def _strip_leaked_reasoning_prefix(content: str) -> str:
+    """Detect and strip a leaked-reasoning prefix before the mandatory annotation.
+
+    FORMAT_RULES rule 1 requires every assistant turn's visible text to begin
+    with a ``[STATE: X → Y]`` annotation; ``NO_REASONING_LEAK_RULE`` (added
+    2026-09-07, ``system_prompt.py``) additionally forbids anything else
+    appearing before it. A frontier-model benchmark run observed one turn whose
+    visible content opened with internal self-talk ("So the tool was executed
+    even with speech! Then why didn't `change_plan` execute? Wait!...") instead
+    of the annotation — a decoding-side artifact that did not reproduce
+    byte-for-byte on a second call at the same temperature, so a system-prompt
+    instruction alone cannot be relied on to prevent it (see that rule's
+    docstring). This is the harness-side guardrail:
+
+    - If a valid ``[STATE: ...]`` annotation is found LATER in the content,
+      strip everything before it, so the leaked prefix doesn't pollute the
+      conversation context forwarded to subsequent turns (which would risk the
+      model imitating its own error) and log the event for auditability.
+    - If no annotation is found anywhere, the content is left untouched —
+      state/tool scoring already treats a turn with no parseable annotation as
+      a missing transition, so there is nothing to recover — but the event is
+      still logged so a run can be diagnosed from its log alone, the way this
+      exact issue first required a manual replay to find.
+    - Empty or whitespace-only content (e.g. from an HTTP-error turn) is
+      already logged separately (``http_error_during_call``) and is left alone.
+    """
+    match = STATE_ANNOTATION_PATTERN.search(content)
+    if match is None:
+        if content.strip():
+            logger.warning(
+                "turn_missing_state_annotation",
+                content_preview=content[:_LEAK_PREFIX_LOG_CHARS],
+            )
+        return content
+    prefix = content[: match.start()]
+    if prefix.strip():
+        logger.warning(
+            "leaked_reasoning_prefix_stripped",
+            prefix_preview=prefix[:_LEAK_PREFIX_LOG_CHARS],
+        )
+        return content[match.start():]
+    return content
+
+
 def _call_vllm(
     endpoint: str,
     model: str,
@@ -677,7 +727,7 @@ def _call_vllm(
     for idx in sorted(tool_call_accum):
         raw_tool_calls.append(tool_call_accum[idx])
 
-    content = "".join(content_parts)
+    content = _strip_leaked_reasoning_prefix("".join(content_parts))
 
     # Append any structured tool calls as <tool_call> tags so that
     # parse_tool_calls() can extract them.
@@ -695,6 +745,61 @@ def _call_vllm(
     return content, raw_tool_calls, latency_ms, ttft_ms
 
 
+def _tool_calls_from_text(content: str) -> tuple[str, list[dict[str, Any]]]:
+    """Lift ``<tool_call>{...}</tool_call>`` blocks out of *content*.
+
+    Returns the content with every block removed and the calls as OpenAI
+    structured ``tool_calls`` with fresh ids. Content with no parseable call is
+    returned unchanged with an empty list.
+    """
+    import json as _json
+    import re as _re
+    import uuid as _uuid
+
+    parsed = parse_tool_calls(content)
+    if not parsed:
+        return content, []
+    calls = [
+        {
+            "id": f"call_{_uuid.uuid4().hex[:24]}",
+            "type": "function",
+            "function": {
+                "name": p.get("name", ""),
+                "arguments": _json.dumps(p.get("arguments", {})),
+            },
+        }
+        for p in parsed
+    ]
+    text = _re.sub(r"\s*<tool_call>.*?</tool_call>\s*", " ", content, flags=_re.DOTALL).strip()
+    return text, calls
+
+
+def _assistant_context_messages(
+    text: str, tool_calls: list[dict[str, Any]], split_tool_call_content: bool
+) -> list[dict[str, Any]]:
+    """Native-format context entries for one assistant turn.
+
+    With *split_tool_call_content*, a turn holding both text and tool calls is
+    sent as two assistant messages, text first. The Gemma-4 chat template
+    renders a merged message's text AFTER the tool responses and then closes the
+    model turn, so a request ending in that tool result carries no generation
+    cue: the model sees its own pre-call text posing as its answer to the result
+    and replies with nothing. Split, the template renders text, call and result
+    in the order they happened and leaves the turn open. ChatML-family
+    templates render the merged form correctly and would show the split form as
+    two separate assistant turns, hence the flag.
+    """
+    if tool_calls and split_tool_call_content and text.strip():
+        return [
+            {"role": "assistant", "content": text},
+            {"role": "assistant", "content": "", "tool_calls": tool_calls},
+        ]
+    msg: dict[str, Any] = {"role": "assistant", "content": text}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return [msg]
+
+
 def _replay_conversation(
     endpoint: str,
     model: str,
@@ -702,12 +807,21 @@ def _replay_conversation(
     temperature: float = 0.0,
     enable_thinking: bool = False,
     engine: str = "vllm",
+    tool_turn_format: str = "native",
+    split_tool_call_content: bool = False,
 ) -> tuple[list[dict[str, Any]], list[float], list[float]]:
     """Replay a conversation, substituting model completions at assistant turns.
 
-    Ground-truth tool responses are kept as-is so the conversation stays on
-    track regardless of whether the model's tool call was correct — this
-    isolates state-transition and tool-call quality from cascading failures.
+    Ground-truth tool responses stand in for real tool execution, but only for
+    calls that were actually made: a result reaches the context only when the
+    preceding assistant turn (the model's reply, or a ground-truth turn copied
+    in) made a tool call, one result per call. A result for a call the model
+    never made would not exist in a real system; showing it gave models that
+    miss calls information they should not have (text format), or was dropped
+    by the chat template while the replay carried on regardless (native
+    format). The ground-truth turn that answers a withheld result cannot be
+    solicited — the context ends in the model's own reply — so it is scored as
+    a miss (empty prediction), never copied from ground truth.
 
     Returns:
         (predicted_messages, latencies_ms_per_assistant_turn, ttfts_ms_per_assistant_turn)
@@ -718,7 +832,13 @@ def _replay_conversation(
     latencies_ms: list[float] = []
     ttfts_ms: list[float] = []
     context: list[dict[str, Any]] = []  # sliding context sent to the model
-    pending_tool_call_ids: list[str] = []  # ids from the latest assistant tool_calls
+    # Ids of the calls made by the latest assistant turn that no result has
+    # answered yet. Reset at every assistant turn, so a call from an earlier
+    # turn never licenses a later result.
+    pending_tool_call_ids: list[str] = []
+    # True when a ground-truth tool result was withheld since the last
+    # assistant turn (the call it answers was never made).
+    result_withheld = False
 
     for msg in sample.get("messages", []):
         role = msg["role"]
@@ -733,36 +853,91 @@ def _replay_conversation(
             predicted.append(msg)
 
         elif role == "assistant":
-            # Some samples open with a system-initiated assistant greeting
-            # before any user turn (system → assistant → user → ...). Models
-            # can't be asked to predict a preamble issued before any user
-            # input, and Qwen3-family chat templates explicitly reject a
-            # message list with no user query. Use the ground-truth turn
-            # as a fixed preamble: append to context and predictions, no
-            # model call, no recorded latency.
-            if not any(c.get("role") == "user" for c in context):
+            # A model completion can only be fairly solicited when the
+            # trailing context entry carries something new the model hasn't
+            # reacted to yet — a user utterance or a tool result. Two
+            # situations produce a context that doesn't:
+            #
+            # (1) An opening assistant turn with no user turn before it at
+            #     all (some samples are system-initiated:
+            #     system → assistant → user → ...). Qwen3-family chat
+            #     templates explicitly reject a message list with no user
+            #     query.
+            # (2) A GT assistant turn immediately following another GT
+            #     assistant turn with nothing between them. The corpus does
+            #     this routinely — measured at 295/296 such adjacent pairs
+            #     across the benchmark corpus, nearly always a text-only
+            #     state-transition turn immediately followed by a
+            #     tool-call turn, with no new user input in between.
+            #
+            # Both send Gemini (via BiFrost) a request whose trailing
+            # message is already model-authored, which its API flatly
+            # refuses ("Requests ending with a model turn are not
+            # supported") — a real constraint, not a bug in that provider:
+            # there is no such thing as "continue the model's own last
+            # utterance" in a turn-based chat API when nothing new has been
+            # said. Case (2) previously reached ``_call_vllm`` anyway, which
+            # is why ~5% of calls on this corpus failed with that exact 400
+            # and scored as a missing state annotation *and* a missing tool
+            # call — every one of those failures was structurally
+            # unanswerable, not a model shortcoming. Use the GT turn
+            # verbatim in both cases: no model call, no recorded latency —
+            # case (1)'s existing treatment, now extended to case (2).
+            last_role = context[-1].get("role") if context else None
+            if last_role not in ("user", "tool") and result_withheld:
+                # This turn answers a tool result the model never got, because
+                # it never made the call. It cannot be asked for, and copying
+                # the ground-truth answer would score the model on a turn it
+                # could not have produced — score it as a miss instead.
+                logger.info("missed_turn_after_withheld_tool_result", turn=len(predicted))
+                result_withheld = False
+                pending_tool_call_ids.clear()
+                predicted.append({"role": "assistant", "content": ""})
+                continue
+            if last_role not in ("user", "tool"):
                 logger.info(
-                    "skip_preamble_assistant_turn",
-                    reason="no_user_in_context",
+                    "skip_unsolicitable_assistant_turn",
+                    reason=(
+                        "no_user_in_context"
+                        if not any(c.get("role") == "user" for c in context)
+                        else "consecutive_assistant_turn"
+                    ),
+                    last_context_role=last_role,
                     turn=len(predicted),
                 )
-                preamble: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": msg.get("content", ""),
-                }
+                # The corpus writes tool calls as <tool_call> text. Native
+                # templates render a result only under structured tool_calls,
+                # so lift them out; the text format keeps the turn verbatim.
+                gt_content = msg.get("content") or ""
                 if msg.get("tool_calls"):
-                    preamble["tool_calls"] = msg["tool_calls"]
-                    pending_tool_call_ids.clear()
-                    for tc in msg["tool_calls"]:
-                        tc_id = tc.get("id", "")
-                        if tc_id:
-                            pending_tool_call_ids.append(tc_id)
-                context.append(preamble)
+                    gt_text, gt_calls = gt_content, list(msg["tool_calls"])
+                else:
+                    gt_text, gt_calls = _tool_calls_from_text(gt_content)
+                if tool_turn_format == "text":
+                    context.append({"role": "assistant", "content": gt_content})
+                else:
+                    context.extend(
+                        _assistant_context_messages(gt_text, gt_calls, split_tool_call_content)
+                    )
+                pending_tool_call_ids[:] = [
+                    tc.get("id") or f"gt_call_{i}" for i, tc in enumerate(gt_calls)
+                ]
+                result_withheld = False
                 predicted.append(msg)
                 continue
 
+            if tool_turn_format == "text":
+                # Same format the model trained in: tool calls as text, tool
+                # results as prefixed user turns, and no native tool
+                # declarations (training never had them; the schemas are in
+                # the system prompt). data/tool_turns.py.
+                from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
+                request_messages, request_tools = to_text_tool_turns(context), None
+            else:
+                request_messages, request_tools = context, tools
             content, raw_tool_calls, latency, ttft = _call_vllm(
-                endpoint, model, context, temperature, tools=tools,
+                endpoint, model, request_messages, temperature, tools=request_tools,
                 enable_thinking=enable_thinking, engine=engine,
             )
             latencies_ms.append(latency)
@@ -779,51 +954,26 @@ def _replay_conversation(
             # text tags when the API didn't return them in the structured field.
             # Without this the next tool-role message has no tool_call_id and
             # frontier providers reject the conversation with HTTP 400.
-            synthesized_from_text = False
-            if not raw_tool_calls:
-                parsed = parse_tool_calls(content)
-                if parsed:
-                    import json as _json
-                    import uuid as _uuid
-                    raw_tool_calls = [
-                        {
-                            "id": f"call_{_uuid.uuid4().hex[:24]}",
-                            "type": "function",
-                            "function": {
-                                "name": p.get("name", ""),
-                                "arguments": _json.dumps(p.get("arguments", {})),
-                            },
-                        }
-                        for p in parsed
-                    ]
-                    synthesized_from_text = True
-
-            # Build a well-formed assistant message for the context so
-            # that subsequent tool-role messages have matching tool_call_ids.
-            # Use content *without* appended <tool_call> tags for the API context
-            if raw_tool_calls and not synthesized_from_text:
-                text_content = content.split("\n<tool_call>")[0]
-            elif synthesized_from_text:
-                # Strip ALL <tool_call>...</tool_call> blocks from content for context
-                import re as _re
-                text_content = _re.sub(
-                    r"\s*<tool_call>.*?</tool_call>\s*",
-                    " ",
-                    content,
-                    flags=_re.DOTALL,
-                ).strip()
-            else:
-                text_content = content
-            ctx_msg: dict[str, Any] = {"role": "assistant", "content": text_content}
             if raw_tool_calls:
-                ctx_msg["tool_calls"] = raw_tool_calls
-                # Store the ids so the next tool message(s) can reference them
-                pending_tool_call_ids.clear()
-                for tc in raw_tool_calls:
-                    tc_id = tc.get("id", "")
-                    if tc_id:
-                        pending_tool_call_ids.append(tc_id)
-            context.append(ctx_msg)
+                # _call_vllm appended the structured calls to content as tags.
+                text_content = content.split("\n<tool_call>")[0]
+            else:
+                text_content, raw_tool_calls = _tool_calls_from_text(content)
+            if tool_turn_format == "text":
+                # Keep the reply exactly as generated. Training sees tool calls
+                # as text in place, so rebuilding them from structured calls
+                # (which re-joins prose and <tool_call> with a newline the model
+                # may not have written) would make the context drift from it.
+                context.append({"role": "assistant", "content": content})
+            else:
+                context.extend(
+                    _assistant_context_messages(text_content, raw_tool_calls, split_tool_call_content)
+                )
+            # Only these calls may be answered by the tool results that follow.
+            pending_tool_call_ids[:] = [
+                tc.get("id") or f"call_{i}" for i, tc in enumerate(raw_tool_calls)
+            ]
+            result_withheld = False
 
             # For eval, store the full content with <tool_call> tags
             pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
@@ -845,19 +995,19 @@ def _replay_conversation(
                     )
 
         elif role == "tool":
-            # Use ground-truth tool response to avoid cascading failures.
-            # Assign tool_call_id from the model's preceding tool call so
-            # the OpenAI-format conversation stays well-formed.
-            tool_msg: dict[str, Any] = {
+            # Ground-truth tool results stand in for real execution, but only
+            # for a call the latest assistant turn actually made. Predictions
+            # keep every ground-truth message so turn alignment is unchanged.
+            predicted.append(msg)
+            if not pending_tool_call_ids:
+                logger.info("tool_result_withheld_no_call", turn=len(predicted) - 1)
+                result_withheld = True
+                continue
+            context.append({
                 "role": "tool",
                 "content": msg["content"],
-            }
-            if pending_tool_call_ids:
-                tool_msg["tool_call_id"] = pending_tool_call_ids.pop(0)
-            elif msg.get("tool_call_id"):
-                tool_msg["tool_call_id"] = msg["tool_call_id"]
-            context.append(tool_msg)
-            predicted.append(msg)
+                "tool_call_id": pending_tool_call_ids.pop(0),
+            })
 
     return predicted, latencies_ms, ttfts_ms
 
@@ -986,6 +1136,29 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--tool-turn-format",
+        choices=["native", "text"],
+        default="native",
+        help=(
+            "native (default): past tool calls and results go to the server as "
+            "structured tool_calls / tool messages, with tools=. text: tool calls "
+            "as <tool_call> text and results as '[Tool result]: ' user turns, no "
+            "tools= — the format models trained on the Task A corpus since "
+            "2026-09-17 see in training. Compare models only within one format."
+        ),
+    )
+    parser.add_argument(
+        "--split-tool-call-content",
+        action="store_true",
+        help=(
+            "Native format only: send a reply holding both text and tool calls "
+            "as two assistant messages, text first. Required for Gemma-4 "
+            "templates, which render a merged message's text after the tool "
+            "response and leave no generation cue (empty replies). Leave off "
+            "for ChatML-family templates."
+        ),
+    )
+    parser.add_argument(
         "--voice-weight",
         type=float,
         default=DEFAULT_VOICE_WEIGHT,
@@ -1070,6 +1243,8 @@ if __name__ == "__main__":
         pred_messages, latencies, ttfts = _replay_conversation(
             args.endpoint, args.model, sample, temperature=0.0,
             enable_thinking=args.enable_thinking, engine=args.engine,
+                tool_turn_format=args.tool_turn_format,
+                split_tool_call_content=args.split_tool_call_content,
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
@@ -1114,6 +1289,8 @@ if __name__ == "__main__":
             trial_messages, _, _ = _replay_conversation(
                 args.endpoint, args.model, sample, temperature=0.7,
                 enable_thinking=args.enable_thinking, engine=args.engine,
+                tool_turn_format=args.tool_turn_format,
+                split_tool_call_content=args.split_tool_call_content,
             )
             state_predictions[idx].stochastic_trials.append(trial_messages)
 
@@ -1181,6 +1358,10 @@ if __name__ == "__main__":
         "complexity_level": level_tag,
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
+        "tool_turn_format": args.tool_turn_format,
+        "split_tool_call_content": args.split_tool_call_content,
+        # 2026-09-17: tool results are shown only for calls actually made.
+        "tool_result_gating": "calls_made_only",
         "metrics": quality.to_dict(),
         # quality_summary now also carries a "chunk_diagnostics" key
         # (guardrails, computed over the voice stratum only; see
