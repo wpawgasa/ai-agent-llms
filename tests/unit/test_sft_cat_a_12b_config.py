@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SFT_12B = PROJECT_ROOT / "configs/training/sft_cat_a_12b.yaml"
 SFT_E4B = PROJECT_ROOT / "configs/training/sft_cat_a_e4b.yaml"
 SFT_C2_V3 = PROJECT_ROOT / "configs/training/sft_cat_a_c2_corpus_v3.yaml"
+SFT_12B_TEXTTURNS = PROJECT_ROOT / "configs/training/sft_cat_a_12b_textturns.yaml"
 MODEL_12B = PROJECT_ROOT / "configs/models_exp_a/gemma4_12b.yaml"
 
 
@@ -58,3 +59,13 @@ def test_12b_model_resolves_lora_targets():
     assert _resolve_lora_targets(_load(SFT_12B), model_name=name) == [
         "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj",
     ]
+
+
+def test_the_textturns_rerun_differs_from_the_first_12b_run_only_in_output_dir():
+    """The tool-result re-run isolates that one fix (CLAUDE.md R26). Any other
+    difference would confound the fix with a recipe change."""
+    assert _differing(SFT_12B_TEXTTURNS, SFT_12B) == ["output_dir"]
+
+
+def test_the_textturns_rerun_keeps_the_first_run_checkpoints():
+    assert _load(SFT_12B_TEXTTURNS)["output_dir"] == "sft_cat_a_12b_textturns"
