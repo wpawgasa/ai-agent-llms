@@ -112,7 +112,42 @@ Result JSONs now record `split_tool_call_content` and
 `tool_result_gating: calls_made_only`. Tests:
 `tests/unit/test_replay_tool_result_gating.py`.
 
-## 4. Consequences
+## 4. E4B re-measured under the fix (2026-09-17)
+
+All three E4B models re-run in the native format with the gating and the
+Gemma-4 split (`*_gated_textv2_auto.json`), v2 text + voice, 0 stochastic
+trials:
+
+| Metric | Untrained | SFT (no tool results in training) | SFT with tool results |
+|---|---|---|---|
+| Blended quality | 0.7260 | 0.7433 | **0.7999** |
+| text / voice | 0.7205 / 0.7387 | 0.7391 / 0.7531 | 0.7844 / 0.8362 |
+| state_sequence_accuracy | 0.869 | 0.871 | 0.934 |
+| state_transition_accuracy | 0.509 | 0.657 | 0.705 |
+| task_completion_rate | 0.730 | 0.581 | 0.785 |
+| task_completion_rate_continuous | 0.423 | 0.520 | 0.726 |
+| invalid_transition_rate | 0.103 | 0.038 | 0.034 |
+| tool_call_f1 | 0.590 | 0.705 | 0.700 |
+| argument_exact_match | 0.350 | 0.568 | 0.570 |
+| chain_propagation_accuracy | 0.291 | 0.336 | 0.330 |
+| full_workflow_success | 0.224 | 0.246 | 0.324 |
+| empty replies / results withheld | 2 / 693 | 6 / 433 | 1 / 310 |
+
+**Training with tool results is worth +0.0566 blended quality**, and the gain
+is in workflow following, not tool calling: completion 0.581 → 0.785 and
+continuous completion 0.520 → 0.726, while `tool_call_f1` and
+`argument_exact_match` are flat. The model that saw tool results in training
+also misses fewer calls, so fewer results are withheld (310 against 433).
+
+Under the pre-fix text format the same two checkpoints scored 0.8486 and
+0.8466 — the free results flattered the weaker model enough to hide the
+difference entirely, which is why the first read of this comparison was "the
+fix changes nothing".
+
+Chain propagation is ~1 in 3 for all three models: the R23 argument-fidelity
+gap is untouched by this fix.
+
+## 5. Consequences
 
 - **Every Task A benchmark result before this fix is not comparable** with
   results after it: all local models, both formats, and Gemini (the gating

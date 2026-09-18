@@ -461,6 +461,52 @@ stages:
     outs:
       - checkpoints/sft_cat_a_e4b/gemma-4-E4B-it
 
+  task_a_sft_gemma4_e4b_textturns:
+    # FROZEN. `dvc repro` skips this stage: its cmd is a ~6.5 h GPU run that
+    # would overwrite the registered weights the first time a dep changes.
+    frozen: true
+    desc: >-
+      FROZEN — Re-run of the E4B SFT arm with TOOL RESULTS in the training
+      sequence. Identical to task_a_sft_gemma4_e4b in every hyperparameter
+      (response_only @ 8192, 3 epochs, lora rank 16, freeze_router false) and
+      in its data source; the configs differ only in output_dir. The first E4B
+      run trained without a single tool result, because the Gemma-4 chat
+      template drops `tool` messages that do not answer structured tool_calls
+      and the corpus writes tool calls as text (CLAUDE.md R26,
+      docs/superpowers/specs/2026-09-17-gemma4-tool-results-design.md).
+      data/tool_turns.py now renders each tool result as a "[Tool result]: "
+      user turn, and response_only masking is offset-based.
+
+      RESULT: 3 epochs, 3,168 steps, best eval_loss 0.4298 at checkpoint-3168.
+      On the Phase 1 Task A benchmark (v2 text + voice, native format with the
+      R26 tool-result gating and the Gemma-4 content/call split, 0 stochastic
+      trials, 32K context) it scores 0.7999 blended quality against the old
+      E4B run's 0.7433 and the untrained E4B's 0.7260
+      (results/exp_a/*_gated_textv2_auto.json). The gain is in workflow
+      following, not tool calls: task completion 0.581 -> 0.785, continuous
+      completion 0.520 -> 0.726, tool_call_f1 unchanged at 0.70. Not a held-out
+      audit, and not comparable to any benchmark number recorded before the R26
+      fix.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_e4b_textturns
+          dvc push  task_a_sft_gemma4_e4b_textturns
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_e4b.yaml
+      --sft-config configs/training/sft_cat_a_e4b_textturns.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/_utils.py
+      - src/llm_workflow_agents/data/tool_turns.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_e4b.yaml
+      - configs/training/sft_cat_a_e4b_textturns.yaml
+      - data/output/sft/task_a_splits
+    outs:
+      - checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it
+
   task_a_sft_gemma4_12b:
     # FROZEN. `dvc repro` skips this stage: its cmd is a ~16 h GPU run that
     # would overwrite the registered weights the first time a dep changes.
