@@ -461,6 +461,49 @@ stages:
     outs:
       - checkpoints/sft_cat_a_e4b/gemma-4-E4B-it
 
+  task_a_sft_gemma4_12b_textturns:
+    # FROZEN. `dvc repro` skips this stage: its cmd is an ~18 h GPU run that
+    # would overwrite the registered weights the first time a dep changes.
+    frozen: true
+    desc: >-
+      FROZEN — Re-run of the 12B SFT arm with TOOL RESULTS in the training
+      sequence, the size twin of task_a_sft_gemma4_e4b_textturns. Identical to
+      task_a_sft_gemma4_12b in every hyperparameter and in its data source; the
+      configs differ only in output_dir (tests/unit/test_sft_cat_a_12b_config.py).
+      The first 12B run trained without a single tool result (CLAUDE.md R26).
+
+      RESULT: 3 epochs, 3,168 steps, best eval_loss 0.39967 at checkpoint-3168
+      (the first 12B run ended at 0.4241; not a strict comparison, since the
+      training text differs). 18.0 h on one H100 NVL. No
+      response_only_turn_not_located warnings. The optimizer/scheduler/rng
+      state was deleted from the six intermediate checkpoints after the run
+      (the disk filled); every checkpoint keeps its adapter weights, and
+      checkpoint-3168 is complete.
+
+      Benchmark numbers are pending: the four-run comparison (untrained / first
+      run / this run in the text format, plus this run in the native format)
+      started 2026-09-19 01:21 UTC. The same re-run on E4B was worth +0.0566
+      blended quality in the native format (0.7433 -> 0.7999).
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_12b_textturns
+          dvc push  task_a_sft_gemma4_12b_textturns
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_12b.yaml
+      --sft-config configs/training/sft_cat_a_12b_textturns.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/_utils.py
+      - src/llm_workflow_agents/data/tool_turns.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_12b.yaml
+      - configs/training/sft_cat_a_12b_textturns.yaml
+      - data/output/sft/task_a_splits
+    outs:
+      - checkpoints/sft_cat_a_12b_textturns/gemma-4-12B-it
+
   task_a_sft_gemma4_e4b_textturns:
     # FROZEN. `dvc repro` skips this stage: its cmd is a ~6.5 h GPU run that
     # would overwrite the registered weights the first time a dep changes.
