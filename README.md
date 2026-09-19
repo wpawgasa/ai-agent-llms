@@ -103,11 +103,50 @@ was trained against. The frontier models have not been run here.
   native, within 0.0015 of checkpoint-3168) despite a much worse eval_loss — one
   more case of eval_loss not ranking checkpoints (R15, R16).
 
-`chain_propagation_accuracy` is deliberately absent from these tables. Scoring
-the benchmark's ground truth against itself gives **0.2843**, below what every
-model here scores, so the metric has no usable headroom and measures how often
-consecutive calls happen to share a value rather than whether the model carries
-one. Do not quote it until it is fixed.
+### Chain propagation
+
+`chain_propagation_accuracy` used to score every consecutive pair of tool
+calls, counting a pair as a failure whenever the second call happened to need
+nothing from the first — which is most pairs. Scored against itself, the
+benchmark's own ground truth reached only **0.2843**, below every model, so the
+metric measured the corpus rather than the model. It now scores only real
+propagation opportunities: an argument of call N+1 whose value comes from call
+N's response and appears nowhere earlier in the conversation, so the only way to
+produce it is to have read the tool result. Ground truth scores exactly 1.0.
+
+The 508-conversation benchmark holds **263 such opportunities across 201
+conversations**. Rescored from the stored run logs with
+`scripts/recompute_chain_propagation.py` (no GPU needed):
+
+| model | format | propagation | when the call was made | correct | wrong value | no call |
+|---|---|---|---|---|---|---|
+| E4B SFT + tool results | text | **0.7719** | 0.9103 | 203 | 20 | 40 |
+| 12B SFT + tool results | text | **0.7643** | 0.9306 | 201 | 15 | 47 |
+| E4B SFT + tool results | native | **0.7300** | 0.9057 | 192 | 20 | 51 |
+| 12B SFT, no tool results | text | **0.7186** | 0.9545 | 189 | 9 | 65 |
+| E4B SFT, no tool results | text | **0.7110** | 0.9212 | 187 | 16 | 60 |
+| gemini-3.5-flash-lite | native | **0.6882** | 0.7835 | 181 | 50 | 32 |
+| 12B SFT + tool results | native | **0.6806** | 0.9040 | 179 | 19 | 65 |
+| gemini-3.1-flash-lite | native | **0.6730** | 0.8271 | 177 | 37 | 49 |
+| 12B SFT, no tool results | native | **0.6540** | 0.9198 | 172 | 15 | 76 |
+| E4B SFT, no tool results | native | **0.5970** | 0.9023 | 157 | 17 | 89 |
+| gemma-4-12B-it (untrained) | text | **0.5970** | 0.9075 | 157 | 16 | 90 |
+| gemma-4-E4B-it (untrained) | text | **0.5475** | 0.8834 | 144 | 19 | 100 |
+| gemma-4-E4B-it (untrained) | native | **0.5171** | 0.8447 | 136 | 25 | 102 |
+| gemma-4-12B-it (untrained) | native | **0.4487** | 0.8676 | 118 | 18 | 127 |
+
+Two things the old metric could not show:
+
+- **Fine-tuning moves propagation a long way** — the 12B goes 0.4487 to 0.6806
+  native, E4B 0.5171 to 0.7300 — and the fine-tuned open-weight models beat both
+  frontier models, which lead the quality table.
+- **Carrying the value is nearly solved; making the call is not.** Once a model
+  emits the right call it carries the right value 90–95% of the time (frontier
+  models are the weakest here at 0.78–0.83). Failures are dominated by the call
+  never being made: 47 of the 12B's 62 failures, 127 of the untrained 12B's 145.
+
+The `no call` column includes turns the harness copied from ground truth rather
+than asking the model for, so it is an upper bound on the model's own omissions.
 
 ---
 
