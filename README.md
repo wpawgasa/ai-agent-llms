@@ -28,6 +28,89 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 
 ---
 
+## Phase 1 Task A Results
+
+Every run below was scored under the R26 tool-result gating (a tool result is
+shown only for a call the model actually made), on the frozen v2 text stratum
+plus the voice stratum — 258 + 250 = 508 conversations, 0 stochastic trials.
+**Nothing here is comparable to a Task A benchmark number recorded before
+2026-09-17**; the earlier runs showed models the results of calls they never
+made. Reproduce any row with:
+
+```bash
+bash scripts/run_exp_a_single.sh --model <path-or-id> \
+    --data data/output/benchmark/task_a_v2 \
+    --data data/output/benchmark/task_a_voice \
+    --max-samples 0 --stochastic-trials 0 --tool-turn-format <native|text>
+```
+
+`quality` is the modality blend (0.7 x text + 0.3 x voice, `blend_modality_scores`)
+and is the number the ranking uses. **Read `continuous` next to `completion`:**
+the plain completion rate only asks whether the last state annotation is
+terminal, so a model that jumps straight there from a state it was never in is
+paid in full (CLAUDE.md R25).
+
+### Native tool-call format
+
+The standard path — structured `tool_calls` rendered by the model's own chat
+template. Frontier models are served through BiFrost and only run here.
+
+| model | quality | text | voice | state trans | tool F1 | completion | continuous | invalid |
+|---|---|---|---|---|---|---|---|---|
+| gemini-3.5-flash-lite (frontier) | **0.8056** | 0.7970 | 0.8258 | 0.5946 | 0.6048 | 0.9409 | 0.6909 | 0.1059 |
+| gemini-3.1-flash-lite (frontier) | **0.8036** | 0.7990 | 0.8143 | 0.6113 | 0.6470 | 0.8642 | 0.7205 | 0.0934 |
+| E4B SFT + tool results | **0.7999** | 0.7844 | 0.8362 | 0.7050 | 0.6996 | 0.7854 | 0.7264 | 0.0345 |
+| 12B SFT + tool results (ckpt-3168) | **0.7629** | 0.7357 | 0.8265 | 0.6712 | 0.6841 | 0.7264 | 0.6496 | 0.0401 |
+| gemma-4-12B-it (untrained) | **0.7563** | 0.7507 | 0.7692 | 0.5788 | 0.6178 | 0.8012 | 0.4843 | 0.1076 |
+| 12B SFT + tool results (ckpt-500) | **0.7553** | 0.7432 | 0.7836 | 0.6850 | 0.6909 | 0.6850 | 0.5866 | 0.0397 |
+| 12B SFT, no tool results | **0.7512** | 0.7125 | 0.8416 | 0.6397 | 0.6928 | 0.7205 | 0.5965 | 0.0368 |
+| E4B SFT, no tool results | **0.7433** | 0.7391 | 0.7531 | 0.6573 | 0.7051 | 0.5807 | 0.5197 | 0.0379 |
+| gemma-4-E4B-it (untrained) | **0.7260** | 0.7205 | 0.7387 | 0.5088 | 0.5901 | 0.7303 | 0.4232 | 0.1026 |
+
+### Text tool-call format
+
+`--tool-turn-format text`: each tool result is rendered as a `[Tool result]: `
+user turn instead of a template-rendered tool message. This is the format the
+SFT corpus writes tool calls in, and the format the tool-result training twin
+was trained against. The frontier models have not been run here.
+
+| model | quality | text | voice | state trans | tool F1 | completion | continuous | invalid |
+|---|---|---|---|---|---|---|---|---|
+| E4B SFT + tool results | **0.8117** | 0.7961 | 0.8479 | 0.7441 | 0.6963 | 0.8287 | 0.7697 | 0.0377 |
+| E4B SFT, no tool results | **0.8093** | 0.7919 | 0.8499 | 0.7556 | 0.7197 | 0.7854 | 0.7146 | 0.0364 |
+| 12B SFT + tool results (ckpt-3168) | **0.7995** | 0.7858 | 0.8313 | 0.7218 | 0.6952 | 0.7953 | 0.7303 | 0.0408 |
+| 12B SFT + tool results (ckpt-500) | **0.7980** | 0.7976 | 0.7991 | 0.7469 | 0.7058 | 0.7539 | 0.6693 | 0.0396 |
+| 12B SFT, no tool results | **0.7749** | 0.7396 | 0.8574 | 0.6707 | 0.7219 | 0.7638 | 0.6496 | 0.0359 |
+| gemma-4-12B-it (untrained) | **0.7682** | 0.7696 | 0.7648 | 0.6186 | 0.6331 | 0.7874 | 0.5453 | 0.0604 |
+| gemma-4-E4B-it (untrained) | **0.7219** | 0.7203 | 0.7256 | 0.4914 | 0.5753 | 0.7362 | 0.4213 | 0.1108 |
+
+### What the two tables say
+
+- **The 4B-class model beats the 12B**, in both formats, trained and untrained
+  after training. The best open-weight result is E4B at 0.8117. Parameter count
+  is not buying anything on this task.
+- **Tool results in the training sequence help, but not evenly.** For E4B the
+  gain is +0.0566 in the native format and only +0.0024 in the text format; for
+  the 12B it is +0.0117 native and +0.0246 text. They mostly repair the native
+  path, which is where the Gemma-4 template was dropping results.
+- **Fine-tuning buys trajectory discipline, not raw completion.** Invalid
+  transitions fall from ~0.10 to ~0.035 and continuous completion rises sharply,
+  while the plain completion rate can fall. The frontier models sit at the top on
+  quality and at the bottom on discipline: gemini-3.5-flash-lite's 0.9409
+  completion is 0.6909 once continuity is required, against 0.1059 invalid
+  transitions.
+- **Almost all of the 12B's gain is present by step 500** (0.7980 text / 0.7553
+  native, within 0.0015 of checkpoint-3168) despite a much worse eval_loss — one
+  more case of eval_loss not ranking checkpoints (R15, R16).
+
+`chain_propagation_accuracy` is deliberately absent from these tables. Scoring
+the benchmark's ground truth against itself gives **0.2843**, below what every
+model here scores, so the metric has no usable headroom and measures how often
+consecutive calls happen to share a value rather than whether the model carries
+one. Do not quote it until it is fixed.
+
+---
+
 ## Current Tags
 
 Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most recent** hash per stage output. An older lineage stays recoverable only through a git tag. These are the two to check out today:
@@ -40,6 +123,8 @@ Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most 
 | **Best Cat A checkpoint** | `model/sft-gemma4-c2-on-task-a-v2` | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | Gemma-4 26B-A4B-it LoRA, `response_only` @ 8192, 48 files / 563 MB, holds checkpoint-500 / -1000 / -1500 / -1767. |
 | **E4B on corpus v3** | `model/sft-gemma4-e4b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_e4b/gemma-4-E4B-it` (stage `task_a_sft_gemma4_e4b`) | Gemma-4-E4B-it LoRA, C2 recipe on `corpus/task-a-v3`, 82 files / 1.70 GB, best checkpoint-3168. Phase 1 benchmark 0.6678; held-out composite 0.7828 text / 0.7894 voice on the corpus-v3 sets — see [the result](docs/cat_a_e4b_sft_benchmark_result.md). |
 | **12B on corpus v3** | `model/sft-gemma4-12b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_12b/gemma-4-12B-it` (stage `task_a_sft_gemma4_12b`) | Gemma-4-12B-it LoRA, C2 recipe on `corpus/task-a-v3`, 80 files / 3.00 GB, best checkpoint-3168. Phase 1 benchmark 0.7186; held-out composite 0.7809 text / 0.7766 voice. Leaks the word `model` at the start of 54.6% of replies — see [the result](docs/cat_a_12b_sft_result.md). |
+| **E4B with tool results** | `model/sft-gemma4-e4b-toolresults-on-task-a-v3` | `checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it` (stage `task_a_sft_gemma4_e4b_textturns`) | Gemma-4-E4B-it LoRA, the E4B recipe with every tool result in the training sequence, best checkpoint-3168 (eval_loss 0.4298, 6h25m). Phase 1 benchmark 0.7999 native / 0.8117 text — the best open-weight result in the table above. |
+| **12B with tool results** | `model/sft-gemma4-12b-toolresults-on-task-a-v3` | `checkpoints/sft_cat_a_12b_textturns/gemma-4-12B-it` (stage `task_a_sft_gemma4_12b_textturns`) | Gemma-4-12B-it LoRA, same change on the 12B, best checkpoint-3168 (eval_loss 0.39967, 18.0 h). Phase 1 benchmark 0.7629 native / 0.7995 text. Intermediate checkpoints keep their adapters but not their optimizer state. |
 | **Corpus-v3 held-out sets** | `derived/task-a-heldout-v3` | `data/output/heldout/cat_a_v3_test_not_in_v2` and `cat_a_v3_test_voice` (gitignored, rebuilt) | 304 text + 146 voice conversations from `corpus/task-a-v3` test, none in `corpus/task-a-v2` train/validation. Not stored: rebuild from the two corpus tags and verify against the committed audits; the annotation holds the commands and checksums. |
 | **GRPO prompt set** | `derived/task-a-grpo-v3` | `data/output/grpo/task_a` | L3–L5 subset of the v3 splits: 5,304 train / 596 validation, 27.7% voice. `P(tool call \| advancing turn)` verified 0.0000. |
 
