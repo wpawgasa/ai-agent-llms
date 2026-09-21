@@ -99,6 +99,47 @@ def test_verify_catches_a_surviving_old_identifier() -> None:
     assert any("CUST-882" in p for p in verify_rows(rows, [broken], ledger, render_prompt=_render))
 
 
+def test_verify_catches_an_old_identifier_inside_a_longer_token() -> None:
+    rows = [("text/l1.jsonl:6", _row())]
+    ledger = _plan(rows)
+    (repaired,) = apply_rows(rows, ledger)
+    broken = copy.deepcopy(repaired)
+    broken["messages"][1]["content"] += " ref CUST-882-OLD"
+    assert any("CUST-882" in p for p in verify_rows(rows, [broken], ledger, render_prompt=_render))
+
+
 def test_a_ledger_key_with_no_matching_row_is_an_error() -> None:
     with pytest.raises(ValueError, match="no row"):
         apply_rows([("k:1", _row())], {"rows": {"k:2": {}}})
+
+
+def test_facts_ledger_is_applied_after_the_mechanical_one() -> None:
+    rows = [("text/l1.jsonl:6", _row())]
+    ledger = _plan(rows)
+    (mechanical,) = apply_rows(rows, ledger)
+    new_cust = ledger["rows"]["text/l1.jsonl:6"]["id_remap"]["CUST-882"]
+    facts = {"edits": [{
+        "key": "text/l1.jsonl:6", "fact": new_cust, "body_index": 3,
+        "action": "rewrite", "old": f"Thanks, {new_cust}!", "new": "Thanks!",
+    }]}
+    (repaired,) = apply_rows(rows, ledger, facts)
+    assert repaired["messages"][-1]["content"].endswith("Thanks!")
+    assert mechanical["messages"][-1]["content"].endswith(f"Thanks, {new_cust}!")
+
+
+def test_verify_reports_an_invented_fact_unless_it_was_accepted() -> None:
+    row = _row()
+    row["messages"][-1]["content"] = "[STATE: RATE → TERMINAL] Use code PREM-20-VIP."
+    rows = [("text/l1.jsonl:6", row)]
+    ledger = _plan(rows)
+    (repaired,) = apply_rows(rows, ledger)
+    assert any("PREM-20-VIP" in p for p in verify_rows(rows, [repaired], ledger, render_prompt=_render, facts_ledger={"edits": []}))
+    accepted = {"edits": [{"key": "text/l1.jsonl:6", "fact": "PREM-20-VIP", "action": "accept_example"}]}
+    (repaired,) = apply_rows(rows, ledger, accepted)
+    assert verify_rows(rows, [repaired], ledger, render_prompt=_render, facts_ledger=accepted) == []
+
+
+def test_a_facts_ledger_key_with_no_row_is_an_error() -> None:
+    rows = [("k:1", _row())]
+    with pytest.raises(ValueError, match="no row"):
+        apply_rows(rows, {"rows": {}}, {"edits": [{"key": "k:9", "fact": "x", "action": "accept_example"}]})

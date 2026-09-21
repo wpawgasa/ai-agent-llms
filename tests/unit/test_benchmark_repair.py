@@ -12,6 +12,7 @@ import random
 import pytest
 
 from llm_workflow_agents.data.benchmark_repair import (
+    apply_fact_edits,
     apply_identifier_remap,
     apply_stay_merges,
     plan_identifier_remap,
@@ -100,6 +101,12 @@ class TestPlanIdentifierRemap:
         sample = _sample([{"role": "user", "content": "switch me to PLAN_50GB"}, _say("S", "S", "Done.")])
         (decision,) = plan_identifier_remap(sample, "", forbidden=set(), rng=random.Random(0), taken=set())
         assert (decision.old, decision.new, decision.reason) == ("PLAN_50GB", None, "complex_shape")
+
+    def test_identifier_inside_a_longer_token_is_skipped(self) -> None:
+        # Rewriting INV-5544 but not INV-5544-SETUP named one invoice two ways.
+        sample = _sample([{"role": "user", "content": "Refund INV-5544, the INV-5544-SETUP fee."}, _say("S", "S", "ok")])
+        decisions = {d.old: d.reason for d in plan_identifier_remap(sample, "", forbidden=set(), rng=random.Random(0), taken=set())}
+        assert decisions["INV-5544"] == "embedded_in_longer_token"
 
     def test_digits_spoken_on_their_own_block_the_remap(self) -> None:
         # The user also says "882" alone; rewriting only CUST-882 would contradict it.
@@ -238,3 +245,43 @@ class TestStayMerges:
         sample["ground_truth"]["state_sequence"].pop()
         with pytest.raises(ValueError, match="state_sequence"):
             apply_stay_merges(sample, plan_stay_merges(sample))
+
+
+# --------------------------------------------------------------------------- fact edits
+
+
+class TestApplyFactEdits:
+
+    def _row(self) -> dict:
+        return _sample([
+            {"role": "user", "content": "anything else?"},
+            _say("S", "S", "Use code PREM20. My customer ID is CID-1274."),
+            {"role": "user", "content": "ok"},
+            _say("S", "TERMINAL", "The format is like RX566609002."),
+        ])
+
+    def test_session_context_rewrite_and_accept(self) -> None:
+        edits = [
+            {"fact": "PREM20", "action": "session_context", "field": "survey_reward_code", "value": "PREM20"},
+            {"fact": "CID-1274", "action": "rewrite", "body_index": 1, "old": " My customer ID is CID-1274.", "new": ""},
+            {"fact": "RX566609002", "action": "accept_example"},
+        ]
+        out = apply_fact_edits(self._row(), edits)
+        assert out["session_context"] == {"survey_reward_code": "PREM20"}
+        assert out["messages"][2]["content"].endswith("Use code PREM20.")
+        assert "RX566609002" in out["messages"][4]["content"]
+
+    def test_a_fact_missing_from_the_row_is_an_error(self) -> None:
+        # Fact values are post-remap; a changed remap must not apply silently.
+        with pytest.raises(ValueError, match="not found"):
+            apply_fact_edits(self._row(), [{"fact": "PREM99", "action": "accept_example"}])
+
+    def test_a_session_context_clash_is_an_error(self) -> None:
+        row = self._row()
+        row["session_context"] = {"survey_reward_code": "OTHER1"}
+        with pytest.raises(ValueError, match="already holds"):
+            apply_fact_edits(row, [{"fact": "PREM20", "action": "session_context", "field": "survey_reward_code", "value": "PREM20"}])
+
+    def test_a_rewrite_must_match_exactly_once(self) -> None:
+        with pytest.raises(ValueError, match="exactly once"):
+            apply_fact_edits(self._row(), [{"fact": "PREM20", "action": "rewrite", "body_index": 1, "old": "nowhere", "new": "x"}])

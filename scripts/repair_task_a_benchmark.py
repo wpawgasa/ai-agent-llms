@@ -36,7 +36,6 @@ import argparse
 import copy
 import json
 import random
-import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -46,6 +45,7 @@ from llm_workflow_agents.data._workflow_script import (
     find_shape_violations,
 )
 from llm_workflow_agents.data.benchmark_repair import (
+    apply_fact_edits,
     apply_identifier_remap,
     apply_stay_merges,
     plan_identifier_remap,
@@ -55,6 +55,7 @@ from llm_workflow_agents.data.benchmark_repair import (
 from llm_workflow_agents.data.source_traceability import (
     _IDENTIFIER_RE,
     find_unsourced_argument_values,
+    find_unsourced_facts,
 )
 from llm_workflow_agents.data.state_convention import (
     find_tool_stay_violations,
@@ -218,14 +219,36 @@ def repair_sample(sample: dict[str, Any], entry: dict[str, Any]) -> dict[str, An
     return out
 
 
-def apply_rows(rows: list[Row], ledger: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every row repaired per its ledger entry; rows without one are copied."""
+def _fact_edits_by_key(facts_ledger: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for edit in (facts_ledger or {}).get("edits", []):
+        grouped.setdefault(edit["key"], []).append(edit)
+    return grouped
+
+
+def apply_rows(
+    rows: list[Row],
+    ledger: dict[str, Any],
+    facts_ledger: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Every row repaired per its ledger entries; rows without one are copied.
+
+    The mechanical ledger is replayed first, then the authored facts ledger,
+    whose values are post-remap.
+    """
     keys = {key for key, _ in rows}
-    stale = sorted(set(ledger.get("rows", {})) - keys)
+    entries = ledger.get("rows", {})
+    fact_edits = _fact_edits_by_key(facts_ledger)
+    stale = sorted((set(entries) | set(fact_edits)) - keys)
     if stale:
         raise ValueError(f"ledger names {len(stale)} keys with no row, e.g. {stale[:3]}")
-    entries = ledger.get("rows", {})
-    return [repair_sample(sample, entries[key]) if key in entries else copy.deepcopy(sample) for key, sample in rows]
+    repaired: list[dict[str, Any]] = []
+    for key, sample in rows:
+        out = repair_sample(sample, entries[key]) if key in entries else copy.deepcopy(sample)
+        if key in fact_edits:
+            out = apply_fact_edits(out, fact_edits[key])
+        repaired.append(out)
+    return repaired
 
 
 def verify_rows(
@@ -233,10 +256,20 @@ def verify_rows(
     repaired: list[dict[str, Any]],
     ledger: dict[str, Any],
     render_prompt: RenderPrompt = _default_render,
+    facts_ledger: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Every problem with the repaired rows; an empty list means all passed."""
+    """Every problem with the repaired rows; an empty list means all passed.
+
+    With a facts ledger, invented facts are checked too: none may remain
+    except those the ledger accepts as format examples.
+    """
     problems: list[str] = []
     entries = ledger.get("rows", {})
+    accepted = {
+        (e["key"], e["fact"])
+        for e in (facts_ledger or {}).get("edits", [])
+        if e["action"] == "accept_example"
+    }
     for (key, original), sample in zip(rows, repaired):
         added = _added_violations(violation_counts(original), violation_counts(sample))
         if added:
@@ -257,10 +290,22 @@ def verify_rows(
         if left:
             problems.append(f"{key}: {len(left)} confident unsourced argument(s) left, e.g. {left[0].describe()}")
 
-        text = json.dumps(sample, ensure_ascii=False)
+        if facts_ledger is not None:
+            invented = [
+                f for f in find_unsourced_facts(_body(sample), prompt, sample.get("session_context"))
+                if f.confidence == "confident" and (key, f.value) not in accepted
+            ]
+            if invented:
+                problems.append(f"{key}: {len(invented)} invented fact(s) left, e.g. {invented[0].describe()}")
+
+        # Plain substring, not whole-token: a remapped value surviving inside a
+        # longer token is exactly the inconsistency to catch.
+        text = json.dumps(
+            [_body(sample), sample.get("ground_truth", {}), sample.get("session_context", {})],
+            ensure_ascii=False,
+        )
         for old in entries.get(key, {}).get("id_remap", {}):
-            system = _original_system(sample)
-            if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(old)}(?![A-Za-z0-9_-])", text.replace(json.dumps(system, ensure_ascii=False), "")):
+            if old in text:
                 problems.append(f"{key}: remapped identifier {old} still present")
     return problems
 
@@ -289,6 +334,7 @@ def main() -> int:
     apply = sub.add_parser("apply", help="replay the ledger into repaired strata and verify them")
     apply.add_argument("--stratum", nargs=2, action="append", required=True, type=Path, metavar=("INPUT_DIR", "OUTPUT_DIR"))
     apply.add_argument("--ledger", required=True, type=Path)
+    apply.add_argument("--facts-ledger", type=Path, help="authored edits for invented facts, replayed after --ledger")
 
     args = parser.parse_args()
 
@@ -309,8 +355,9 @@ def main() -> int:
         rows = load_stratum(input_dir)
         all_rows.extend(rows)
         outputs.append((rows, output_dir))
-    repaired_all = apply_rows(all_rows, ledger)
-    problems = verify_rows(all_rows, repaired_all, ledger)
+    facts_ledger = json.loads(args.facts_ledger.read_text(encoding="utf-8")) if args.facts_ledger else None
+    repaired_all = apply_rows(all_rows, ledger, facts_ledger)
+    problems = verify_rows(all_rows, repaired_all, ledger, facts_ledger=facts_ledger)
 
     offset = 0
     for rows, output_dir in outputs:

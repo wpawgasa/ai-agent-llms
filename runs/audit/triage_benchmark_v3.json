@@ -1,25 +1,25 @@
 {
  "summary": {
   "rows": 508,
-  "rows_with_findings": 402,
+  "rows_with_findings": 396,
   "render_failures": 0,
   "unsourced_arguments": {
    "confident": 0,
    "needs_review": 160
   },
   "unsourced_facts": {
-   "confident": 31,
+   "confident": 2,
    "needs_review": 104
   },
-  "rows_with_confident_unsourced": 29,
+  "rows_with_confident_unsourced": 2,
   "multi_tool_states": {
    "offers": 483,
    "uses": 19
   },
   "mergeable_stay_pairs": 0,
-  "reused_identifiers": 6,
-  "identifier_occurrences_reused_share": 0.015920398009950248,
-  "rows_sharing_identifiers_with_reference": 34,
+  "reused_identifiers": 5,
+  "identifier_occurrences_reused_share": 0.014329580348004094,
+  "rows_sharing_identifiers_with_reference": 27,
   "data": [
    "data/output/benchmark/task_a_v3",
    "data/output/benchmark/task_a_voice_v2"
@@ -91,14 +91,6 @@
      "kind": "fact",
      "value": "20%",
      "confidence": "needs_review",
-     "tool_name": null,
-     "argument": null
-    },
-    {
-     "msg_index": 11,
-     "kind": "fact",
-     "value": "PREM20",
-     "confidence": "confident",
      "tool_name": null,
      "argument": null
     }
@@ -766,14 +758,6 @@
      "confidence": "needs_review",
      "tool_name": null,
      "argument": null
-    },
-    {
-     "msg_index": 12,
-     "kind": "fact",
-     "value": "FEEDBACK15",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
     }
    ],
    "multi_tool_states": [
@@ -876,7 +860,9 @@
    ],
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
-   "identifiers_in_reference": {}
+   "identifiers_in_reference": {
+    "INV-5544": 1
+   }
   },
   {
    "key": "data/output/benchmark/task_a_v3/l2_conversations_mixed_gemini-3-flash-preview_20260611_090338.jsonl:5",
@@ -941,14 +927,6 @@
      "kind": "fact",
      "value": "20%",
      "confidence": "needs_review",
-     "tool_name": null,
-     "argument": null
-    },
-    {
-     "msg_index": 22,
-     "kind": "fact",
-     "value": "NX-511",
-     "confidence": "confident",
      "tool_name": null,
      "argument": null
     }
@@ -1745,27 +1723,6 @@
    }
   },
   {
-   "key": "data/output/benchmark/task_a_v3/l2_conversations_mixed_gemini-3-flash-preview_20260611_090338.jsonl:32",
-   "conversation_id": "L2_032",
-   "modality": "text",
-   "complexity_level": "L2",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 4,
-     "kind": "fact",
-     "value": "PROC-436",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [],
-   "identifiers_in_reference": {}
-  },
-  {
    "key": "data/output/benchmark/task_a_v3/l2_conversations_mixed_gemini-3-flash-preview_20260611_090338.jsonl:33",
    "conversation_id": "L2_033",
    "modality": "text",
@@ -2024,35 +1981,6 @@
      "kind": "fact",
      "value": "10%",
      "confidence": "needs_review",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [],
-   "identifiers_in_reference": {}
-  },
-  {
-   "key": "data/output/benchmark/task_a_v3/l2_conversations_mixed_gemini-3-flash-preview_20260611_090338.jsonl:46",
-   "conversation_id": "L2_046",
-   "modality": "text",
-   "complexity_level": "L2",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 2,
-     "kind": "fact",
-     "value": "PREV-37",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    },
-    {
-     "msg_index": 5,
-     "kind": "fact",
-     "value": "PT-837",
-     "confidence": "confident",
      "tool_name": null,
      "argument": null
     }
@@ -2927,27 +2855,6 @@
    "identifiers_in_reference": {}
   },
   {
-   "key": "data/output/benchmark/task_a_v3/l3_conversations_mixed_gemini-3-flash-preview_20260611_094631.jsonl:20",
-   "conversation_id": "L3_020",
-   "modality": "text",
-   "complexity_level": "L3",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 16,
-     "kind": "fact",
-     "value": "UP-UNLIM-10",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [],
-   "identifiers_in_reference": {}
-  },
-  {
    "key": "data/output/benchmark/task_a_v3/l3_conversations_mixed_gemini-3-flash-preview_20260611_094631.jsonl:21",
    "conversation_id": "L3_021",
    "modality": "text",
@@ -3783,16 +3690,7 @@
    "modality": "text",
    "complexity_level": "L3",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 9,
-     "kind": "fact",
-     "value": "CID-1182",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "COLLECT_RATING",
@@ -4196,7 +4094,7 @@
     {
      "msg_index": 15,
      "kind": "fact",
-     "value": "RX425025",
+     "value": "RX298559",
      "confidence": "confident",
      "tool_name": null,
      "argument": null
@@ -5030,16 +4928,7 @@
    "modality": "text",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 13,
-     "kind": "fact",
-     "value": "UNLIM_PREM_60",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -5067,14 +4956,6 @@
      "kind": "fact",
      "value": "90%",
      "confidence": "needs_review",
-     "tool_name": null,
-     "argument": null
-    },
-    {
-     "msg_index": 16,
-     "kind": "fact",
-     "value": "PHARM-2155",
-     "confidence": "confident",
      "tool_name": null,
      "argument": null
     }
@@ -5143,16 +5024,7 @@
    "modality": "text",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 16,
-     "kind": "fact",
-     "value": "RX504861922",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "PROCESS_REQUEST",
@@ -5176,16 +5048,7 @@
    "modality": "text",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN-UNL-50",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -5199,9 +5062,7 @@
    ],
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN-UNL-50": 10
-   }
+   "identifiers_in_reference": {}
   },
   {
    "key": "data/output/benchmark/task_a_v3/l4_conversations_mixed_gemini-3-5-flash_20260615_074945.jsonl:37",
@@ -5374,16 +5235,7 @@
    "modality": "text",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN-UNLIM-88",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -5420,31 +5272,6 @@
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
    "identifiers_in_reference": {}
-  },
-  {
-   "key": "data/output/benchmark/task_a_v3/l4_conversations_mixed_gemini-3-5-flash_20260615_074945.jsonl:45",
-   "conversation_id": "L4_045",
-   "modality": "text",
-   "complexity_level": "L4",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 10,
-     "kind": "fact",
-     "value": "PLAN-50G",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [
-    "PLAN-50G"
-   ],
-   "identifiers_in_reference": {
-    "PLAN-50G": 13
-   }
   },
   {
    "key": "data/output/benchmark/task_a_v3/l4_conversations_mixed_gemini-3-5-flash_20260615_074945.jsonl:46",
@@ -5845,24 +5672,7 @@
    "modality": "text",
    "complexity_level": "L5",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 4,
-     "kind": "fact",
-     "value": "PR-538",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    },
-    {
-     "msg_index": 10,
-     "kind": "fact",
-     "value": "RX-8912",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "PROCESS_REQUEST",
@@ -6042,14 +5852,6 @@
    "complexity_level": "L5",
    "unsourced_arguments": [],
    "unsourced_facts": [
-    {
-     "msg_index": 4,
-     "kind": "fact",
-     "value": "REF-652",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    },
     {
      "msg_index": 26,
      "kind": "fact",
@@ -6601,7 +6403,7 @@
     {
      "msg_index": 9,
      "kind": "fact",
-     "value": "AC546031",
+     "value": "AC401918",
      "confidence": "confident",
      "tool_name": null,
      "argument": null
@@ -6907,16 +6709,7 @@
    "modality": "text",
    "complexity_level": "L5",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 3,
-     "kind": "fact",
-     "value": "USR-65584",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "REVIEW_POLICY",
@@ -7406,16 +7199,7 @@
    "modality": "voice",
    "complexity_level": "L1",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 5,
-     "kind": "fact",
-     "value": "CS-4423",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "COLLECT_RATING",
@@ -7787,16 +7571,7 @@
    "modality": "voice",
    "complexity_level": "L2",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "FIX-777",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "IDENTIFY_ISSUE",
@@ -9534,16 +9309,7 @@
    "modality": "voice",
    "complexity_level": "L3",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 7,
-     "kind": "fact",
-     "value": "TX-8556",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "COLLECT_RATING",
@@ -10138,29 +9904,6 @@
    "identifiers_in_reference": {}
   },
   {
-   "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:3",
-   "conversation_id": "L4_003",
-   "modality": "voice",
-   "complexity_level": "L4",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN-MAX100",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN-MAX100": 17
-   }
-  },
-  {
    "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:4",
    "conversation_id": "L4_004",
    "modality": "voice",
@@ -10295,29 +10038,6 @@
    "identifiers_in_reference": {}
   },
   {
-   "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:10",
-   "conversation_id": "L4_010",
-   "modality": "voice",
-   "complexity_level": "L4",
-   "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN_5G_60GB",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
-   "multi_tool_states": [],
-   "mergeable_stay_pairs": [],
-   "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN_5G_60GB": 2
-   }
-  },
-  {
    "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:11",
    "conversation_id": "L4_011",
    "modality": "voice",
@@ -10391,16 +10111,7 @@
    "modality": "voice",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "UNL-59",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -10546,16 +10257,7 @@
    "modality": "voice",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 13,
-     "kind": "fact",
-     "value": "PLAN-MAX-100GB",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -10569,9 +10271,7 @@
    ],
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN-MAX-100GB": 9
-   }
+   "identifiers_in_reference": {}
   },
   {
    "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:21",
@@ -10579,16 +10279,7 @@
    "modality": "voice",
    "complexity_level": "L4",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 13,
-     "kind": "fact",
-     "value": "PLAN_MAX60",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -10602,9 +10293,7 @@
    ],
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN_MAX60": 1
-   }
+   "identifiers_in_reference": {}
   },
   {
    "key": "data/output/benchmark/task_a_voice_v2/l4_conversations_mixed_gemini-3-7-flash_20260824_100527.jsonl:22",
@@ -11540,16 +11229,7 @@
    "modality": "voice",
    "complexity_level": "L5",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN_MAX30",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -11563,9 +11243,7 @@
    ],
    "mergeable_stay_pairs": [],
    "reused_identifiers": [],
-   "identifiers_in_reference": {
-    "PLAN_MAX30": 2
-   }
+   "identifiers_in_reference": {}
   },
   {
    "key": "data/output/benchmark/task_a_voice_v2/l5_conversations_mixed_gemini-3-7-flash_20260824_103658.jsonl:11",
@@ -11802,16 +11480,7 @@
    "modality": "voice",
    "complexity_level": "L5",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "PLAN-50G",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",
@@ -11824,12 +11493,8 @@
     }
    ],
    "mergeable_stay_pairs": [],
-   "reused_identifiers": [
-    "PLAN-50G"
-   ],
-   "identifiers_in_reference": {
-    "PLAN-50G": 13
-   }
+   "reused_identifiers": [],
+   "identifiers_in_reference": {}
   },
   {
    "key": "data/output/benchmark/task_a_voice_v2/l5_conversations_mixed_gemini-3-7-flash_20260824_103658.jsonl:21",
@@ -12574,16 +12239,7 @@
    "modality": "voice",
    "complexity_level": "L5",
    "unsourced_arguments": [],
-   "unsourced_facts": [
-    {
-     "msg_index": 15,
-     "kind": "fact",
-     "value": "MAX-899",
-     "confidence": "confident",
-     "tool_name": null,
-     "argument": null
-    }
-   ],
+   "unsourced_facts": [],
    "multi_tool_states": [
     {
      "state": "ACTIVATE_SERVICE",

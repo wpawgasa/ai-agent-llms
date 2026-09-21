@@ -686,3 +686,50 @@ stages:
       md5: 654c1a6eb1602c8397c720a41eaea725.dir
       size: 2063228312
       nfiles: 63
+  task_a_benchmark_repair_v3:
+    cmd: rm -rf data/output/benchmark/task_a_v3 
+      data/output/benchmark/task_a_voice_v2 && python 
+      scripts/repair_task_a_benchmark.py apply --stratum 
+      data/output/benchmark/task_a_v2 data/output/benchmark/task_a_v3 --stratum 
+      data/output/benchmark/task_a_voice data/output/benchmark/task_a_voice_v2 
+      --ledger data/interim/task_a_benchmark_repair_ledger/ledger.json 
+      --facts-ledger data/interim/task_a_benchmark_repair_ledger/facts.json
+    deps:
+    - path: data/interim/task_a_benchmark_repair_ledger
+      hash: md5
+      md5: 85967f28fab132e721250f62400f72be.dir
+      size: 98852
+      nfiles: 2
+    - path: data/output/benchmark/task_a_v2
+      hash: md5
+      md5: 5670e85e425b6adc9c4218fb3b2fa39d.dir
+      size: 4905207
+      nfiles: 6
+    - path: data/output/benchmark/task_a_voice
+      hash: md5
+      md5: 6fea777dd9b8f0fe08d613117933cfb7.dir
+      size: 5095131
+      nfiles: 10
+    - path: scripts/repair_task_a_benchmark.py
+      hash: md5
+      md5: d74dc1ea368611f64800b766b5ec8b6e
+      size: 15759
+    - path: src/llm_workflow_agents/data/benchmark_repair.py
+      hash: md5
+      md5: 4e10ebf749140a6ad8171e723e7a70dd
+      size: 15160
+    - path: src/llm_workflow_agents/data/source_traceability.py
+      hash: md5
+      md5: 3f5fb4b31a55dd931eadf3d5a435d278
+      size: 17015
+    outs:
+    - path: data/output/benchmark/task_a_v3
+      hash: md5
+      md5: 30cbf975786dec2878589dc281c70959.dir
+      size: 4894615
+      nfiles: 6
+    - path: data/output/benchmark/task_a_voice_v2
+      hash: md5
+      md5: 4a954b8239e0f682b6b0d7afd1d3933c.dir
+      size: 5086128
+      nfiles: 5

@@ -1,0 +1,6 @@
+outs:
+- md5: 85967f28fab132e721250f62400f72be.dir
+  size: 98852
+  nfiles: 2
+  hash: md5
+  path: task_a_benchmark_repair_ledger

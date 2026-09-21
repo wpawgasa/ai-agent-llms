@@ -70,6 +70,43 @@ stages:
     outs:
       - data/output/benchmark/task_a_v2
 
+  task_a_benchmark_repair_v3:
+    # FROZEN 2026-09-21. `dvc repro` skips this stage. Scores on these strata
+    # are a separate scale from v2 text / v1 voice. See CLAUDE.md R28.
+    frozen: true
+    desc: >-
+      FROZEN — the Phase 1 benchmark with its untraceable values repaired
+      (CLAUDE.md R28). Inputs are the frozen v2 text stratum and the frozen
+      voice stratum; both stay unchanged. Same 508 conversations in the same
+      order. Two DVC-tracked ledgers are replayed: ledger.json (seed
+      20260921, planned once against the SFT corpus) remaps 943 simple entity
+      identifiers to values absent from training, merges 59 runs of self-loop
+      turns ending in a tool call, and states 35 unknowable tool-argument
+      values in a session_context block; facts.json (32 authored edits,
+      approved 2026-09-21) resolves 31 invented facts in gold prose - 27 into
+      session context, 2 answer-leaking examples rewritten to format masks,
+      1 role-slip sentence removed, 2 genuine format examples accepted.
+      Verified: no confident unsourced tool argument, no unaccepted invented
+      fact, no new format violation, ground truth aligned, no remapped value
+      surviving. Deterministic, no LLM calls and no training data at repro time.
+    cmd: >-
+      rm -rf data/output/benchmark/task_a_v3 data/output/benchmark/task_a_voice_v2 &&
+      python scripts/repair_task_a_benchmark.py apply
+      --stratum data/output/benchmark/task_a_v2 data/output/benchmark/task_a_v3
+      --stratum data/output/benchmark/task_a_voice data/output/benchmark/task_a_voice_v2
+      --ledger data/interim/task_a_benchmark_repair_ledger/ledger.json
+      --facts-ledger data/interim/task_a_benchmark_repair_ledger/facts.json
+    deps:
+      - data/output/benchmark/task_a_v2
+      - data/output/benchmark/task_a_voice
+      - data/interim/task_a_benchmark_repair_ledger
+      - scripts/repair_task_a_benchmark.py
+      - src/llm_workflow_agents/data/benchmark_repair.py
+      - src/llm_workflow_agents/data/source_traceability.py
+    outs:
+      - data/output/benchmark/task_a_v3
+      - data/output/benchmark/task_a_voice_v2
+
   task_a_benchmark_voice:
     # FROZEN 2026-09-11. `dvc repro` skips this stage. In production use as
     # the voice half of the Cat A composite blend since 2026-08-24 (see

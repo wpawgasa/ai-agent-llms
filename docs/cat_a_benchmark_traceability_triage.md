@@ -185,37 +185,79 @@ python scripts/repair_task_a_benchmark.py apply \
 
 ### Result
 
-Plan (seed 20260921): 421 of 508 rows changed; 948 identifiers remapped; 83
-skipped (70 structured, 10 digits spoken elsewhere, 3 general knowledge); 59
-merge runs, none dropped for violations; 35 session-context values. Apply:
-every row passes verification, and a second apply is byte-identical.
+Plan (seed 20260921): 420 of 508 rows changed; 943 identifiers remapped; 88
+skipped (70 structured, 9 digits spoken elsewhere, 6 embedded in a longer
+token, 3 general knowledge); 59 merge runs, none dropped for violations; 35
+session-context values. Apply: every row passes verification, and a second
+apply is byte-identical.
 
-Re-triaged (`runs/audit/triage_benchmark_v3.json`):
+**Two defects caught and fixed before commit:**
 
-| | v2 | v3 |
+- The first plan remapped `AES-256` to `AES-616`: the general-knowledge
+  allowlist was applied to the facts check but not to the remap. The remap now
+  skips it (`general_knowledge`).
+- Five conversations came out naming one thing two ways. `INV-5544` was
+  remapped where it stood alone, while `INV-5544-SETUP` was skipped as a
+  structured identifier. The planner and the rewriter disagreed about token
+  boundaries, and verification used the rewriter's rule, so it could not see
+  the problem. The planner now skips an identifier that also occurs inside a
+  longer token (`embedded_in_longer_token`), and verification checks for the
+  old value as a plain substring. Both have regression tests.
+
+## Repair pilot — authored stage (2026-09-21)
+
+The 31 confident invented facts were resolved one by one in
+`data/interim/task_a_benchmark_repair_ledger/facts.json` (32 edits, approved by
+the user), replayed after the mechanical ledger by `apply --facts-ledger`.
+
+**26 of the 31 were hidden unknowable tool arguments.** The teacher invented a
+value in prose ("I recommend plan PLAN-UNL-50") and the gold call then used it.
+The argument check counted those calls as sourced, because the prose had said
+the value first. Stating the value in session context fixes the prose and the
+call together.
+
+| Action | Count | Examples |
+|---|---|---|
+| Session context | 27 | 13 recommended upgrade plans, 2 survey reward codes, 12 on-file identifiers (contract, claim, procedure, prescription, pharmacy, interaction, fix) |
+| Rewrite to a format mask | 2 | the agent's "example" `RX566609002` was exactly the ID the user read out next — the teacher leaked the answer |
+| Remove a sentence | 1 | the agent said "My customer ID is CID-1274." — a role slip; the ID moved to session context |
+| Accept as a format example | 2 | "e.g. RX + 6 digits", after which the user gives a different, real ID |
+
+`apply_fact_edits` refuses to apply when a fact is not where the ledger says it
+is (fact values are post-remap, so drift would otherwise be silent), when a
+session-context field already holds a different value, or when a rewrite
+target does not occur exactly once. With `--facts-ledger`, verification also
+requires that no confident invented fact remains except the accepted examples.
+
+The session-context header now reads "use these values where a tool call or the
+conversation needs them": a reward code is told to the customer, not passed to
+a tool.
+
+### Final state
+
+| | v2 + voice | v3 + voice v2 |
 |---|---|---|
 | Confident unsourced tool arguments | 35 | **0** |
-| Confident invented facts | 33 | 31 |
+| Confident invented facts | 33 | **2** (both accepted format examples) |
 | Mergeable stay+stay pairs | 59 | **0** |
-| Identifier occurrences reused across rows | 31.1% | **1.6%** |
-| Rows sharing an identifier with training | 362 | **34** |
+| Identifier occurrences reused across rows | 31.1% | **1.4%** |
+| Rows sharing an identifier with training | 362 | **27** |
 
-The two resolved facts were invented values that were also unsourced
-arguments; stating them in session context sources both.
+Frozen as DVC stage `task_a_benchmark_repair_v3` (guard:
+`tests/unit/test_dvc_benchmark_repair_v3_stage.py`); the ledgers are tracked by
+`data/interim/task_a_benchmark_repair_ledger.dvc`. Run the benchmark as
+`--data data/output/benchmark/task_a_v3 --data data/output/benchmark/task_a_voice_v2`.
 
-**One defect caught and fixed before commit:** the first plan remapped
-`AES-256` to `AES-616`, because the general-knowledge allowlist was applied to
-the facts check but not to the remap. The remap now skips it
-(`general_knowledge`), with a regression test.
+### Left as they are, by decision
 
-### Not yet done
+- **19 multi-tool state visits and 483 multi-tool state offers.** Splitting a
+  state inside an existing conversation needs an advancing turn the
+  conversation does not contain, and converting the offers to router states
+  would rewrite the conversations. They make a turn ambiguous; they do not make
+  anything unscorable. One tool per state is a rule for future generation.
+- **Advance-then-stay pairs** stay two turns (decided 2026-09-21).
 
-- **31 invented facts** — 18 appear right after a tool result, so the natural
-  fix is to put the value in that result; 13 have no tool result before them
-  and need session context or a prose edit. Per-conversation judgement.
-- **19 multi-tool state visits** — splitting a state inside an existing
-  conversation needs an advancing turn the conversation does not contain, so
-  it is authored content, not a mechanical repair.
-- The repaired strata are not DVC-tracked yet. They get a frozen stage once
-  their content is final; `plan` is deterministic from its seed, the code and
-  the DVC-tracked training corpus, so nothing is lost meanwhile.
+### Next
+
+Every model must be re-scored on the new strata — the scores are a separate
+scale from v2. Four local models in two formats and both Gemini runs.

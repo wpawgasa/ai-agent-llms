@@ -20,6 +20,11 @@ live in :mod:`source_traceability`; see CLAUDE.md R28.
    instead of copying it from gold. Advance-then-stay pairs are never merged:
    that pair is how the stay convention enters a tool state.
 
+4. **Fact edits.** Authored per conversation, not planned: a specific fact the
+   gold prose invents is moved into session context, rewritten, or accepted as
+   a format example (:func:`apply_fact_edits`). Replayed after the three
+   mechanical repairs, so its values are post-remap.
+
 Order matters when planning: remap, then merge, then plan session context.
 Merging moves prose into the calling turn, and a calling turn cannot source its
 own value, so session context must be planned on the merged conversation.
@@ -57,7 +62,7 @@ class RemapDecision:
 
     old: str
     new: str | None
-    reason: str   # "remapped" | "general_knowledge" | "complex_shape" | "digits_referenced_elsewhere" | "no_free_value"
+    reason: str   # "remapped" | "general_knowledge" | "complex_shape" | "embedded_in_longer_token" | "digits_referenced_elsewhere" | "no_free_value"
 
 
 # --------------------------------------------------------------------------- helpers
@@ -148,6 +153,12 @@ def plan_identifier_remap(
             decisions.append(RemapDecision(old, None, "complex_shape"))
             continue
         prefix, digits = match.groups()
+        # INV-5544 inside INV-5544-SETUP: the rewrite only touches whole tokens,
+        # so remapping would leave the embedded copy behind and the
+        # conversation would name one invoice two ways.
+        if text.count(old) != len(re.findall(_bounded(old), text)):
+            decisions.append(RemapDecision(old, None, "embedded_in_longer_token"))
+            continue
         if re.search(rf"(?<!\d){digits}(?!\d)", bare_text):
             decisions.append(RemapDecision(old, None, "digits_referenced_elsewhere"))
             continue
@@ -301,4 +312,48 @@ def apply_stay_merges(sample: dict[str, Any], runs: list[tuple[int, ...]]) -> di
         del messages[i]
     for n in sorted(drop_entries, reverse=True):
         del sequence[n]
+    return out
+
+
+# --------------------------------------------------------------------------- 4. fact edits
+
+
+def apply_fact_edits(sample: dict[str, Any], edits: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply authored edits for invented facts; return a new sample.
+
+    Each edit names the ``fact`` it resolves and one ``action``:
+
+    - ``session_context``: state ``value`` under ``field``. An existing field
+      holding a different value is an error, never an overwrite.
+    - ``rewrite``: replace ``old`` with ``new`` in the conversation message at
+      ``body_index`` (system message excluded); ``old`` must occur exactly once.
+    - ``accept_example``: no change; the fact is a format example, not a claim.
+
+    Every ``fact`` must appear in the conversation before any edit applies.
+    Fact values are post-remap, so a changed remap ledger would otherwise
+    leave edits silently pointing at values that no longer exist.
+    """
+    out = copy.deepcopy(sample)
+    body = [m for m in out.get("messages", []) if m.get("role") != "system"]
+    text = json.dumps(body, ensure_ascii=False)
+    for edit in edits:
+        if edit["fact"] not in text:
+            raise ValueError(f"fact {edit['fact']!r} not found in the conversation")
+
+    for edit in edits:
+        action = edit["action"]
+        if action == "session_context":
+            context = out.setdefault("session_context", {})
+            field, value = edit["field"], edit["value"]
+            if field in context and context[field] != value:
+                raise ValueError(f"session_context.{field} already holds {context[field]!r}, not {value!r}")
+            context[field] = value
+        elif action == "rewrite":
+            message = body[edit["body_index"]]
+            content = message.get("content") or ""
+            if content.count(edit["old"]) != 1:
+                raise ValueError(f"rewrite target {edit['old']!r} must occur exactly once in message {edit['body_index']}")
+            message["content"] = content.replace(edit["old"], edit["new"])
+        elif action != "accept_example":
+            raise ValueError(f"unknown fact action {action!r}")
     return out

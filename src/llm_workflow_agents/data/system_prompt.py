@@ -345,7 +345,8 @@ def format_rules_for_sample(sample: Any) -> str:
 #: checkers can find the block without restating its wording.
 SESSION_CONTEXT_HEADER = (
     "Session context (known to you before the conversation began — use these "
-    "values directly as tool arguments; do not ask the customer for them):"
+    "values where a tool call or the conversation needs them; do not ask the "
+    "customer for them):"
 )
 
 
