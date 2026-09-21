@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from generate_benchmark_replacements import gate, parse_extra, slots_from_triage  # noqa: E402
+from generate_benchmark_replacements import gate, parse_extra, slot_targets, slots_from_triage  # noqa: E402
 
 
 def _render(sample: dict, original: str) -> str:
@@ -98,3 +98,29 @@ def test_a_tool_result_without_a_call_is_rejected() -> None:
     sample["messages"].insert(4, {"role": "assistant", "content": "[STATE: CREATE_PROPOSAL → CREATE_PROPOSAL] Let me check."})
     sample["messages"].insert(5, {"role": "tool", "content": '{"ok": true}'})
     assert any("no tool call" in r and "result" in r for r in gate(sample, SLOT, prompt=""))
+
+
+def _slot(domain: str, state: str) -> dict:
+    return {"domain": domain, "must_visit": state}
+
+
+def test_a_sequence_is_exercised_only_at_its_last_step() -> None:
+    assert slot_targets(_slot("sales", "CREATE_PROPOSAL")) == (("SEND_PROPOSAL",), {"SEND_PROPOSAL"})
+    assert slot_targets(_slot("surveys", "COLLECT_RATING")) == (("COLLECT_NPS",), {"COLLECT_NPS"})
+    assert slot_targets(_slot("banking", "FRAUD_INVESTIGATION")) == (("REPORT_FRAUD",), {"REPORT_FRAUD"})
+
+
+def test_a_choice_is_exercised_in_any_branch_of_its_router() -> None:
+    required, acceptable = slot_targets(_slot("billing_payments", "APPLY_ADJUSTMENT"))
+    assert acceptable == {"ISSUE_REFUND", "WAIVE_LATE_FEE"}
+    assert required[0] == "APPLY_ADJUSTMENT" and required[1] in acceptable
+
+
+def test_reaching_only_the_first_step_of_a_sequence_is_rejected() -> None:
+    sample = _clean()
+    sample["messages"] = sample["messages"][:4] + [
+        {"role": "assistant", "content": "[STATE: CREATE_PROPOSAL → CLOSE_DEAL] Your quote is ready."}
+    ]
+    slot = {**SLOT, "targets": ["SEND_PROPOSAL"]}
+    assert any("never visits SEND_PROPOSAL" in r for r in gate(sample, slot, prompt=""))
+    assert not any("never visits" in r for r in gate(_clean(), slot, prompt=""))

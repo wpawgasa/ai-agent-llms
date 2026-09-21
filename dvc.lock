@@ -733,3 +733,42 @@ stages:
       md5: 4a954b8239e0f682b6b0d7afd1d3933c.dir
       size: 5086128
       nfiles: 5
+  task_a_benchmark_v4:
+    cmd: rm -rf data/output/benchmark/task_a_v4 
+      data/output/benchmark/task_a_voice_v3 && python 
+      scripts/build_benchmark_v4.py --stratum text 
+      data/output/benchmark/task_a_v3 data/output/benchmark/task_a_v4 --stratum 
+      voice data/output/benchmark/task_a_voice_v2 
+      data/output/benchmark/task_a_voice_v3 --replacements 
+      data/interim/task_a_benchmark_v4_replacements
+    deps:
+    - path: data/interim/task_a_benchmark_v4_replacements
+      hash: md5
+      md5: 831ef3ca0e4fbf6085db6d9d3b3b2a77.dir
+      size: 501096
+      nfiles: 3
+    - path: data/output/benchmark/task_a_v3
+      hash: md5
+      md5: 30cbf975786dec2878589dc281c70959.dir
+      size: 4894615
+      nfiles: 6
+    - path: data/output/benchmark/task_a_voice_v2
+      hash: md5
+      md5: 4a954b8239e0f682b6b0d7afd1d3933c.dir
+      size: 5086128
+      nfiles: 5
+    - path: scripts/build_benchmark_v4.py
+      hash: md5
+      md5: 1f512dc5a26c6090e101e7711a90582a
+      size: 4258
+    outs:
+    - path: data/output/benchmark/task_a_v4
+      hash: md5
+      md5: b7dd2c15ce78794553b14e8270a84dea.dir
+      size: 5018223
+      nfiles: 7
+    - path: data/output/benchmark/task_a_voice_v3
+      hash: md5
+      md5: 364adbe27954f139b5db8c0c05e17f00.dir
+      size: 5100987
+      nfiles: 6

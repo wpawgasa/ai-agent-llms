@@ -77,3 +77,51 @@ def test_a_domain_without_routers_builds_and_walks_as_before() -> None:
         pa = walk_path(ga, domain, "cooperative", "service", a)
         pb = walk_path(gb, domain, "cooperative", "service", b)
         assert [(t.from_state, t.to_state) for t in pa] == [(t.from_state, t.to_state) for t in pb]
+
+
+# --------------------------------------------------------------------------- required states
+
+
+def test_a_required_state_behind_an_optional_branch_is_attached_and_walked() -> None:
+    # banking reaches FRAUD_INVESTIGATION only through an optional intent_match
+    # edge, which a service conversation never walked (0 of 400 before).
+    domain = split_multi_tool_states(DOMAIN_REGISTRY["banking"])
+    for seed in range(40):
+        rng = random.Random(seed)
+        graph = select_subgraph(domain, COMPLEXITY_SPECS["L2"], rng, "service", required_states=("REPORT_FRAUD",))
+        names = _names(graph)
+        assert {"FRAUD_INVESTIGATION", "REPORT_FRAUD"} <= set(names.values())
+        path = walk_path(graph, domain, "cooperative", "service", rng, required_states=("REPORT_FRAUD",))
+        walked = [names[t.to_state] for t in path]
+        assert "REPORT_FRAUD" in walked, seed
+        assert path[-1].to_state in graph.terminal_states
+
+
+def test_an_unreachable_required_state_is_an_error() -> None:
+    import pytest
+
+    domain = split_multi_tool_states(DOMAIN_REGISTRY["banking"])
+    with pytest.raises(ValueError, match="unreachable"):
+        select_subgraph(domain, COMPLEXITY_SPECS["L2"], random.Random(0), required_states=("NO_SUCH_STATE",))
+
+
+def test_the_teacher_is_told_the_required_route_only_when_there_is_one() -> None:
+    from llm_workflow_agents.data.generate_workflows import _build_teacher_prompt
+
+    domain = split_multi_tool_states(DOMAIN_REGISTRY["banking"])
+    graph = select_subgraph(domain, COMPLEXITY_SPECS["L2"], random.Random(0), required_states=("REPORT_FRAUD",))
+    schemas = list(domain.tools)
+    with_route = _build_teacher_prompt(graph, schemas, "cooperative", COMPLEXITY_SPECS["L2"], domain, required_states=("REPORT_FRAUD",))
+    without = _build_teacher_prompt(graph, schemas, "cooperative", COMPLEXITY_SPECS["L2"], domain)
+    assert "MUST pass through [REPORT_FRAUD]" in with_route
+    assert "Required route" not in without
+
+
+def test_the_repair_loop_names_a_required_state_the_teacher_skipped() -> None:
+    from llm_workflow_agents.data.generate_workflows import _find_missing_required_states
+
+    messages = [{"role": "assistant", "content": "[STATE: A → B] hi"}]
+    assert _find_missing_required_states(messages, ()) == []
+    assert _find_missing_required_states(messages, ("B",)) == []
+    (problem,) = _find_missing_required_states(messages, ("REPORT_FRAUD",))
+    assert "[REPORT_FRAUD]" in problem

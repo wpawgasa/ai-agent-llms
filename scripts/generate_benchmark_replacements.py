@@ -65,6 +65,9 @@ from llm_workflow_agents.data.source_traceability import (  # noqa: E402
 )
 from llm_workflow_agents.data.state_convention import parse_assistant_turns  # noqa: E402
 
+from llm_workflow_agents.data.domain_registry import DOMAIN_REGISTRY  # noqa: E402
+from llm_workflow_agents.data.single_tool_graph import split_multi_tool_states  # noqa: E402
+
 #: The teacher that wrote each stratum being replaced.
 TEACHERS = {"text": "gemini-3-flash-preview", "voice": "gemini-3.7-flash"}
 
@@ -106,6 +109,37 @@ def parse_extra(spec: str) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------- targets
+
+
+def slot_targets(slot: dict[str, Any], rng: random.Random | None = None) -> tuple[tuple[str, ...], set[str]]:
+    """``(required_states, acceptable)`` for a slot, from its split domain.
+
+    The removed conversation used two tools in ``must_visit``. After the split:
+
+    - a **sequence** is exercised only if the conversation reaches its last
+      step (``CREATE_PROPOSAL`` -> ``SEND_PROPOSAL``): require that step;
+    - a **choice** is exercised only if the conversation enters one of that
+      router's branches: require the router and one branch, drawn with ``rng``
+      so the replacements do not all take the first option.
+
+    ``acceptable`` is what the gate checks: the last step, or any branch.
+    """
+    domain = split_multi_tool_states(DOMAIN_REGISTRY[slot["domain"]])
+    state = slot["must_visit"]
+    routes = [e.dst for e in domain.edges if e.src == state and e.route]
+    if routes:
+        branch = (rng or random.Random(0)).choice(routes)
+        return (state, branch), set(routes)
+    last = state
+    while True:
+        nxt = [e.dst for e in domain.edges if e.src == last and e.trigger == "tool_success" and e.label.endswith(" done")]
+        if not nxt:
+            break
+        last = nxt[0]
+    return (last,), {last}
+
+
 # --------------------------------------------------------------------------- gate
 
 
@@ -143,8 +177,9 @@ def gate(sample: dict[str, Any], slot: dict[str, Any], prompt: str) -> list[str]
     if not any(l.tool_names for l in labels):
         reasons.append("no tool call")
     visited = {l.from_state for l in labels} | {l.to_state for l in labels}
-    if slot["must_visit"] not in visited:
-        reasons.append(f"never visits {slot['must_visit']}")
+    targets = set(slot.get("targets") or [slot["must_visit"]])
+    if not targets & visited:
+        reasons.append(f"never visits {' or '.join(sorted(targets))}")
     return reasons
 
 
@@ -170,7 +205,7 @@ def repair_candidate(
 # --------------------------------------------------------------------------- generation
 
 
-def _generate(slot: dict[str, Any], seed: int, n: int, workdir: Path) -> list[dict[str, Any]]:
+def _generate(slot: dict[str, Any], seed: int, n: int, workdir: Path, pin: bool) -> list[dict[str, Any]]:
     from llm_workflow_agents.data.generate_workflows import generate_workflow_dataset
 
     out = workdir / f"seed{seed}"
@@ -185,6 +220,7 @@ def _generate(slot: dict[str, Any], seed: int, n: int, workdir: Path) -> list[di
         modality_preset="voice_only" if slot["modality"] == "voice" else "default",
         initiation_preset="outbound_heavy" if slot["initiator"] == "agent" else "default",
         single_tool_states=True,
+        required_states=tuple(slot["required"]) if pin else (),
         max_workers=n,
     )
     return [json.loads(line) for f in sorted(out.glob("*.jsonl")) for line in f.read_text().splitlines() if line.strip()]
@@ -200,14 +236,22 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=20260921)
     parser.add_argument("--candidates-per-attempt", type=int, default=3)
     parser.add_argument("--max-attempts", type=int, default=6)
-    parser.add_argument("--slots", help="comma-separated slot indices to run, for a smoke test")
+    parser.add_argument("--slots", help="comma-separated slot indices to run")
+    parser.add_argument("--resume", action="store_true",
+                        help="keep the accepted slots already in --out-dir; rerun only --slots")
+    parser.add_argument("--pin", action="store_true",
+                        help="pin each slot's route (generator required_states) instead of hoping the teacher takes it")
     args = parser.parse_args()
 
     rows = dict(load_rows(args.benchmark))
-    slots = slots_from_triage(json.loads(args.triage.read_text()), rows) + [parse_extra(e) for e in args.extra]
+    all_slots = slots_from_triage(json.loads(args.triage.read_text()), rows) + [parse_extra(e) for e in args.extra]
+    target_rng = random.Random(args.seed)
+    for slot in all_slots:
+        required, acceptable = slot_targets(slot, target_rng)
+        slot["required"], slot["targets"] = list(required), sorted(acceptable)
+    run = set(range(len(all_slots)))
     if args.slots:
-        keep = {int(i) for i in args.slots.split(",")}
-        slots = [s for i, s in enumerate(slots) if i in keep]
+        run = {int(i) for i in args.slots.split(",")}
     forbidden = _reference_identifiers(args.reference)
     for sample in rows.values():
         forbidden.update(_IDENTIFIER_RE.findall(json.dumps(sample, ensure_ascii=False)))
@@ -215,14 +259,38 @@ def main() -> int:
     taken: set[str] = set()
 
     accepted: dict[str, list[dict[str, Any]]] = {"text": [], "voice": []}
-    manifest: list[dict[str, Any]] = []
+    manifest: list[dict[str, Any]] = [{} for _ in all_slots]
+    if args.resume:
+        previous = json.loads((args.out_dir / "manifest.json").read_text())
+        kept_ids = {r["accepted"]["conversation_id"] for i, r in enumerate(previous) if i not in run and r.get("accepted")}
+        for modality in accepted:
+            path = args.out_dir / f"replacements_{modality}.jsonl"
+            if path.exists():
+                accepted[modality] = [
+                    json.loads(l) for l in path.read_text().splitlines()
+                    if l.strip() and json.loads(l)["conversation_id"] in kept_ids
+                ]
+        for i, record in enumerate(previous):
+            if i not in run:
+                manifest[i] = record
+    taken.update(_IDENTIFIER_RE.findall(json.dumps(accepted, ensure_ascii=False)))
+
+    def next_id(level: str) -> str:
+        used = {s["conversation_id"] for m in accepted.values() for s in m}
+        n = 1
+        while f"{level}_V4R{n:02d}" in used:
+            n += 1
+        return f"{level}_V4R{n:02d}"
+
     with tempfile.TemporaryDirectory() as tmp:
-        for index, slot in enumerate(slots):
+        for index, slot in enumerate(all_slots):
+            if index not in run:
+                continue
             record = {**slot, "teacher": TEACHERS[slot["modality"]], "attempts": []}
             for attempt in range(args.max_attempts):
                 seed = args.seed + index * 100 + attempt
                 try:
-                    candidates = _generate(slot, seed, args.candidates_per_attempt, Path(tmp))
+                    candidates = _generate(slot, seed, args.candidates_per_attempt, Path(tmp), args.pin)
                 except Exception as exc:  # noqa: BLE001 - one failed call must not end the run
                     record["attempts"].append({"seed": seed, "error": f"{type(exc).__name__}: {exc}"[:300]})
                     continue
@@ -234,8 +302,7 @@ def main() -> int:
                     if reasons:
                         rejected.append({"id": candidate.get("conversation_id"), "reasons": reasons})
                         continue
-                    level_count = sum(1 for s in accepted[slot["modality"]] if s["complexity_level"] == slot["level"])
-                    repaired["conversation_id"] = f"{slot['level']}_V4R{level_count + 1:02d}"
+                    repaired["conversation_id"] = next_id(slot["level"])
                     repaired["replaces"] = slot["replaces_id"]
                     accepted[slot["modality"]].append(repaired)
                     record["accepted"] = {"seed": seed, "conversation_id": repaired["conversation_id"]}
@@ -244,9 +311,9 @@ def main() -> int:
                 if "accepted" in record:
                     break
             status = record.get("accepted", {}).get("conversation_id", "NOT FILLED")
-            print(f"[{index + 1}/{len(slots)}] {slot['level']} {slot['domain']} {slot['modality']} {slot['language']} "
+            print(f"[{index + 1}/{len(all_slots)}] {slot['level']} {slot['domain']} {slot['modality']} {slot['language']} "
                   f"{slot['initiator']} -> {status} after {len(record['attempts'])} attempt(s)", flush=True)
-            manifest.append(record)
+            manifest[index] = record
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for modality, samples in accepted.items():

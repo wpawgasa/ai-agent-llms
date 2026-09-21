@@ -261,3 +261,84 @@ Frozen as DVC stage `task_a_benchmark_repair_v3` (guard:
 
 Every model must be re-scored on the new strata — the scores are a separate
 scale from v2. Four local models in two formats and both Gemini runs.
+
+## v4 — replacing the multi-tool conversations (2026-09-21)
+
+**Branch**: `feature/single-tool-states-and-benchmark-v4`
+
+The 19 v3 conversations that call two different tools in one state (18 text,
+1 voice) could not be repaired in place, so they were replaced by 20 newly
+generated conversations — 19 matched one-to-one, plus one extra English L3
+sales conversation.
+
+### Generator changes
+
+- **One tool per state** — `generate_workflow_dataset(single_tool_states=True)`.
+  Each of the 25 multi-tool states in the registry declares `tool_mode`:
+  6 `sequence` (every tool, in order: one state per tool, chained) and 19
+  `choice` (the customer's request decides: a text-only router listing every
+  option, one state per tool). Read off the instructions' "and"/"or".
+  `sequence_order` fixes the order where the listed order is unnatural, without
+  changing the listed tools.
+- **Routers** — the subgraph keeps every route of an included router (also one
+  pulled in through an optional branch), and each branch continues as the spine
+  branch does.
+- **Pinned routes** — `required_states=(...)` attaches a state even behind an
+  optional branch, states it to the teacher as a required route, and makes the
+  repair loop reject a draft that skips it. Needed because teacher
+  conversations do not follow the walked path: the teacher writes its own
+  route, and never took banking's optional fraud branch in a service call.
+- **Teacher rules** — tool arguments must come from the user or an earlier tool
+  result (ask first if missing); no invented identifiers, codes, amounts or
+  dates in prose.
+- **Orphan tool results** — `find_orphan_tool_results` flags a tool result after
+  a turn that only announces the call. Found in the first generated
+  conversation; now part of the generator's repair loop, the triage report and
+  the gate.
+
+All of it is off by default. With the flags off, placeholder generation over
+five domains hashes identically to `main`.
+
+### Generation and gate
+
+`scripts/generate_benchmark_replacements.py` generates each slot from its
+original's stratum and teacher. A candidate is accepted only after the v3
+repairs and a gate: zero traceability findings, zero format violations, at
+least one tool call, and **the part of the workflow the original was about** —
+the last step of the split sequence, or a branch of the split router.
+
+The first pass used a looser gate (enter the original state) and filled 18 of
+20. Reading them showed that three L2 sales conversations quoted but never sent
+the proposal, and one ecommerce conversation took a side exit instead of its
+router, so the gate was tightened and those four regenerated, together with the
+two fraud slots under pinned routes. Final: 20 of 20, each on its first attempt
+in the final run; about 36 attempts and 108 candidates across both runs.
+
+**One exception, by decision:** the L1 survey replacement collects CSAT only.
+Split into CSAT then NPS, the two-rating survey no longer fits L1's 3-4 state
+budget. Recorded in the manifest as `accepted_exception`.
+
+### Result
+
+| | v3 | v4 |
+|---|---|---|
+| Conversations | 508 | 509 (259 text + 250 voice) |
+| State visits using two tools | 19 | **0** |
+| Confident unsourced arguments | 0 | 0 |
+| Confident invented facts | 2 (accepted) | 2 (same) |
+| Orphan tool results | 4 | 4 (pre-existing; none in the replacements) |
+| Rows sharing an identifier with training | 27 | 25 |
+
+The replacements alone are clean on every check, including zero identifiers
+shared with training. Frozen as `task_a_benchmark_v4` (outs `task_a_v4`,
+`task_a_voice_v3`); the replacements, the manifest and every rejected
+candidate's reasons are DVC-tracked in
+`data/interim/task_a_benchmark_v4_replacements`.
+
+### Left open
+
+- The 457 states that *offer* two tools in untouched conversations stay as they
+  are; one tool per state is enforced for future generation.
+- The 4 pre-existing orphan tool results, 3 of them in the hand-added
+  `l3_insurance_premium_payment_th` file.
+- Every model must be re-scored on v4; it is a separate scale from v3.

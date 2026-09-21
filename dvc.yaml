@@ -107,6 +107,45 @@ stages:
       - data/output/benchmark/task_a_v3
       - data/output/benchmark/task_a_voice_v2
 
+  task_a_benchmark_v4:
+    # FROZEN 2026-09-21. `dvc repro` skips this stage. Scores on these strata
+    # are a separate scale from v3. See CLAUDE.md R28.
+    frozen: true
+    desc: >-
+      FROZEN — the repaired v3 benchmark without the 19 conversations that call
+      two different tools in one state, plus 20 clean replacements (CLAUDE.md
+      R28). Text: 258 - 18 + 19 = 259; voice: 250 - 1 + 1 = 250; 509 in all.
+      Each replacement matches the removed conversation on level, domain,
+      modality, language and opener, was written by the same teacher
+      (gemini-3-flash-preview for text, gemini-3.7-flash for voice) with
+      single_tool_states=True, went through the v3 repairs (fresh identifiers
+      absent from training, stay merges, session context), and passed a gate:
+      zero traceability findings, zero format violations, at least one tool
+      call, and the last step of the split sequence or a branch of the split
+      router the original was about. The two banking fraud slots needed the
+      generator's required_states pin: the teacher never took the optional
+      fraud branch unprompted. One exception, by decision: the L1 survey
+      replacement collects CSAT only, because the split two-rating survey no
+      longer fits L1's 3-4 state budget. The 20th conversation is an extra
+      English L3 sales row. Replacements, manifest and every rejected
+      candidate's reasons live in the DVC-tracked
+      data/interim/task_a_benchmark_v4_replacements. Deterministic, no model
+      calls at repro time.
+    cmd: >-
+      rm -rf data/output/benchmark/task_a_v4 data/output/benchmark/task_a_voice_v3 &&
+      python scripts/build_benchmark_v4.py
+      --stratum text data/output/benchmark/task_a_v3 data/output/benchmark/task_a_v4
+      --stratum voice data/output/benchmark/task_a_voice_v2 data/output/benchmark/task_a_voice_v3
+      --replacements data/interim/task_a_benchmark_v4_replacements
+    deps:
+      - data/output/benchmark/task_a_v3
+      - data/output/benchmark/task_a_voice_v2
+      - data/interim/task_a_benchmark_v4_replacements
+      - scripts/build_benchmark_v4.py
+    outs:
+      - data/output/benchmark/task_a_v4
+      - data/output/benchmark/task_a_voice_v3
+
   task_a_benchmark_voice:
     # FROZEN 2026-09-11. `dvc repro` skips this stage. In production use as
     # the voice half of the Cat A composite blend since 2026-08-24 (see

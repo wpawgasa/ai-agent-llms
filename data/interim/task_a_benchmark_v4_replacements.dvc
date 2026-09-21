@@ -1,0 +1,6 @@
+outs:
+- md5: 831ef3ca0e4fbf6085db6d9d3b3b2a77.dir
+  size: 501096
+  nfiles: 3
+  hash: md5
+  path: task_a_benchmark_v4_replacements

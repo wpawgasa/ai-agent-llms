@@ -267,11 +267,50 @@ class WorkflowGraph:
         }
 
 
+def _find_missing_required_states(messages: list[dict[str, Any]], required: tuple[str, ...]) -> list[str]:
+    """Required states the conversation's annotations never enter."""
+    if not required:
+        return []
+    entered: set[str] = set()
+    for message in messages:
+        if message.get("role") == "assistant":
+            for src, dst in re.findall(r"\[STATE:\s*([^\]\s]+)\s*(?:→|->)\s*([^\]\s]+)\s*\]", message.get("content") or ""):
+                entered.update((src, dst))
+    return [
+        f"the conversation never enters required state [{state}]; take the "
+        f"workflow's transitions that lead there"
+        for state in required if state not in entered
+    ]
+
+
+def _shortest_edge_path(domain: "DomainSpec", sources: set[str], target: str) -> list | None:
+    """Shortest run of domain edges from any state in ``sources`` to ``target``."""
+    from collections import deque
+
+    previous: dict[str, Any] = {name: None for name in sources}
+    queue = deque(sorted(sources))
+    while queue:
+        name = queue.popleft()
+        if name == target:
+            path = []
+            while previous[name] is not None:
+                edge = previous[name]
+                path.append(edge)
+                name = edge.src
+            return list(reversed(path))
+        for e in domain.edges:
+            if e.src == name and e.dst not in previous:
+                previous[e.dst] = e
+                queue.append(e.dst)
+    return None
+
+
 def select_subgraph(
     domain: "DomainSpec",
     spec: "ComplexitySpec",
     rng: random.Random,
     intent_category: str = "service",
+    required_states: tuple[str, ...] = (),
 ) -> WorkflowGraph:
     """Build a semantically-valid subgraph of domain's canonical edge graph.
 
@@ -394,6 +433,26 @@ def select_subgraph(
 
     if route_edges:
         complete_routers()
+
+    # Step 1c: attach every required state along the shortest run of domain
+    # edges from anything already included, so the conversation can reach it
+    # even when it sits behind an optional branch. Draws no randomness.
+    for target in required_states:
+        if target in included_names:
+            continue
+        route = _shortest_edge_path(domain, included_names, target)
+        if route is None:
+            raise ValueError(f"required state {target!r} is unreachable in {domain.name}")
+        for e in route:
+            if e.dst not in included_names:
+                included_names.add(e.dst)
+                selected_states.append(e.dst)
+            if not any(t.from_state == e.src and t.to_state == e.dst for t in selected_transitions):
+                selected_transitions.append(WorkflowTransition(
+                    from_state=e.src, to_state=e.dst,
+                    condition=e.label, label=e.label, trigger=e.trigger,
+                    optional=e.optional, priority=1 if e.optional else 0, route=e.route,
+                ))
 
     # Step 2: add num_branches optional edges
     num_branches_target = rng.randint(*spec.num_branches)
@@ -562,8 +621,12 @@ def walk_path(
     behavior: str,
     intent_category: str,
     rng: random.Random,
+    required_states: tuple[str, ...] = (),
 ) -> list[WorkflowTransition]:
     """Traverse subgraph from initial, picking edges by simulated trigger.
+
+    With ``required_states``, the walk heads for each required state it has
+    not visited yet, along the shortest run of subgraph edges.
 
     Returns the sequence of WorkflowTransition objects walked.
     Always terminates at a terminal state.
@@ -581,6 +644,24 @@ def walk_path(
     current_id = subgraph.initial_state
     max_steps = len(subgraph.states) * 3 + 5  # safety cap
 
+    # Distance, in edges, from every state to each required state.
+    name_to_id = {s.name: s.id for s in subgraph.states}
+    pending = [name_to_id[r] for r in required_states if r in name_to_id]
+    distance: dict[str, dict[str, int]] = {}
+    for goal in pending:
+        dist = {goal: 0}
+        frontier = [goal]
+        while frontier:
+            nxt = []
+            for node in frontier:
+                for t in subgraph.transitions:
+                    if t.to_state == node and t.from_state not in dist:
+                        dist[t.from_state] = dist[node] + 1
+                        nxt.append(t.from_state)
+            frontier = nxt
+        distance[goal] = dist
+    visited = {current_id}
+
     for _ in range(max_steps):
         if current_id in terminal_ids:
             break
@@ -588,6 +669,19 @@ def walk_path(
         edges = outgoing.get(current_id, [])
         if not edges:
             break
+
+        # Head for a required state not yet visited. Only when required
+        # states were given, so an ordinary walk draws the same numbers.
+        waiting = [g for g in pending if g not in visited]
+        if waiting:
+            def to_goal(e: WorkflowTransition) -> int:
+                return min(distance[g].get(e.to_state, 10**9) for g in waiting)
+            best = min(edges, key=to_goal)
+            if to_goal(best) < 10**9:
+                path.append(best)
+                current_id = best.to_state
+                visited.add(current_id)
+                continue
 
         # A router routes: pick one of its options at random. Checked before
         # any trigger is simulated, so a graph without routers draws exactly
@@ -597,6 +691,7 @@ def walk_path(
             chosen = rng.choice(routes)
             path.append(chosen)
             current_id = chosen.to_state
+            visited.add(current_id)
             continue
 
         # Simulate trigger outcomes for this state
@@ -631,6 +726,7 @@ def walk_path(
 
         path.append(chosen)
         current_id = chosen.to_state
+        visited.add(current_id)
 
     return path
 
@@ -1120,6 +1216,7 @@ def _generate_placeholder_conversation(
     resolved_retry_exhaustion: str = "none",
     modality: str = "text",
     barge_in: bool = False,
+    required_states: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     """Generate a placeholder conversation following the workflow graph.
 
@@ -1188,7 +1285,7 @@ def _generate_placeholder_conversation(
 
     # walk_path requires domain_spec for trigger simulation
     if domain_spec:
-        path = walk_path(workflow, domain_spec, behavior, intent_category, rng)
+        path = walk_path(workflow, domain_spec, behavior, intent_category, rng, required_states)
     else:
         # Minimal fallback: walk states in spine order
         path = [
@@ -1478,6 +1575,7 @@ def _build_teacher_prompt(
     outbound_reason: "OutboundReason | None" = None,
     modality: str = "text",
     barge_in: bool = False,
+    required_states: tuple[str, ...] = (),
 ) -> str:
     domain_name = domain_spec.name if domain_spec else spec.domain
     tool_names = [t["function"]["name"] for t in tool_schemas]
@@ -1492,6 +1590,14 @@ def _build_teacher_prompt(
         if intent_category == "upsell_promo"
         else ""
     )
+    route_line = ""
+    if required_states:
+        stops = " then ".join(f"[{s}]" for s in required_states)
+        route_line = (
+            f"Required route: this conversation MUST pass through {stops}, taking the "
+            "workflow's transitions that lead there. Do not skip them. The workflow "
+            "must still reach a terminal state.\n"
+        )
     outbound_line = ""
     if initiator == "agent" and outbound_reason is not None:
         outbound_line = (
@@ -1537,6 +1643,7 @@ def _build_teacher_prompt(
         f"{outbound_line}"
         f"{voice_line}"
         f"{promo_line}"
+        f"{route_line}"
         f"{lang_instruction}\n\n"
         f"{contract_block}\n\n"
         f"Workflow script (natural language — follow this for conversation flow):\n{script}\n\n"
@@ -1723,6 +1830,7 @@ def _generate_teacher_conversation(
     repair_feedback: list[str] | None = None,
     modality: str = "text",
     barge_in: bool = False,
+    required_states: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     """Call a teacher model API to generate a conversation.
 
@@ -1740,6 +1848,7 @@ def _generate_teacher_conversation(
     user_prompt = _build_teacher_prompt(
         workflow, tool_schemas, behavior, spec, domain_spec, language, intent_category,
         initiator, outbound_reason, modality=modality, barge_in=barge_in,
+        required_states=required_states,
     )
     if repair_feedback:
         feedback_lines = "\n".join(f"- {v}" for v in repair_feedback)
@@ -1796,6 +1905,7 @@ def generate_workflow_dataset(
     modality_preset: str = "default",
     barge_in_rate: float = 0.25,
     single_tool_states: bool = False,
+    required_states: tuple[str, ...] = (),
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1902,6 +2012,11 @@ def generate_workflow_dataset(
             becomes chained states, a choice becomes a router whose options the
             customer's request decides. Off by default, so existing runs are
             unchanged. CLAUDE.md R28.
+        required_states: States every conversation must pass through, in
+            order, named as in the (split) domain graph. They are attached to
+            the subgraph even behind an optional branch, stated to the teacher
+            as a required route, and enforced by the repair loop. Needs a
+            pinned ``domain``. Empty by default.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -2077,7 +2192,7 @@ def generate_workflow_dataset(
             # states, choices become a router the customer's request decides.
             domain_spec = split_multi_tool_states(domain_spec)
 
-        workflow = select_subgraph(domain_spec, spec, rng, intent_category)
+        workflow = select_subgraph(domain_spec, spec, rng, intent_category, tuple(required_states))
 
         # Resolve the level's retry-exhaustion policy against THIS subgraph.
         # "error_path" asks the agent to follow a tool_error arc, but only 8 of
@@ -2111,7 +2226,7 @@ def generate_workflow_dataset(
                 workflow, tool_schemas, behavior, spec, rng, domain_spec, sample_language,
                 intent_category, initiator, outbound_reason,
                 resolved_retry_exhaustion=resolved_retry_exhaustion,
-                modality=modality, barge_in=barge_in,
+                modality=modality, barge_in=barge_in, required_states=tuple(required_states),
             )
 
         fell_back = False
@@ -2120,7 +2235,7 @@ def generate_workflow_dataset(
                 messages = _generate_teacher_conversation(
                     workflow, tool_schemas, behavior, spec, rng, domain_spec, teacher_model,
                     sample_language, intent_category, initiator, outbound_reason,
-                    modality=modality, barge_in=barge_in,
+                    modality=modality, barge_in=barge_in, required_states=tuple(required_states),
                 )
             except Exception:
                 # API/parse failure (already logged as teacher_model_fallback).
@@ -2172,6 +2287,7 @@ def generate_workflow_dataset(
                         # A tool result after a turn that only announces the
                         # call (CLAUDE.md R28).
                         or find_orphan_tool_results(msgs)
+                        or _find_missing_required_states(msgs, required_states)
                     )
                     if violations:
                         logger.debug(
@@ -2197,7 +2313,7 @@ def generate_workflow_dataset(
                             teacher_model, sample_language, intent_category,
                             initiator, outbound_reason,
                             repair_feedback=violations,
-                            modality=modality, barge_in=barge_in,
+                            modality=modality, barge_in=barge_in, required_states=tuple(required_states),
                         )
                     except Exception:
                         _teacher_call_failures += 1
