@@ -136,3 +136,86 @@ exactly these cases. The confident set is the defect list.
    as in R25.
 4. Freeze the result as a new stratum and re-score every model, both Gemini
    runs included.
+
+## Repair pilot — mechanical stage (2026-09-21)
+
+**Branch**: `feature/task-a-benchmark-repair-pilot`
+
+Three repairs, planned once into a ledger and replayed deterministically — the
+R25 pattern — so the repaired strata never depend on code that changes later.
+
+### What was built
+
+- `system_prompt.render_session_context` and `SESSION_CONTEXT_HEADER`. The
+  served prompt states a sample's `session_context` after the tool schemas and
+  before the rules. A sample without one renders byte-identically; the
+  committed fixture test on real rows still passes.
+- `src/llm_workflow_agents/data/benchmark_repair.py` — plan and apply for each
+  repair:
+  - **Identifier remap.** Each simple entity identifier (`CUST-882`) gets a
+    fresh value of the same shape that appears nowhere in the training corpus
+    or the benchmark. Skipped: general-knowledge tokens (`AES-256`),
+    identifiers with structure (`PLAN_50GB`, `CARD-ENDING-4455`), and any whose
+    digits are also spoken on their own ("the one ending 882").
+  - **Stay merges.** A run of self-loop turns in one state ending in a tool
+    call becomes one turn. Advance-then-stay pairs are never merged. Runs that
+    touch a barge-in turn are never merged.
+  - **Session context.** Each confident unsourced tool argument becomes a
+    session-context fact.
+  - Planning order is remap, merge, then session context: merging moves prose
+    into the calling turn, and a calling turn cannot source its own value.
+- `scripts/repair_task_a_benchmark.py plan|apply`. `plan` is the only step that
+  is seeded or reads the training corpus; it also drops any merge that would
+  add a format violation. `apply` replays the ledger and verifies every row: no
+  new format violations (shape, continuity, tool stay, voice), ground truth
+  still aligned with the turns, no confident unsourced argument left, no
+  remapped value surviving.
+
+```bash
+python scripts/repair_task_a_benchmark.py plan \
+    --input-dir data/output/benchmark/task_a_v2 \
+    --input-dir data/output/benchmark/task_a_voice \
+    --reference data/output/sft/task_a_splits \
+    --ledger data/interim/task_a_benchmark_repair_ledger/ledger.json
+python scripts/repair_task_a_benchmark.py apply \
+    --stratum data/output/benchmark/task_a_v2 data/output/benchmark/task_a_v3 \
+    --stratum data/output/benchmark/task_a_voice data/output/benchmark/task_a_voice_v2 \
+    --ledger data/interim/task_a_benchmark_repair_ledger/ledger.json
+```
+
+### Result
+
+Plan (seed 20260921): 421 of 508 rows changed; 948 identifiers remapped; 83
+skipped (70 structured, 10 digits spoken elsewhere, 3 general knowledge); 59
+merge runs, none dropped for violations; 35 session-context values. Apply:
+every row passes verification, and a second apply is byte-identical.
+
+Re-triaged (`runs/audit/triage_benchmark_v3.json`):
+
+| | v2 | v3 |
+|---|---|---|
+| Confident unsourced tool arguments | 35 | **0** |
+| Confident invented facts | 33 | 31 |
+| Mergeable stay+stay pairs | 59 | **0** |
+| Identifier occurrences reused across rows | 31.1% | **1.6%** |
+| Rows sharing an identifier with training | 362 | **34** |
+
+The two resolved facts were invented values that were also unsourced
+arguments; stating them in session context sources both.
+
+**One defect caught and fixed before commit:** the first plan remapped
+`AES-256` to `AES-616`, because the general-knowledge allowlist was applied to
+the facts check but not to the remap. The remap now skips it
+(`general_knowledge`), with a regression test.
+
+### Not yet done
+
+- **31 invented facts** — 18 appear right after a tool result, so the natural
+  fix is to put the value in that result; 13 have no tool result before them
+  and need session context or a prose edit. Per-conversation judgement.
+- **19 multi-tool state visits** — splitting a state inside an existing
+  conversation needs an advancing turn the conversation does not contain, so
+  it is authored content, not a mechanical repair.
+- The repaired strata are not DVC-tracked yet. They get a frozen stage once
+  their content is final; `plan` is deterministic from its seed, the code and
+  the DVC-tracked training corpus, so nothing is lost meanwhile.

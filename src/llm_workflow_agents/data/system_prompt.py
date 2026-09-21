@@ -341,6 +341,27 @@ def format_rules_for_sample(sample: Any) -> str:
     return _format_rules_cached(retry_budget_for_sample(sample), _STAY_RULE_ENABLED)
 
 
+#: Heading of the per-conversation session-context block. Exported so tests and
+#: checkers can find the block without restating its wording.
+SESSION_CONTEXT_HEADER = (
+    "Session context (known to you before the conversation began — use these "
+    "values directly as tool arguments; do not ask the customer for them):"
+)
+
+
+def render_session_context(session_context: dict[str, Any] | None) -> str:
+    """The session-context block, or "" when there is nothing to state.
+
+    Returning "" for an absent or empty context is what keeps every existing
+    row's prompt byte-identical (tests/fixtures/text_prompt_baseline.json).
+    """
+    if not session_context:
+        return ""
+    lines = [f"\n{SESSION_CONTEXT_HEADER}"]
+    lines.extend(f"  {key}: {value}" for key, value in session_context.items())
+    return "\n".join(lines)
+
+
 def build_enriched_system_prompt(
     sample: dict[str, Any],
     original_content: str,
@@ -437,6 +458,16 @@ def build_enriched_system_prompt(
         else:
             ref_parts.append("\nTool schemas: none — this workflow does not call any tools.")
         parts.append("\n".join(ref_parts))
+
+    # Session context: values an external system hands the agent before the
+    # conversation starts (an interaction id, an account on file). Without it a
+    # gold call can require a value the model has no way to know (CLAUDE.md
+    # R28). It sits after the "Workflow script" marker so force_rebuild
+    # regenerates it rather than keeping a stale copy, and it renders nothing
+    # when the sample has none, so existing rows are unchanged.
+    session_block = render_session_context(sample.get("session_context"))
+    if session_block:
+        parts.append(session_block)
 
     # STAY_RULE is rendered inline as rule 2 of FORMAT_RULES (default-on since
     # 2026-07-31); it must NOT also be appended here or TASK_A_STAY_RULE=1 would
