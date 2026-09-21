@@ -15,6 +15,7 @@ from llm_workflow_agents.data.source_traceability import (
     find_identifier_reuse,
     find_mergeable_stay_pairs,
     find_multi_tool_states,
+    find_orphan_tool_results,
     find_unsourced_argument_values,
     find_unsourced_facts,
     is_identifier_shaped,
@@ -257,3 +258,19 @@ class TestFindMergeableStayPairs:
     def test_self_loops_in_different_states_are_not_mergeable(self) -> None:
         messages = [_user("hi"), _say("A", "A", "x"), _say("B", "B", "y")]
         assert find_mergeable_stay_pairs(messages) == []
+
+
+class TestFindOrphanToolResults:
+
+    def test_a_result_after_a_call_is_fine(self) -> None:
+        messages = [_user("hi"), _call("S", "lookup", {}), _tool({"ok": True}), _tool({"ok": True})]
+        assert find_orphan_tool_results(messages) == []
+
+    def test_a_result_after_an_announcement_is_an_orphan(self) -> None:
+        # "Let me get you qualified in our system" -- and no call.
+        messages = [_user("hi"), _say("S", "S", "Let me get you qualified in our system."), _tool({"status": "qualified"})]
+        (problem,) = find_orphan_tool_results(messages)
+        assert "message 2" in problem
+
+    def test_a_result_with_nothing_before_it_is_an_orphan(self) -> None:
+        assert len(find_orphan_tool_results([_tool({"ok": True})])) == 1

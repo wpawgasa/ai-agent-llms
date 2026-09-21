@@ -43,6 +43,8 @@ from llm_workflow_agents.data._workflow_script import (
     find_tool_placement_violations,
 )
 from llm_workflow_agents.data.state_convention import find_tool_stay_violations
+from llm_workflow_agents.data.single_tool_graph import split_multi_tool_states
+from llm_workflow_agents.data.source_traceability import find_orphan_tool_results
 from llm_workflow_agents.data.voice_convention import (
     apply_barge_in_loss_flag,
     chunk_spoken_text,
@@ -224,6 +226,9 @@ class WorkflowTransition:
     trigger: str = "always" # one of _VALID_TRIGGERS
     optional: bool = False
     intent_category: str | None = None
+    # A router edge of a split "choice" state (single_tool_graph). Not
+    # serialised: the rendered graph shows it as an ordinary branch.
+    route: bool = False
 
 
 @dataclass
@@ -331,6 +336,7 @@ def select_subgraph(
                 trigger=edge.trigger,
                 optional=False,
                 priority=0,
+                route=edge.route,
             ))
         else:
             # Shortcut edge — jumped over intermediate spine states to reach terminal
@@ -343,12 +349,58 @@ def select_subgraph(
                 priority=0,
             ))
 
+    # Step 1b: complete every router (a split "choice" state, see
+    # single_tool_graph). The prompt must list every option for the model to
+    # route on the customer's request, so all routes are kept, and each extra
+    # branch continues exactly as the spine branch does. Runs again after the
+    # closing step, which can bring a router in through an optional branch.
+    # A domain with no router takes no step here and draws no randomness.
+    route_edges: dict[str, list] = {}
+    for e in domain.edges:
+        if e.route:
+            route_edges.setdefault(e.src, []).append(e)
+
+    def complete_routers() -> None:
+        for router in [name for name in list(selected_states) if name in route_edges]:
+            targets = {e.dst for e in route_edges[router]}
+            from_router = [t for t in selected_transitions if t.from_state == router]
+            for t in from_router:
+                if t.to_state in targets:
+                    t.route = True
+            spine_branch = next((t.to_state for t in from_router if t.route), None)
+            if spine_branch is not None:
+                onward = next(t for t in selected_transitions if t.from_state == spine_branch)
+            else:
+                # The spine jumped from the router straight past its branches;
+                # route through them instead.
+                onward = from_router[0]
+                selected_transitions.remove(onward)
+            for e in route_edges[router]:
+                if e.dst not in included_names:
+                    included_names.add(e.dst)
+                    selected_states.append(e.dst)
+                if not any(t.from_state == router and t.to_state == e.dst for t in selected_transitions):
+                    selected_transitions.append(WorkflowTransition(
+                        from_state=router, to_state=e.dst,
+                        condition=e.label, label=e.label,
+                        trigger=e.trigger, optional=False, priority=0, route=True,
+                    ))
+                if not any(t.from_state == e.dst for t in selected_transitions):
+                    selected_transitions.append(WorkflowTransition(
+                        from_state=e.dst, to_state=onward.to_state,
+                        condition=onward.label, label=onward.label,
+                        trigger=onward.trigger, optional=False, priority=0,
+                    ))
+
+    if route_edges:
+        complete_routers()
+
     # Step 2: add num_branches optional edges
     num_branches_target = rng.randint(*spec.num_branches)
     candidate_branch_edges = [
         e for src in sorted(included_names)
         for e in branch_edges.get(src, [])
-        if e.intent_category != "upsell_promo"
+        if e.intent_category != "upsell_promo" and not e.route
     ]
     rng.shuffle(candidate_branch_edges)
     branches_added = 0
@@ -463,6 +515,9 @@ def select_subgraph(
             instruction=node.instruction,
         )
 
+    if route_edges:
+        complete_routers()
+
     wf_states = [to_workflow_state(i, n) for i, n in enumerate(selected_states)]
     id_map = {s.name: s.id for s in wf_states}
 
@@ -476,6 +531,7 @@ def select_subgraph(
             optional=t.optional,
             priority=t.priority,
             intent_category=t.intent_category,
+            route=t.route,
         )
         for t in selected_transitions
         if t.from_state in id_map and t.to_state in id_map
@@ -532,6 +588,16 @@ def walk_path(
         edges = outgoing.get(current_id, [])
         if not edges:
             break
+
+        # A router routes: pick one of its options at random. Checked before
+        # any trigger is simulated, so a graph without routers draws exactly
+        # the random numbers it always did.
+        routes = [e for e in edges if e.route]
+        if routes:
+            chosen = rng.choice(routes)
+            path.append(chosen)
+            current_id = chosen.to_state
+            continue
 
         # Simulate trigger outcomes for this state
         current_state = name_to_state.get(id_to_name.get(current_id, ""))
@@ -1339,6 +1405,8 @@ RULES:
 - Every [STATE: X → Y] you emit with X != Y MUST appear in the WORKFLOW CONTRACT's ALLOWED TRANSITIONS list (provided in the user message). Never invent a transition; if unsure how to proceed, stay in the current state ([STATE: X → X]).
 - Only call a tool from a state that lists it under TOOL PERMISSIONS PER STATE. Never call a tool in a state marked "text only", and never call a tool absent from the tool schemas.
 - Follow the user behavior pattern exactly (cooperative / adversarial_probing / digressing / invalid_tool_inputs).
+- Every value in a tool call's arguments must already be in the conversation: said by the user, or returned by an earlier tool result. If a tool needs a value nobody has given, the assistant asks the user for it BEFORE calling the tool; never make one up.
+- The assistant never states a specific identifier, code, amount, percentage or date unless it appeared earlier in the user's words or a tool result. Report what tools returned; do not invent plan IDs, discount codes, prices or record numbers.
 - The conversation MUST reach one of the terminal states before ending.
 - ~20 % of tool responses should be errors: {"error": "Service temporarily unavailable"}.
 - Output ONLY the JSON object — no markdown fences, no extra keys.
@@ -1727,6 +1795,7 @@ def generate_workflow_dataset(
     require_tool_stay: bool = True,
     modality_preset: str = "default",
     barge_in_rate: float = 0.25,
+    single_tool_states: bool = False,
 ) -> DatasetMetadata:
     """Generate multi-turn conversation dataset for a single complexity level.
 
@@ -1827,6 +1896,12 @@ def generate_workflow_dataset(
         barge_in_rate: Share of VOICE conversations that carry one <unspoken>
             barge-in and its recovery turn. Ignored for text conversations,
             which never draw it. Must be within 0.0 and 1.0.
+        single_tool_states: Split every multi-tool state of the chosen domain
+            before building the conversation, so no state offers more than one
+            tool (``single_tool_graph.split_multi_tool_states``): a sequence
+            becomes chained states, a choice becomes a router whose options the
+            customer's request decides. Off by default, so existing runs are
+            unchanged. CLAUDE.md R28.
 
     Returns:
         DatasetMetadata with paths to generated JSONL files and statistics.
@@ -1997,6 +2072,11 @@ def generate_workflow_dataset(
             domain_key, domain_spec = _select_domain(rng, domain, spec)
             intent_category = _select_intent_category(rng, active_intent_dist)
 
+        if single_tool_states:
+            # One tool per state (CLAUDE.md R28): sequences become chained
+            # states, choices become a router the customer's request decides.
+            domain_spec = split_multi_tool_states(domain_spec)
+
         workflow = select_subgraph(domain_spec, spec, rng, intent_category)
 
         # Resolve the level's retry-exhaustion policy against THIS subgraph.
@@ -2089,6 +2169,9 @@ def generate_workflow_dataset(
                         )
                         or find_shape_violations(msgs, initiator)
                         or find_voice_violations(msgs, modality)
+                        # A tool result after a turn that only announces the
+                        # call (CLAUDE.md R28).
+                        or find_orphan_tool_results(msgs)
                     )
                     if violations:
                         logger.debug(

@@ -30,6 +30,16 @@ class StateNode:
     instruction: str
     tools: tuple[str, ...] = ()
     kind: str = "working"  # "initial" | "working" | "terminal"
+    # Required when a state offers more than one tool (CLAUDE.md R28):
+    # "sequence" -- every tool is called, in the listed order;
+    # "choice"   -- the customer's request decides which one.
+    # single_tool_graph.split_multi_tool_states turns either into one-tool
+    # states; a generator run with single_tool_states=True applies it.
+    tool_mode: str = ""
+    # Order the "sequence" tools run in, when it differs from ``tools``. Kept
+    # separate so reordering never changes the listed tools of a generator run
+    # that does not split states.
+    sequence_order: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -43,6 +53,9 @@ class Edge:
     optional: bool = False
     priority: int = 0
     intent_category: str | None = None  # set to "upsell_promo" on upsell-arc edges
+    # A router edge from a split "choice" state to one of its tool states. The
+    # subgraph keeps every route of a router, and a walk picks one at random.
+    route: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,6 +139,14 @@ def validate_domain(domain: DomainSpec) -> None:
         if e.trigger not in _VALID_TRIGGERS:
             raise ValueError(
                 f"{domain.name}: edge {e.src}->{e.dst} has invalid trigger '{e.trigger}'"
+            )
+
+    # A multi-tool state must say whether its tools run in sequence or are a choice
+    for st in domain.states:
+        if len(st.tools) > 1 and st.tool_mode not in ("sequence", "choice"):
+            raise ValueError(
+                f"{domain.name}: state '{st.name}' offers {len(st.tools)} tools but "
+                f"declares tool_mode={st.tool_mode!r}; set 'sequence' or 'choice'"
             )
 
     # tool_success / tool_error only on states with tools
@@ -279,7 +300,7 @@ ACCOUNT_MANAGEMENT = DomainSpec(
         StateNode("VERIFY_IDENTITY", "Verify the customer's identity before accessing any account details.", tools=("verify_identity",)),
         StateNode("AUTHENTICATE", "Authenticate the customer with OTP, PIN, or a security question.", tools=("verify_identity",)),
         StateNode("LOOKUP_ACCOUNT", "Retrieve the customer's account record and confirm the details on file.", tools=("lookup_rewards",)),
-        StateNode("PROCESS_REQUEST", "Carry out the requested account change with the matching tool.", tools=("create_account", "update_profile", "reset_password", "close_account", "manage_subscription")),
+        StateNode("PROCESS_REQUEST", "Carry out the requested account change with the matching tool.", tools=("create_account", "update_profile", "reset_password", "close_account", "manage_subscription"), tool_mode="choice"),
         StateNode("CONFIRM_CHANGES", "Summarise the pending change and ask the customer to confirm."),
         StateNode("UPDATE_RECORDS", "Persist the confirmed changes to the customer's profile.", tools=("update_profile",)),
         StateNode("NOTIFY_CUSTOMER", "Notify the customer that the change is complete and what happens next."),
@@ -357,9 +378,9 @@ BILLING_PAYMENTS = DomainSpec(
         StateNode("GREETING", "Greet the customer and ask about their billing or payment need.", kind="initial"),
         StateNode("VERIFY_IDENTITY", "Confirm the customer's identity and the account in question."),
         StateNode("LOOKUP_BILLING", "Look up the relevant invoice or billing record.", tools=("lookup_invoice",)),
-        StateNode("REVIEW_CHARGES", "Review the charges with the customer and note any disputes.", tools=("lookup_invoice", "dispute_charge")),
-        StateNode("PROCESS_PAYMENT", "Process the payment or set up an installment plan.", tools=("process_payment", "setup_payment_plan")),
-        StateNode("APPLY_ADJUSTMENT", "Apply any approved refund or fee waiver.", tools=("issue_refund", "waive_late_fee")),
+        StateNode("REVIEW_CHARGES", "Review the charges with the customer and note any disputes.", tools=("lookup_invoice", "dispute_charge"), tool_mode="sequence"),
+        StateNode("PROCESS_PAYMENT", "Process the payment or set up an installment plan.", tools=("process_payment", "setup_payment_plan"), tool_mode="choice"),
+        StateNode("APPLY_ADJUSTMENT", "Apply any approved refund or fee waiver.", tools=("issue_refund", "waive_late_fee"), tool_mode="choice"),
         StateNode("CONFIRM_ACTION", "Summarise the billing action and ask the customer to confirm."),
         StateNode("GENERATE_DOCUMENT", "Generate the requested receipt, statement, or tax document.", tools=("generate_receipt",)),
         StateNode("ESCALATE", "Escalate unresolved billing issues to a specialist."),
@@ -439,9 +460,9 @@ ORDER_MANAGEMENT = DomainSpec(
         StateNode("VERIFY_IDENTITY", "Confirm the customer's identity and the order owner."),
         StateNode("LOOKUP_ORDER", "Look up the order by its ID.", tools=("lookup_order",)),
         StateNode("CHECK_STATUS", "Check the order's current status or delivery tracking.", tools=("track_delivery",)),
-        StateNode("PROCESS_MODIFICATION", "Modify or cancel the order as requested.", tools=("modify_order", "cancel_order")),
-        StateNode("INITIATE_RETURN", "Start a return, exchange, or damaged-item report.", tools=("initiate_return", "report_damaged_item")),
-        StateNode("ARRANGE_DELIVERY", "Reschedule or re-track delivery as needed.", tools=("reschedule_delivery", "track_delivery")),
+        StateNode("PROCESS_MODIFICATION", "Modify or cancel the order as requested.", tools=("modify_order", "cancel_order"), tool_mode="choice"),
+        StateNode("INITIATE_RETURN", "Start a return, exchange, or damaged-item report.", tools=("initiate_return", "report_damaged_item"), tool_mode="choice"),
+        StateNode("ARRANGE_DELIVERY", "Reschedule or re-track delivery as needed.", tools=("reschedule_delivery", "track_delivery"), tool_mode="choice"),
         StateNode("CONFIRM_ACTION", "Summarise the order action and ask the customer to confirm."),
         StateNode("ESCALATE", "Escalate unresolved order issues to a specialist."),
         StateNode("RESOLVE", "Confirm the order matter is resolved."),
@@ -518,12 +539,12 @@ TECHNICAL_SUPPORT = DomainSpec(
     entity_slots=("system_name", "device_model", "fix_id", "severity", "ticket_id"),
     states=(
         StateNode("GREETING", "Greet the customer and ask what technical problem they're facing.", kind="initial"),
-        StateNode("IDENTIFY_ISSUE", "Identify the affected system and check its status or compatibility.", tools=("check_system_status", "check_compatibility")),
+        StateNode("IDENTIFY_ISSUE", "Identify the affected system and check its status or compatibility.", tools=("check_system_status", "check_compatibility"), tool_mode="choice"),
         StateNode("COLLECT_DIAGNOSTICS", "Collect diagnostic information about the issue.", tools=("check_system_status",)),
         StateNode("RUN_TESTS", "Run the appropriate diagnostic test.", tools=("run_diagnostic",)),
-        StateNode("ATTEMPT_FIX", "Apply a known fix or restart the affected service.", tools=("apply_fix", "restart_service")),
+        StateNode("ATTEMPT_FIX", "Apply a known fix or restart the affected service.", tools=("apply_fix", "restart_service"), tool_mode="choice"),
         StateNode("VERIFY_RESOLUTION", "Verify the issue is resolved after the fix.", tools=("check_system_status",)),
-        StateNode("ESCALATE_ENGINEERING", "Escalate to engineering and file a bug report if unresolved.", tools=("escalate_to_engineer", "create_bug_report")),
+        StateNode("ESCALATE_ENGINEERING", "Escalate to engineering and file a bug report if unresolved.", tools=("escalate_to_engineer", "create_bug_report"), tool_mode="sequence"),
         StateNode("REMOTE_ASSIST", "Guide the customer through remote assistance steps.", tools=("restart_service",)),
         StateNode("CONFIRM_FIX", "Confirm with the customer that the fix worked."),
         StateNode("RESOLVE", "Confirm the technical issue is resolved."),
@@ -672,7 +693,7 @@ HEALTHCARE = DomainSpec(
         StateNode("CHECK_ELIGIBILITY", "Verify the patient's insurance coverage and benefits for the requested service.", tools=("verify_coverage",)),
         StateNode("REVIEW_RECORDS", "Review the patient's medical records or current claim status.", tools=("check_claim_status",)),
         StateNode("SCHEDULE_SERVICE", "Schedule the requested medical appointment.", tools=("schedule_appointment",)),
-        StateNode("PROCESS_REQUEST", "Process the prescription refill or specialist referral request.", tools=("request_prescription_refill", "request_referral")),
+        StateNode("PROCESS_REQUEST", "Process the prescription refill or specialist referral request.", tools=("request_prescription_refill", "request_referral"), tool_mode="choice"),
         StateNode("REFERRAL_PROCESS", "Coordinate the specialist referral, confirming provider availability and next steps.", tools=("request_referral",)),
         StateNode("SUBMIT_AUTHORIZATION", "Submit the prior-authorization request for the procedure or service.", tools=("submit_prior_auth",)),
         StateNode("REVIEW_AUTHORIZATION", "Review the outcome of a submitted prior-authorization request.", tools=("check_claim_status",)),
@@ -766,8 +787,8 @@ BANKING = DomainSpec(
         StateNode("AUTHENTICATE_2FA", "Complete two-factor authentication for sensitive banking actions."),
         StateNode("LOOKUP_ACCOUNT", "Look up the account balance and recent transaction history.", tools=("check_balance",)),
         StateNode("REVIEW_TRANSACTIONS", "Review recent transactions with the customer and note any concerns.", tools=("check_balance",)),
-        StateNode("PROCESS_REQUEST", "Carry out the requested banking transaction using the appropriate tool.", tools=("transfer_funds", "apply_for_loan", "activate_card", "inquiry_interest_rate", "block_card")),
-        StateNode("FRAUD_INVESTIGATION", "Investigate suspected fraud, block the card if necessary, and file a report.", tools=("report_fraud", "block_card")),
+        StateNode("PROCESS_REQUEST", "Carry out the requested banking transaction using the appropriate tool.", tools=("transfer_funds", "apply_for_loan", "activate_card", "inquiry_interest_rate", "block_card"), tool_mode="choice"),
+        StateNode("FRAUD_INVESTIGATION", "Investigate suspected fraud, block the card if necessary, and file a report.", tools=("report_fraud", "block_card"), tool_mode="sequence", sequence_order=("block_card", "report_fraud")),
         StateNode("FRAUD_APPEAL", "Review a previously filed fraud decision and escalate if the customer disputes the outcome."),
         StateNode("APPROVAL_CHECK", "Check whether the transaction or loan request requires additional approval."),
         StateNode("COLLECT_DOCUMENTS", "Guide the customer through submitting the documents required for a loan application."),
@@ -864,7 +885,7 @@ TELECOM = DomainSpec(
         StateNode("PORT_NUMBER_PROCESS", "Carry out the number porting procedure from the previous carrier.", tools=("port_number",)),
         StateNode("SIM_REPLACEMENT", "Process a SIM card replacement for the customer.", tools=("unlock_device",)),
         StateNode("TECHNICAL_CHECK", "Check for network outages or technical issues affecting the service.", tools=("report_outage",)),
-        StateNode("ACTIVATE_SERVICE", "Activate roaming or unlock the device as requested.", tools=("activate_roaming", "unlock_device")),
+        StateNode("ACTIVATE_SERVICE", "Activate roaming or unlock the device as requested.", tools=("activate_roaming", "unlock_device"), tool_mode="choice"),
         StateNode("CONFIRM_CHANGES", "Summarise all pending changes and ask the customer to confirm."),
         StateNode("NOTIFY_CUSTOMER", "Notify the customer of the completed changes and any important details."),
         StateNode("ESCALATE", "Escalate unresolved telecom issues to a specialist."),
@@ -951,9 +972,9 @@ UTILITIES = DomainSpec(
     states=(
         StateNode("GREETING", "Greet the customer and ask about their utility service.", kind="initial"),
         StateNode("VERIFY_ACCOUNT", "Verify the customer's utility account."),
-        StateNode("REVIEW_BILLING", "Review the bill and usage, noting any disputes.", tools=("dispute_bill", "analyze_usage")),
+        StateNode("REVIEW_BILLING", "Review the bill and usage, noting any disputes.", tools=("dispute_bill", "analyze_usage"), tool_mode="sequence", sequence_order=("analyze_usage", "dispute_bill")),
         StateNode("CHECK_METER", "Record or check the customer's meter reading.", tools=("submit_meter_reading",)),
-        StateNode("PROCESS_REQUEST", "Process the connection or program-enrollment request.", tools=("request_connection", "enroll_green_energy")),
+        StateNode("PROCESS_REQUEST", "Process the connection or program-enrollment request.", tools=("request_connection", "enroll_green_energy"), tool_mode="choice"),
         StateNode("DISPATCH_TECHNICIAN", "Report the outage and dispatch a technician if needed.", tools=("report_outage",)),
         StateNode("CONFIRM_ACTION", "Summarise the action and ask the customer to confirm."),
         StateNode("SCHEDULE_SERVICE", "Schedule the service connection or visit.", tools=("request_connection",)),
@@ -1042,8 +1063,8 @@ TRAVEL = DomainSpec(
         StateNode("PAYMENT_PROCESSING", "Process payment for the booking, applying loyalty points if requested.", tools=("redeem_points",)),
         StateNode("LOYALTY_UPGRADE", "Present a loyalty tier upgrade offer or apply a points redemption.", tools=("redeem_points",)),
         StateNode("ISSUE_DOCUMENTS", "Issue travel documents and confirm all requirements are met.", tools=("check_visa_requirements",)),
-        StateNode("HANDLE_CHANGES", "Modify or cancel an existing reservation as requested.", tools=("modify_reservation", "cancel_reservation")),
-        StateNode("DISRUPTION_HANDLING", "Handle travel disruption such as delays, cancellations, or missed connections.", tools=("modify_reservation", "cancel_reservation")),
+        StateNode("HANDLE_CHANGES", "Modify or cancel an existing reservation as requested.", tools=("modify_reservation", "cancel_reservation"), tool_mode="choice"),
+        StateNode("DISRUPTION_HANDLING", "Handle travel disruption such as delays, cancellations, or missed connections.", tools=("modify_reservation", "cancel_reservation"), tool_mode="choice"),
         StateNode("REBOOK_FLIGHTS", "Rebook affected flights due to disruption or schedule change.", tools=("book_reservation",)),
         StateNode("FILE_CLAIM", "File the travel insurance claim for the incident.", tools=("file_travel_claim",)),
         StateNode("CONFIRM_DETAILS", "Confirm the booking or change details with the traveler."),
@@ -1129,8 +1150,8 @@ ECOMMERCE = DomainSpec(
         StateNode("GREETING", "Greet the shopper and ask what they're looking for.", kind="initial"),
         StateNode("UNDERSTAND_NEEDS", "Clarify the shopper's needs and suggest relevant products.", tools=("recommend_products",)),
         StateNode("SEARCH_CATALOG", "Search the catalog for matching products.", tools=("search_products",)),
-        StateNode("CHECK_AVAILABILITY", "Check stock or back-order status for the chosen item.", tools=("check_stock", "check_backorder")),
-        StateNode("APPLY_PROMOTIONS", "Apply coupons or a price match if eligible.", tools=("apply_coupon", "price_match")),
+        StateNode("CHECK_AVAILABILITY", "Check stock or back-order status for the chosen item.", tools=("check_stock", "check_backorder"), tool_mode="choice"),
+        StateNode("APPLY_PROMOTIONS", "Apply coupons or a price match if eligible.", tools=("apply_coupon", "price_match"), tool_mode="choice"),
         StateNode("PROCESS_ORDER", "Place the order for the shopper."),
         StateNode("CONFIRM_PURCHASE", "Summarise the purchase and ask the shopper to confirm."),
         StateNode("ARRANGE_DELIVERY", "Arrange delivery details for the order."),
@@ -1201,7 +1222,7 @@ GOVERNMENT = DomainSpec(
         StateNode("VERIFY_CITIZEN", "Verify the citizen's identity."),
         StateNode("CHECK_ELIGIBILITY", "Check eligibility for the requested benefit.", tools=("check_benefit_eligibility",)),
         StateNode("REVIEW_APPLICATION", "Review the status of the citizen's application.", tools=("check_application_status",)),
-        StateNode("PROCESS_REQUEST", "Process the complaint or tax inquiry.", tools=("file_complaint", "submit_tax_inquiry")),
+        StateNode("PROCESS_REQUEST", "Process the complaint or tax inquiry.", tools=("file_complaint", "submit_tax_inquiry"), tool_mode="choice"),
         StateNode("VERIFY_DOCUMENTS", "Verify the authenticity of submitted documents.", tools=("verify_document",)),
         StateNode("SUBMIT_FORM", "Submit the required form on the citizen's behalf.", tools=("submit_tax_inquiry",)),
         StateNode("SCHEDULE_VISIT", "Schedule an in-person office appointment.", tools=("schedule_appointment",)),
@@ -1285,7 +1306,7 @@ INSURANCE = DomainSpec(
     states=(
         StateNode("GREETING", "Greet the policyholder and ask how you can help with their insurance needs.", kind="initial"),
         StateNode("VERIFY_POLICYHOLDER", "Verify the policyholder's identity and confirm active coverage.", tools=("verify_policy",)),
-        StateNode("REVIEW_POLICY", "Review the policy details, including coverage levels and any pending renewals.", tools=("update_policy", "renew_policy", "cancel_policy", "quote_premium")),
+        StateNode("REVIEW_POLICY", "Review the policy details, including coverage levels and any pending renewals.", tools=("update_policy", "renew_policy", "cancel_policy", "quote_premium"), tool_mode="choice"),
         StateNode("AMEND_POLICY", "Apply a policy amendment such as beneficiary update or coverage level change.", tools=("update_policy",)),
         StateNode("CLAIM_INTAKE", "Take down the details of the new claim and file it.", tools=("file_claim",)),
         StateNode("ASSESS_COVERAGE", "Assess whether the incident is covered and check the current claim status.", tools=("check_claim_status",)),
@@ -1453,7 +1474,7 @@ SCHEDULING = DomainSpec(
         StateNode("SELECT_SLOT", "Help the customer select a slot and book it.", tools=("book_appointment",)),
         StateNode("CONFIRM_BOOKING", "Confirm the booking details with the customer.", tools=("book_appointment",)),
         StateNode("SEND_CONFIRMATION", "Send a confirmation or reminder.", tools=("send_reminder",)),
-        StateNode("HANDLE_RESCHEDULE", "Reschedule or cancel the appointment as requested.", tools=("reschedule_appointment", "cancel_appointment")),
+        StateNode("HANDLE_RESCHEDULE", "Reschedule or cancel the appointment as requested.", tools=("reschedule_appointment", "cancel_appointment"), tool_mode="choice"),
         StateNode("MANAGE_WAITLIST", "Add the customer to the waitlist if no slot is open.", tools=("join_waitlist",)),
         StateNode("RESOLVE", "Confirm the scheduling request is resolved."),
         StateNode("TERMINAL", "Thank the customer and close the conversation.", kind="terminal"),
@@ -1527,7 +1548,7 @@ SALES = DomainSpec(
         StateNode("IDENTIFY_NEEDS", "Identify the prospect's needs and pain points."),
         StateNode("PRESENT_SOLUTION", "Present the solution, offering a demo if useful.", tools=("schedule_demo",)),
         StateNode("HANDLE_OBJECTIONS", "Address the prospect's objections."),
-        StateNode("CREATE_PROPOSAL", "Create a quote and send a proposal.", tools=("create_quote", "send_proposal")),
+        StateNode("CREATE_PROPOSAL", "Create a quote and send a proposal.", tools=("create_quote", "send_proposal"), tool_mode="sequence"),
         StateNode("NEGOTIATE_TERMS", "Negotiate terms, including any upsell.", tools=("process_upsell",)),
         StateNode("CLOSE_DEAL", "Close the deal and check renewal terms.", tools=("check_contract_renewal",)),
         StateNode("FOLLOW_UP", "Follow up with the prospect after the meeting.", tools=("send_proposal",)),
@@ -1596,7 +1617,7 @@ SURVEYS = DomainSpec(
     states=(
         StateNode("GREETING", "Greet the customer and introduce the survey.", kind="initial"),
         StateNode("EXPLAIN_SURVEY", "Explain the survey's purpose and length."),
-        StateNode("COLLECT_RATING", "Collect the customer's satisfaction or NPS rating.", tools=("collect_csat", "collect_nps")),
+        StateNode("COLLECT_RATING", "Collect the customer's satisfaction or NPS rating.", tools=("collect_csat", "collect_nps"), tool_mode="sequence"),
         StateNode("COLLECT_COMMENTS", "Collect any additional comments or feedback.", tools=("submit_feedback",)),
         StateNode("THANK_CUSTOMER", "Thank the customer for their feedback."),
         StateNode("ESCALATE_LOW_SCORE", "Log low scores for trend analysis and follow-up.", tools=("log_complaint_trend",)),

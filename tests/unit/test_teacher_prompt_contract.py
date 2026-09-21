@@ -81,3 +81,12 @@ def test_teacher_system_prompt_references_contract():
     assert "ALLOWED TRANSITIONS" in sp
     assert "TOOL PERMISSIONS PER STATE" in sp
     assert "never invent a transition" in sp.lower()
+
+
+def test_teacher_prompt_forbids_values_nobody_supplied() -> None:
+    # CLAUDE.md R28: 26 of 31 invented facts in the benchmark were values the
+    # teacher made up in prose and the gold call then used.
+    from llm_workflow_agents.data.generate_workflows import _TEACHER_SYSTEM_PROMPT
+
+    assert "asks the user for it BEFORE calling the tool" in _TEACHER_SYSTEM_PROMPT
+    assert "never states a specific identifier" in _TEACHER_SYSTEM_PROMPT

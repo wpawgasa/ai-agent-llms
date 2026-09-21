@@ -414,3 +414,30 @@ def find_mergeable_stay_pairs(messages: list[dict[str, Any]]) -> list[tuple[int,
         if len(states) == 1:
             pairs.append((first.msg_index, second.msg_index))
     return pairs
+
+
+def find_orphan_tool_results(messages: list[dict[str, Any]]) -> list[str]:
+    """Tool results that answer no tool call.
+
+    A tool message must follow an assistant turn that makes a call (possibly
+    with other tool messages in between, for a turn that makes several). A
+    result after a turn that only *announces* the call ("let me get you
+    qualified") teaches the model to narrate a call instead of making it --
+    the announce-but-don't-call failure. Returns one line per orphan, worded as
+    repair feedback for the teacher.
+    """
+    found: list[str] = []
+    for index, message in enumerate(messages):
+        if message.get("role") != "tool":
+            continue
+        j = index - 1
+        while j >= 0 and messages[j].get("role") == "tool":
+            j -= 1
+        previous = messages[j] if j >= 0 else {}
+        if previous.get("role") == "assistant" and _calls_in(previous):
+            continue
+        found.append(
+            f"message {index} is a tool result, but the assistant turn before it makes no "
+            f"<tool_call>; put the <tool_call> in that turn, or remove the tool result"
+        )
+    return found

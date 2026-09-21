@@ -38,6 +38,7 @@ from llm_workflow_agents.data.source_traceability import (
     find_identifier_reuse,
     find_mergeable_stay_pairs,
     find_multi_tool_states,
+    find_orphan_tool_results,
     find_unsourced_argument_values,
     find_unsourced_facts,
 )
@@ -118,6 +119,7 @@ def triage_rows(
                 for f in find_multi_tool_states(sample.get("workflow_graph"), body)
             ],
             "mergeable_stay_pairs": [list(p) for p in find_mergeable_stay_pairs(body)],
+            "orphan_tool_results": find_orphan_tool_results(body),
         })
 
     reuse = find_identifier_reuse(identifiers)
@@ -132,6 +134,7 @@ def triage_rows(
         return any(row[k] for k in (
             "unsourced_arguments", "unsourced_facts", "multi_tool_states",
             "mergeable_stay_pairs", "reused_identifiers", "identifiers_in_reference",
+            "orphan_tool_results",
         ))
 
     listed = [r for r in per_row if has_findings(r)]
@@ -154,6 +157,7 @@ def triage_rows(
         ),
         "multi_tool_states": dict(Counter(f["kind"] for r in per_row for f in r["multi_tool_states"])),
         "mergeable_stay_pairs": sum(len(r["mergeable_stay_pairs"]) for r in per_row),
+        "orphan_tool_results": sum(len(r["orphan_tool_results"]) for r in per_row),
         "reused_identifiers": len(reuse),
         "identifier_occurrences_reused_share": (reused_occurrences / occurrences) if occurrences else 0.0,
         "rows_sharing_identifiers_with_reference": sum(1 for r in per_row if r["identifiers_in_reference"]),
