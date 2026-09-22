@@ -186,7 +186,6 @@ the user said (a Thai city name written in English, a date put in ISO form).
 | Tool arguments the model cannot know — the value appears nowhere in the conversation or the prompt (`L1_006` scores `interaction_id="INT-5541"`) | **35** confident (+160 needs review) | A model that asks for the value, as the prompt tells it to, is scored wrong | Fixed — stated in a session-context block |
 | Invented facts in gold replies — codes, plan IDs or amounts no tool returned (`PREM20`, a "20% discount") | **33** confident (+104 needs review); of the 31 reviewed one by one, 26 also feed a later tool call | Hidden unknowable arguments, and a model that doesn't invent them looks worse | Fixed — 2 genuine format examples accepted |
 | Conversations using two tools in one state, with instructions like "satisfaction **or** NPS" | **19** conversations; 483 states offer two tools | Following the prompt exactly is scored as a missed call | Fixed — replaced with 20 one-tool-per-state conversations; 457 states still *offer* two tools |
-| Back-to-back assistant turns; the harness cannot ask for the second, so it copies it from gold | **327** pairs (59 stay+stay, 265 advance-then-stay, 3 other) — 324 of 1,868 tool calls (17.3%) never scored | Those calls score as perfect for every model | 59 merged; the 265 advance-then-stay pairs remain by decision |
 | Identifier values shared with the training corpus | **362** of 508 conversations; 31.1% of identifier occurrences reused across conversations | Memorising training values is rewarded | Reduced — 25 conversations, 1.4% reuse |
 | Tool results with no tool call before them | **4** (3 in the hand-added insurance file) | The model is shown a result for a call nobody made | Remain |
 | **Conversations with at least one confident finding** | **52** of 508 (10.2%) | | |
@@ -199,13 +198,23 @@ the user said (a Thai city name written in English, a date put in ISO form).
 | Tool arguments the model cannot know | **443** confident (+2,742 needs review) | Trains the model to produce values it was never given | Not fixed |
 | Identifier values reused across conversations | **70.5%** of identifier occurrences (2,630 values; `TX-101` in ~196 conversations) | Teaches constants instead of copying from the conversation | Not fixed |
 | States offering two tools / visits using two | **9,542** states offer two; **458** visits use two | Trains "one state, several calls", the pattern v4 removes from the benchmark | Not fixed; the generator's `single_tool_states` prevents it in new data |
-| Back-to-back assistant turns | **3,802** pairs in 1,934 conversations (552 stay+stay, 3,250 advance-then-stay) | — | Not fixed |
 | Tool results with no tool call before them | **60** in 41 conversations | Trains announcing a call instead of making it | Not fixed; the generator's repair loop now rejects it |
 | **Conversations with at least one confident finding** | **1,189** of 9,932 (12.0%) | | |
 
 #### Harness issues that also touch these tables
 
-- **Copied turns score as perfect** — the back-to-back turns above; open (R26).
+- **Back-to-back gold turns are copied, not scored.** When the answer key has two
+  assistant turns in a row, nothing new arrives after the model's first reply,
+  and a chat API cannot be asked for "your next turn", so the harness pastes the
+  second gold turn in and scores it as perfect. 327 pairs in this benchmark
+  (59 stay+stay, 265 advance-then-stay, 3 other) — **324 of 1,868 tool calls
+  (17.3%) are never asked of the model.** Worse, a model that does the natural
+  thing in one reply (in `L1_005`, apologise *and* retry after a tool error) has
+  its real call counted as an extra, wrong one. The data is not at fault: both
+  gold turns are correct and the shape is legal. The v3/v4 benchmarks merged the
+  59 stay+stay pairs as a workaround; the fix belongs in the harness — score the
+  model's one reply against both gold turns combined — and would cover all 324.
+  Open (R26).
 - **Frontier runs are labelled `native`** but run with text-format history
   (footnote ¹). The label is wrong in the result files; the rows are placed by
   what the harness actually sent.
