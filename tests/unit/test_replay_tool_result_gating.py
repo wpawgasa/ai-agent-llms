@@ -13,11 +13,11 @@ result, whether or not the model's reply called the tool. Two things followed:
 
 Three rules are tested here:
 
-1. A ground-truth tool result reaches the context only when the preceding
-   assistant turn (model reply or copied ground-truth turn) made a tool call,
-   one result per call.
-2. A copied ground-truth turn writes its tool calls as ``<tool_call>`` text;
-   native mode lifts them into structured ``tool_calls`` so their results render.
+1. A ground-truth tool result reaches the context only when the latest reply
+   made a tool call, one result per call — including a call made on the second
+   ask of a segment (``eval/segment_scoring.py``).
+2. The segment answering a withheld result is a miss; ground truth is never
+   copied into a prediction.
 3. With ``split_tool_call_content`` (Gemma-4), a reply carrying both text and a
    tool call goes to the server as two assistant messages, text first. The
    Gemma-4 template renders a merged message's text AFTER the tool response and
@@ -73,14 +73,18 @@ def _mentions_result(messages) -> bool:
 def test_no_call_means_no_tool_result(monkeypatch, fmt):
     seen, predicted, latencies = _run(
         monkeypatch,
-        ["[STATE: V → V]\nCould you repeat the PIN?", "[STATE: DONE → DONE]\nBye."],
+        [
+            "[STATE: V → V]\nCould you repeat the PIN?",
+            "[STATE: V → V]\nStill need the PIN.",  # second ask: the segment owes a call
+            "[STATE: DONE → DONE]\nBye.",
+        ],
         tool_turn_format=fmt,
     )
     assert all(not _mentions_result(msgs) for msgs in seen)
-    # The turn that answers the result cannot be asked for, so it is scored as
-    # a miss (empty), never copied from ground truth.
+    # The segment that answers the result cannot be asked for, so it is scored
+    # as a miss (empty), never copied from ground truth.
     assert predicted[4]["content"] == ""
-    assert len(seen) == 2 and len(latencies) == 2
+    assert len(seen) == 3 and len(latencies) == 3
 
 
 @pytest.mark.parametrize("fmt", ["native", "text"])
@@ -127,58 +131,45 @@ def test_stale_call_does_not_admit_a_later_result(monkeypatch):
         "workflow_graph": {},
     }
     seen, predicted, _ = _run(
-        monkeypatch, [f"[STATE: V → V]\n{CALL_TEXT}", "[STATE: V → V]\nno call"], sample=sample,
+        monkeypatch,
+        [f"[STATE: V → V]\n{CALL_TEXT}", "[STATE: V → V]\nno call", "[STATE: V → V]\nstill no call"],
+        sample=sample,
     )
     assert all(not _mentions_result(msgs) for msgs in seen)
     assert predicted[6]["content"] == ""
 
 
-def test_copied_ground_truth_turn_keeps_its_tool_call_native(monkeypatch):
-    """Consecutive assistant turns: the second is copied from ground truth. Its
-    text tool call must become structured so the following result renders."""
-    sample = {
-        "messages": [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "PIN 5542"},
-            {"role": "assistant", "content": "[STATE: V → V]\nOne moment."},
-            {"role": "assistant", "content": f"[STATE: V → V]\n{CALL_TEXT}"},
-            {"role": "tool", "content": RESULT},
-            {"role": "assistant", "content": "[STATE: V → DONE]\nVerified."},
-        ],
-        "tool_schemas": [],
-        "workflow_graph": {},
-    }
-    seen, predicted, _ = _run(monkeypatch, ["[STATE: V → V]\nOne moment.", "[STATE: V → DONE]\nok"], sample=sample)
-    assert len(seen) == 2
-    last = seen[1]
-    assert last[-1]["role"] == "tool" and RESULT in last[-1]["content"]
-    copied = last[-2]
-    assert copied["role"] == "assistant"
-    assert copied["tool_calls"][0]["function"]["name"] == "verify"
-    assert "<tool_call>" not in copied["content"]
-    assert last[-1]["tool_call_id"] == copied["tool_calls"][0]["id"]
-    # Predictions still carry the ground-truth turn unchanged.
-    assert predicted[3]["content"] == sample["messages"][3]["content"]
+PAIR = {
+    "messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "PIN 5542"},
+        {"role": "assistant", "content": "[STATE: V → V]\nOne moment."},
+        {"role": "assistant", "content": f"[STATE: V → V]\n{CALL_TEXT}"},
+        {"role": "tool", "content": RESULT},
+        {"role": "assistant", "content": "[STATE: V → DONE]\nVerified."},
+    ],
+    "tool_schemas": [],
+    "workflow_graph": {},
+}
 
 
-def test_copied_ground_truth_turn_keeps_its_tool_call_text(monkeypatch):
-    sample = {
-        "messages": [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "PIN 5542"},
-            {"role": "assistant", "content": "[STATE: V → V]\nOne moment."},
-            {"role": "assistant", "content": f"[STATE: V → V]\n{CALL_TEXT}"},
-            {"role": "tool", "content": RESULT},
-            {"role": "assistant", "content": "[STATE: V → DONE]\nVerified."},
-        ],
-        "tool_schemas": [],
-        "workflow_graph": {},
-    }
-    seen, _, _ = _run(
-        monkeypatch, ["[STATE: V → V]\nOne moment.", "[STATE: V → DONE]\nok"], sample=sample,
-        tool_turn_format="text",
+@pytest.mark.parametrize("fmt", ["native", "text"])
+def test_call_made_on_the_second_ask_admits_its_result(monkeypatch, fmt):
+    """Back-to-back ground-truth turns (speech, then the call) are one segment.
+    A reply that only announces the call gets a second ask; the call it then
+    makes admits the result."""
+    seen, predicted, _ = _run(
+        monkeypatch,
+        ["[STATE: V → V]\nOne moment.", f"[STATE: V → V]\n{CALL_TEXT}", "[STATE: V → DONE]\nok"],
+        sample=PAIR, tool_turn_format=fmt,
     )
-    assert _mentions_result(seen[1])
+    assert len(seen) == 3
+    assert _mentions_result(seen[2]) and not _mentions_result(seen[1])
+    if fmt == "native":
+        assert seen[2][-1]["tool_call_id"] == seen[2][-2]["tool_calls"][0]["id"]
+    # Ground truth is never copied into a prediction.
+    assert predicted[3]["content"] == ""
+    assert CALL_TEXT in predicted[2]["content"]
 
 
 def test_split_sends_text_then_call_as_two_messages(monkeypatch):

@@ -38,6 +38,20 @@ used by the composite — `compute_weighted_score` still takes
 `task_completion_rate`, so adding it moved no Phase 1 score. Read the pair:
 a large gap between them means the model is teleporting, not finishing.
 
+### Segment scoring (`segment_scoring.py`, 2026-09-22)
+
+The Phase 1 replay scores by *segment* — a run of ground-truth assistant turns
+with no user message or tool result between them — never by assistant turn.
+The model is asked once per segment and once more if an owed tool call is
+missing (the second reply is kept only if it makes a call). Before any metric
+runs, `segment_scoring_view(gt, pred)` merges each segment into one turn on
+both sides: tool calls over the whole segment; one state transition from the
+segment's opening state to its final state, legal only if the annotations
+chain and every tool call sits under a self-loop annotation
+(`ILLEGAL_TRANSITION` otherwise). Ground truth is never copied into a
+prediction; outbound openers are unscored (CLAUDE.md R29). Every per-turn
+metric keeps pairing the two views by position, so no metric changed.
+
 ## Tool-Calling Accuracy (`tool_call_f1.py`)
 ```python
 @dataclass

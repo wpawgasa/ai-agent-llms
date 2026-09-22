@@ -53,6 +53,7 @@ from llm_workflow_agents.eval.tool_call_f1 import (
 from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetrics
 from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend_modality_scores
 from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics_by_language
+from llm_workflow_agents.eval.segment_scoring import SegmentStats, reply_texts, segment_scoring_view
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -492,6 +493,28 @@ def _load_samples(
     return samples
 
 
+def dataset_fingerprints(data_paths: "list[Path]") -> dict[str, str]:
+    """SHA-256 of exactly the files ``_load_samples`` reads, per ``--data`` path.
+
+    A directory's hash covers each ``*.jsonl`` directly inside it, by name and
+    content, in sorted order — so a result can be tied to the benchmark version
+    it scored, which a directory name alone cannot do.
+    """
+    import hashlib
+    from pathlib import Path
+
+    out: dict[str, str] = {}
+    for data_path in data_paths:
+        p = Path(data_path)
+        files = [p] if p.is_file() else sorted(p.glob("*.jsonl"))
+        digest = hashlib.sha256()
+        for f in files:
+            digest.update(f.name.encode() + b"\0")
+            digest.update(hashlib.sha256(f.read_bytes()).digest())
+        out[str(p)] = digest.hexdigest()
+    return out
+
+
 def _downgrade_tool_turns_to_text(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert past structured tool turns to plain text.
 
@@ -800,6 +823,14 @@ def _assistant_context_messages(
     return [msg]
 
 
+def _gt_turn_has_call(msg: dict[str, Any]) -> bool:
+    return bool(
+        (msg.get("annotations") or {}).get("tool_calls")
+        or msg.get("tool_calls")
+        or parse_tool_calls(msg.get("content") or "")
+    )
+
+
 def _replay_conversation(
     endpoint: str,
     model: str,
@@ -809,196 +840,143 @@ def _replay_conversation(
     engine: str = "vllm",
     tool_turn_format: str = "native",
     split_tool_call_content: bool = False,
+    stats: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[float], list[float]]:
-    """Replay a conversation, substituting model completions at assistant turns.
+    """Replay a conversation, asking the model once per SEGMENT of assistant turns.
+
+    A segment is a run of ground-truth assistant turns with no user message or
+    tool result between them (``eval/segment_scoring.py``). The corpus often
+    splits one piece of work across two such turns — speech, then the tool
+    call — and a model may equally do both in one reply. So the model is asked
+    once at the start of each segment, and when the segment owes a tool call
+    that the reply did not make, asked once more: the context then ends on the
+    model's own reply, which vLLM and the Gemma-4 template accept as the cue
+    for a fresh turn (verified 2026-09-22 on 40 real pairs, both formats).
+    Frontier APIs refuse a request ending on the model's own turn, so on
+    BiFrost the second ask is skipped and counted (``second_ask_unavailable``).
+    A second reply is kept only if it makes a tool call. Asked again with
+    nothing new to react to, a model that had no call to make sometimes writes
+    the customer's next line; such a reply goes into neither the context nor
+    the prediction (``second_ask_no_call_discarded``).
+
+    Ground truth is never copied into a prediction. An opening turn (an
+    outbound conversation, before any user message) is not asked for: the
+    served prompt does not say why the agent is calling, so the model can only
+    invent a purpose, and its invented opener would then sit in the context
+    beside ground-truth customer replies to a different one. The ground-truth
+    opener goes into the CONTEXT and the segment is marked ``"unscored": True``
+    so scoring drops it — on every engine, so local and frontier runs match.
 
     Ground-truth tool responses stand in for real tool execution, but only for
     calls that were actually made: a result reaches the context only when the
-    preceding assistant turn (the model's reply, or a ground-truth turn copied
-    in) made a tool call, one result per call. A result for a call the model
-    never made would not exist in a real system; showing it gave models that
-    miss calls information they should not have (text format), or was dropped
-    by the chat template while the replay carried on regardless (native
-    format). The ground-truth turn that answers a withheld result cannot be
-    solicited — the context ends in the model's own reply — so it is scored as
-    a miss (empty prediction), never copied from ground truth.
+    latest reply made a tool call, one result per call. A result for a call the
+    model never made would not exist in a real system (R26). The segment that
+    answers a withheld result cannot be asked for — nothing new has arrived —
+    so it is scored as a miss (empty prediction).
+
+    Predictions stay aligned with the ground truth message by message: a
+    segment's replies are joined into its first slot (and listed under
+    ``"replies"``), and its other slots are left empty.
+
+    ``stats``, when given, is incremented in place with counts of segments,
+    second asks, unscored segments and misses.
 
     Returns:
-        (predicted_messages, latencies_ms_per_assistant_turn, ttfts_ms_per_assistant_turn)
+        (predicted_messages, latencies_ms_per_request, ttfts_ms_per_request)
     """
     tools = sample.get("tool_schemas") or []
     terminal_states = set(sample.get("workflow_graph", {}).get("terminal", []))
+    messages = sample.get("messages", [])
     predicted: list[dict[str, Any]] = []
     latencies_ms: list[float] = []
     ttfts_ms: list[float] = []
     context: list[dict[str, Any]] = []  # sliding context sent to the model
-    # Ids of the calls made by the latest assistant turn that no result has
-    # answered yet. Reset at every assistant turn, so a call from an earlier
-    # turn never licenses a later result.
+    # Ids of the calls made by the latest assistant reply that no result has
+    # answered yet. Reset at every reply, so a call from an earlier reply
+    # never licenses a later result.
     pending_tool_call_ids: list[str] = []
-    # True when a ground-truth tool result was withheld since the last
-    # assistant turn (the call it answers was never made).
+    # True when a ground-truth tool result was withheld since the last reply
+    # (the call it answers was never made).
     result_withheld = False
+    counts = stats if stats is not None else {}
 
-    for msg in sample.get("messages", []):
+    def _count(key: str) -> None:
+        counts[key] = counts.get(key, 0) + 1
+
+    def _add_assistant_turn(content: str, text: str, calls: list[dict[str, Any]]) -> None:
+        if tool_turn_format == "text":
+            # Keep the turn exactly as written. Training sees tool calls as
+            # text in place, so rebuilding them from structured calls would
+            # make the context drift from it.
+            context.append({"role": "assistant", "content": content})
+        else:
+            context.extend(_assistant_context_messages(text, calls, split_tool_call_content))
+        pending_tool_call_ids[:] = [tc.get("id") or f"call_{i}" for i, tc in enumerate(calls)]
+
+    def _ask() -> tuple[str, str, list[dict[str, Any]]]:
+        if tool_turn_format == "text":
+            # Same format the model trained in: tool calls as text, tool
+            # results as prefixed user turns, and no native tool declarations
+            # (the schemas are in the system prompt). data/tool_turns.py.
+            from llm_workflow_agents.data.tool_turns import to_text_tool_turns
+
+            request_messages, request_tools = to_text_tool_turns(context), None
+        else:
+            request_messages, request_tools = context, tools
+        content, raw_tool_calls, latency, ttft = _call_vllm(
+            endpoint, model, request_messages, temperature, tools=request_tools,
+            enable_thinking=enable_thinking, engine=engine,
+        )
+        latencies_ms.append(latency)
+        ttfts_ms.append(ttft)
+        logger.debug(
+            "model_response",
+            turn=len(predicted),
+            latency_ms=round(latency, 1),
+            ttft_ms=round(ttft, 1),
+            content=content[:2000],  # truncate to avoid flooding logs
+        )
+        # Synthesize structured tool_calls from inline <tool_call> text when
+        # the API returned none in the structured field; without them the next
+        # tool message has no tool_call_id and frontier providers reject it.
+        if raw_tool_calls:
+            text_content = content.split("\n<tool_call>")[0]  # calls appended as tags
+        else:
+            text_content, raw_tool_calls = _tool_calls_from_text(content)
+        return content, text_content, raw_tool_calls
+
+    def _copy_into_context(msg: dict[str, Any]) -> None:
+        # The corpus writes tool calls as <tool_call> text. Native templates
+        # render a result only under structured tool_calls, so lift them out.
+        gt_content = msg.get("content") or ""
+        if msg.get("tool_calls"):
+            gt_text, gt_calls = gt_content, list(msg["tool_calls"])
+        else:
+            gt_text, gt_calls = _tool_calls_from_text(gt_content)
+        _add_assistant_turn(gt_content, gt_text, gt_calls)
+
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
         role = msg["role"]
 
         if role == "system":
             enriched = _build_system_prompt(sample, msg["content"])
             context.append({"role": "system", "content": enriched})
             predicted.append(msg)  # keep original in predictions for eval
+            i += 1
 
         elif role == "user":
             context.append({"role": "user", "content": msg["content"]})
             predicted.append(msg)
-
-        elif role == "assistant":
-            # A model completion can only be fairly solicited when the
-            # trailing context entry carries something new the model hasn't
-            # reacted to yet — a user utterance or a tool result. Two
-            # situations produce a context that doesn't:
-            #
-            # (1) An opening assistant turn with no user turn before it at
-            #     all (some samples are system-initiated:
-            #     system → assistant → user → ...). Qwen3-family chat
-            #     templates explicitly reject a message list with no user
-            #     query.
-            # (2) A GT assistant turn immediately following another GT
-            #     assistant turn with nothing between them. The corpus does
-            #     this routinely — measured at 295/296 such adjacent pairs
-            #     across the benchmark corpus, nearly always a text-only
-            #     state-transition turn immediately followed by a
-            #     tool-call turn, with no new user input in between.
-            #
-            # Both send Gemini (via BiFrost) a request whose trailing
-            # message is already model-authored, which its API flatly
-            # refuses ("Requests ending with a model turn are not
-            # supported") — a real constraint, not a bug in that provider:
-            # there is no such thing as "continue the model's own last
-            # utterance" in a turn-based chat API when nothing new has been
-            # said. Case (2) previously reached ``_call_vllm`` anyway, which
-            # is why ~5% of calls on this corpus failed with that exact 400
-            # and scored as a missing state annotation *and* a missing tool
-            # call — every one of those failures was structurally
-            # unanswerable, not a model shortcoming. Use the GT turn
-            # verbatim in both cases: no model call, no recorded latency —
-            # case (1)'s existing treatment, now extended to case (2).
-            last_role = context[-1].get("role") if context else None
-            if last_role not in ("user", "tool") and result_withheld:
-                # This turn answers a tool result the model never got, because
-                # it never made the call. It cannot be asked for, and copying
-                # the ground-truth answer would score the model on a turn it
-                # could not have produced — score it as a miss instead.
-                logger.info("missed_turn_after_withheld_tool_result", turn=len(predicted))
-                result_withheld = False
-                pending_tool_call_ids.clear()
-                predicted.append({"role": "assistant", "content": ""})
-                continue
-            if last_role not in ("user", "tool"):
-                logger.info(
-                    "skip_unsolicitable_assistant_turn",
-                    reason=(
-                        "no_user_in_context"
-                        if not any(c.get("role") == "user" for c in context)
-                        else "consecutive_assistant_turn"
-                    ),
-                    last_context_role=last_role,
-                    turn=len(predicted),
-                )
-                # The corpus writes tool calls as <tool_call> text. Native
-                # templates render a result only under structured tool_calls,
-                # so lift them out; the text format keeps the turn verbatim.
-                gt_content = msg.get("content") or ""
-                if msg.get("tool_calls"):
-                    gt_text, gt_calls = gt_content, list(msg["tool_calls"])
-                else:
-                    gt_text, gt_calls = _tool_calls_from_text(gt_content)
-                if tool_turn_format == "text":
-                    context.append({"role": "assistant", "content": gt_content})
-                else:
-                    context.extend(
-                        _assistant_context_messages(gt_text, gt_calls, split_tool_call_content)
-                    )
-                pending_tool_call_ids[:] = [
-                    tc.get("id") or f"gt_call_{i}" for i, tc in enumerate(gt_calls)
-                ]
-                result_withheld = False
-                predicted.append(msg)
-                continue
-
-            if tool_turn_format == "text":
-                # Same format the model trained in: tool calls as text, tool
-                # results as prefixed user turns, and no native tool
-                # declarations (training never had them; the schemas are in
-                # the system prompt). data/tool_turns.py.
-                from llm_workflow_agents.data.tool_turns import to_text_tool_turns
-
-                request_messages, request_tools = to_text_tool_turns(context), None
-            else:
-                request_messages, request_tools = context, tools
-            content, raw_tool_calls, latency, ttft = _call_vllm(
-                endpoint, model, request_messages, temperature, tools=request_tools,
-                enable_thinking=enable_thinking, engine=engine,
-            )
-            latencies_ms.append(latency)
-            ttfts_ms.append(ttft)
-            logger.debug(
-                "model_response",
-                turn=len(predicted),
-                latency_ms=round(latency, 1),
-                ttft_ms=round(ttft, 1),
-                content=content[:2000],  # truncate to avoid flooding logs
-            )
-
-            # Fix #2: synthesize structured tool_calls from inline <tool_call>
-            # text tags when the API didn't return them in the structured field.
-            # Without this the next tool-role message has no tool_call_id and
-            # frontier providers reject the conversation with HTTP 400.
-            if raw_tool_calls:
-                # _call_vllm appended the structured calls to content as tags.
-                text_content = content.split("\n<tool_call>")[0]
-            else:
-                text_content, raw_tool_calls = _tool_calls_from_text(content)
-            if tool_turn_format == "text":
-                # Keep the reply exactly as generated. Training sees tool calls
-                # as text in place, so rebuilding them from structured calls
-                # (which re-joins prose and <tool_call> with a newline the model
-                # may not have written) would make the context drift from it.
-                context.append({"role": "assistant", "content": content})
-            else:
-                context.extend(
-                    _assistant_context_messages(text_content, raw_tool_calls, split_tool_call_content)
-                )
-            # Only these calls may be answered by the tool results that follow.
-            pending_tool_call_ids[:] = [
-                tc.get("id") or f"call_{i}" for i, tc in enumerate(raw_tool_calls)
-            ]
-            result_withheld = False
-
-            # For eval, store the full content with <tool_call> tags
-            pred_msg: dict[str, Any] = {"role": "assistant", "content": content}
-            predicted.append(pred_msg)
-
-            # Fix #1: do NOT early-exit on terminal state. Multi-turn
-            # negotiations (L1_002, L1_004) reach TERMINAL on turn 1 if the
-            # model collapses negotiation; truncating the loop loses every
-            # subsequent GT tool call from per-turn alignment. Walk every
-            # GT turn instead — the natural end of `for msg in messages`
-            # provides the stop condition.
-            if terminal_states:
-                transitions = parse_state_transitions([pred_msg])
-                if transitions and transitions[-1][1] in terminal_states:
-                    logger.info(
-                        "terminal_state_reached_continuing",
-                        state=transitions[-1][1],
-                        turn=len(latencies_ms),
-                    )
+            i += 1
 
         elif role == "tool":
             # Ground-truth tool results stand in for real execution, but only
-            # for a call the latest assistant turn actually made. Predictions
-            # keep every ground-truth message so turn alignment is unchanged.
+            # for a call the latest reply actually made. Predictions keep every
+            # ground-truth message so alignment is unchanged.
             predicted.append(msg)
+            i += 1
             if not pending_tool_call_ids:
                 logger.info("tool_result_withheld_no_call", turn=len(predicted) - 1)
                 result_withheld = True
@@ -1009,12 +987,96 @@ def _replay_conversation(
                 "tool_call_id": pending_tool_call_ids.pop(0),
             })
 
+        elif role == "assistant":
+            end = i
+            while end < len(messages) and messages[end]["role"] == "assistant":
+                end += 1
+            segment = messages[i:end]
+            _count("segments")
+            last_role = context[-1].get("role") if context else None
+
+            if last_role not in ("user", "tool") and result_withheld:
+                # This segment answers a tool result the model never got,
+                # because it never made the call. Nothing new has arrived to
+                # react to, and copying the ground-truth answer would score the
+                # model on work it could not have done — score it as a miss.
+                logger.info("missed_segment_after_withheld_tool_result", turn=i, turns=len(segment))
+                _count("missed_after_withheld_result")
+                result_withheld = False
+                pending_tool_call_ids.clear()
+                predicted.extend({"role": "assistant", "content": ""} for _ in segment)
+                i = end
+                continue
+
+            if last_role not in ("user", "tool"):
+                # An opening turn: no user message yet (outbound conversations
+                # open with the agent). See the docstring for why it is not
+                # asked for.
+                logger.info(
+                    "unscored_opening_segment",
+                    last_context_role=last_role, turn=i, turns=len(segment),
+                )
+                _count("unscored_opening")
+                for gt_msg in segment:
+                    _copy_into_context(gt_msg)
+                result_withheld = False
+                predicted.extend({**gt_msg, "unscored": True} for gt_msg in segment)
+                i = end
+                continue
+
+            content, text_content, calls = _ask()
+            _add_assistant_turn(content, text_content, calls)
+            replies = [content]
+            result_withheld = False
+
+            if not calls and any(_gt_turn_has_call(m) for m in segment):
+                # The segment owes a tool call and the reply made none: the
+                # model may be announcing the call first. Ask once more.
+                if engine == "bifrost":
+                    logger.info("second_ask_unavailable", engine=engine, turn=i)
+                    _count("second_ask_unavailable")
+                else:
+                    _count("second_asks")
+                    content, text_content, calls = _ask()
+                    if calls:
+                        _count("second_ask_made_call")
+                        _add_assistant_turn(content, text_content, calls)
+                        replies.append(content)
+                    else:
+                        logger.info("second_ask_no_call_discarded", turn=i, content=content[:300])
+                        _count("second_ask_no_call_discarded")
+
+            pred_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": "\n".join(r for r in replies if r),
+                "replies": replies,
+            }
+            predicted.append(pred_msg)
+            predicted.extend({"role": "assistant", "content": ""} for _ in segment[1:])
+
+            # Do NOT stop on a terminal state: walking every ground-truth turn
+            # keeps later ground-truth tool calls in the scoring alignment.
+            if terminal_states:
+                transitions = parse_state_transitions([pred_msg])
+                if transitions and transitions[-1][1] in terminal_states:
+                    logger.info(
+                        "terminal_state_reached_continuing",
+                        state=transitions[-1][1],
+                        turn=len(latencies_ms),
+                    )
+            i = end
+
+        else:
+            predicted.append(msg)
+            i += 1
+
     return predicted, latencies_ms, ttfts_ms
 
 
 def build_state_machine_inputs(
     samples: list[dict[str, Any]],
     predicted_messages: list[list[dict[str, Any]]],
+    ground_truth_messages: list[list[dict[str, Any]]] | None = None,
 ) -> tuple[list[ConversationPrediction], list[ConversationGroundTruth]]:
     """Pair each sample's replayed messages with its own ground truth.
 
@@ -1025,6 +1087,9 @@ def build_state_machine_inputs(
     conversation sharing its id, understating whole-run state accuracy.
     Keys here combine the row position with the id, so each row can only
     ever meet its own ground truth.
+
+    ``ground_truth_messages`` replaces each sample's own messages as the ground
+    truth — the benchmark passes its segment view (``eval/segment_scoring.py``).
     """
     if len(samples) != len(predicted_messages):
         raise ValueError(
@@ -1032,6 +1097,10 @@ def build_state_machine_inputs(
         )
     predictions: list[ConversationPrediction] = []
     ground_truths: list[ConversationGroundTruth] = []
+    if ground_truth_messages is not None and len(ground_truth_messages) != len(samples):
+        raise ValueError(
+            f"{len(samples)} samples but {len(ground_truth_messages)} ground-truth conversations"
+        )
     for idx, (sample, messages) in enumerate(zip(samples, predicted_messages)):
         key = f"{idx}:{sample.get('conversation_id', f'sample_{idx}')}"
         gt_truth = sample.get("ground_truth", {})
@@ -1039,7 +1108,10 @@ def build_state_machine_inputs(
         predictions.append(ConversationPrediction(conversation_id=key, messages=messages))
         ground_truths.append(ConversationGroundTruth(
             conversation_id=key,
-            messages=sample.get("messages", []),
+            messages=(
+                ground_truth_messages[idx] if ground_truth_messages is not None
+                else sample.get("messages", [])
+            ),
             terminal_states=terminal_states,
         ))
     return predictions, ground_truths
@@ -1233,6 +1305,14 @@ if __name__ == "__main__":
     chain_ground_truths: list[dict[str, Any]] = []
     all_latencies_ms: list[float] = []
     all_ttfts_ms: list[float] = []
+    # Every metric reads one ground-truth turn beside one prediction slot, so
+    # both sides are scored through the segment view (eval/segment_scoring.py):
+    # one turn per run of consecutive ground-truth assistant turns.
+    all_gt_views: list[list[dict[str, Any]]] = []
+    # One entry per request, for guardrails that measure a single reply's shape.
+    conv_reply_preds: list[list[TurnPrediction]] = []
+    segment_stats = SegmentStats()
+    replay_counts: dict[str, int] = {}
 
     for idx, sample in enumerate(samples):
         conv_id = sample.get("conversation_id", f"sample_{idx}")
@@ -1243,19 +1323,26 @@ if __name__ == "__main__":
         pred_messages, latencies, ttfts = _replay_conversation(
             args.endpoint, args.model, sample, temperature=0.0,
             enable_thinking=args.enable_thinking, engine=args.engine,
-                tool_turn_format=args.tool_turn_format,
-                split_tool_call_content=args.split_tool_call_content,
+            tool_turn_format=args.tool_turn_format,
+            split_tool_call_content=args.split_tool_call_content,
+            stats=replay_counts,
         )
         all_latencies_ms.extend(latencies)
         all_ttfts_ms.extend(ttfts)
-        all_pred_messages.append(pred_messages)
+        gt_view, pred_view = segment_scoring_view(
+            sample.get("messages", []), pred_messages, segment_stats,
+        )
+        all_pred_messages.append(pred_view)
+        all_gt_views.append(gt_view)
+        conv_reply_preds.append([
+            TurnPrediction(turn_id=k, content=text)
+            for k, text in enumerate(reply_texts(pred_messages))
+        ])
 
         # Tool-call inputs — one TurnPrediction/GroundTruth per assistant turn
         this_conv_preds: list[TurnPrediction] = []
         this_conv_gts: list[TurnGroundTruth] = []
-        for turn_idx, (pred_msg, gt_msg) in enumerate(
-            zip(pred_messages, sample.get("messages", []))
-        ):
+        for turn_idx, (pred_msg, gt_msg) in enumerate(zip(pred_view, gt_view)):
             if gt_msg.get("role") != "assistant":
                 continue
             tp = TurnPrediction(
@@ -1275,12 +1362,14 @@ if __name__ == "__main__":
         conv_tool_gts.append(this_conv_gts)
 
         # Chain propagation inputs
-        chain_predictions.append({"messages": pred_messages})
-        chain_ground_truths.append({"messages": sample.get("messages", [])})
+        chain_predictions.append({"messages": pred_view})
+        chain_ground_truths.append({"messages": gt_view})
 
     # Keyed by row position, never by conversation_id: the text and voice
     # strata reuse ids (see build_state_machine_inputs).
-    state_predictions, state_ground_truths = build_state_machine_inputs(samples, all_pred_messages)
+    state_predictions, state_ground_truths = build_state_machine_inputs(
+        samples, all_pred_messages, all_gt_views,
+    )
 
     # --- Stochastic trials for pass^k ---
     for trial_num in range(args.stochastic_trials):
@@ -1292,7 +1381,8 @@ if __name__ == "__main__":
                 tool_turn_format=args.tool_turn_format,
                 split_tool_call_content=args.split_tool_call_content,
             )
-            state_predictions[idx].stochastic_trials.append(trial_messages)
+            _, trial_view = segment_scoring_view(sample.get("messages", []), trial_messages)
+            state_predictions[idx].stochastic_trials.append(trial_view)
 
     # --- Compute metrics ---
     state_metrics = evaluate_state_machine(state_predictions, state_ground_truths)
@@ -1331,7 +1421,7 @@ if __name__ == "__main__":
     # quality_summary["quality"], so this cannot move the Phase 1 ranking.
     quality_summary = attach_chunk_diagnostics(
         quality_summary,
-        _voice_stratum_completions_by_language(samples, conv_tool_preds),
+        _voice_stratum_completions_by_language(samples, conv_reply_preds),
     )
 
     # --- Write results ---
@@ -1359,7 +1449,16 @@ if __name__ == "__main__":
         "num_samples": len(samples),
         "stochastic_trials": args.stochastic_trials,
         "tool_turn_format": args.tool_turn_format,
+        # BiFrost rewrites every request's history to text
+        # (_downgrade_tool_turns_to_text), whatever --tool-turn-format says.
+        "tool_turn_format_effective": "text" if args.engine == "bifrost" else args.tool_turn_format,
         "split_tool_call_content": args.split_tool_call_content,
+        "data_sha256": dataset_fingerprints(data_paths),
+        # 2026-09-22: one ask per segment of consecutive ground-truth assistant
+        # turns, a second ask when an owed tool call is missing, scored per
+        # segment; ground truth is never copied into a prediction.
+        "scoring": "segment",
+        "segment_stats": {**segment_stats.to_dict(), **replay_counts},
         # 2026-09-17: tool results are shown only for calls actually made.
         "tool_result_gating": "calls_made_only",
         "metrics": quality.to_dict(),
@@ -1387,6 +1486,7 @@ if __name__ == "__main__":
     print(f"  tool_call_f1 (conv)     : {quality.tool_metrics_conversation.tool_call_f1:.3f}")
     print(f"  latency_per_turn_avg_ms : {quality.latency_per_turn_avg_ms:.1f}")
     print(f"  ttft_avg_ms             : {quality.ttft_avg_ms:.1f}")
+    print(f"  segments (scoring unit) : {result['segment_stats']}")
     print(
         "  quality (blended)       : "
         f"{quality_summary['quality']:.4f}"

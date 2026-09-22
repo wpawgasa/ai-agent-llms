@@ -1,24 +1,29 @@
-"""``_replay_conversation`` must never solicit a completion with a trailing
-context entry that is itself model-authored.
+"""Turns the replay cannot ordinarily ask for: openers and back-to-back turns.
 
-Root cause (2026-09-07): Gemini (via BiFrost) rejects any chat-completion
-request whose trailing message has role ``assistant`` — "Requests ending
-with a model turn are not supported" — because there is no such thing as
-"continue the model's own last utterance" in a turn-based chat API when
-nothing new (a user utterance or a tool result) has arrived since. Before
-this fix, ``_replay_conversation`` only guarded the OPENING case (an
-assistant turn with no user turn before it at all — the pre-existing
-``skip_preamble_assistant_turn`` path). It did not guard the much more
-common case: two GT assistant turns adjacent with nothing between them,
-which the benchmark corpus contains routinely (295/296 measured instances
-are a text-only state-transition turn immediately followed by a tool-call
-turn). Every one of those calls the harness previously made was
-structurally unanswerable and always failed with the same 400, scoring as
-both a missing state annotation and a missing tool call — not a model
-capability gap.
+History. Gemini (via BiFrost) rejects any request whose trailing message is
+the model's own ("Requests ending with a model turn are not supported"), and
+the corpus often has two ground-truth assistant turns in a row — a speech turn
+then the tool-call turn, 295/296 of such pairs (R25). The first fix stopped
+asking for the second turn and COPIED it from ground truth into the
+predictions, where it scored as perfect: ~327 turns per run the model never
+produced.
 
-The invariant under test: for ANY sample, ``_call_vllm`` is only ever
-invoked with a context whose last message has role ``user`` or ``tool``.
+Now (2026-09-22) the replay works per segment — a run of consecutive
+ground-truth assistant turns (``eval/segment_scoring.py``):
+
+- The model is asked once at the start of each segment, and once more when
+  the segment owes a tool call the reply did not make. vLLM and the Gemma-4
+  template accept a request ending on the model's own reply as the cue for a
+  fresh turn (verified on 40 real pairs, both tool-turn formats).
+- BiFrost refuses that request, so there the second ask is skipped and counted.
+- A second reply is kept only if it makes a tool call; otherwise it is
+  discarded (live smoke 2026-09-22: asked again with no call to make, the E4B
+  sometimes wrote the customer's next line).
+- An opening turn (outbound, no user message yet) is not asked for on any
+  engine: the served prompt does not say why the agent is calling. The
+  ground-truth opener goes into the CONTEXT only and the segment is marked
+  ``unscored``.
+- Ground truth is never copied into a scored prediction.
 """
 
 from __future__ import annotations
@@ -26,36 +31,66 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from llm_workflow_agents.eval.agent_benchmark import _replay_conversation
 
 ENDPOINT = "http://localhost:8000"
 MODEL = "test-model"
+CALL = '<tool_call>{"name": "verify_identity", "arguments": {}}</tool_call>'
 
 
-def _fake_call_vllm_factory(recorded_contexts: list[list[dict[str, Any]]], reply: str):
-    def _fake_call_vllm(endpoint, model, messages, temperature=0.0, tools=None,
-                         enable_thinking=False, engine="vllm"):
-        recorded_contexts.append([dict(m) for m in messages])
-        return reply, [], 10.0, 5.0
+def _fake(recorded: list[list[dict[str, Any]]], replies: list[str]):
+    queue = list(replies)
+
+    def _fake_call_vllm(endpoint, model, messages, temperature=0.0, tools=None, **kwargs):
+        recorded.append([dict(m) for m in messages])
+        return (queue.pop(0) if len(queue) > 1 else queue[0]), [], 10.0, 5.0
 
     return _fake_call_vllm
 
 
-def _assert_no_call_ends_in_assistant(recorded_contexts):
-    for ctx in recorded_contexts:
-        assert ctx, "a call was made with empty context"
-        assert ctx[-1]["role"] in ("user", "tool"), (
-            f"_call_vllm was invoked with a context ending in role "
-            f"{ctx[-1]['role']!r} — this is exactly the shape Gemini's API "
-            f"rejects with 'Requests ending with a model turn are not "
-            f"supported'"
-        )
+def _replay(sample, replies, **kw):
+    recorded: list[list[dict[str, Any]]] = []
+    stats: dict[str, int] = {}
+    with patch(
+        "llm_workflow_agents.eval.agent_benchmark._call_vllm",
+        side_effect=_fake(recorded, replies),
+    ):
+        predicted, latencies, _ = _replay_conversation(ENDPOINT, MODEL, sample, stats=stats, **kw)
+    return recorded, predicted, latencies, stats
 
 
-def test_ordinary_alternating_conversation_calls_model_for_every_assistant_turn():
-    """Baseline: a normal system/user/assistant/user/assistant conversation
-    must still call the model once per assistant turn — the fix must not
-    over-skip."""
+OUTBOUND = {
+    "messages": [
+        {"role": "system", "content": "You are an agent."},
+        {"role": "assistant", "content": "[STATE: GREETING → GREETING]\nHi, calling about your account."},
+        {"role": "user", "content": "ok"},
+        {"role": "assistant", "content": "[STATE: GREETING → TERMINAL]\ndone"},
+    ],
+    "tool_schemas": [],
+    "workflow_graph": {},
+}
+
+PAIR = {
+    "messages": [
+        {"role": "system", "content": "You are an agent."},
+        {"role": "user", "content": "check my identity, id ACCT-1"},
+        {"role": "assistant", "content": "[STATE: VERIFY → VERIFY]\nOne moment."},
+        {
+            "role": "assistant",
+            "content": f"[STATE: VERIFY → VERIFY]\n{CALL}",
+            "annotations": {"tool_calls": [{"name": "verify_identity", "arguments": {}}]},
+        },
+        {"role": "tool", "content": '{"status": "success"}'},
+        {"role": "assistant", "content": "[STATE: VERIFY → TERMINAL]\nAll set."},
+    ],
+    "tool_schemas": [{"function": {"name": "verify_identity", "parameters": {}}}],
+    "workflow_graph": {},
+}
+
+
+def test_ordinary_alternating_conversation_asks_once_per_assistant_turn():
     sample = {
         "messages": [
             {"role": "system", "content": "You are an agent."},
@@ -67,110 +102,79 @@ def test_ordinary_alternating_conversation_calls_model_for_every_assistant_turn(
         "tool_schemas": [],
         "workflow_graph": {},
     }
-    recorded: list[list[dict[str, Any]]] = []
-    with patch(
-        "llm_workflow_agents.eval.agent_benchmark._call_vllm",
-        side_effect=_fake_call_vllm_factory(recorded, "[STATE: A → A]\nreply"),
-    ):
-        predicted, latencies, ttfts = _replay_conversation(ENDPOINT, MODEL, sample)
-    assert len(recorded) == 2
-    assert len(latencies) == 2
-    _assert_no_call_ends_in_assistant(recorded)
+    recorded, _, latencies, stats = _replay(sample, ["[STATE: A → A]\nreply"])
+    assert len(recorded) == 2 and len(latencies) == 2
+    assert stats["segments"] == 2 and "second_asks" not in stats
 
 
-def test_opening_assistant_preamble_is_not_solicited():
-    """Pre-existing case: an outbound/system-initiated conversation
-    (system → assistant → user → ...) must not call the model for the
-    opener — there is no user turn yet for it to react to."""
-    sample = {
-        "messages": [
-            {"role": "system", "content": "You are an agent."},
-            {"role": "assistant", "content": "[STATE: GREETING → GREETING]\nHi, calling about your account."},
-            {"role": "user", "content": "ok"},
-            {"role": "assistant", "content": "[STATE: GREETING → TERMINAL]\ndone"},
+@pytest.mark.parametrize("engine", ["vllm", "bifrost"])
+def test_opener_goes_into_context_unscored(engine):
+    recorded, predicted, _, stats = _replay(OUTBOUND, ["[STATE: GREETING → TERMINAL]\ndone"], engine=engine)
+    assert len(recorded) == 1  # only the turn after the customer spoke
+    assert recorded[0][1]["content"] == OUTBOUND["messages"][1]["content"]  # opener in context
+    assert predicted[1]["unscored"] is True
+    assert stats["unscored_opening"] == 1
+
+
+def test_bifrost_never_asks_without_a_user_message_or_after_its_own_turn():
+    for sample in (OUTBOUND, PAIR):
+        recorded, _, _, _ = _replay(sample, ["[STATE: VERIFY → VERIFY]\nOne moment."], engine="bifrost")
+        for ctx in recorded:
+            assert ctx[-1]["role"] in ("user", "tool")
+
+
+def test_owed_call_after_an_announcement_gets_a_second_ask():
+    recorded, predicted, latencies, stats = _replay(
+        PAIR,
+        ["[STATE: VERIFY → VERIFY]\nOne moment.", f"[STATE: VERIFY → VERIFY]\n{CALL}", "[STATE: VERIFY → TERMINAL]\nok"],
+    )
+    assert len(recorded) == 3 and len(latencies) == 3
+    assert recorded[1][-1]["role"] == "assistant"  # the second ask follows the model's own reply
+    assert recorded[2][-1]["role"] == "tool"  # the call it then made admits the result
+    assert stats["second_asks"] == 1 and stats["second_ask_made_call"] == 1
+    # Both replies land in the segment's first slot; ground truth is never copied.
+    assert "One moment." in predicted[2]["content"] and CALL in predicted[2]["content"]
+    assert predicted[2]["replies"][1] == f"[STATE: VERIFY → VERIFY]\n{CALL}"
+    assert predicted[3]["content"] == ""
+
+
+def test_second_ask_without_a_call_is_discarded():
+    recorded, predicted, _, stats = _replay(
+        PAIR,
+        [
+            "[STATE: VERIFY → VERIFY]\nShall I verify you now?",
+            "[STATE: VERIFY → VERIFY]\nYes please, go ahead.",  # the customer's line, written by the model
+            "[STATE: VERIFY → TERMINAL]\nok",
         ],
-        "tool_schemas": [],
-        "workflow_graph": {},
-    }
-    recorded: list[list[dict[str, Any]]] = []
-    with patch(
-        "llm_workflow_agents.eval.agent_benchmark._call_vllm",
-        side_effect=_fake_call_vllm_factory(recorded, "[STATE: GREETING → TERMINAL]\ndone"),
-    ):
-        predicted, latencies, ttfts = _replay_conversation(ENDPOINT, MODEL, sample)
-    # Only the second assistant turn (after the user spoke) is solicited.
+    )
+    assert stats["second_asks"] == 1 and stats["second_ask_no_call_discarded"] == 1
+    assert "go ahead" not in predicted[2]["content"]
+    assert predicted[2]["replies"] == ["[STATE: VERIFY → VERIFY]\nShall I verify you now?"]
+    # Discarded from the context too: no later request carries it.
+    assert all("go ahead" not in (m.get("content") or "") for ctx in recorded for m in ctx)
+
+
+def test_a_reply_that_speaks_and_calls_needs_no_second_ask():
+    recorded, predicted, _, stats = _replay(
+        PAIR, [f"[STATE: VERIFY → VERIFY]\nOne moment.\n{CALL}", "[STATE: VERIFY → TERMINAL]\nok"],
+    )
+    assert len(recorded) == 2 and "second_asks" not in stats
+    assert predicted[3]["content"] == ""
+
+
+def test_bifrost_skips_the_second_ask_and_counts_it():
+    recorded, predicted, _, stats = _replay(
+        PAIR, ["[STATE: VERIFY → VERIFY]\nOne moment.", "[STATE: VERIFY → TERMINAL]\nok"], engine="bifrost",
+    )
+    assert stats["second_ask_unavailable"] == 1
+    # No call was made, so the result is withheld and the segment answering
+    # it is a miss.
+    assert predicted[5]["content"] == ""
+    assert stats["missed_after_withheld_result"] == 1
     assert len(recorded) == 1
-    assert len(latencies) == 1
-    _assert_no_call_ends_in_assistant(recorded)
-    # The opener is carried through verbatim in the predictions.
-    assert predicted[1]["content"] == sample["messages"][1]["content"]
 
 
-def test_consecutive_assistant_turn_is_not_solicited():
-    """The newly-guarded case: two GT assistant turns back to back with no
-    user/tool message between them — the shape measured at 295/296
-    instances across the real benchmark corpus (a text-only state-
-    transition turn immediately followed by a tool-call turn), e.g.
-    conversation L1_005 (announce a tool error, then retry the same call
-    with no new user input in between)."""
-    sample = {
-        "messages": [
-            {"role": "system", "content": "You are an agent."},
-            {"role": "user", "content": "check my identity, id ACCT-1"},
-            {
-                "role": "assistant",
-                "content": '[STATE: VERIFY → VERIFY]\n<tool_call>{"name": "verify_identity", "arguments": {}}</tool_call>',
-                "annotations": {"tool_calls": [{"name": "verify_identity", "arguments": {}}]},
-            },
-            {"role": "tool", "content": '{"error": "unavailable"}'},
-            {
-                # Text-only turn, no tool call — the "prev" half of the pair.
-                "role": "assistant",
-                "content": "[STATE: VERIFY → VERIFY]\nApologies, hit a temporary issue.",
-            },
-            {
-                # Immediately-following tool-call turn, no user message
-                # between this and the previous assistant turn — the "cur"
-                # half of the pair, and the one that must be skipped.
-                "role": "assistant",
-                "content": '[STATE: VERIFY → VERIFY]\n<tool_call>{"name": "verify_identity", "arguments": {}}</tool_call>',
-                "annotations": {"tool_calls": [{"name": "verify_identity", "arguments": {}}]},
-            },
-            {"role": "tool", "content": '{"status": "success"}'},
-            {"role": "assistant", "content": "[STATE: VERIFY → TERMINAL]\nAll set."},
-        ],
-        "tool_schemas": [{"function": {"name": "verify_identity", "parameters": {}}}],
-        "workflow_graph": {},
-    }
-    recorded: list[list[dict[str, Any]]] = []
-    with patch(
-        "llm_workflow_agents.eval.agent_benchmark._call_vllm",
-        # The reply calls the tool: a tool result is only shown after a call
-        # the model made (test_replay_tool_result_gating.py), and this test is
-        # about the consecutive-turn skip, not about a missed call.
-        side_effect=_fake_call_vllm_factory(
-            recorded,
-            '[STATE: VERIFY → VERIFY]\n<tool_call>{"name": "verify_identity", "arguments": {}}</tool_call>',
-        ),
-    ):
-        predicted, latencies, ttfts = _replay_conversation(ENDPOINT, MODEL, sample)
-
-    # 4 GT assistant turns total; the 3rd one (index 5, the retry) must be
-    # skipped, so only 3 model calls are made.
-    assert len(recorded) == 3
-    assert len(latencies) == 3
-    _assert_no_call_ends_in_assistant(recorded)
-    # The skipped turn is carried through verbatim, tool_calls included.
-    skipped_gt = sample["messages"][5]
-    skipped_pred = predicted[5]
-    assert skipped_pred["content"] == skipped_gt["content"]
-    assert skipped_pred.get("tool_calls") == skipped_gt.get("tool_calls")
-
-
-def test_multiple_consecutive_assistant_turns_in_a_row():
-    """Three GT assistant turns in a row (no user/tool between any of
-    them): only the first is solicited; the following two are structurally
-    unanswerable in the same way and must both be skipped."""
+def test_three_prose_turns_in_a_row_are_one_segment_and_one_ask():
     sample = {
         "messages": [
             {"role": "system", "content": "You are an agent."},
@@ -182,13 +186,7 @@ def test_multiple_consecutive_assistant_turns_in_a_row():
         "tool_schemas": [],
         "workflow_graph": {},
     }
-    recorded: list[list[dict[str, Any]]] = []
-    with patch(
-        "llm_workflow_agents.eval.agent_benchmark._call_vllm",
-        side_effect=_fake_call_vllm_factory(recorded, "[STATE: A → A]\nreply"),
-    ):
-        predicted, latencies, ttfts = _replay_conversation(ENDPOINT, MODEL, sample)
+    recorded, predicted, _, _ = _replay(sample, ["[STATE: A → A]\nreply"])
     assert len(recorded) == 1
-    _assert_no_call_ends_in_assistant(recorded)
-    assert predicted[3]["content"] == sample["messages"][3]["content"]
-    assert predicted[4]["content"] == sample["messages"][4]["content"]
+    assert predicted[2]["content"] == "[STATE: A → A]\nreply"
+    assert predicted[3]["content"] == "" and predicted[4]["content"] == ""

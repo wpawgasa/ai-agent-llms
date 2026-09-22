@@ -212,15 +212,24 @@ the user said (a Thai city name written in English, a date put in ISO form).
   thing in one reply (in `L1_005`, apologise *and* retry after a tool error) has
   its real call counted as an extra, wrong one. The data is not at fault: both
   gold turns are correct and the shape is legal. The v3/v4 benchmarks merged the
-  59 stay+stay pairs as a workaround; the fix belongs in the harness — score the
-  model's one reply against both gold turns combined — and would cover all 324.
-  Open (R26).
+  59 stay+stay pairs as a workaround. **Fixed in the harness 2026-09-22, for runs
+  from then on; every table above predates it.** The replay now works per
+  *segment* (a run of back-to-back gold turns): it asks the model once, asks
+  again only when a tool call is still owed, scores the calls over the whole
+  segment and the state as the segment's final state reached legally (a tool
+  call must still sit under a self-loop annotation), and never copies gold into
+  a prediction (`eval/segment_scoring.py`). On Gemini, which refuses a request
+  ending on its own turn, the second ask is skipped and counted. Outbound
+  openers are no longer scored at all: the served prompt never says why the
+  agent is calling (R29).
 - **Frontier runs are labelled `native`** but run with text-format history
-  (footnote ¹). The label is wrong in the result files; the rows are placed by
-  what the harness actually sent.
+  (footnote ¹). The label is wrong in these result files; the rows are placed
+  by what the harness actually sent. New result files also record
+  `tool_turn_format_effective`.
 - **Result files record data paths, not hashes.** The link from a result to the
   tagged data (`corpus/task-a-benchmark-v2`, `corpus/task-a-benchmark-voice-v1`)
-  rests on those stages being frozen.
+  rests on those stages being frozen. New result files also record
+  `data_sha256`.
 - **Chain propagation** was measuring the corpus, not the model, until
   2026-09-19; the table above is rescored under the fixed metric (R27).
 
