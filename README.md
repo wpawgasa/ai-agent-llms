@@ -53,12 +53,11 @@ paid in full (CLAUDE.md R25).
 ### Native tool-call format
 
 The standard path — structured `tool_calls` rendered by the model's own chat
-template. Frontier models are served through BiFrost and only run here.
+template. Local models only: the frontier models cannot run in this format
+through BiFrost (see the text table).
 
 | model | quality | text | voice | state trans | tool F1 | completion | continuous | invalid |
 |---|---|---|---|---|---|---|---|---|
-| gemini-3.5-flash-lite (frontier) | **0.8056** | 0.7970 | 0.8258 | 0.5946 | 0.6048 | 0.9409 | 0.6909 | 0.1059 |
-| gemini-3.1-flash-lite (frontier) | **0.8036** | 0.7990 | 0.8143 | 0.6113 | 0.6470 | 0.8642 | 0.7205 | 0.0934 |
 | E4B SFT + tool results | **0.7999** | 0.7844 | 0.8362 | 0.7050 | 0.6996 | 0.7854 | 0.7264 | 0.0345 |
 | 12B SFT + tool results (ckpt-3168) | **0.7629** | 0.7357 | 0.8265 | 0.6712 | 0.6841 | 0.7264 | 0.6496 | 0.0401 |
 | gemma-4-12B-it (untrained) | **0.7563** | 0.7507 | 0.7692 | 0.5788 | 0.6178 | 0.8012 | 0.4843 | 0.1076 |
@@ -72,17 +71,27 @@ template. Frontier models are served through BiFrost and only run here.
 `--tool-turn-format text`: each tool result is rendered as a `[Tool result]: `
 user turn instead of a template-rendered tool message. This is the format the
 SFT corpus writes tool calls in, and the format the tool-result training twin
-was trained against. The frontier models have not been run here.
+was trained against.
 
 | model | quality | text | voice | state trans | tool F1 | completion | continuous | invalid |
 |---|---|---|---|---|---|---|---|---|
 | E4B SFT + tool results | **0.8117** | 0.7961 | 0.8479 | 0.7441 | 0.6963 | 0.8287 | 0.7697 | 0.0377 |
 | E4B SFT, no tool results | **0.8093** | 0.7919 | 0.8499 | 0.7556 | 0.7197 | 0.7854 | 0.7146 | 0.0364 |
+| gemini-3.5-flash-lite (frontier)¹ | **0.8056** | 0.7970 | 0.8258 | 0.5946 | 0.6048 | 0.9409 | 0.6909 | 0.1059 |
+| gemini-3.1-flash-lite (frontier)¹ | **0.8036** | 0.7990 | 0.8143 | 0.6113 | 0.6470 | 0.8642 | 0.7205 | 0.0934 |
 | 12B SFT + tool results (ckpt-3168) | **0.7995** | 0.7858 | 0.8313 | 0.7218 | 0.6952 | 0.7953 | 0.7303 | 0.0408 |
 | 12B SFT + tool results (ckpt-500) | **0.7980** | 0.7976 | 0.7991 | 0.7469 | 0.7058 | 0.7539 | 0.6693 | 0.0396 |
 | 12B SFT, no tool results | **0.7749** | 0.7396 | 0.8574 | 0.6707 | 0.7219 | 0.7638 | 0.6496 | 0.0359 |
 | gemma-4-12B-it (untrained) | **0.7682** | 0.7696 | 0.7648 | 0.6186 | 0.6331 | 0.7874 | 0.5453 | 0.0604 |
 | gemma-4-E4B-it (untrained) | **0.7219** | 0.7203 | 0.7256 | 0.4914 | 0.5753 | 0.7362 | 0.4213 | 0.1108 |
+
+¹ Frontier models run through BiFrost, and the harness rewrites every BiFrost
+request's history to text (`_downgrade_tool_turns_to_text`): Gemini-3 rejects
+re-sent structured tool calls, because BiFrost strips the `thought_signature`
+they need. So these rows are text-format history, even though their result
+files record `tool_turn_format: native`. Two differences from the local text
+rows remain: the `tools=` declarations are still sent, and a tool result reads
+`[Tool result <call id>]: ` rather than `[Tool result]: `.
 
 ### What the two tables say
 
@@ -95,10 +104,14 @@ was trained against. The frontier models have not been run here.
   path, which is where the Gemma-4 template was dropping results.
 - **Fine-tuning buys trajectory discipline, not raw completion.** Invalid
   transitions fall from ~0.10 to ~0.035 and continuous completion rises sharply,
-  while the plain completion rate can fall. The frontier models sit at the top on
-  quality and at the bottom on discipline: gemini-3.5-flash-lite's 0.9409
-  completion is 0.6909 once continuity is required, against 0.1059 invalid
-  transitions.
+  while the plain completion rate can fall. The frontier models are the least
+  disciplined models in the table: gemini-3.5-flash-lite's 0.9409 completion is
+  0.6909 once continuity is required, against 0.1059 invalid transitions.
+- **Both fine-tuned E4B models outscore both frontier models** in the text
+  format, the one comparison where all of them see tool turns the same way
+  (0.8117 and 0.8093 against 0.8056 and 0.8036); the fine-tuned 12B sits just
+  below them at 0.7995. The frontier models win on plain completion and lose on
+  state transitions, tool F1 and invalid transitions.
 - **Almost all of the 12B's gain is present by step 500** (0.7980 text / 0.7553
   native, within 0.0015 of checkpoint-3168) despite a much worse eval_loss — one
   more case of eval_loss not ranking checkpoints (R15, R16).
@@ -125,9 +138,9 @@ conversations**. Rescored from the stored run logs with
 | E4B SFT + tool results | native | **0.7300** | 0.9057 | 192 | 20 | 51 |
 | 12B SFT, no tool results | text | **0.7186** | 0.9545 | 189 | 9 | 65 |
 | E4B SFT, no tool results | text | **0.7110** | 0.9212 | 187 | 16 | 60 |
-| gemini-3.5-flash-lite | native | **0.6882** | 0.7835 | 181 | 50 | 32 |
+| gemini-3.5-flash-lite | text¹ | **0.6882** | 0.7835 | 181 | 50 | 32 |
 | 12B SFT + tool results | native | **0.6806** | 0.9040 | 179 | 19 | 65 |
-| gemini-3.1-flash-lite | native | **0.6730** | 0.8271 | 177 | 37 | 49 |
+| gemini-3.1-flash-lite | text¹ | **0.6730** | 0.8271 | 177 | 37 | 49 |
 | 12B SFT, no tool results | native | **0.6540** | 0.9198 | 172 | 15 | 76 |
 | E4B SFT, no tool results | native | **0.5970** | 0.9023 | 157 | 17 | 89 |
 | gemma-4-12B-it (untrained) | text | **0.5970** | 0.9075 | 157 | 16 | 90 |
@@ -139,7 +152,7 @@ Two things the old metric could not show:
 
 - **Fine-tuning moves propagation a long way** — the 12B goes 0.4487 to 0.6806
   native, E4B 0.5171 to 0.7300 — and the fine-tuned open-weight models beat both
-  frontier models, which lead the quality table.
+  frontier models, which score close to them on quality.
 - **Carrying the value is nearly solved; making the call is not.** Once a model
   emits the right call it carries the right value 90–95% of the time (frontier
   models are the weakest here at 0.78–0.83). Failures are dominated by the call
