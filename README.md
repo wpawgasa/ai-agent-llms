@@ -161,6 +161,64 @@ Two things the old metric could not show:
 The `no call` column includes turns the harness copied from ground truth rather
 than asking the model for, so it is an upper bound on the model's own omissions.
 
+### Known flaws behind these numbers
+
+Every result above was scored on the **v2 text set + v1 voice set** (508
+conversations), and every fine-tuned model was trained on **corpus v3** (9,932
+conversations). Both were audited on 2026-09-21 with
+`scripts/triage_task_a_quality.py` and found to contain the flaws below
+(CLAUDE.md R28). Every model faced the same benchmark, so the *ranking* is a
+fair comparison; the *absolute* scores run low, and the fine-tuned models learned
+some of the training corpus's habits. The v4 benchmark
+(`corpus/task-a-benchmark-v4`) fixes most of the benchmark flaws; **the training
+corpus has not been fixed** — the generator now prevents these flaws in new data,
+but the existing corpus is unchanged.
+
+"Confident" counts only clear cases: an identifier-shaped value, or an argument
+named like an identifier. Amounts, names, dates and descriptions are counted
+separately as "needs review", because most of them are correct rewrites of what
+the user said (a Thai city name written in English, a date put in ISO form).
+
+#### Benchmark (v2 text + v1 voice)
+
+| Flaw | Count | Effect on scores | In v4 |
+|---|---|---|---|
+| Tool arguments the model cannot know — the value appears nowhere in the conversation or the prompt (`L1_006` scores `interaction_id="INT-5541"`) | **35** confident (+160 needs review) | A model that asks for the value, as the prompt tells it to, is scored wrong | Fixed — stated in a session-context block |
+| Invented facts in gold replies — codes, plan IDs or amounts no tool returned (`PREM20`, a "20% discount") | **33** confident (+104 needs review); of the 31 reviewed one by one, 26 also feed a later tool call | Hidden unknowable arguments, and a model that doesn't invent them looks worse | Fixed — 2 genuine format examples accepted |
+| Conversations using two tools in one state, with instructions like "satisfaction **or** NPS" | **19** conversations; 483 states offer two tools | Following the prompt exactly is scored as a missed call | Fixed — replaced with 20 one-tool-per-state conversations; 457 states still *offer* two tools |
+| Back-to-back assistant turns; the harness cannot ask for the second, so it copies it from gold | **327** pairs (59 stay+stay, 265 advance-then-stay, 3 other) — 324 of 1,868 tool calls (17.3%) never scored | Those calls score as perfect for every model | 59 merged; the 265 advance-then-stay pairs remain by decision |
+| Identifier values shared with the training corpus | **362** of 508 conversations; 31.1% of identifier occurrences reused across conversations | Memorising training values is rewarded | Reduced — 25 conversations, 1.4% reuse |
+| Tool results with no tool call before them | **4** (3 in the hand-added insurance file) | The model is shown a result for a call nobody made | Remain |
+| **Conversations with at least one confident finding** | **52** of 508 (10.2%) | | |
+
+#### Training corpus (v3)
+
+| Flaw | Count | Effect on the trained models | Status |
+|---|---|---|---|
+| Invented facts in gold replies | **978** confident (+2,899 needs review) | Measured: fine-tuning raised the rate at which the 12B emits identifiers found nowhere in its context from **0.3% to 3.0%** — mostly new values, so it learned the *shape* of an identifier, not a list | Not fixed |
+| Tool arguments the model cannot know | **443** confident (+2,742 needs review) | Trains the model to produce values it was never given | Not fixed |
+| Identifier values reused across conversations | **70.5%** of identifier occurrences (2,630 values; `TX-101` in ~196 conversations) | Teaches constants instead of copying from the conversation | Not fixed |
+| States offering two tools / visits using two | **9,542** states offer two; **458** visits use two | Trains "one state, several calls", the pattern v4 removes from the benchmark | Not fixed; the generator's `single_tool_states` prevents it in new data |
+| Back-to-back assistant turns | **3,802** pairs in 1,934 conversations (552 stay+stay, 3,250 advance-then-stay) | — | Not fixed |
+| Tool results with no tool call before them | **60** in 41 conversations | Trains announcing a call instead of making it | Not fixed; the generator's repair loop now rejects it |
+| **Conversations with at least one confident finding** | **1,189** of 9,932 (12.0%) | | |
+
+#### Harness issues that also touch these tables
+
+- **Copied turns score as perfect** — the back-to-back turns above; open (R26).
+- **Frontier runs are labelled `native`** but run with text-format history
+  (footnote ¹). The label is wrong in the result files; the rows are placed by
+  what the harness actually sent.
+- **Result files record data paths, not hashes.** The link from a result to the
+  tagged data (`corpus/task-a-benchmark-v2`, `corpus/task-a-benchmark-voice-v1`)
+  rests on those stages being frozen.
+- **Chain propagation** was measuring the corpus, not the model, until
+  2026-09-19; the table above is rescored under the fixed metric (R27).
+
+Audit reports: `runs/audit/triage_benchmark_v2.json` (benchmark) and
+`runs/audit/triage_sft_corpus_v3.json` (training corpus). Full account:
+`docs/cat_a_benchmark_traceability_triage.md`.
+
 ---
 
 ## Current Tags
