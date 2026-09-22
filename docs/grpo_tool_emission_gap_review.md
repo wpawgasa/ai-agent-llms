@@ -326,8 +326,10 @@ different corpus scale — not just cleaned in place. **Re-measure `heldout_comp
 against the new data before treating 0.674 as current.**
 
 **Still outstanding:**
-- `dvc.lock` needs `dvc commit`/`dvc push` on a machine with DVC configured (unavailable in this
-  session) so the lock file and GCS remote reflect this regeneration.
+- ~~`dvc.lock` needs `dvc commit`/`dvc push` on a machine with DVC configured (unavailable in this
+  session)~~ — **done, and the premise was wrong**: the DVC CLI lives in the project venvs
+  (`.venv-infer/bin/dvc`). Verified 2026-09-23 that the lock and the GCS remote both match the
+  regenerated data (CLAUDE.md, "DVC in this environment").
 - Checks 2 and the headroom/pass@k re-probes (§4 step 2) still require the actual GPU host, and
   should now run against **this new data**, not the old sampled artifacts.
 
