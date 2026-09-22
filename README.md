@@ -30,9 +30,84 @@ Phase 1: Benchmark          Phase 2: Fine-Tune          Phase 3: Quantize       
 
 ## Phase 1 Task A Results
 
-Every run below was scored under the R26 tool-result gating (a tool result is
-shown only for a call the model actually made), on the frozen v2 text stratum
-plus the voice stratum — 258 + 250 = 508 conversations, 0 stochastic trials.
+The current results are on the **v4 benchmark with segment scoring** (259 text
++ 250 voice = 509 conversations, 0 stochastic trials). Only the three E4B
+models have been re-scored so far; the 12B and the frontier models are still on
+the previous benchmark, further down, and the two sets are **not comparable** —
+v4 repaired the data flaws (R28) and segment scoring changed which turns are
+asked for and how they are scored (R29).
+
+```bash
+bash scripts/run_exp_a_single.sh --model <path-or-id> \
+    --data data/output/benchmark/task_a_v4 \
+    --data data/output/benchmark/task_a_voice_v3 \
+    --max-samples 0 --stochastic-trials 0 --tool-turn-format <native|text>
+```
+
+`quality` is the modality blend (0.7 x text + 0.3 x voice,
+`blend_modality_scores`) and is the number the ranking uses. **Read
+`continuous` next to `completion`:** the plain completion rate only asks
+whether the last state annotation is terminal, so a model that jumps straight
+there from a state it was never in is paid in full (CLAUDE.md R25).
+
+| model | format | quality | text | voice | state turn | state seq | tool F1 | completion | continuous | chain |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E4B SFT + tool results | text | **0.8332** | 0.8175 | 0.8699 | 0.8109 | 0.9613 | 0.6952 | 0.9057 | 0.8625 | 0.9000 |
+| E4B SFT, no tool results | text | **0.8160** | 0.7894 | 0.8782 | 0.7968 | 0.9595 | 0.6957 | 0.8585 | 0.8507 | 0.8963 |
+| E4B SFT + tool results | native | **0.8046** | 0.7796 | 0.8628 | 0.7992 | 0.9452 | 0.6844 | 0.8468 | 0.8114 | 0.8481 |
+| E4B SFT, no tool results | native | **0.7763** | 0.7720 | 0.7866 | 0.7146 | 0.9104 | 0.7044 | 0.6699 | 0.6523 | 0.8963 |
+| gemma-4-E4B-it (untrained) | text | **0.6877** | 0.6552 | 0.7635 | 0.5414 | 0.8055 | 0.6031 | 0.7289 | **0.2692** | 0.7481 |
+| gemma-4-E4B-it (untrained) | native | **0.6867** | 0.6688 | 0.7284 | 0.5056 | 0.7932 | 0.5831 | 0.7407 | **0.2652** | 0.6481 |
+
+### What the v4 table says
+
+- **Fine-tuning is worth far more than the training variant**: +0.15 (text) and
+  +0.12 (native) over untrained, against +0.017 / +0.028 between the two
+  trained models.
+- **Tool results in the training sequence still help, by less than the old
+  harness said** — +0.017 text and +0.028 native, against +0.0566 native
+  before. Almost all of it is workflow following (native completion 0.670 ->
+  0.847), not tool calling: all three models sit at 0.58-0.70 tool F1.
+- **The untrained model's completion is teleportation.** Its plain completion
+  (0.73-0.74) is close to the trained models', but continuous completion is
+  **0.27**: it declares a terminal state from states it was never in. The
+  trained models hold 0.65-0.86 on both definitions.
+
+### Segments — what the replay asked for
+
+Every run covers the same 5,824 segments (a run of gold assistant turns with
+nothing between them), 266 of them multi-turn, with the same 79 outbound
+openers unscored because the served prompt never says why the agent is calling
+(R29).
+
+| model | format | second asks | of those, made the call | discarded | stay-rule violations | discontinuous | missed after a withheld result |
+|---|---|---|---|---|---|---|---|
+| E4B SFT + tool results | text | 356 | 231 | 125 | 10 | 3 | 133 |
+| E4B SFT + tool results | native | 390 | 225 | 165 | 9 | 3 | 195 |
+| E4B SFT, no tool results | text | 453 | 340 | 113 | 9 | 2 | 126 |
+| E4B SFT, no tool results | native | 620 | 499 | 121 | 6 | 4 | 139 |
+| gemma-4-E4B-it (untrained) | text | 621 | 312 | 309 | 584 | 306 | 357 |
+| gemma-4-E4B-it (untrained) | native | 773 | 318 | 455 | 606 | 146 | 537 |
+
+- **The second ask recovers real calls** — 225-499 per run for the trained
+  models. Under the old harness those turns were copied from gold and scored as
+  perfect, so the calls were never the model's to make or miss.
+- **Rule-following separates the models more sharply than any score.** The
+  untrained model puts a tool call under an advancing annotation 584-606 times
+  and breaks its own state chain 146-306 times; the trained models do each
+  2-10 times. None of this was measurable before segment scoring.
+- **Its second asks mostly fail too**: 455 of 773 produced no call and were
+  discarded, against 113-165 for the trained models.
+
+---
+
+## Previous Benchmark (v2 text + v1 voice, per-turn scoring)
+
+**Superseded by the v4 table above, and not comparable with it.** Kept because
+the 12B and the frontier models have only ever been scored this way. Every run
+below was scored under the R26 tool-result gating (a tool result is shown only
+for a call the model actually made), on the frozen v2 text stratum plus the
+voice stratum — 258 + 250 = 508 conversations, 0 stochastic trials.
 **Nothing here is comparable to a Task A benchmark number recorded before
 2026-09-17**; the earlier runs showed models the results of calls they never
 made. Reproduce any row with:
@@ -44,11 +119,9 @@ bash scripts/run_exp_a_single.sh --model <path-or-id> \
     --max-samples 0 --stochastic-trials 0 --tool-turn-format <native|text>
 ```
 
-`quality` is the modality blend (0.7 x text + 0.3 x voice, `blend_modality_scores`)
-and is the number the ranking uses. **Read `continuous` next to `completion`:**
-the plain completion rate only asks whether the last state annotation is
-terminal, so a model that jumps straight there from a state it was never in is
-paid in full (CLAUDE.md R25).
+Columns mean what they mean above; these numbers were produced by the old
+replay, which copied back-to-back gold turns into the predictions and scored
+them as perfect.
 
 ### Native tool-call format
 
@@ -93,7 +166,7 @@ files record `tool_turn_format: native`. Two differences from the local text
 rows remain: the `tools=` declarations are still sent, and a tool result reads
 `[Tool result <call id>]: ` rather than `[Tool result]: `.
 
-### What the two tables say
+### What the two older tables say
 
 - **The 4B-class model beats the 12B**, in both formats, trained and untrained
   after training. The best open-weight result is E4B at 0.8117. Parameter count
@@ -127,8 +200,10 @@ propagation opportunities: an argument of call N+1 whose value comes from call
 N's response and appears nowhere earlier in the conversation, so the only way to
 produce it is to have read the tool result. Ground truth scores exactly 1.0.
 
-The 508-conversation benchmark holds **263 such opportunities across 201
-conversations**. Rescored from the stored run logs with
+On v4 the metric is reported in the table at the top of this section (270
+opportunities; the three E4B models score 0.648-0.900). The table below is the
+older benchmark, whose 508 conversations hold **263 such opportunities across
+201 conversations**. Rescored from the stored run logs with
 `scripts/recompute_chain_propagation.py` (no GPU needed):
 
 | model | format | propagation | when the call was made | correct | wrong value | no call |
