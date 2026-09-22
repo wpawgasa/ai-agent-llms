@@ -20,8 +20,10 @@ showed that it often could not:
   from its whole context from **0.3% to 3.0%**; most invented values
   (`RES-99887`, `INT-99821`) occur in no training row, so the model learned the
   *shape* of an identifier, not a list of them.
-- **72.7%** of identifier occurrences in the SFT corpus reuse a value that
-  appears in more than one conversation (`TX-101` in 196 rows).
+- **70.5%** of identifier occurrences in the SFT corpus reuse a value that
+  appears in more than one conversation (`TX-101` in ~196 rows). An early
+  rough count said 72.7%; it did not exclude prompt vocabulary such as state
+  names. Full corpus audit: `runs/audit/triage_sft_corpus_v3.json`.
 
 This work builds the checks and runs them over the benchmark. **It repairs
 nothing.** The report is the work list for the repair steps.
