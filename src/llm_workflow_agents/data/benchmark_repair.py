@@ -103,7 +103,20 @@ def _is_barge_in(message: dict[str, Any]) -> bool:
 # --------------------------------------------------------------------------- 1. identifiers
 
 
-def _fresh_digits(length: int, rng: random.Random, prefix: str, unavailable: set[str]) -> str | None:
+def _fresh_digits(
+    length: int,
+    rng: random.Random,
+    prefix: str,
+    unavailable: set[str],
+    blocked_substrings: frozenset[str] = frozenset(),
+) -> str | None:
+    """A fresh digit run for ``prefix``, avoiding whole values and substrings.
+
+    ``blocked_substrings`` holds the row's other identifiers: a fresh value that
+    CONTAINS one of them (POL-12345 minted as POL-99739 beside POL-99) leaves
+    that string in the row, and the plain-substring verification cannot tell it
+    from the defect it exists to catch (INV-5544 inside INV-5544-SETUP).
+    """
     low, high = 10 ** (length - 1), 10**length - 1
     if high - low + 1 <= _ENUMERATE_LIMIT:
         candidates = list(range(low, high + 1))
@@ -111,8 +124,12 @@ def _fresh_digits(length: int, rng: random.Random, prefix: str, unavailable: set
     else:
         candidates = (rng.randint(low, high) for _ in range(_RANDOM_TRIES))
     for number in candidates:
-        if f"{prefix}{number}" not in unavailable:
-            return str(number)
+        value = f"{prefix}{number}"
+        if value in unavailable:
+            continue
+        if any(blocked in value for blocked in blocked_substrings):
+            continue
+        return str(number)
     return None
 
 
@@ -162,7 +179,10 @@ def plan_identifier_remap(
         if re.search(rf"(?<!\d){digits}(?!\d)", bare_text):
             decisions.append(RemapDecision(old, None, "digits_referenced_elsewhere"))
             continue
-        fresh = _fresh_digits(len(digits), rng, prefix, forbidden | taken | {old})
+        fresh = _fresh_digits(
+            len(digits), rng, prefix, forbidden | taken | {old},
+            blocked_substrings=frozenset(o for o in identifiers if o != old),
+        )
         if fresh is None:
             decisions.append(RemapDecision(old, None, "no_free_value"))
             continue

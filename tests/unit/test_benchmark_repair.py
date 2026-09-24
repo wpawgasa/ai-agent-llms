@@ -79,6 +79,29 @@ class TestPlanIdentifierRemap:
         assert remapped["CUST-882"].startswith("CUST-") and len(remapped["CUST-882"]) == len("CUST-882")
         assert remapped["ORD-4415"] != "ORD-4415"
 
+    def test_a_fresh_value_never_contains_another_identifier_of_the_same_row(self) -> None:
+        """A short identifier must not survive as a substring of a fresh long one.
+
+        Found on the SFT corpus (2026-09-24): POL-99 was correctly remapped to
+        POL-23, but POL-12345 in the same row was minted POL-99739 — so the
+        literal string "POL-99" was still in the row. The old token is gone and
+        nothing is mis-named, but the plain-substring check that catches the
+        real defect (INV-5544 left inside INV-5544-SETUP) cannot tell the two
+        apart, and a real defect hiding behind a false positive costs more than
+        a re-mint.
+        """
+        sample = _sample([
+            {"role": "user", "content": "policies POL-99 and POL-12345"},
+            _call("S", "lookup", {"policy_id": "POL-99", "other": "POL-12345"}),
+            _say("S", "TERMINAL", "Both POL-99 and POL-12345 are active."),
+        ])
+        for seed in range(60):
+            decisions = plan_identifier_remap(sample, "", forbidden=set(), rng=random.Random(seed), taken=set())
+            remapped = {d.old: d.new for d in decisions if d.new}
+            for old, new in remapped.items():
+                others = [o for o in remapped if o != old]
+                assert not any(other in new for other in others), (seed, old, new)
+
     def test_new_values_avoid_forbidden_and_taken_values(self) -> None:
         taken: set[str] = set()
         forbidden = {f"CUST-{n}" for n in range(100, 1000) if n != 555}
