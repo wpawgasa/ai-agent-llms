@@ -98,3 +98,29 @@ def test_a_list_valued_argument_checks_each_member() -> None:
     assert find_enum_violations([_turn(tags=["new"])], schemas) == []
     (violation,) = find_enum_violations([_turn(tags=["new", "bogus"])], schemas)
     assert violation.value == "bogus"
+
+
+def _error_result(text: str = '{"error": "Invalid value for sort_by."}'):
+    return {"role": "tool", "content": text}
+
+
+def test_a_value_the_tool_then_rejects_is_a_deliberate_test_case() -> None:
+    """The corpus generates invalid tool inputs on purpose (15% of conversations,
+    `02-data-generation.md`): the user asks for a bad value, the agent passes it
+    through, the tool errors, and the conversation tests recovery. All 8 of the
+    v4 benchmark's flagged rows are this, not defects — every one is followed by
+    an error payload.
+    """
+    messages = [_turn(sort_by="cheapest_ever"), _error_result()]
+    assert find_enum_violations(messages, SCHEMAS) == []
+
+
+def test_a_bad_value_the_tool_ACCEPTS_is_still_a_violation() -> None:
+    messages = [_turn(sort_by="cheapest_ever"), {"role": "tool", "content": '{"results": []}'}]
+    (violation,) = find_enum_violations(messages, SCHEMAS)
+    assert violation.value == "cheapest_ever"
+
+
+def test_a_bad_value_with_no_tool_result_at_all_is_still_a_violation() -> None:
+    (violation,) = find_enum_violations([_turn(sort_by="cheapest_ever")], SCHEMAS)
+    assert violation.value == "cheapest_ever"

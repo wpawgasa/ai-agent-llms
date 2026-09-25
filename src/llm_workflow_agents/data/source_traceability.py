@@ -486,6 +486,13 @@ def find_enum_violations(
     Case and spacing differences are NOT reported. The scorer is strict about
     them, but they are a formatting defect of a different kind, and mixing them
     in would bury the values that are genuinely off the list.
+
+    A call the very next tool message REJECTS is not reported either. The corpus
+    generates invalid tool inputs deliberately — 15% of conversations by spec —
+    so the user asks for ``sort_by='cheapest_ever'``, the agent passes it
+    through, the tool errors and the conversation tests recovery. All 8 rows
+    this check first flagged on the v4 benchmark were that, and "fixing" them
+    would have deleted the error-recovery arcs they exist to exercise.
     """
     properties: dict[str, dict[str, Any]] = {}
     for schema in tool_schemas or []:
@@ -495,9 +502,22 @@ def find_enum_violations(
             continue
         properties[name] = ((function.get("parameters") or {}).get("properties") or {})
 
+    def rejected_next(index: int) -> bool:
+        """True when the tool message after ``index`` reports an error."""
+        for message in messages[index + 1:]:
+            role = message.get("role")
+            if role == "tool":
+                content = message.get("content") or ""
+                return '"error"' in content or '"Error"' in content
+            if role in ("assistant", "user"):
+                return False
+        return False
+
     found: list[EnumViolation] = []
     for index, message in enumerate(messages):
         if message.get("role") != "assistant":
+            continue
+        if rejected_next(index):
             continue
         calls = _calls_in(message) or (message.get("annotations") or {}).get("tool_calls") or []
         for call in calls:
