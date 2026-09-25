@@ -1,0 +1,6 @@
+outs:
+- md5: da643a5e573deff80f07abb604887787.dir
+  size: 307439551
+  nfiles: 3
+  hash: md5
+  path: task_a_splits_v4

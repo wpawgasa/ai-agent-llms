@@ -1,0 +1,6 @@
+outs:
+- md5: f7a43819614ba9061415aa1ffb160520.dir
+  size: 1487796
+  nfiles: 1
+  hash: md5
+  path: task_a_corpus_repair_ledger
