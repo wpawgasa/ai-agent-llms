@@ -66,48 +66,145 @@ git tag -n1 -l 'corpus/*' 'model/*'    # one-line summaries
 git tag -n40 model/sft-gemma4-c2-on-task-a-v2   # full annotation, incl. hashes
 ```
 
-### Benchmark corpora
+### Benchmark corpora (Phase 1 evaluation)
 
-Independent of the SFT lineage below — a different generation pipeline, used for Phase 1
-evaluation rather than training. Both stages carry `frozen: true` in `dvc.yaml`.
+A different pipeline from the SFT corpus below. Every stage carries `frozen: true`.
+Score a model on ONE benchmark version; the versions are separate scales (R28, R29).
 
-| Tag | Commit | Contents | Hash |
-|---|---|---|---|
-| `corpus/task-a-benchmark-v1` | `f4bf688` | 258 convs, text, 17 files — the data behind the current Cat A ranking | `0522f8fa…` |
-| `corpus/task-a-benchmark-voice-v1` | `f4bf688` | 250 convs, voice, 50/level, 10 files — voice half of the composite blend | `6fea777d…` |
+| Tag | Restores | Contents |
+|---|---|---|
+| `corpus/task-a-benchmark-v1` | `data/output/benchmark/task_a` | 258 convs, text. Predates the tool-call stay rule (R25). |
+| `corpus/task-a-benchmark-voice-v1` | `data/output/benchmark/task_a_voice` | 250 convs, voice, 50/level. |
+| `corpus/task-a-benchmark-v2` | `data/output/benchmark/task_a_v2` | 258 convs, text, on the stay rule; 143 authored inserts. |
+| `corpus/task-a-benchmark-v3` | `data/output/benchmark/task_a_v3` + `task_a_voice_v2` | 258 + 250. Traceability repair (R28). Superseded. |
+| **`corpus/task-a-benchmark-v4`** | `data/output/benchmark/task_a_v4` + `task_a_voice_v3` | **259 + 250 — the current benchmark.** The 19 two-tool convs replaced. |
 
 ### Corpora (SFT training)
 
-| Tag | Commit | Contents | Hash (`task_a_splits`) |
-|---|---|---|---|
-| `corpus/task-a-v1` | `6a50272` | 5,549 convs, all text; 4,716 / 554 / 279 | `6bb5eb6f…` |
-| `corpus/task-a-v2` | `64e98e5` | 5,543 convs, tool-call stay convention; 4,711 / 554 / 278 | `21e33e25…` |
-| `corpus/task-a-v3` | `ba7b827` | 9,932 convs (7,043 text + 2,889 voice); 8,441 / 992 / 499 | see annotation |
+| Tag | Restores | Contents |
+|---|---|---|
+| `corpus/task-a-v1` | `data/output/sft/task_a_splits` | 5,549 convs, all text; 4,716 / 554 / 279. |
+| `corpus/task-a-v2` | `data/output/sft/task_a_splits` | 5,543 convs, stay convention; 4,711 / 554 / 278. |
+| **`corpus/task-a-v3`** | `data/output/sft/task_a_splits` | **9,932 convs** (7,043 text + 2,889 voice); 8,441 / 992 / 499. |
+| *(untagged)* | `data/output/sft/task_a_splits_v4` | 9,891 convs — the R30 stage-1 repair. Its own path, so no tag is needed to tell it apart. |
+
+The first three share ONE path. Only the tag tells them apart — see §4.
+
+### Derived sets
+
+| Tag | Restores |
+|---|---|
+| `derived/task-a-heldout-v3` | `data/output/heldout/cat_a_v3_test_not_in_v2`, `cat_a_v3_test_voice` |
+| `derived/task-a-grpo-v3` | `data/output/grpo/task_a` |
 
 ### Models
 
-| Tag | Commit | Cell / recipe | Hash | Held-out composite |
-|---|---|---|---|---|
-| `model/sft-gemma4-v2-on-pre-r12` | `b0d53f9` | ckpt-1000 baseline, untagged corpus | `f89238076f…` | 0.7271 (different set) |
-| `model/sft-gemma4-v3-on-task-a-v1` | `480ffd0` | C0, `all_tokens` @ 4096 | `d5438dced5…` | 0.5709 |
-| `model/sft-gemma4-v4-on-task-a-v2` | `602de60` | C0, `all_tokens` @ 4096 | `57e40028fe…` | 0.5120 |
-| `model/sft-gemma4-c2-step500-on-task-a-v2` | `8ec1929` | C2 snapshot, **incomplete** | `110bb1bf2e…` | — |
-| **`model/sft-gemma4-c2-on-task-a-v2`** | `7e758da` | **C2, `response_only` @ 8192 — best** | `50ed6597b5…` | **0.7595** |
+| Tag | Restores | Recipe / result |
+|---|---|---|
+| `model/sft-gemma4-v2-on-pre-r12` | `checkpoints/sft_cat_a/gemma-4-26B-A4B-it` | ckpt-1000 baseline, untagged corpus. |
+| `model/sft-gemma4-v3-on-task-a-v1` | same path | C0, `all_tokens` @ 4096 — held-out 0.5709. |
+| `model/sft-gemma4-v4-on-task-a-v2` | same path | C0 on the stay corpus — held-out 0.5120. |
+| `model/sft-gemma4-c2-step500-on-task-a-v2` | `checkpoints/sft_cat_a_c2_step500` | C2 mid-run snapshot, incomplete. |
+| **`model/sft-gemma4-c2-on-task-a-v2`** | `checkpoints/sft_cat_a_c2/gemma-4-26B-A4B-it` | **C2 — held-out 0.7595, best 26B.** |
+| `model/sft-gemma4-e4b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_e4b/gemma-4-E4B-it` | E4B, C2 recipe on corpus v3. |
+| `model/sft-gemma4-12b-c2-on-task-a-v3` | `checkpoints/sft_cat_a_12b/gemma-4-12B-it` | 12B, same recipe — the size arm. |
+| **`model/sft-gemma4-e4b-toolresults-on-task-a-v3`** | `checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it` | **Best on v4: 0.8332 text / 0.8046 native.** |
+| `model/sft-gemma4-12b-toolresults-on-task-a-v3` | `checkpoints/sft_cat_a_12b_textturns/gemma-4-12B-it` | 12B twin: 0.8084 text / 0.7864 native. |
+| `model/sft-gemma4-e4b-on-repaired-corpus-v4` | `checkpoints/sft_cat_a_e4b_corpus_v4/gemma-4-E4B-it` | R30 null result: 0.8308 / 0.8189. |
 
-The three held-out composites above are all scored on the same 206-row set and are
-comparable to each other. None is comparable to a score on the `corpus/task-a-v3` held-out
-sets — see §3.3.
+The v3/v4/C2 held-out composites share one 206-row set and are comparable to each other.
+The v4-benchmark numbers are a different scale again — never mix the two.
 
-`model/sft-gemma4-v2-on-pre-r12` was created retroactively on 2026-07-25 — it did not exist
-when the v3 lineage was registered, even though v3's own tag message referred to it.
+**Untagged:** the GRPO Cat A lineage (`checkpoints/grpo_cat_a/gemma-4-26B-A4B-it`) and the
+DPO one (`checkpoints/dpo_cat_a/gemma-4-26B-A4B-it`). Both are reachable only through
+`dvc.lock`'s current entry, and `dvc gc -w` would delete them (§6).
 
-**Untagged as of 2026-07-25:** the GRPO Cat A checkpoint lineage
-(`checkpoints/grpo_cat_a/gemma-4-26B-A4B-it`, `e9b711c1f7…`, 487 MB, 35 files,
-`checkpoint-50/-100/-150`), registered by `48028c5`. Its bytes are fully present in both the
-local cache and the GCS remote, so it is recoverable *today* — but only via `dvc.lock`'s
-current entry. The moment the `task_a_grpo_gemma4_26b_a4b` stage reruns, that entry is
-overwritten and the lineage drops to git-archaeology-only (§5); `dvc gc -w` would delete it
-outright (§6). It should be tagged before any further GRPO work.
+---
+
+## 2b. Checking out a specific version
+
+Two different jobs, and mixing them up is where the time goes:
+
+- **Replace the workspace copy** — normal, for "give me version X to work with".
+- **Materialize out-of-place** — for comparing two versions, or when the version you want
+  shares a path with one you must not disturb (§4). Never touches the workspace.
+
+Every command below was run on 2026-09-25; the counts are what it printed.
+
+### Out-of-place (safe, preferred for comparisons)
+
+```bash
+# Benchmark: any version, into /tmp, workspace untouched
+python scripts/materialize_dvc_lineage.py \
+    --rev corpus/task-a-benchmark-v3 \
+    --dvc-path data/output/benchmark/task_a_v3 \
+    --out /tmp/bench_v3                      # -> 6 files, 258 conversations
+
+# Checkpoint: --dvc-path is the stage's OUT, not the tag name
+python scripts/materialize_dvc_lineage.py \
+    --rev model/sft-gemma4-e4b-on-repaired-corpus-v4 \
+    --dvc-path checkpoints/sft_cat_a_e4b_corpus_v4/gemma-4-E4B-it \
+    --out /tmp/e4b_v4                        # -> 80 files
+
+# Training corpus: v1/v2/v3 SHARE one path, so the tag is the only difference
+python scripts/materialize_dvc_lineage.py \
+    --rev corpus/task-a-v2 \
+    --dvc-path data/output/sft/task_a_splits \
+    --out /tmp/corpus_v2                     # -> 3 files, 5,543 conversations
+```
+
+### When the blobs are not in the local cache
+
+`materialize_dvc_lineage.py` reads only the local cache, so on a fresh machine — or after a
+cache cleanup — it exits with "not in cache". **`dvc fetch --rev` does not exist in the
+pinned DVC (3.67.1); only `-T/--all-tags` and `-A/--all-commits` do** (the script's own error
+message still suggests `--rev`; ignore it). Fetch by checking the tag's lock file out first,
+then put yours back:
+
+```bash
+cp dvc.lock /tmp/lock.bak
+git checkout corpus/task-a-v2 -- dvc.lock      # NOTE: this also STAGES dvc.lock
+dvc fetch data/output/sft/task_a_splits        # -> 4 files fetched
+cp /tmp/lock.bak dvc.lock
+git restore --staged --worktree dvc.lock       # undo the staging, or your next commit carries it
+python scripts/materialize_dvc_lineage.py --rev corpus/task-a-v2 \
+    --dvc-path data/output/sft/task_a_splits --out /tmp/corpus_v2
+```
+
+`dvc fetch -T <path>` also works and needs no lock-file juggling, but it pulls that path for
+EVERY tag — expensive on a checkpoint path carrying several lineages.
+
+### Into the workspace
+
+```bash
+# The version dvc.lock currently names (after a normal clone or git checkout)
+dvc pull data/output/benchmark/task_a_v4 checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it
+
+# A different version of a SHARED path: check out the tag's lock file, then checkout
+git checkout corpus/task-a-v2 -- dvc.lock
+dvc checkout data/output/sft/task_a_splits     # workspace now holds v2
+# ... and to go back:
+git restore --staged --worktree dvc.lock && dvc checkout data/output/sft/task_a_splits
+```
+
+Checking out the whole tag (`git checkout <tag>` then `dvc checkout`) works too and is
+simplest when you want that commit's code as well — but it detaches HEAD, so
+`git switch main` afterwards.
+
+### Which version is on disk right now?
+
+```bash
+# What each tag says the shared path should hash to
+for t in corpus/task-a-v1 corpus/task-a-v2 corpus/task-a-v3; do
+  echo "$t $(git show $t:dvc.lock | grep -A4 'path: data/output/sft/task_a_splits$' \
+        | grep -oE '[a-f0-9]{32}\.dir' | head -1)"
+done
+```
+
+A cheaper tell for the SFT corpus: `cat data/output/sft/task_a_splits/*.jsonl | wc -l`
+gives 5,549 (v1), 5,543 (v2) or 9,932 (v3). For a benchmark directory, the result JSONs
+record `data_sha256` per `--data` path (R29), so a stored result names exactly the bytes
+it scored.
 
 ---
 

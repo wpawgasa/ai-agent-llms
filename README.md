@@ -316,7 +316,7 @@ Audit reports: `runs/audit/triage_benchmark_v2.json` (benchmark) and
 
 ## Current Tags
 
-Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most recent** hash per stage output. An older lineage stays recoverable only through a git tag. These are the two to check out today:
+Corpora and checkpoints are DVC-tracked, and `dvc.lock` records only the **most recent** hash per stage output. An older lineage stays recoverable only through a git tag. These are the two to check out today; **the full inventory of every benchmark, corpus and checkpoint version, and the verified commands to check any of them out — in place or side by side — is [§2 and §2b of the versioning doc](docs/data_and_model_versioning.md#2-current-inventory)**:
 
 | What | Tag | Restores | Contents |
 |------|-----|----------|----------|
