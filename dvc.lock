@@ -817,3 +817,40 @@ stages:
       md5: 98de38dac2b2f393063bfe2ce308980f.dir
       size: 1704143578
       nfiles: 80
+  task_a_sft_splits_repair_v4:
+    cmd: python scripts/repair_task_a_corpus.py apply --stratum 
+      data/output/sft/task_a_splits data/output/sft/task_a_splits_v4 --ledger 
+      data/interim/task_a_corpus_repair_ledger/ledger.json
+    deps:
+    - path: data/interim/task_a_corpus_repair_ledger
+      hash: md5
+      md5: f7a43819614ba9061415aa1ffb160520.dir
+      size: 1487796
+      nfiles: 1
+    - path: data/output/sft/task_a_splits
+      hash: md5
+      md5: 53f4fee095b3824b203344075cd3fdd7.dir
+      size: 309232126
+      nfiles: 3
+    - path: scripts/repair_task_a_benchmark.py
+      hash: md5
+      md5: d74dc1ea368611f64800b766b5ec8b6e
+      size: 15759
+    - path: scripts/repair_task_a_corpus.py
+      hash: md5
+      md5: b67e92259d5fe2d9b8135080e5fed9c5
+      size: 8007
+    - path: src/llm_workflow_agents/data/benchmark_repair.py
+      hash: md5
+      md5: fd6b47dfa2d1805be3ecf2fd113f0e87
+      size: 15858
+    - path: src/llm_workflow_agents/data/source_traceability.py
+      hash: md5
+      md5: e95f4e6dbdb8030140cf0a129eafc1d7
+      size: 18172
+    outs:
+    - path: data/output/sft/task_a_splits_v4
+      hash: md5
+      md5: da643a5e573deff80f07abb604887787.dir
+      size: 307439551
+      nfiles: 3

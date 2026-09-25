@@ -626,6 +626,48 @@ stages:
     outs:
       - checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it
 
+  task_a_sft_splits_repair_v4:
+    # FROZEN. `dvc repro` skips this stage. The ledger makes `apply` fully
+    # deterministic, but re-running it after the ledger or the input corpus
+    # changes would silently replace the corpus a registered checkpoint was
+    # trained on. Unfreeze only to rebuild on purpose.
+    frozen: true
+    desc: >-
+      FROZEN — Stage 1 of the Task A SFT corpus repair (CLAUDE.md R28, R30):
+      the mechanical half of the benchmark repair pointed at the training
+      corpus. `apply` replays the seeded ledger in
+      data/interim/task_a_corpus_repair_ledger, so it reads no model, uses no
+      randomness and rebuilds these bytes exactly.
+
+      Against data/output/sft/task_a_splits: confident unknowable tool
+      arguments 443 -> 0, identifier reuse 70.5% -> 4.4%, orphan tool results
+      60 -> 0 (41 conversations dropped, 9,932 -> 9,891), mergeable stay pairs
+      552 -> 1, rows sharing an identifier with the v4 benchmark 127 -> 52.
+      NOT repaired: 907 confident invented facts and 456 two-tool state visits
+      (stage 2, deliberately not bought — see R30).
+
+      Splits: 8,409 train / 986 validation / 496 test. Audits:
+      runs/audit/triage_sft_corpus_v3.json (before),
+      runs/audit/triage_sft_corpus_v4.json (after).
+
+      RESULT OF USING IT: null. The E4B retrained on this corpus
+      (task_a_sft_gemma4_e4b_corpus_v4) scores 0.8308 text / 0.8189 native on
+      the v4 benchmark against the baseline's 0.8332 / 0.8046 — the two formats
+      disagree in sign and argument exact match fell in both.
+      docs/cat_a_corpus_repair_null_result.md.
+    cmd: >-
+      python scripts/repair_task_a_corpus.py apply
+      --stratum data/output/sft/task_a_splits data/output/sft/task_a_splits_v4
+      --ledger data/interim/task_a_corpus_repair_ledger/ledger.json
+    deps:
+      - data/output/sft/task_a_splits
+      - data/interim/task_a_corpus_repair_ledger
+      - scripts/repair_task_a_corpus.py
+      - scripts/repair_task_a_benchmark.py
+      - src/llm_workflow_agents/data/benchmark_repair.py
+      - src/llm_workflow_agents/data/source_traceability.py
+    outs:
+      - data/output/sft/task_a_splits_v4
   task_a_sft_gemma4_e4b_corpus_v4:
     # FROZEN. `dvc repro` skips this stage: its cmd is a ~6.7 h GPU run that
     # would overwrite the registered weights the first time a dep changes.

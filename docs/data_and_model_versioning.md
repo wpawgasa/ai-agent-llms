@@ -86,7 +86,7 @@ Score a model on ONE benchmark version; the versions are separate scales (R28, R
 | `corpus/task-a-v1` | `data/output/sft/task_a_splits` | 5,549 convs, all text; 4,716 / 554 / 279. |
 | `corpus/task-a-v2` | `data/output/sft/task_a_splits` | 5,543 convs, stay convention; 4,711 / 554 / 278. |
 | **`corpus/task-a-v3`** | `data/output/sft/task_a_splits` | **9,932 convs** (7,043 text + 2,889 voice); 8,441 / 992 / 499. |
-| *(untagged)* | `data/output/sft/task_a_splits_v4` | 9,891 convs — the R30 stage-1 repair. Its own path, so no tag is needed to tell it apart. |
+| `corpus/task-a-v4-repaired` | `data/output/sft/task_a_splits_v4` | 9,891 convs — corpus v3 with the R30 stage-1 repair applied; 8,409 / 986 / 496. Own path (stage `task_a_sft_splits_repair_v4`). |
 
 The first three share ONE path. Only the tag tells them apart — see §4.
 
