@@ -1,0 +1,391 @@
+{
+  "calls_total": 1880,
+  "calls_matched": 1340,
+  "calls_failed": 540,
+  "conversations": 509,
+  "conversations_with_replies": 462,
+  "buckets": {
+    "value_in_context": 320,
+    "missing_argument": 123,
+    "value_unknowable": 123,
+    "no_call": 73,
+    "equivalent_value": 14
+  },
+  "examples": {
+    "value_in_context": [
+      {
+        "conversation": "L1_009",
+        "idx": 8,
+        "turn": 5,
+        "detail": "qualify_lead.timeline: expected 'three months', got 'next three months' [value_in_context]"
+      },
+      {
+        "conversation": "L1_011",
+        "idx": 10,
+        "turn": 4,
+        "detail": "qualify_lead.timeline: expected 'next 3 months', got '3 months' [value_in_context]"
+      },
+      {
+        "conversation": "L1_024",
+        "idx": 23,
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท เอ็นเตอร์ไพรส์ จำกัด', got 'เอ็นเตอร์ไพรส์ จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_026",
+        "idx": 25,
+        "turn": 8,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_in_context]"
+      },
+      {
+        "conversation": "L1_026",
+        "idx": 25,
+        "turn": 8,
+        "detail": "search_flights.destination: expected 'Chiang Mai', got 'เชียงใหม่' [value_in_context]"
+      },
+      {
+        "conversation": "L1_032",
+        "idx": 31,
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท สยามเทรดดิ้ง จำกัด', got 'สยามเทรดดิ้ง จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_032",
+        "idx": 31,
+        "turn": 6,
+        "detail": "qualify_lead.timeline: expected 'ภายใน 3 เดือน', got '3 เดือนข้างหน้า' [value_in_context]"
+      },
+      {
+        "conversation": "L1_033",
+        "idx": 32,
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท สยามโลจิสติกส์ จำกัด', got 'สยามโลจิสติกส์ จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_033",
+        "idx": 32,
+        "turn": 6,
+        "detail": "qualify_lead.timeline: expected 'ภายใน 3 เดือน', got 'ภายใน 3 เดือนข้างหน้า' [value_in_context]"
+      },
+      {
+        "conversation": "L1_036",
+        "idx": 35,
+        "turn": 4,
+        "detail": "check_compatibility.device_model: expected 'X-9000', got 'X-9000 series mouse' [value_in_context]"
+      },
+      {
+        "conversation": "L1_036",
+        "idx": 35,
+        "turn": 8,
+        "detail": "check_compatibility.device_model: expected 'X-9000', got 'X-9000 series mouse' [value_in_context]"
+      },
+      {
+        "conversation": "L1_040",
+        "idx": 39,
+        "turn": 5,
+        "detail": "qualify_lead.timeline: expected 'three months', got 'next three months' [value_in_context]"
+      }
+    ],
+    "missing_argument": [
+      {
+        "conversation": "L1_022",
+        "idx": 21,
+        "turn": 6,
+        "detail": "qualify_lead.budget_range: expected '$50,000 to $70,000', got None [missing_argument]"
+      },
+      {
+        "conversation": "L1_022",
+        "idx": 21,
+        "turn": 6,
+        "detail": "qualify_lead.timeline: expected 'three months', got None [missing_argument]"
+      },
+      {
+        "conversation": "L1_023",
+        "idx": 22,
+        "turn": 8,
+        "detail": "verify_identity.verification_value: expected '8899', got None [missing_argument]"
+      },
+      {
+        "conversation": "L1_024",
+        "idx": 23,
+        "turn": 6,
+        "detail": "qualify_lead.notes: expected 'ลูกค้าเกรดเอ', got None [missing_argument]"
+      },
+      {
+        "conversation": "L1_044",
+        "idx": 43,
+        "turn": 2,
+        "detail": "report_incident.affected_services: expected ['chemical factory'], got None [missing_argument]"
+      },
+      {
+        "conversation": "L1_044",
+        "idx": 43,
+        "turn": 8,
+        "detail": "dispatch_emergency.description: expected 'Large fire at chemical factory with confirmed hazmat leak', got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_003",
+        "idx": 51,
+        "turn": 11,
+        "detail": "submit_feedback.sentiment: expected 'neutral', got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_005",
+        "idx": 52,
+        "turn": 9,
+        "detail": "quote_premium.risk_profile: expected 'invalid_data', got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_010",
+        "idx": 55,
+        "turn": 10,
+        "detail": "log_complaint_trend.region: expected 'Bangkok', got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_010",
+        "idx": 55,
+        "turn": 12,
+        "detail": "log_complaint_trend.region: expected 'Bangkok', got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_015",
+        "idx": 59,
+        "turn": 6,
+        "detail": "search_flights.passengers: expected 1, got None [missing_argument]"
+      },
+      {
+        "conversation": "L2_015",
+        "idx": 59,
+        "turn": 6,
+        "detail": "search_flights.cabin_class: expected 'economy', got None [missing_argument]"
+      }
+    ],
+    "no_call": [
+      {
+        "conversation": "L1_024",
+        "idx": 23,
+        "turn": 8,
+        "detail": "qualify_lead.: expected {'contact_name': 'สมชาย', 'company': 'บริษัท เอ็นเตอร์ไพรส์ จำกัด', 'budget_range': 'งบไม่อั้น', 'timeline': 'พรุ่งนี้'}, got None [no_call]"
+      },
+      {
+        "conversation": "L2_025",
+        "idx": 68,
+        "turn": 8,
+        "detail": "check_balance.: expected {'account_id': '987-6-54321-0'}, got None [no_call]"
+      },
+      {
+        "conversation": "L2_042",
+        "idx": 85,
+        "turn": 15,
+        "detail": "compare_products.: expected {'product_ids': ['CHAIR-188', 'CHAIR-448']}, got None [no_call]"
+      },
+      {
+        "conversation": "INS_PREMIUM_008",
+        "idx": 140,
+        "turn": 9,
+        "detail": "send_sms.: expected {'policy_number': '7076203344', 'message': 'กธ.7076203344 ครบชำระเบี้ยฯ 22 มิถุนายน 2569 จำนวน 6,100 บาท สามารถชำระได้ถึง 7 กรกฎาคม 2569ดาวน์โหลดที่ http://bc.ocean.co.th/a/cppl70762 ขออภัยหากชำระแล้ว, สมัครรับบริการแจ้งเตือนชำระเบี้ยผ่าน LINE คลิก https://www.ocean.co.th/line-auto'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_008",
+        "idx": 148,
+        "turn": 18,
+        "detail": "change_plan.: expected {'account_id': 'ACT-92308', 'new_plan_id': 'WorldTraveler Premium'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_012",
+        "idx": 152,
+        "turn": 27,
+        "detail": "check_visa_requirements.: expected {'nationality': 'Thai', 'destination': 'United Kingdom', 'trip_purpose': 'tourism'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_018",
+        "idx": 158,
+        "turn": 15,
+        "detail": "check_visa_requirements.: expected {'nationality': 'Thai', 'destination': 'Singapore', 'trip_purpose': 'tourism'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_018",
+        "idx": 158,
+        "turn": 31,
+        "detail": "check_visa_requirements.: expected {'nationality': 'Thai', 'destination': 'Singapore', 'trip_purpose': 'tourism'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_040",
+        "idx": 180,
+        "turn": 21,
+        "detail": "change_plan.: expected {'account_id': 'ACC210980', 'new_plan_id': 'SuperNonStop 100GB', 'effective_date': '2023-11-25'}, got None [no_call]"
+      },
+      {
+        "conversation": "L4_047",
+        "idx": 187,
+        "turn": 36,
+        "detail": "check_claim_status.: expected {'claim_id': 'CLM-520714'}, got None [no_call]"
+      },
+      {
+        "conversation": "L5_006",
+        "idx": 196,
+        "turn": 11,
+        "detail": "check_balance.: expected {'account_id': 'AC815446'}, got None [no_call]"
+      },
+      {
+        "conversation": "L5_014",
+        "idx": 204,
+        "turn": 17,
+        "detail": "check_balance.: expected {'account_id': '1029384756'}, got None [no_call]"
+      }
+    ],
+    "value_unknowable": [
+      {
+        "conversation": "L1_026",
+        "idx": 25,
+        "turn": 6,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_026",
+        "idx": 25,
+        "turn": 6,
+        "detail": "search_flights.destination: expected 'Chiang Mai', got 'เชียงใหม่' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_031",
+        "idx": 30,
+        "turn": 4,
+        "detail": "verify_identity.verification_method: expected 'password', got 'pin' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_043",
+        "idx": 42,
+        "turn": 7,
+        "detail": "search_flights.departure_date: expected '2023-10-15', got '2024-10-15' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_044",
+        "idx": 43,
+        "turn": 2,
+        "detail": "report_incident.location: expected 'Maptaphut Industrial Estate', got 'นิคมอุตสาหกรรมมาบตาพุด' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_007",
+        "idx": 53,
+        "turn": 10,
+        "detail": "log_complaint_trend.category: expected 'technical', got 'website checkout' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_007",
+        "idx": 53,
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'website kept crashing during checkout process', got 'The website kept crashing during my checkout process' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_010",
+        "idx": 55,
+        "turn": 10,
+        "detail": "log_complaint_trend.category: expected 'staff_behavior', got 'พนักงานส่งของ' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_010",
+        "idx": 55,
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Customer reported delivery staff used inappropriate language', got 'พนักงานส่งของพูดจาไม่ดีเลย' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "idx": 58,
+        "turn": 6,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "idx": 58,
+        "turn": 6,
+        "detail": "search_flights.destination: expected 'Paris', got 'ปารีส' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "idx": 58,
+        "turn": 6,
+        "detail": "search_flights.departure_date: expected '2024-10-20', got '2023-10-20' [value_unknowable]"
+      }
+    ],
+    "equivalent_value": [
+      {
+        "conversation": "L1_030",
+        "idx": 29,
+        "turn": 5,
+        "detail": "verify_coverage.procedure_code: expected 45378, got '45378' [equivalent_value]"
+      },
+      {
+        "conversation": "L1_036",
+        "idx": 35,
+        "turn": 12,
+        "detail": "check_system_status.system_name: expected 'central_hub', got 'central hub' [equivalent_value]"
+      },
+      {
+        "conversation": "L2_027",
+        "idx": 70,
+        "turn": 10,
+        "detail": "log_complaint_trend.category: expected 'Agent Behavior', got 'agent behavior' [equivalent_value]"
+      },
+      {
+        "conversation": "L2_027",
+        "idx": 70,
+        "turn": 12,
+        "detail": "log_complaint_trend.category: expected 'Agent Behavior', got 'agent behavior' [equivalent_value]"
+      },
+      {
+        "conversation": "L2_043",
+        "idx": 86,
+        "turn": 9,
+        "detail": "log_complaint_trend.category: expected 'Wait Times', got 'wait times' [equivalent_value]"
+      },
+      {
+        "conversation": "L2_043",
+        "idx": 86,
+        "turn": 11,
+        "detail": "log_complaint_trend.category: expected 'Wait Times', got 'wait times' [equivalent_value]"
+      },
+      {
+        "conversation": "L4_041",
+        "idx": 181,
+        "turn": 14,
+        "detail": "request_referral.specialty: expected 'cardiology', got 'Cardiology' [equivalent_value]"
+      },
+      {
+        "conversation": "L4_041",
+        "idx": 181,
+        "turn": 16,
+        "detail": "request_referral.specialty: expected 'cardiology', got 'Cardiology' [equivalent_value]"
+      },
+      {
+        "conversation": "L3_V4R06",
+        "idx": 249,
+        "turn": 11,
+        "detail": "schedule_demo.product: expected 'Enterprise Plan', got 'Enterprise plan' [equivalent_value]"
+      },
+      {
+        "conversation": "L3_V4R07",
+        "idx": 250,
+        "turn": 4,
+        "detail": "qualify_lead.budget_range: expected '$20k - $30k?', got '$20k - $30k' [equivalent_value]"
+      },
+      {
+        "conversation": "L3_V4R07",
+        "idx": 250,
+        "turn": 4,
+        "detail": "qualify_lead.timeline: expected \"'yesterday'\", got 'yesterday' [equivalent_value]"
+      },
+      {
+        "conversation": "L4_039",
+        "idx": 447,
+        "turn": 10,
+        "detail": "file_claim.description: expected 'Another car backed into mine.', got 'another car backed into mine' [equivalent_value]"
+      }
+    ]
+  },
+  "log": "results/exp_a/sft_cat_a_e4b_textturns_ckpt3168_gatedtext_v4_auto.log",
+  "data": [
+    "data/output/benchmark/task_a_v4",
+    "data/output/benchmark/task_a_voice_v3"
+  ]
+}
