@@ -268,3 +268,61 @@ def align_calls(
             remaining.remove(match)
         pairs.append((gold, match))
     return pairs
+
+
+# --------------------------------------------------------------------------- second level
+
+_THAI = re.compile(r"[฀-๿]")
+_LATIN = re.compile(r"[a-z]", re.IGNORECASE)
+
+
+def _scripts(text: str) -> set[str]:
+    found = set()
+    if _THAI.search(text):
+        found.add("thai")
+    if _LATIN.search(text):
+        found.add("latin")
+    return found
+
+
+def _words(value: Any) -> set[str]:
+    text = unicodedata.normalize("NFKC", _text(value)).casefold()
+    return {w for w in re.split(r"[^0-9a-z฀-๿]+", text) if w}
+
+
+def refine_value_mismatch(expected: Any, actual: Any, context: str) -> str:
+    """Why a wrong value is wrong — the second level under ``value_in_context``.
+
+    ``cross_script``      the two use different writing systems: the same entity
+                          named in the conversation's language against gold in
+                          another. A data convention, not a model failure.
+    ``phrasing``          one value contains the other word for word ("three
+                          months" inside "next three months"). The schema never
+                          pinned the boundary.
+    ``partial_overlap``   they share words but neither contains the other, and
+                          no number disagrees. Needs a human read.
+    ``different_value``   anything else, including every case where a number or
+                          date disagrees. The capability gap.
+
+    A disagreeing number outranks word overlap: "2000 baht" against "3000 baht"
+    is a different value, not phrasing.
+    """
+    expected_text, actual_text = _text(expected), _text(actual)
+    expected_numbers, actual_numbers = re.findall(r"\d+", expected_text), re.findall(r"\d+", actual_text)
+    if expected_numbers != actual_numbers:
+        return "different_value"
+
+    expected_scripts, actual_scripts = _scripts(expected_text), _scripts(actual_text)
+    if expected_scripts and actual_scripts and not (expected_scripts & actual_scripts):
+        return "cross_script"
+
+    expected_loose, actual_loose = _loose(expected), _loose(actual)
+    if expected_loose and actual_loose and (
+        expected_loose in actual_loose or actual_loose in expected_loose
+    ):
+        return "phrasing"
+
+    expected_words, actual_words = _words(expected), _words(actual)
+    if expected_words & actual_words:
+        return "partial_overlap"
+    return "different_value"

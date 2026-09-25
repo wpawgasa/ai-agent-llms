@@ -441,3 +441,80 @@ def find_orphan_tool_results(messages: list[dict[str, Any]]) -> list[str]:
             f"<tool_call>; put the <tool_call> in that turn, or remove the tool result"
         )
     return found
+
+
+@dataclass(frozen=True)
+class EnumViolation:
+    """A gold tool-call value its own schema's ``enum`` does not allow."""
+
+    msg_index: int
+    tool: str
+    argument: str
+    value: Any
+    allowed: list[Any]
+
+    def describe(self) -> str:
+        return (
+            f"message {self.msg_index}: {self.tool}.{self.argument} is {self.value!r}, "
+            f"but its schema allows only {self.allowed}"
+        )
+
+
+def _enum_of(spec: Mapping[str, Any]) -> list[Any] | None:
+    """The allowed values for a parameter, looking inside an array's items."""
+    if not isinstance(spec, Mapping):
+        return None
+    if isinstance(spec.get("enum"), list):
+        return list(spec["enum"])
+    items = spec.get("items")
+    if isinstance(items, Mapping) and isinstance(items.get("enum"), list):
+        return list(items["enum"])
+    return None
+
+
+def find_enum_violations(
+    messages: list[dict[str, Any]], tool_schemas: Iterable[Mapping[str, Any]] | None
+) -> list[EnumViolation]:
+    """Gold tool-call values that their own schema's ``enum`` forbids.
+
+    A conversation whose gold call asks for ``sort_by='cheapest_ever'`` while the
+    schema lists ``['relevance','price_low','price_high','rating']`` scores every
+    model wrong for answering correctly — 7 such cases on the v4 benchmark, each
+    one a defect nothing else catches. Cheap, needs no model, and belongs in the
+    generator's repair loop next to :func:`find_orphan_tool_results`.
+
+    Case and spacing differences are NOT reported. The scorer is strict about
+    them, but they are a formatting defect of a different kind, and mixing them
+    in would bury the values that are genuinely off the list.
+    """
+    properties: dict[str, dict[str, Any]] = {}
+    for schema in tool_schemas or []:
+        function = schema.get("function", schema)
+        name = function.get("name")
+        if not name:
+            continue
+        properties[name] = ((function.get("parameters") or {}).get("properties") or {})
+
+    found: list[EnumViolation] = []
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        calls = _calls_in(message) or (message.get("annotations") or {}).get("tool_calls") or []
+        for call in calls:
+            spec_by_argument = properties.get(call.get("name") or "")
+            if not spec_by_argument:
+                continue
+            arguments = call.get("arguments")
+            if not isinstance(arguments, Mapping):
+                continue
+            for argument, value in arguments.items():
+                allowed = _enum_of(spec_by_argument.get(argument) or {})
+                if allowed is None:
+                    continue
+                for item in value if isinstance(value, list) else [value]:
+                    if any(_compact(str(item)) == _compact(str(option)) for option in allowed):
+                        continue
+                    found.append(
+                        EnumViolation(index, call.get("name") or "", argument, item, allowed)
+                    )
+    return found

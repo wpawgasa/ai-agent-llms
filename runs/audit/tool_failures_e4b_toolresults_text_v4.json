@@ -383,6 +383,423 @@
       }
     ]
   },
+  "value_reasons": {
+    "value_in_context": {
+      "different_value": 204,
+      "phrasing": 60,
+      "partial_overlap": 33,
+      "cross_script": 23
+    },
+    "value_unknowable": {
+      "different_value": 57,
+      "partial_overlap": 42,
+      "cross_script": 17,
+      "phrasing": 7
+    }
+  },
+  "value_reason_examples": {
+    "value_in_context/phrasing": [
+      {
+        "conversation": "L1_009",
+        "turn": 5,
+        "detail": "qualify_lead.timeline: expected 'three months', got 'next three months' [value_in_context]"
+      },
+      {
+        "conversation": "L1_011",
+        "turn": 4,
+        "detail": "qualify_lead.timeline: expected 'next 3 months', got '3 months' [value_in_context]"
+      },
+      {
+        "conversation": "L1_024",
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท เอ็นเตอร์ไพรส์ จำกัด', got 'เอ็นเตอร์ไพรส์ จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_032",
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท สยามเทรดดิ้ง จำกัด', got 'สยามเทรดดิ้ง จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_033",
+        "turn": 6,
+        "detail": "qualify_lead.company: expected 'บริษัท สยามโลจิสติกส์ จำกัด', got 'สยามโลจิสติกส์ จำกัด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_033",
+        "turn": 6,
+        "detail": "qualify_lead.timeline: expected 'ภายใน 3 เดือน', got 'ภายใน 3 เดือนข้างหน้า' [value_in_context]"
+      },
+      {
+        "conversation": "L1_036",
+        "turn": 4,
+        "detail": "check_compatibility.device_model: expected 'X-9000', got 'X-9000 series mouse' [value_in_context]"
+      },
+      {
+        "conversation": "L1_036",
+        "turn": 8,
+        "detail": "check_compatibility.device_model: expected 'X-9000', got 'X-9000 series mouse' [value_in_context]"
+      },
+      {
+        "conversation": "L1_040",
+        "turn": 5,
+        "detail": "qualify_lead.timeline: expected 'three months', got 'next three months' [value_in_context]"
+      },
+      {
+        "conversation": "L2_003",
+        "turn": 11,
+        "detail": "submit_feedback.description: expected 'Add more templates for the dashboard.', got 'Just that you should add more templates for the dashboard.' [value_in_context]"
+      }
+    ],
+    "value_unknowable/cross_script": [
+      {
+        "conversation": "L1_026",
+        "turn": 6,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_026",
+        "turn": 6,
+        "detail": "search_flights.destination: expected 'Chiang Mai', got 'เชียงใหม่' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_044",
+        "turn": 2,
+        "detail": "report_incident.location: expected 'Maptaphut Industrial Estate', got 'นิคมอุตสาหกรรมมาบตาพุด' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_010",
+        "turn": 10,
+        "detail": "log_complaint_trend.category: expected 'staff_behavior', got 'พนักงานส่งของ' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_010",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Customer reported delivery staff used inappropriate language', got 'พนักงานส่งของพูดจาไม่ดีเลย' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "turn": 6,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "turn": 6,
+        "detail": "search_flights.destination: expected 'Paris', got 'ปารีส' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_018",
+        "turn": 9,
+        "detail": "file_claim.description: expected 'Rear-end collision', got 'รถชนท้าย' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_036",
+        "turn": 14,
+        "detail": "reschedule_delivery.time_slot: expected 'morning', got 'ช่วงเช้า' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_045",
+        "turn": 6,
+        "detail": "check_availability.service_type: expected 'Vehicle Inspection and Maintenance', got 'ตรวจสภาพรถพร้อมเช็กระยะ' [value_unknowable]"
+      }
+    ],
+    "value_in_context/cross_script": [
+      {
+        "conversation": "L1_026",
+        "turn": 8,
+        "detail": "search_flights.origin: expected 'Bangkok', got 'กรุงเทพ' [value_in_context]"
+      },
+      {
+        "conversation": "L1_026",
+        "turn": 8,
+        "detail": "search_flights.destination: expected 'Chiang Mai', got 'เชียงใหม่' [value_in_context]"
+      },
+      {
+        "conversation": "L1_044",
+        "turn": 5,
+        "detail": "check_safety_status.identifier: expected 'Maptaphut Industrial Estate', got 'โรงงานสารเคมี' [value_in_context]"
+      },
+      {
+        "conversation": "L1_044",
+        "turn": 8,
+        "detail": "dispatch_emergency.location: expected 'Maptaphut Industrial Estate', got 'นิคมอุตสาหกรรมมาบตาพุด' [value_in_context]"
+      },
+      {
+        "conversation": "L1_048",
+        "turn": 8,
+        "detail": "search_products.sort_by: expected 'ราคาถูกที่สุด', got 'price_low' [value_in_context]"
+      },
+      {
+        "conversation": "L2_010",
+        "turn": 12,
+        "detail": "log_complaint_trend.category: expected 'staff_behavior', got 'พนักงานส่งของ' [value_in_context]"
+      },
+      {
+        "conversation": "L2_010",
+        "turn": 12,
+        "detail": "log_complaint_trend.description: expected 'Customer reported delivery staff used inappropriate language', got 'พนักงานส่งของพูดจาไม่ดีเลย' [value_in_context]"
+      },
+      {
+        "conversation": "L2_045",
+        "turn": 10,
+        "detail": "book_appointment.service_type: expected 'Vehicle Inspection and Maintenance', got 'ตรวจสภาพรถพร้อมเช็กระยะ' [value_in_context]"
+      },
+      {
+        "conversation": "L3_V4R03",
+        "turn": 12,
+        "detail": "run_diagnostic.diagnostic_type: expected 'สแกนระดับสูงสุด', got 'cpu_load' [value_in_context]"
+      },
+      {
+        "conversation": "L3_V4R08",
+        "turn": 9,
+        "detail": "dispute_bill.bill_period: expected 'กรกฎาคม', got 'July' [value_in_context]"
+      }
+    ],
+    "value_unknowable/different_value": [
+      {
+        "conversation": "L1_031",
+        "turn": 4,
+        "detail": "verify_identity.verification_method: expected 'password', got 'pin' [value_unknowable]"
+      },
+      {
+        "conversation": "L1_043",
+        "turn": 7,
+        "detail": "search_flights.departure_date: expected '2023-10-15', got '2024-10-15' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_007",
+        "turn": 10,
+        "detail": "log_complaint_trend.category: expected 'technical', got 'website checkout' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "turn": 6,
+        "detail": "search_flights.departure_date: expected '2024-10-20', got '2023-10-20' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_014",
+        "turn": 10,
+        "detail": "check_visa_requirements.destination: expected 'France', got 'Paris' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_015",
+        "turn": 6,
+        "detail": "search_flights.departure_date: expected '2024-12-15', got '2024-11-15' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_022",
+        "turn": 9,
+        "detail": "log_complaint_trend.category: expected 'delay', got 'service' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_022",
+        "turn": 9,
+        "detail": "log_complaint_trend.description: expected 'ลูกค้าให้คะแนน 1 เนื่องจากบริการช้ามาก', got 'บริการช้ามาก' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_039",
+        "turn": 8,
+        "detail": "search_products.sort_by: expected 'popularity', got 'rating' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_048",
+        "turn": 4,
+        "detail": "register_complaint.category: expected 'Technical', got 'internet_outage' [value_unknowable]"
+      }
+    ],
+    "value_in_context/partial_overlap": [
+      {
+        "conversation": "L1_032",
+        "turn": 6,
+        "detail": "qualify_lead.timeline: expected 'ภายใน 3 เดือน', got '3 เดือนข้างหน้า' [value_in_context]"
+      },
+      {
+        "conversation": "L2_020",
+        "turn": 10,
+        "detail": "submit_feedback.description: expected 'แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลยนะ ประทับใจตรงนี้แหละ', got 'แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลย ประทับใจตรงนี้แหละ' [value_in_context]"
+      },
+      {
+        "conversation": "L2_020",
+        "turn": 12,
+        "detail": "submit_feedback.description: expected 'แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลยนะ ประทับใจตรงนี้แหละ', got 'แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลย ประทับใจตรงนี้แหละ' [value_in_context]"
+      },
+      {
+        "conversation": "L2_027",
+        "turn": 12,
+        "detail": "log_complaint_trend.description: expected 'Agent was rude and did not solve the issue.', got \"The agent was rude and didn't solve my issue at all.\" [value_in_context]"
+      },
+      {
+        "conversation": "L2_038",
+        "turn": 12,
+        "detail": "log_complaint_trend.description: expected 'Delivery was three days late and driver was rude', got 'The delivery was three days late and the driver was rude.' [value_in_context]"
+      },
+      {
+        "conversation": "L2_043",
+        "turn": 11,
+        "detail": "log_complaint_trend.description: expected 'Customer reported significant dissatisfaction due to long wait times last week.', got 'Customer experienced long wait times last week' [value_in_context]"
+      },
+      {
+        "conversation": "L2_048",
+        "turn": 4,
+        "detail": "register_complaint.description: expected 'Internet is down', got 'Internet has been down for three days' [value_in_context]"
+      },
+      {
+        "conversation": "L2_048",
+        "turn": 8,
+        "detail": "register_complaint.description: expected 'Internet is down', got 'Internet has been down for three days' [value_in_context]"
+      },
+      {
+        "conversation": "L2_050",
+        "turn": 13,
+        "detail": "waive_late_fee.waiver_reason: expected 'Customer claims system error and usually pays on time', got 'Customer requested waiver for late fee' [value_in_context]"
+      },
+      {
+        "conversation": "L3_022",
+        "turn": 18,
+        "detail": "create_quote.products: expected ['Enterprise Scaling Solution', 'Premium Migration Support'], got ['Enterprise Pro'] [value_in_context]"
+      }
+    ],
+    "value_in_context/different_value": [
+      {
+        "conversation": "L1_044",
+        "turn": 5,
+        "detail": "check_safety_status.check_type: expected 'location', got 'facility' [value_in_context]"
+      },
+      {
+        "conversation": "L1_044",
+        "turn": 8,
+        "detail": "dispatch_emergency.severity: expected 'critical', got 'high' [value_in_context]"
+      },
+      {
+        "conversation": "L1_048",
+        "turn": 4,
+        "detail": "recommend_products.based_on: expected 'similar', got 'history' [value_in_context]"
+      },
+      {
+        "conversation": "L1_049",
+        "turn": 4,
+        "detail": "recommend_products.based_on: expected 'super_awesome_stuff', got 'history' [value_in_context]"
+      },
+      {
+        "conversation": "L1_049",
+        "turn": 8,
+        "detail": "recommend_products.based_on: expected 'trending', got 'history' [value_in_context]"
+      },
+      {
+        "conversation": "L1_049",
+        "turn": 12,
+        "detail": "search_products.sort_by: expected 'cheapest_ever', got 'price_low' [value_in_context]"
+      },
+      {
+        "conversation": "L2_016",
+        "turn": 24,
+        "detail": "send_reminder.channel: expected 'email', got 'sms' [value_in_context]"
+      },
+      {
+        "conversation": "L2_020",
+        "turn": 10,
+        "detail": "submit_feedback.feedback_type: expected 'experience', got 'service' [value_in_context]"
+      },
+      {
+        "conversation": "L2_020",
+        "turn": 12,
+        "detail": "submit_feedback.feedback_type: expected 'experience', got 'service' [value_in_context]"
+      },
+      {
+        "conversation": "L2_022",
+        "turn": 11,
+        "detail": "log_complaint_trend.category: expected 'delay', got 'service' [value_in_context]"
+      }
+    ],
+    "value_unknowable/partial_overlap": [
+      {
+        "conversation": "L2_007",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'website kept crashing during checkout process', got 'The website kept crashing during my checkout process' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_027",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Agent was rude and did not solve the issue.', got \"The agent was rude and didn't solve my issue at all.\" [value_unknowable]"
+      },
+      {
+        "conversation": "L2_038",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Delivery was three days late and driver was rude', got 'The delivery was three days late and the driver was rude.' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_043",
+        "turn": 9,
+        "detail": "log_complaint_trend.description: expected 'Customer reported significant dissatisfaction due to long wait times last week.', got 'Customer experienced long wait times last week' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_050",
+        "turn": 11,
+        "detail": "waive_late_fee.waiver_reason: expected 'Customer claims system error and usually pays on time', got 'Customer requested waiver for late fee' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_008",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Technician was late and lacked necessary parts', got \"The technician was late and didn't even have the right parts.\" [value_unknowable]"
+      },
+      {
+        "conversation": "L3_015",
+        "turn": 3,
+        "detail": "register_complaint.description: expected 'Internet has been down for 3 days, previous reports did not resolve the issue.', got 'Internet has been down for 3 days despite multiple reports' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_015",
+        "turn": 21,
+        "detail": "close_case.resolution_summary: expected 'SLA breached. Escalated to supervisor. Provided 500 THB credit compensation. Customer satisfied.', got 'SLA breached case escalated to supervisor and 500 THB credit applied to customer account' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_021",
+        "turn": 11,
+        "detail": "waive_late_fee.waiver_reason: expected 'Good payment history customer claim timely payment', got 'Customer paid on time previously' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_022",
+        "turn": 11,
+        "detail": "schedule_demo.product: expected 'Enterprise Scaling Solution', got 'Enterprise Pro' [value_unknowable]"
+      }
+    ],
+    "value_unknowable/phrasing": [
+      {
+        "conversation": "L2_016",
+        "turn": 6,
+        "detail": "check_availability.service_type: expected 'ขูดหินปูนและเคลือบฟลูออไรด์', got 'ขูดหินปูน' [value_unknowable]"
+      },
+      {
+        "conversation": "L2_048",
+        "turn": 4,
+        "detail": "register_complaint.severity: expected 'ultra-high', got 'high' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_V4R01",
+        "turn": 10,
+        "detail": "schedule_demo.product: expected 'CRM Dashboard', got 'CRM' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_V4R07",
+        "turn": 17,
+        "detail": "create_quote.products: expected ['SyncPro', 'FastTrack'], got ['FastTrack'] [value_unknowable]"
+      },
+      {
+        "conversation": "L2_025",
+        "turn": 10,
+        "detail": "log_complaint_trend.description: expected 'Support agent hung up on customer during call.', got 'agent hung up on customer' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_008",
+        "turn": 4,
+        "detail": "register_complaint.category: expected 'internet', got 'internet_outage' [value_unknowable]"
+      },
+      {
+        "conversation": "L3_024",
+        "turn": 14,
+        "detail": "report_fraud.description: expected 'Unauthorized online purchase reported by customer', got 'Unauthorized online purchase' [value_unknowable]"
+      }
+    ]
+  },
   "log": "results/exp_a/sft_cat_a_e4b_textturns_ckpt3168_gatedtext_v4_auto.log",
   "data": [
     "data/output/benchmark/task_a_v4",

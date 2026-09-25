@@ -41,7 +41,11 @@ from typing import Any
 
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt
 from llm_workflow_agents.eval.tool_call_f1 import parse_tool_calls
-from llm_workflow_agents.eval.tool_call_failures import align_calls, classify_call
+from llm_workflow_agents.eval.tool_call_failures import (
+    align_calls,
+    classify_call,
+    refine_value_mismatch,
+)
 
 SAMPLE_RE = re.compile(r"evaluating_sample\s+conversation_id=(\S+)\s+idx=(\d+)")
 RESPONSE_RE = re.compile(r"model_response\s+content=('.*?'|\".*?\")\s+latency_ms=", re.DOTALL)
@@ -110,6 +114,10 @@ def gold_calls_with_context(sample: dict[str, Any]) -> list[tuple[dict[str, Any]
 
 def triage(samples: list[dict[str, Any]], replies: dict[int, list[str]]) -> dict[str, Any]:
     buckets: collections.Counter[str] = collections.Counter()
+    # Why a wrong value is wrong, for the two value buckets: the split that
+    # decides whether the fix is a data convention, a schema rule or training.
+    sub: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
+    sub_examples: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     examples: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     calls_total = matched = 0
     conversations_with_replies = 0
@@ -130,6 +138,16 @@ def triage(samples: list[dict[str, Any]], replies: dict[int, list[str]]) -> dict
                 continue
             for failure in failures:
                 buckets[failure.bucket] += 1
+                if failure.bucket in ("value_in_context", "value_unknowable"):
+                    reason = refine_value_mismatch(failure.expected, failure.actual, context)
+                    sub[failure.bucket][reason] += 1
+                    key = f"{failure.bucket}/{reason}"
+                    if len(sub_examples[key]) < 10:
+                        sub_examples[key].append({
+                            "conversation": sample.get("conversation_id"),
+                            "turn": turn,
+                            "detail": failure.describe(),
+                        })
                 if len(examples[failure.bucket]) < 12:
                     examples[failure.bucket].append({
                         "conversation": sample.get("conversation_id"),
@@ -145,6 +163,8 @@ def triage(samples: list[dict[str, Any]], replies: dict[int, list[str]]) -> dict
         "conversations_with_replies": conversations_with_replies,
         "buckets": dict(buckets.most_common()),
         "examples": {k: v for k, v in examples.items()},
+        "value_reasons": {k: dict(v.most_common()) for k, v in sub.items()},
+        "value_reason_examples": dict(sub_examples),
     }
 
 
@@ -169,6 +189,11 @@ def main() -> int:
     print(f"{'bucket':20} {'count':>7} {'% of failures':>14} {'% of all calls':>15}")
     for bucket, count in report["buckets"].items():
         print(f"{bucket:20} {count:7} {count / max(failed, 1):13.1%} {count / max(total, 1):14.1%}")
+    for bucket, reasons in report["value_reasons"].items():
+        total_bucket = sum(reasons.values())
+        print(f"\n  {bucket} split by why the value differs ({total_bucket}):")
+        for reason, count in reasons.items():
+            print(f"    {reason:18} {count:6} {count / max(total_bucket, 1):7.1%}")
     print("\nno_call includes turns the harness never asked for (openers, segments after a "
           "withheld result), so it is an upper bound on the model's own omissions.")
     if args.out:
