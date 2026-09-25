@@ -626,6 +626,51 @@ stages:
     outs:
       - checkpoints/sft_cat_a_e4b_textturns/gemma-4-E4B-it
 
+  task_a_sft_gemma4_e4b_corpus_v4:
+    # FROZEN. `dvc repro` skips this stage: its cmd is a ~6.7 h GPU run that
+    # would overwrite the registered weights the first time a dep changes.
+    frozen: true
+    desc: >-
+      FROZEN — The A/B arm for "does repairing the SFT corpus move the v4
+      benchmark?" (CLAUDE.md R30). Identical to task_a_sft_gemma4_e4b_textturns
+      in every hyperparameter; the configs differ in output_dir and data.source
+      only, pinned by tests/unit/test_sft_cat_a_corpus_v4_config.py. The corpus
+      is data/output/sft/task_a_splits_v4, the stage-1 repair built by
+      scripts/repair_task_a_corpus.py from the seeded ledger in
+      data/interim/task_a_corpus_repair_ledger (confident unknowable tool
+      arguments 443 -> 0, identifier reuse 70.5% -> 4.4%, orphan tool results
+      60 -> 0 with 41 conversations dropped, mergeable stay pairs 552 -> 1).
+
+      RESULT — NULL. 3 epochs, 3,156 steps, 6.66 h, best eval_loss 0.4292
+      (baseline 0.4298; eval_loss cannot rank runs on different splits, R15/R16).
+      On the v4 benchmark, against model/sft-gemma4-e4b-toolresults-on-task-a-v3:
+      text 0.8332 -> 0.8308 (-0.0024), native 0.8046 -> 0.8189 (+0.0144). The
+      two formats disagree in sign, their components contradict each other, and
+      one run per arm puts both inside a ~±0.01 band. Argument exact match — the
+      metric the experiment predicted would rise — FELL in both formats
+      (0.6309 -> 0.6202 text, 0.6064 -> 0.6037 native), so the mechanical corpus
+      flaws are not what caps argument fidelity. Stage 2 (907 authored invented
+      facts, 456 regenerated two-tool conversations) is therefore not bought.
+      See docs/cat_a_corpus_repair_null_result.md.
+
+      To register an existing checkpoint without re-running training:
+          dvc commit task_a_sft_gemma4_e4b_corpus_v4
+          dvc push  task_a_sft_gemma4_e4b_corpus_v4
+    cmd: >-
+      ./scripts/run_phase2_sft.sh
+      --model-config configs/models_exp_a/gemma4_e4b.yaml
+      --sft-config configs/training/sft_cat_a_e4b_corpus_v4.yaml
+    deps:
+      - scripts/run_phase2_sft.sh
+      - src/llm_workflow_agents/training/sft.py
+      - src/llm_workflow_agents/training/_utils.py
+      - src/llm_workflow_agents/data/tool_turns.py
+      - src/llm_workflow_agents/training/lora_targets.py
+      - configs/models_exp_a/gemma4_e4b.yaml
+      - configs/training/sft_cat_a_e4b_corpus_v4.yaml
+      - data/output/sft/task_a_splits_v4
+    outs:
+      - checkpoints/sft_cat_a_e4b_corpus_v4/gemma-4-E4B-it
   task_a_sft_gemma4_12b:
     # FROZEN. `dvc repro` skips this stage: its cmd is a ~16 h GPU run that
     # would overwrite the registered weights the first time a dep changes.
