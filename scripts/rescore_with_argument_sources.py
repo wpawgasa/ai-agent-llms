@@ -92,6 +92,20 @@ def blended_delta(result: dict[str, Any]) -> float:
     return delta
 
 
+def exact_match_quality(stored: dict[str, Any], blended_delta_value: float) -> float:
+    """The recorded run's quality under EXACT MATCH, whichever rule produced it.
+
+    A run already scored under declared sources has the gain baked in, so adding
+    the delta would count it twice; subtracting turns the recorded number into
+    its exact-match counterfactual and keeps one column comparable across runs
+    scored under either rule.
+    """
+    quality = stored["quality_summary"]["quality"]
+    if (stored.get("argument_scoring") or {}).get("rule") == "declared_sources":
+        return quality - blended_delta_value
+    return quality
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("logs", nargs="+", type=Path)
@@ -114,7 +128,11 @@ def main() -> int:
     for result in results:
         result["blended_delta"] = blended_delta(result)
         recorded = Path("results/exp_a") / result["log"].replace(".log", ".json")
-        quality = json.loads(recorded.read_text())["quality_summary"]["quality"] if recorded.exists() else None
+        quality = (
+            exact_match_quality(json.loads(recorded.read_text()), result["blended_delta"])
+            if recorded.exists()
+            else None
+        )
         cells = []
         for modality in ("text", "voice"):
             scores = result["strata"].get(modality)

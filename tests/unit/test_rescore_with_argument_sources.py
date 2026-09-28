@@ -47,3 +47,26 @@ def test_a_run_that_did_not_move_reports_no_change() -> None:
         }
     }
     assert blended_delta(result) == pytest.approx(0.0)
+
+
+exact_match_quality = rescore_module.exact_match_quality
+
+
+def _stored(quality: float, rule: str | None) -> dict:
+    stored = {"quality_summary": {"quality": quality}}
+    if rule is not None:
+        stored["argument_scoring"] = {"rule": rule}
+    return stored
+
+
+def test_a_run_recorded_under_the_old_rule_reports_its_quality_as_is() -> None:
+    assert exact_match_quality(_stored(0.8332, "exact_match"), 0.0137) == pytest.approx(0.8332)
+
+
+def test_a_run_with_no_recorded_rule_is_an_old_rule_run() -> None:
+    assert exact_match_quality(_stored(0.8332, None), 0.0137) == pytest.approx(0.8332)
+
+
+def test_a_run_already_scored_under_declared_sources_is_not_counted_twice() -> None:
+    """The gain is baked into the recorded number; adding it again inflates it."""
+    assert exact_match_quality(_stored(0.8353, "declared_sources"), 0.0129) == pytest.approx(0.8224)
