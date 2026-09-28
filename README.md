@@ -72,26 +72,43 @@ the ledger, its hash, the backend and the threshold are recorded in every
 result JSON under `argument_scoring`, and a result with **no** such key is
 under the old exact-match rule.
 
-Pass `--no-argument-sources` to score the old way. Rescored from the stored run
-logs (`scripts/rescore_with_argument_sources.py`), every v4 run gains between
-+0.0087 and +0.0157 and **the ranking does not change** in either format:
+Pass `--no-argument-sources` to score the old way. All three E4B models were
+**re-run** under the new rule on 2026-09-28 (`*_v4sources_auto.json`), and each
+run's own log was also rescored under both rules
+(`scripts/rescore_with_argument_sources.py`), which separates the rule from
+run-to-run generation variance:
 
-| model | format | exact match | declared sources |
-|---|---|---|---|
-| E4B SFT + tool results | text | 0.8332 | **0.8469** |
-| E4B SFT, no tool results | text | 0.8160 | 0.8283 |
-| E4B SFT + tool results | native | 0.8046 | 0.8183 |
-| E4B SFT, no tool results | native | 0.7763 | 0.7879 |
-| gemma-4-E4B-it (untrained) | text | 0.6877 | 0.7035 |
-| gemma-4-E4B-it (untrained) | native | 0.6867 | 0.7005 |
+| model | format | Sep 22 exact | Sep 22 declared | Sep 28 exact | Sep 28 declared | rule | gen. swing |
+|---|---|---|---|---|---|---|---|
+| E4B SFT + tool results | text | 0.8332 | **0.8469** | 0.8224 | **0.8353** | +0.013 | −0.0108 |
+| E4B SFT + tool results | native | 0.8046 | 0.8183 | 0.8109 | 0.8252 | +0.014 | +0.0063 |
+| E4B SFT, no tool results | text | 0.8160 | 0.8283 | 0.8135 | 0.8258 | +0.012 | −0.0025 |
+| E4B SFT, no tool results | native | 0.7763 | 0.7879 | 0.7743 | 0.7859 | +0.012 | −0.0020 |
+| gemma-4-E4B-it (untrained) | text | 0.6877 | 0.7035 | 0.6710 | 0.6911 | +0.016…0.020 | −0.0167 |
+| gemma-4-E4B-it (untrained) | native | 0.6867 | 0.7005 | 0.6814 | 0.6952 | +0.014 | −0.0053 |
 
-It is a level shift, not a re-ordering, and it does not reach 0.9 — the best
-run is still 0.053 short. Of the 31 free-text arguments still rejected on that
-run, 9 are the fact guard doing its job (a number or identifier changed) and 22
-are low lexical similarity, several of them real paraphrases the offline
-backend cannot see. Section 7 of
-`docs/cat_a_tool_argument_failure_taxonomy.md` has the full table, including
-the 12B and the rejected samples.
+Three things to read off it.
+
+**The rule is worth +0.012 to +0.020 and reproduces across independent
+generations** — on four of the six cells it lands within 0.0000 of itself on
+two different runs. **The ranking does not change** in either format.
+
+**Run-to-run variance is the same size as the rule.** The identical checkpoint,
+data and settings scored 0.8332 then 0.8224 under the identical exact-match
+rule — a −0.0108 swing from vLLM nondeterminism at temperature 0, and −0.0167
+on the untrained model. **So a single fresh run cannot isolate a scoring change,
+and no one-run-per-arm comparison should claim a difference below ~0.02.** The
+from-log rescore is the instrument for that, because it holds the generations
+fixed. (Tool calls are far more stable than prose: on one pair of runs the
+model emitted byte-identical tool calls — 1970 of them, same md5 — while its
+prose differed, so that cell's tool F1 matched to four decimals.)
+
+**It does not reach 0.9** — the best run is still 0.053 short. Of the 31
+free-text arguments still rejected there, 9 are the fact guard doing its job (a
+number or identifier changed) and 22 are low lexical similarity, several of
+them real paraphrases the offline backend cannot see. Section 7 of
+`docs/cat_a_tool_argument_failure_taxonomy.md` has the full analysis and the
+12B, which was rescored but not re-run.
 
 ### What the v4 table says
 
