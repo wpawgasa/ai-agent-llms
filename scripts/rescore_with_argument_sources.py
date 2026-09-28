@@ -33,11 +33,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from llm_workflow_agents.eval.free_text_similarity import DEFAULT_THRESHOLD, values_match
+from llm_workflow_agents.eval.argument_scoring import canonicalize_call, load_ledger
+from llm_workflow_agents.eval.free_text_similarity import DEFAULT_THRESHOLD
 from llm_workflow_agents.eval.tool_call_f1 import (
     TurnGroundTruth,
     TurnPrediction,
-    _deep_equals,
     evaluate_tool_calls_conversation,
     parse_tool_calls,
 )
@@ -49,55 +49,13 @@ from triage_tool_call_failures import gold_calls_with_context, load_samples, par
 VOICE_WEIGHT = 0.30
 
 
-def load_sources(path: Path) -> dict[str, str]:
-    return json.loads(path.read_text(encoding="utf-8"))["sources"]
-
-
-def rewrite_call(
-    gold: dict[str, Any],
-    predicted: dict[str, Any] | None,
-    sources: dict[str, str],
-    threshold: float,
-    backend: str,
-    counters: dict[str, int],
-) -> dict[str, Any] | None:
-    """The predicted call with the declared source rules applied.
-
-    A free-text argument judged equivalent is rewritten to the gold value so
-    the ordinary sub-tree match then accepts it; a system-supplied argument is
-    filled in, because the runtime would have supplied it. Everything else is
-    left exactly as the model wrote it.
-    """
-    if predicted is None:
-        return None
-    tool = gold.get("name") or ""
-    out = dict(predicted.get("arguments") or {})
-    for argument, expected in (gold.get("arguments") or {}).items():
-        source = sources.get(f"{tool}.{argument}")
-        if source == "system":
-            out[argument] = expected
-            counters["system_supplied"] += 1
-        elif source == "free_text":
-            actual = out.get(argument)
-            if actual is None or _deep_equals(actual, expected):
-                continue
-            if values_match(expected, actual, threshold=threshold, backend=backend):
-                out[argument] = expected
-                counters["free_text_accepted"] += 1
-            else:
-                counters["free_text_rejected"] += 1
-    return {**predicted, "arguments": out}
-
-
 def rescore(
     log: Path,
     samples: list[dict[str, Any]],
-    sources: dict[str, str],
-    threshold: float,
-    backend: str,
+    scoring: Any,
 ) -> dict[str, Any]:
     replies = parse_log(log)
-    counters = {"system_supplied": 0, "free_text_accepted": 0, "free_text_rejected": 0}
+    counters: dict[str, int] = {}
     strata: dict[str, dict[str, list[Any]]] = {}
 
     for index, sample in enumerate(samples, start=1):
@@ -108,7 +66,7 @@ def rescore(
         rewritten = [
             fixed
             for expected, actual in align_calls(gold_calls, predicted)
-            if (fixed := rewrite_call(expected, actual, sources, threshold, backend, counters))
+            if (fixed := canonicalize_call(expected, actual, scoring, counters)) is not None
         ]
         bucket["gt"].append([TurnGroundTruth(turn_id=0, tool_calls=gold_calls)])
         bucket["before"].append([TurnPrediction(turn_id=0, content="", tool_calls=predicted)])
@@ -145,8 +103,8 @@ def main() -> int:
     args = parser.parse_args()
 
     samples = load_samples(args.data)
-    sources = load_sources(args.sources)
-    results = [rescore(log, samples, sources, args.threshold, args.backend) for log in args.logs]
+    scoring = load_ledger(args.sources, threshold=args.threshold, backend=args.backend)
+    results = [rescore(log, samples, scoring) for log in args.logs]
 
     header = (
         f"{'run':<46} {'text tool F1':>17} {'voice tool F1':>17} {'blended quality':>19}"
@@ -173,17 +131,21 @@ def main() -> int:
         name = result["log"].replace("_v4_auto.log", "")
         print(f"{name:<46} {cells[0]:>17} {cells[1]:>17} {quality_cell:>19}")
 
-    totals = {k: sum(r["counters"][k] for r in results) for k in results[0]["counters"]}
+    keys = {k for r in results for k in r["counters"]}
+    totals = {k: sum(r["counters"].get(k, 0) for r in results) for k in keys} or {
+        "free_text_accepted": 0, "free_text_rejected": 0, "system_supplied": 0
+    }
     print(
-        f"\nfree text accepted {totals['free_text_accepted']}, rejected "
-        f"{totals['free_text_rejected']}; system-supplied {totals['system_supplied']} "
+        f"\nfree text accepted {totals.get('free_text_accepted', 0)}, rejected "
+        f"{totals.get('free_text_rejected', 0)}; system-supplied "
+        f"{totals.get('system_supplied', 0)} "
         f"(backend={args.backend}, threshold={args.threshold})"
     )
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
             json.dumps(
-                {"threshold": args.threshold, "backend": args.backend, "runs": results},
+                {"scoring": scoring.to_dict(), "runs": results},
                 indent=2,
                 ensure_ascii=False,
             ),

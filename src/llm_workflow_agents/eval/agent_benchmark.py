@@ -55,6 +55,16 @@ from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend
 from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics_by_language
 from llm_workflow_agents.eval.segment_scoring import SegmentStats, reply_texts, segment_scoring_view
 from llm_workflow_agents.eval.argument_provenance import agent_decidable_call
+from llm_workflow_agents.eval.free_text_similarity import (
+    DEFAULT_THRESHOLD as DEFAULT_FREE_TEXT_THRESHOLD,
+)
+from llm_workflow_agents.eval.argument_scoring import (
+    DEFAULT_LEDGER,
+    EXACT_MATCH,
+    ArgumentScoring,
+    canonicalize_conversation,
+    load_ledger,
+)
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -1074,6 +1084,62 @@ def _replay_conversation(
     return predicted, latencies_ms, ttfts_ms
 
 
+def build_tool_inputs(
+    pred_view: list[dict[str, Any]],
+    gt_view: list[dict[str, Any]],
+    tool_schemas: list[dict[str, Any]],
+    argument_scoring: ArgumentScoring = EXACT_MATCH,
+    counters: dict[str, int] | None = None,
+) -> tuple[
+    list[TurnPrediction],
+    list[TurnGroundTruth],
+    tuple[list[TurnPrediction], list[TurnGroundTruth]],
+]:
+    """One conversation's tool-call inputs: one turn per ground-truth assistant turn.
+
+    Declared argument owners are applied to the PREDICTION
+    (eval/argument_scoring.py), so every metric downstream still compares two
+    ordinary tool calls and needs no change. With the default
+    :data:`EXACT_MATCH` rule the predictions pass through untouched.
+
+    Returns the per-turn predictions and ground truths, plus the agent-decidable
+    pair — the same calls with only the arguments a score may attribute to the
+    model, reported beside the headline metric and never inside it (R31).
+    """
+    scored_turns = [
+        (turn_idx, pred_msg, gt_msg)
+        for turn_idx, (pred_msg, gt_msg) in enumerate(zip(pred_view, gt_view))
+        if gt_msg.get("role") == "assistant"
+    ]
+    # Pooled per conversation, then returned to the turn each call was made on.
+    predicted_calls = canonicalize_conversation(
+        [(gt.get("annotations") or {}).get("tool_calls") or [] for _, _, gt in scored_turns],
+        [parse_tool_calls(pred.get("content", "")) for _, pred, _ in scored_turns],
+        argument_scoring,
+        counters,
+    )
+
+    predictions: list[TurnPrediction] = []
+    ground_truths: list[TurnGroundTruth] = []
+    decidable_preds: list[TurnPrediction] = []
+    decidable_gts: list[TurnGroundTruth] = []
+    for (turn_idx, pred_msg, gt_msg), pred_calls in zip(scored_turns, predicted_calls):
+        content = pred_msg.get("content", "")
+        gt_tool_calls = (gt_msg.get("annotations") or {}).get("tool_calls") or []
+        predictions.append(TurnPrediction(turn_id=turn_idx, content=content, tool_calls=pred_calls))
+        ground_truths.append(TurnGroundTruth(turn_id=turn_idx, tool_calls=gt_tool_calls))
+        decidable_preds.append(
+            TurnPrediction(turn_id=turn_idx, content=content, tool_calls=pred_calls)
+        )
+        decidable_gts.append(
+            TurnGroundTruth(
+                turn_id=turn_idx,
+                tool_calls=[agent_decidable_call(tool_schemas, c) for c in gt_tool_calls],
+            )
+        )
+    return predictions, ground_truths, (decidable_preds, decidable_gts)
+
+
 def build_state_machine_inputs(
     samples: list[dict[str, Any]],
     predicted_messages: list[list[dict[str, Any]]],
@@ -1241,6 +1307,43 @@ if __name__ == "__main__":
             "conversations, in which case quality equals the text score exactly."
         ),
     )
+    parser.add_argument(
+        "--argument-sources",
+        default=str(DEFAULT_LEDGER),
+        help=(
+            "Reviewed ledger declaring who owns each tool argument "
+            f"(default: {DEFAULT_LEDGER}). free_text arguments are compared by "
+            "similarity with a fact guard and system-supplied ones are not "
+            "scored against the model; everything else stays exact. A missing "
+            "file scores every argument exactly. This CHANGES the score — runs "
+            "under different ledgers are not comparable, so the ledger and its "
+            "hash are recorded in the result JSON."
+        ),
+    )
+    parser.add_argument(
+        "--no-argument-sources",
+        action="store_true",
+        help="Score every argument by exact match, the rule in force before 2026-09-28.",
+    )
+    parser.add_argument(
+        "--free-text-threshold",
+        type=float,
+        default=DEFAULT_FREE_TEXT_THRESHOLD,
+        help=(
+            "Similarity at or above which a free-text argument counts as correct "
+            f"(default: {DEFAULT_FREE_TEXT_THRESHOLD}, calibrated in "
+            "eval/free_text_similarity.py)."
+        ),
+    )
+    parser.add_argument(
+        "--free-text-backend",
+        default="token_f1",
+        help=(
+            "Similarity backend for free-text arguments. The default is "
+            "deterministic and offline; a registered encoder gives different "
+            "scores, so it is recorded alongside them."
+        ),
+    )
     args = parser.parse_args()
 
     import logging
@@ -1295,6 +1398,22 @@ if __name__ == "__main__":
         stochastic_trials=args.stochastic_trials,
     )
 
+    # How a tool argument is compared. Exact match for every argument unless a
+    # reviewed ledger declares otherwise (eval/argument_scoring.py).
+    argument_scoring = (
+        EXACT_MATCH
+        if args.no_argument_sources
+        else load_ledger(
+            args.argument_sources,
+            threshold=args.free_text_threshold,
+            backend=args.free_text_backend,
+        )
+    )
+    argument_counts: dict[str, int] = {}
+    if not args.no_argument_sources and not argument_scoring.enabled:
+        logger.warning("argument_sources_missing", path=args.argument_sources)
+    logger.info("argument_scoring", **argument_scoring.to_dict())
+
     # --- Run deterministic evaluation pass (temperature=0.0) ---
     all_pred_messages: list[list[dict[str, Any]]] = []
     tool_predictions: list[TurnPrediction] = []
@@ -1345,35 +1464,15 @@ if __name__ == "__main__":
             for k, text in enumerate(reply_texts(pred_messages))
         ])
 
-        # Tool-call inputs — one TurnPrediction/GroundTruth per assistant turn
-        this_conv_preds: list[TurnPrediction] = []
-        this_conv_gts: list[TurnGroundTruth] = []
-        for turn_idx, (pred_msg, gt_msg) in enumerate(zip(pred_view, gt_view)):
-            if gt_msg.get("role") != "assistant":
-                continue
-            tp = TurnPrediction(
-                turn_id=turn_idx,
-                content=pred_msg.get("content", ""),
-            )
-            gt_tool_calls = (gt_msg.get("annotations") or {}).get("tool_calls") or []
-            # The same gold calls with only the arguments a score may attribute
-            # to the model (eval/argument_provenance.py). Identical to the above
-            # until a schema declares a source, so this cannot move a ranking.
-            decidable_gts.append(TurnGroundTruth(
-                turn_id=turn_idx,
-                tool_calls=[agent_decidable_call(tool_schemas, c) for c in gt_tool_calls],
-            ))
-            decidable_preds.append(TurnPrediction(turn_id=turn_idx, content=pred_msg.get("content", "")))
-            tg = TurnGroundTruth(
-                turn_id=turn_idx,
-                tool_calls=gt_tool_calls,
-            )
-            tool_predictions.append(tp)
-            tool_ground_truths.append(tg)
-            this_conv_preds.append(tp)
-            this_conv_gts.append(tg)
+        this_conv_preds, this_conv_gts, conv_decidable = build_tool_inputs(
+            pred_view, gt_view, tool_schemas, argument_scoring, argument_counts,
+        )
+        tool_predictions.extend(this_conv_preds)
+        tool_ground_truths.extend(this_conv_gts)
         conv_tool_preds.append(this_conv_preds)
         conv_tool_gts.append(this_conv_gts)
+        decidable_preds.extend(conv_decidable[0])
+        decidable_gts.extend(conv_decidable[1])
 
         # Chain propagation inputs
         chain_predictions.append({"messages": pred_view})
@@ -1476,6 +1575,11 @@ if __name__ == "__main__":
         "segment_stats": {**segment_stats.to_dict(), **replay_counts},
         # 2026-09-17: tool results are shown only for calls actually made.
         "tool_result_gating": "calls_made_only",
+        # 2026-09-28: free-text arguments are scored by similarity and
+        # system-supplied ones are not scored against the model. A result
+        # under a different rule, ledger, backend or threshold is not
+        # comparable with this one.
+        "argument_scoring": {**argument_scoring.to_dict(), **argument_counts},
         "metrics": quality.to_dict(),
         # Tool metrics over the agent-decidable arguments only (source "user" or
         # "derived", plus every undeclared argument). Equal to metrics.tool_metrics

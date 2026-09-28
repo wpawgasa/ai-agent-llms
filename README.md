@@ -59,6 +59,40 @@ there from a state it was never in is paid in full (CLAUDE.md R25).
 | gemma-4-E4B-it (untrained) | text | **0.6877** | 0.6552 | 0.7635 | 0.5414 | 0.8055 | 0.6031 | 0.7289 | **0.2692** | 0.7481 |
 | gemma-4-E4B-it (untrained) | native | **0.6867** | 0.6688 | 0.7284 | 0.5056 | 0.7932 | 0.5831 | 0.7407 | **0.2652** | 0.6481 |
 
+### Since 2026-09-28: free-text arguments are scored by similarity
+
+The table above is under the **exact-match** rule, and a fresh run will no
+longer reproduce it. A free-text argument (`description`, `resolution_summary`,
+`waiver_reason` and their kind) cannot be exact-matched — the model writes a
+faithful paraphrase of what the customer said and scores zero — so the harness
+now compares those by similarity with a fact guard, and does not score against
+the model the one argument a runtime would supply. Who owns each argument is a
+reviewed ledger, `data/interim/task_a_argument_sources/sources.json`; the rule,
+the ledger, its hash, the backend and the threshold are recorded in every
+result JSON under `argument_scoring`, and a result with **no** such key is
+under the old exact-match rule.
+
+Pass `--no-argument-sources` to score the old way. Rescored from the stored run
+logs (`scripts/rescore_with_argument_sources.py`), every v4 run gains between
++0.0087 and +0.0157 and **the ranking does not change** in either format:
+
+| model | format | exact match | declared sources |
+|---|---|---|---|
+| E4B SFT + tool results | text | 0.8332 | **0.8469** |
+| E4B SFT, no tool results | text | 0.8160 | 0.8283 |
+| E4B SFT + tool results | native | 0.8046 | 0.8183 |
+| E4B SFT, no tool results | native | 0.7763 | 0.7879 |
+| gemma-4-E4B-it (untrained) | text | 0.6877 | 0.7035 |
+| gemma-4-E4B-it (untrained) | native | 0.6867 | 0.7005 |
+
+It is a level shift, not a re-ordering, and it does not reach 0.9 — the best
+run is still 0.053 short. Of the 31 free-text arguments still rejected on that
+run, 9 are the fact guard doing its job (a number or identifier changed) and 22
+are low lexical similarity, several of them real paraphrases the offline
+backend cannot see. Section 7 of
+`docs/cat_a_tool_argument_failure_taxonomy.md` has the full table, including
+the 12B and the rejected samples.
+
 ### What the v4 table says
 
 - **Fine-tuning is worth far more than the training variant**: +0.15 (text) and
