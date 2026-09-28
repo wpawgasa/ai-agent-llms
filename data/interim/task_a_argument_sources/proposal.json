@@ -1,0 +1,3614 @@
+{
+  "version": 1,
+  "summary": {
+    "user": 187,
+    "derived": 38,
+    "free_text": 22,
+    "system": 1
+  },
+  "pairs": [
+    {
+      "tool": "activate_backup_systems",
+      "argument": "failover_type",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "hot",
+        "warm",
+        "warm"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "activate_backup_systems",
+      "argument": "system_name",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 16,
+      "has_enum": false,
+      "samples": [
+        "Cloud-Failover-Group-A",
+        "Cloud-Failover-Group-A",
+        "core database",
+        "generator backup"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "activate_card",
+      "argument": "card_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "CARD9253",
+        "9876"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "activate_card",
+      "argument": "last_four_ssn",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        "1234",
+        "4321"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "activate_roaming",
+      "argument": "account_id",
+      "occurrences": 36,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "AC7532",
+        "ACC31742",
+        "ACC-75797",
+        "ACT-42393"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "activate_roaming",
+      "argument": "destination_country",
+      "occurrences": 36,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "Japan",
+        "Japan",
+        "Canada",
+        "France"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "activate_roaming",
+      "argument": "roaming_plan",
+      "occurrences": 32,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "basic",
+        "premium",
+        "premium",
+        "unlimited"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "analyze_usage",
+      "argument": "account_id",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "123-456-789",
+        "ACC-47248",
+        "ACC-10560",
+        "ACC-10560"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "analyze_usage",
+      "argument": "period_months",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 2,
+      "has_enum": false,
+      "samples": [
+        12,
+        12
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_coupon",
+      "argument": "coupon_code",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "SAVE31",
+        "SAVE10",
+        "SAVE10",
+        "SAVE458"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_coupon",
+      "argument": "order_id",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ORD-7508",
+        "ORD-7993",
+        "ORD-7993",
+        "TEMP-6524"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_fix",
+      "argument": "fix_id",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "patch_09",
+        "FIX-2998",
+        "FIX-INDEX-REBUILD-42",
+        "FIX-196"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_fix",
+      "argument": "placeholder",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_fix",
+      "argument": "system_name",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "HomeHub-V2",
+        "Server-Alpha",
+        "prod-db-01",
+        "auth-gateway"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_for_loan",
+      "argument": "customer_id",
+      "occurrences": 29,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-INVALID-999",
+        "CUST-70147",
+        "C-102938",
+        "C-102938"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_for_loan",
+      "argument": "loan_type",
+      "occurrences": 29,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "personal",
+        "personal",
+        "personal",
+        "personal"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "apply_for_loan",
+      "argument": "placeholder",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "apply_for_loan",
+      "argument": "requested_amount",
+      "occurrences": 29,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        200000,
+        200000,
+        500000,
+        500000
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "block_card",
+      "argument": "card_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CARD_4846",
+        "CARD-5232"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "block_card",
+      "argument": "reason",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": true,
+      "samples": [
+        "suspicious_activity",
+        "suspicious_activity"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "book_appointment",
+      "argument": "customer_id",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "C-9999",
+        "CUST-2090",
+        "C-9981",
+        "8888"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_appointment",
+      "argument": "preferred_date",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-10-27",
+        "2023-11-20",
+        "2024-11-25",
+        "July 14th"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_appointment",
+      "argument": "preferred_time",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "14:00",
+        "10:00",
+        "10:00",
+        "1:00 PM"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_appointment",
+      "argument": "service_type",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 15,
+      "has_enum": false,
+      "samples": [
+        "ขูดหินปูนและเคลือบฟลูออไรด์",
+        "Vehicle Inspection and Maintenance",
+        "ตรวจสุขภาพฟัน",
+        "massage"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_reservation",
+      "argument": "option_id",
+      "occurrences": 43,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "TG855",
+        "FL-609",
+        "FL733",
+        "FL-898"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_reservation",
+      "argument": "passenger_name",
+      "occurrences": 43,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "Wichai",
+        "Alex Rivera",
+        "Alex Rivera",
+        "Somchai Rakdee"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_reservation",
+      "argument": "placeholder",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "book_reservation",
+      "argument": "reservation_type",
+      "occurrences": 43,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": true,
+      "samples": [
+        "flight",
+        "flight",
+        "flight",
+        "flight"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "cancel_order",
+      "argument": "order_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "TH-1822",
+        "ORD-6519"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "cancel_order",
+      "argument": "reason",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 20,
+      "has_enum": false,
+      "samples": [
+        "ระบบห่วยและรอนานเกินไป",
+        "อยากเปลี่ยนรุ่นใหม่"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "change_plan",
+      "argument": "account_id",
+      "occurrences": 64,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ACCT-5281",
+        "ACC-22481",
+        "TEL-36894",
+        "AC7532"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "change_plan",
+      "argument": "effective_date",
+      "occurrences": 14,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-11-20",
+        "2023-11-15",
+        "2023-10-25",
+        "2023-10-25"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "change_plan",
+      "argument": "new_plan_id",
+      "occurrences": 64,
+      "sourced_share": 1.0,
+      "median_length": 14,
+      "has_enum": false,
+      "samples": [
+        "pro_unlimited",
+        "UP-UNLIM-10",
+        "plan-unlimited-intl",
+        "ultra_max_unlim_699"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_application_status",
+      "argument": "application_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "APP-1376",
+        "APP-2830"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_availability",
+      "argument": "date",
+      "occurrences": 24,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-10-27",
+        "2025-05-20",
+        "2025-05-12",
+        "2025-05-12"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_availability",
+      "argument": "location",
+      "occurrences": 8,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "Chicago",
+        "Bangna",
+        "Los Angeles",
+        "Los Angeles"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_availability",
+      "argument": "product_id",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "CHAIR-188",
+        "VC-PET-01",
+        "VC-PET-01",
+        "HP-699"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_availability",
+      "argument": "service_type",
+      "occurrences": 24,
+      "sourced_share": 1.0,
+      "median_length": 15,
+      "has_enum": false,
+      "samples": [
+        "ขูดหินปูนและเคลือบฟลูออไรด์",
+        "ตรวจฟัน",
+        "routine cleaning",
+        "routine cleaning"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_balance",
+      "argument": "account_id",
+      "occurrences": 66,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "123-4-56789-0",
+        "123-4-56789-0",
+        "CHK-45227",
+        "CHK-45227"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_balance",
+      "argument": "placeholder",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_benefit_eligibility",
+      "argument": "benefit_type",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": true,
+      "samples": [
+        "unemployment",
+        "unemployment",
+        "unemployment",
+        "housing"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "check_benefit_eligibility",
+      "argument": "citizen_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CIT-36474",
+        "1100100987654",
+        "1100100987654",
+        "CIT-1978"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_claim_status",
+      "argument": "claim_id",
+      "occurrences": 201,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "CLAIM-92265",
+        "AUTH-495",
+        "CLM-401812",
+        "CLM-401812"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_claim_status",
+      "argument": "patient_id",
+      "occurrences": 82,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "HN7317",
+        "P-99887",
+        "AJ-5922",
+        "P-99887"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_claim_status",
+      "argument": "placeholder",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_compatibility",
+      "argument": "device_model",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "X-9000",
+        "X-9000"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_compatibility",
+      "argument": "target_version",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "SuperFast",
+        "12.4"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_contract_renewal",
+      "argument": "contract_id",
+      "occurrences": 13,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "CONT-182",
+        "CON-8363",
+        "CON-369",
+        "ZEN-CON-12"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_data_usage",
+      "argument": "account_id",
+      "occurrences": 139,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ACCT-5281",
+        "ACCT-5281",
+        "ACCT-5281",
+        "ACC-22481"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_data_usage",
+      "argument": "period",
+      "occurrences": 121,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "current",
+        "current",
+        "last_month",
+        "current"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "check_safety_status",
+      "argument": "check_type",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "location",
+        "facility",
+        "facility",
+        "location"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "check_safety_status",
+      "argument": "identifier",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 16,
+      "has_enum": false,
+      "samples": [
+        "Maptaphut Industrial Estate",
+        "Main Data Center",
+        "Main Data Center",
+        "อาคารพาณิชย์สุขุมวิท 21"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_sla_status",
+      "argument": "case_id",
+      "occurrences": 20,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CMP-237",
+        "CASE-3750",
+        "CASE-3056",
+        "CASE-2538"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_stock",
+      "argument": "product_id",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "SPK-67",
+        "BT-X1",
+        "BT-X1",
+        "H-200"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_system_status",
+      "argument": "check_type",
+      "occurrences": 29,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": true,
+      "samples": [
+        "connectivity",
+        "connectivity",
+        "health",
+        "connectivity"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "check_system_status",
+      "argument": "placeholder",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_system_status",
+      "argument": "system_name",
+      "occurrences": 59,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "central_hub",
+        "HomeHub-V2",
+        "Area-Node-Bangkok",
+        "HomeHub-V2"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_visa_requirements",
+      "argument": "destination",
+      "occurrences": 117,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "France",
+        "Japan",
+        "Japan",
+        "Japan"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_visa_requirements",
+      "argument": "nationality",
+      "occurrences": 117,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        "Thai",
+        "Thai",
+        "Thai",
+        "USA"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_visa_requirements",
+      "argument": "placeholder",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "check_visa_requirements",
+      "argument": "trip_purpose",
+      "occurrences": 99,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "tourism",
+        "tourism",
+        "tourism",
+        "tourism"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "close_case",
+      "argument": "case_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CMP-237",
+        "CASE-3750",
+        "CASE-3056",
+        "CASE-2538"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "close_case",
+      "argument": "customer_satisfied",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "close_case",
+      "argument": "resolution_summary",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 56,
+      "has_enum": false,
+      "samples": [
+        "Customer received $50 credit for 3-day outage and SLA violation.",
+        "SLA breached. Escalated to supervisor. Provided 500 THB credit compensation. Customer satisfied.",
+        "Customer received 200 THB discount due to employee conduct issue and SLA breach.",
+        "Customer received $50 credit for delayed and damaged delivery"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "collect_csat",
+      "argument": "comments",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 23,
+      "has_enum": false,
+      "samples": [
+        "พนักงานส่งของพูดจาไม่ดี",
+        "บริการช้ามาก",
+        "It was terrible.",
+        "It was honestly terrible."
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "collect_csat",
+      "argument": "interaction_id",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "INT-8781",
+        "CS-6518",
+        "INT-18536",
+        "INT-4493"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "collect_csat",
+      "argument": "score",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 1,
+      "has_enum": false,
+      "samples": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "collect_nps",
+      "argument": "customer_id",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-1736",
+        "C-9921",
+        "CUST-390",
+        "C-8821"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "collect_nps",
+      "argument": "reason",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 27,
+      "has_enum": false,
+      "samples": [
+        "I like the features, though the interface is a bit cluttered.",
+        "long wait times",
+        "the agent was super helpful"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "collect_nps",
+      "argument": "score",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 1,
+      "has_enum": false,
+      "samples": [
+        8,
+        2,
+        9,
+        2
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "compare_products",
+      "argument": "product_ids",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 21,
+      "has_enum": false,
+      "samples": [
+        [
+          "CHAIR-188",
+          "CHAIR-448"
+        ],
+        [
+          "VC-PET-01",
+          "VC-ULTRA-05"
+        ],
+        [
+          "HP-699",
+          "HP-736"
+        ],
+        [
+          "TAB-116",
+          "TAB-609"
+        ]
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "create_quote",
+      "argument": "customer_id",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "C-8871",
+        "C-8871",
+        "NX-424",
+        "NX-424"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "create_quote",
+      "argument": "discount_pct",
+      "occurrences": 13,
+      "sourced_share": 1.0,
+      "median_length": 2,
+      "has_enum": false,
+      "samples": [
+        30,
+        30,
+        20,
+        20
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "create_quote",
+      "argument": "products",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 28,
+      "has_enum": false,
+      "samples": [
+        [
+          "Enterprise Scaling Solution",
+          "Premium Migration Support"
+        ],
+        [
+          "Enterprise Scaling Solution",
+          "Premium Migration Support"
+        ],
+        [
+          "Logistics Plus",
+          "AI Fleet Dispatcher"
+        ],
+        [
+          "Logistics Plus",
+          "AI Fleet Dispatcher"
+        ]
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispatch_emergency",
+      "argument": "description",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 47,
+      "has_enum": false,
+      "samples": [
+        "Large fire at chemical factory with confirmed hazmat leak",
+        "Fire in Sector B, high impact on cloud services",
+        "มีคนติดอยู่ด้วย"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "dispatch_emergency",
+      "argument": "emergency_type",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "hazmat",
+        "fire",
+        "infrastructure",
+        "fire"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "dispatch_emergency",
+      "argument": "location",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 22,
+      "has_enum": false,
+      "samples": [
+        "Maptaphut Industrial Estate",
+        "Main Data Center",
+        "452 Industrial Parkway",
+        "อาคารซีดับเบิลยู ทาวเวอร์ ชั้น 15 ถนนรัชดาภิเษก"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispatch_emergency",
+      "argument": "severity",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "critical",
+        "critical",
+        "critical",
+        "critical"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "dispute_bill",
+      "argument": "account_id",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "ACC-47248",
+        "ACC-47248",
+        "ACC-10560"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispute_bill",
+      "argument": "bill_period",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "กรกฎาคม",
+        "กรกฎาคม",
+        "2023-10"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispute_bill",
+      "argument": "dispute_reason",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 41,
+      "has_enum": false,
+      "samples": [
+        "ยอดพุ่งสูงผิดปกติในช่วงที่ไม่มีคนอยู่บ้าน",
+        "ยอดพุ่งสูงผิดปกติในช่วงที่ไม่มีคนอยู่บ้าน",
+        "Customer not home during day, suspects meter malfunction"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "dispute_charge",
+      "argument": "dispute_reason",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 26,
+      "has_enum": false,
+      "samples": [
+        "ไม่ได้ใช้งานค่าบริการเสริม"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispute_charge",
+      "argument": "disputed_amount",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": false,
+      "samples": [
+        500
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "dispute_charge",
+      "argument": "invoice_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "INV-4886"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "enroll_green_energy",
+      "argument": "account_id",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "123-456-789",
+        "123-456-789",
+        "ACC-47248",
+        "ACC-10560"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "enroll_green_energy",
+      "argument": "program",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": true,
+      "samples": [
+        "solar",
+        "solar",
+        "solar",
+        "solar"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "escalate_to_supervisor",
+      "argument": "case_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CASE-3750",
+        "CASE-3056",
+        "CASE-2538",
+        "CASE-4978"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "escalate_to_supervisor",
+      "argument": "reason",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 37,
+      "has_enum": false,
+      "samples": [
+        "SLA breached for internet outage complaint",
+        "SLA breached and high severity employee conduct issue",
+        "SLA breach and high severity delivery damage",
+        "SLA breached by 48 hours for complete outage"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "escalate_to_supervisor",
+      "argument": "urgency",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": true,
+      "samples": [
+        "immediate",
+        "urgent",
+        "urgent",
+        "urgent"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "file_claim",
+      "argument": "claim_type",
+      "occurrences": 56,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "auto",
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "file_claim",
+      "argument": "description",
+      "occurrences": 51,
+      "sourced_share": 1.0,
+      "median_length": 26,
+      "has_enum": false,
+      "samples": [
+        "Rear-end collision",
+        "fender bender",
+        "fender bender",
+        "ขับรถไปเบียดเสาไฟฟ้าในลานจอดรถ"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "file_claim",
+      "argument": "incident_date",
+      "occurrences": 56,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2024-05-20",
+        "2023-10-25",
+        "2023-10-25",
+        "2024-05-20"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "file_claim",
+      "argument": "placeholder",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "file_claim",
+      "argument": "policy_id",
+      "occurrences": 56,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "POL-520949",
+        "POL-8465",
+        "POL-8465",
+        "POL-876836"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "file_complaint",
+      "argument": "department",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 17,
+      "has_enum": false,
+      "samples": [
+        "Housing Authority"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "file_complaint",
+      "argument": "description",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 32,
+      "has_enum": false,
+      "samples": [
+        "Application delayed over 60 days"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "file_complaint",
+      "argument": "priority",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "high"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "file_complaint",
+      "argument": "subject",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 17,
+      "has_enum": false,
+      "samples": [
+        "Delay in approval"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "generate_receipt",
+      "argument": "document_type",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": true,
+      "samples": [
+        "tax_invoice",
+        "receipt",
+        "receipt",
+        "tax_invoice"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "generate_receipt",
+      "argument": "transaction_id",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "TXN-914147",
+        "ADJ-6056",
+        "TX-7285",
+        "TXN-4180"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "get_pricing",
+      "argument": "product_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "VC-PET-01"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "get_product_details",
+      "argument": "product_id",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CHAIR-188",
+        "CHAIR-188",
+        "VC-PET-01"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "initiate_return",
+      "argument": "items",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 17,
+      "has_enum": false,
+      "samples": [
+        [
+          "Wireless Headphones"
+        ],
+        [
+          "item_001"
+        ]
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "initiate_return",
+      "argument": "order_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "ORD-2484",
+        "ORDER-96249"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "initiate_return",
+      "argument": "reason",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "broken",
+        "cracked headband"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "initiate_return",
+      "argument": "return_type",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": true,
+      "samples": [
+        "return",
+        "return"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "inquiry_interest_rate",
+      "argument": "product_type",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "credit_card",
+        "personal_loan",
+        "savings",
+        "cd"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "join_waitlist",
+      "argument": "customer_id",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-689",
+        "CUST-3839",
+        "CUST-ALPHA-99",
+        "CUST-ALPHA-99"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "join_waitlist",
+      "argument": "preferred_date_range",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2025-05-12"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "join_waitlist",
+      "argument": "service_type",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 16,
+      "has_enum": false,
+      "samples": [
+        "ตรวจฟัน",
+        "routine cleaning",
+        "Comprehensive Skin Screening",
+        "Comprehensive Skin Screening"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "log_complaint_trend",
+      "argument": "category",
+      "occurrences": 20,
+      "sourced_share": 1.0,
+      "median_length": 13,
+      "has_enum": false,
+      "samples": [
+        "technical",
+        "staff_behavior",
+        "staff_behavior",
+        "delay"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "log_complaint_trend",
+      "argument": "description",
+      "occurrences": 20,
+      "sourced_share": 1.0,
+      "median_length": 46,
+      "has_enum": false,
+      "samples": [
+        "website kept crashing during checkout process",
+        "Customer reported delivery staff used inappropriate language",
+        "Customer reported delivery staff used inappropriate language",
+        "ลูกค้าให้คะแนน 1 เนื่องจากบริการช้ามาก"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "log_complaint_trend",
+      "argument": "region",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "Northeast",
+        "Bangkok",
+        "Bangkok",
+        "London"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "lookup_invoice",
+      "argument": "customer_id",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-3148",
+        "ACC-828368",
+        "CUST-495649",
+        "ACC-2334"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "lookup_invoice",
+      "argument": "invoice_id",
+      "occurrences": 17,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "INV-2023-01",
+        "INV-2024-001",
+        "INV-2024-001",
+        "INV-2024-001"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "lookup_order",
+      "argument": "order_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ORD-2484",
+        "ORDER-96249",
+        "#ORD-8141",
+        "TH-1822"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "lookup_rewards",
+      "argument": "customer_id",
+      "occurrences": 11,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-5347",
+        "CUST-5347",
+        "CUST-9135",
+        "CUST-745902"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "modify_order",
+      "argument": "modifications",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 51,
+      "has_enum": false,
+      "samples": [
+        {
+          "shipping_address": "456 Oak Avenue, Springfield"
+        }
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "modify_order",
+      "argument": "order_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "ORD-16462"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "offer_goodwill",
+      "argument": "customer_id",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "ACC-4609",
+        "CUST-2104",
+        "CUST-9056",
+        "CUST-6170"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "offer_goodwill",
+      "argument": "gesture_type",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": true,
+      "samples": [
+        "credit",
+        "credit",
+        "discount",
+        "credit"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "offer_goodwill",
+      "argument": "value",
+      "occurrences": 11,
+      "sourced_share": 1.0,
+      "median_length": 2,
+      "has_enum": false,
+      "samples": [
+        50,
+        500,
+        200,
+        50
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "price_match",
+      "argument": "competitor_price",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        129.99
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "price_match",
+      "argument": "product_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "HP-184"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_payment",
+      "argument": "amount",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        1250.0,
+        1250.0,
+        150.0,
+        1500
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_payment",
+      "argument": "invoice_id",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "INV-2024-001",
+        "INV-8022",
+        "INV-8766",
+        "INV-6135"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_payment",
+      "argument": "payment_method",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": true,
+      "samples": [
+        "credit_card",
+        "credit_card",
+        "credit_card",
+        "credit_card"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "process_upsell",
+      "argument": "current_product",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 13,
+      "has_enum": false,
+      "samples": [
+        "Streamline Pro",
+        "Standard Plan",
+        "SyncPro"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_upsell",
+      "argument": "customer_id",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "NX-424",
+        "C-445",
+        "ZEN-389",
+        "NX-6804"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_upsell",
+      "argument": "offer_details",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 22,
+      "has_enum": false,
+      "samples": [
+        "20% discount on add-on"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "process_upsell",
+      "argument": "recommended_product",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": false,
+      "samples": [
+        "AI Fleet Dispatcher",
+        "Advanced Analytics Module",
+        "Analytics Plus",
+        "Enterprise Plan + Advanced Analytics"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "qualify_lead",
+      "argument": "budget_range",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "$50,000",
+        "$50,000",
+        "$50,000 to $70,000",
+        "งบไม่อั้น"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "qualify_lead",
+      "argument": "company",
+      "occurrences": 23,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "Global Tech",
+        "TechNova Systems",
+        "NexaCorp",
+        "บริษัท เอ็นเตอร์ไพรส์ จำกัด"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "qualify_lead",
+      "argument": "contact_name",
+      "occurrences": 23,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "Mark",
+        "Sarah Miller",
+        "Sarah Jenkins",
+        "สมชาย"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "qualify_lead",
+      "argument": "notes",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 12,
+      "has_enum": false,
+      "samples": [
+        "ลูกค้าเกรดเอ"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "qualify_lead",
+      "argument": "timeline",
+      "occurrences": 21,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "three months",
+        "next 3 months",
+        "three months",
+        "พรุ่งนี้"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "quote_premium",
+      "argument": "age",
+      "occurrences": 18,
+      "sourced_share": 1.0,
+      "median_length": 2,
+      "has_enum": false,
+      "samples": [
+        35,
+        35,
+        35,
+        35
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "quote_premium",
+      "argument": "coverage_amount",
+      "occurrences": 21,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        1000000,
+        1000000,
+        1000000,
+        1000000
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "quote_premium",
+      "argument": "coverage_type",
+      "occurrences": 21,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "auto",
+        "life",
+        "life",
+        "bundle"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "quote_premium",
+      "argument": "risk_profile",
+      "occurrences": 16,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": true,
+      "samples": [
+        "low",
+        "low",
+        "low",
+        "invalid_data"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "recommend_products",
+      "argument": "based_on",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "similar",
+        "super_awesome_stuff",
+        "trending",
+        "history"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "recommend_products",
+      "argument": "customer_id",
+      "occurrences": 12,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "CUST-6241",
+        "99",
+        "99",
+        "CUST-29"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "recommend_upgrade",
+      "argument": "current_product_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "KB-418"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "recommend_upgrade",
+      "argument": "usage_profile",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 12,
+      "has_enum": false,
+      "samples": [
+        "heavy coding"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "redeem_points",
+      "argument": "loyalty_id",
+      "occurrences": 52,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "L-9987",
+        "99999",
+        "MB28976",
+        "LY-9808"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "redeem_points",
+      "argument": "placeholder",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "redeem_points",
+      "argument": "points_to_redeem",
+      "occurrences": 52,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        5000,
+        1000,
+        5000,
+        10000
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "redeem_points",
+      "argument": "reservation_id",
+      "occurrences": 48,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "BK5251",
+        "RES-507",
+        "RES-408275",
+        "RES-88391"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "redirect_call",
+      "argument": "reason",
+      "occurrences": 1,
+      "sourced_share": 0.0,
+      "median_length": 30,
+      "has_enum": false,
+      "samples": [
+        "customer_requested_human_agent"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "register_complaint",
+      "argument": "category",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 14,
+      "has_enum": false,
+      "samples": [
+        "Technical",
+        "Technical",
+        "internet_outage",
+        "การบริการพนักงาน"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "register_complaint",
+      "argument": "customer_id",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ACC-4609",
+        "ACC-4609",
+        "CUST-2104",
+        "CUST-9056"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "register_complaint",
+      "argument": "description",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 40,
+      "has_enum": false,
+      "samples": [
+        "Internet is down",
+        "Internet is down",
+        "Internet has been down for 3 days, previous reports did not resolve the issue.",
+        "พนักงานส่งของโยนพัสดุและพูดจาไม่สุภาพใส่ลูกค้า"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "register_complaint",
+      "argument": "severity",
+      "occurrences": 6,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": true,
+      "samples": [
+        "ultra-high",
+        "critical",
+        "high",
+        "high"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "renew_policy",
+      "argument": "duration_months",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 2,
+      "has_enum": false,
+      "samples": [
+        12
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "renew_policy",
+      "argument": "policy_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "POL-53055"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_fraud",
+      "argument": "description",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 49,
+      "has_enum": false,
+      "samples": [
+        "User reports unauthorized electronics transaction while card was in possession.",
+        "User reports unauthorized electronics transaction while card was in possession.",
+        "User has never shopped at that store and card is still with them",
+        "ผมไม่ได้ทำรายการนี้จริงๆ ครับ"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "report_fraud",
+      "argument": "disputed_amount",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        500.0,
+        5000.0,
+        15000.0,
+        4500.0
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_fraud",
+      "argument": "transaction_id",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "TXN-366",
+        "TXN-366",
+        "TXN-301",
+        "TXN_42"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_incident",
+      "argument": "affected_services",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": false,
+      "samples": [
+        [
+          "chemical factory"
+        ],
+        [
+          "Cloud Services"
+        ]
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_incident",
+      "argument": "estimated_impact",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        "high"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_incident",
+      "argument": "incident_type",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "fire",
+        "fire",
+        "เพลิงไหม้",
+        "severe water leak"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "report_incident",
+      "argument": "location",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 22,
+      "has_enum": false,
+      "samples": [
+        "Maptaphut Industrial Estate",
+        "Main Data Center - Rear Office",
+        "อาคารพาณิชย์สุขุมวิท 21",
+        "Building 4B"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_claim_documents",
+      "argument": "claim_id",
+      "occurrences": 50,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "CLM-90454",
+        "CLM-268656",
+        "CLM-841",
+        "CLM-841"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_claim_documents",
+      "argument": "doc_type",
+      "occurrences": 50,
+      "sourced_share": 1.0,
+      "median_length": 13,
+      "has_enum": true,
+      "samples": [
+        "photo",
+        "photo",
+        "photo",
+        "photo"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "request_prescription_refill",
+      "argument": "patient_id",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "P88201",
+        "P88201",
+        "HN59861",
+        "PAT-1516"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_prescription_refill",
+      "argument": "pharmacy_id",
+      "occurrences": 8,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "PH-926",
+        "PH-926",
+        "PH-174",
+        "PHARM-5491"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_prescription_refill",
+      "argument": "prescription_id",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "RX682298",
+        "RX682298",
+        "RX-7647",
+        "RX-LIPITOR-555"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_referral",
+      "argument": "patient_id",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "P-99887",
+        "PAT-7495",
+        "PAT-7495",
+        "P99999"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "request_referral",
+      "argument": "reason",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 22,
+      "has_enum": false,
+      "samples": [
+        "มีอาการแน่นหน้าอกบ่อยๆ",
+        "persistent lumbar pain",
+        "persistent lumbar pain"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "request_referral",
+      "argument": "specialty",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "cardiology",
+        "orthopedist",
+        "orthopedist",
+        "cardiology"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_appointment",
+      "argument": "appointment_id",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "APP-789",
+        "MSG-772",
+        "APT-6955",
+        "APT-3413"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_appointment",
+      "argument": "new_date",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-10-28",
+        "July 15th",
+        "2024-03-01",
+        "2025-05-12"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_appointment",
+      "argument": "new_time",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "14:00",
+        "10:00 AM",
+        "2:00 PM",
+        "11:00"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_delivery",
+      "argument": "new_date",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-11-25",
+        "2023-11-17",
+        "2023-11-12",
+        "2023-10-25"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_delivery",
+      "argument": "order_id",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "#ORD-8141",
+        "ORD-78500",
+        "ORD-7338",
+        "ORD-6045"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "reschedule_delivery",
+      "argument": "time_slot",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "morning",
+        "บ่าย"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "restart_service",
+      "argument": "graceful",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        true
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "restart_service",
+      "argument": "service_name",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "CloudSync",
+        "auth-gateway",
+        "auth-gateway",
+        "Database"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "run_diagnostic",
+      "argument": "diagnostic_type",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 11,
+      "has_enum": false,
+      "samples": [
+        "signal_integrity",
+        "sync_engine_lag",
+        "สแกนระดับสูงสุด",
+        "cpu"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "run_diagnostic",
+      "argument": "placeholder",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "run_diagnostic",
+      "argument": "system_name",
+      "occurrences": 15,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "HomeHub-V2",
+        "CloudSync",
+        "Server-Alpha",
+        "Server-Alpha"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "run_diagnostic",
+      "argument": "verbose",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        true,
+        true
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_appointment",
+      "argument": "appointment_type",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 12,
+      "has_enum": true,
+      "samples": [
+        "consultation",
+        "procedure",
+        "consultation",
+        "consultation"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "schedule_appointment",
+      "argument": "office_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "OFF-739"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_appointment",
+      "argument": "patient_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "AJ-5922",
+        "P00892",
+        "P9876",
+        "P8842"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_appointment",
+      "argument": "preferred_date",
+      "occurrences": 11,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-11-21",
+        "2023-11-15",
+        "2026-04-15",
+        "2023-11-15"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_appointment",
+      "argument": "service_type",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": false,
+      "samples": [
+        "permit_verification"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_demo",
+      "argument": "contact_name",
+      "occurrences": 17,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "Alex",
+        "สมชาย",
+        "Casey",
+        "สมชาย"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_demo",
+      "argument": "preferred_date",
+      "occurrences": 16,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2023-11-15",
+        "2023-11-20",
+        "2025-06-12",
+        "2023-11-25"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "schedule_demo",
+      "argument": "product",
+      "occurrences": 17,
+      "sourced_share": 1.0,
+      "median_length": 14,
+      "has_enum": false,
+      "samples": [
+        "Unified Dashboard",
+        "Enterprise Scaling Solution",
+        "Logistics Plus",
+        "CRM Dashboard"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "cabin_class",
+      "occurrences": 33,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "economy",
+        "economy",
+        "economy",
+        "economy"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "departure_date",
+      "occurrences": 68,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "2024-11-25",
+        "2024-11-25",
+        "2023-10-15",
+        "2024-10-20"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "destination",
+      "occurrences": 68,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "Chiang Mai",
+        "Chiang Mai",
+        "New York",
+        "Paris"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "origin",
+      "occurrences": 68,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "Bangkok",
+        "Bangkok",
+        "London",
+        "Bangkok"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "passengers",
+      "occurrences": 37,
+      "sourced_share": 1.0,
+      "median_length": 1,
+      "has_enum": false,
+      "samples": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_flights",
+      "argument": "placeholder",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_products",
+      "argument": "category",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 15,
+      "has_enum": false,
+      "samples": [
+        "Home Appliances"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_products",
+      "argument": "price_range",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 12,
+      "has_enum": false,
+      "samples": [
+        {
+          "max": 500
+        },
+        {
+          "max": 25000
+        },
+        {
+          "max": 300
+        },
+        {
+          "max": 200
+        }
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_products",
+      "argument": "query",
+      "occurrences": 20,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": false,
+      "samples": [
+        "เครื่องชงกาแฟแคปซูล",
+        "เครื่องชงกาแฟแคปซูล",
+        "noise-canceling headphones",
+        "noise-canceling headphones"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "search_products",
+      "argument": "sort_by",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": true,
+      "samples": [
+        "ราคาถูกที่สุด",
+        "price_low",
+        "cheapest_ever",
+        "price_low"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "send_mass_notification",
+      "argument": "message",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 50,
+      "has_enum": false,
+      "samples": [
+        "Emergency at West Data Center, backup power active"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "send_mass_notification",
+      "argument": "priority",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "critical"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "send_proposal",
+      "argument": "quote_id",
+      "occurrences": 13,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "Q-7001",
+        "Q-8821",
+        "Q-7721",
+        "Q-7781"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "send_proposal",
+      "argument": "recipient_email",
+      "occurrences": 13,
+      "sourced_share": 1.0,
+      "median_length": 19,
+      "has_enum": false,
+      "samples": [
+        "casey@nexalogistics.com",
+        "somchai@abctech.com",
+        "s.jenkins@zenithcorp.com",
+        "alex@techflow.io"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "send_reminder",
+      "argument": "appointment_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "APP-789-B",
+        "APP-789-B",
+        "APP-8084",
+        "MSG-772"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "send_reminder",
+      "argument": "channel",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": true,
+      "samples": [
+        "sms",
+        "email",
+        "sms",
+        "sms"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "send_sms",
+      "argument": "message",
+      "occurrences": 3,
+      "sourced_share": 0.0,
+      "median_length": 238,
+      "has_enum": false,
+      "samples": [
+        "กธ.7076201234 ครบชำระเบี้ยฯ 15 มิถุนายน 2569 จำนวน 4,250 บาท สามารถชำระได้ถึง 30 มิถุนายน 2569ดาวน์โหลดที่ http://bc.ocean.co.th/a/cppl70762 ขออภัยหากชำระแล้ว, สมัครรับบริการแจ้งเตือนชำระเบี้ยผ่าน LINE คลิก https://www.ocean.co.th/line-auto",
+        "กธ.7076205678 ครบชำระเบี้ยฯ 20 มิถุนายน 2569 จำนวน 8,900 บาท สามารถชำระได้ถึง 5 กรกฎาคม 2569ดาวน์โหลดที่ http://bc.ocean.co.th/a/cppl70762 ขออภัยหากชำระแล้ว, สมัครรับบริการแจ้งเตือนชำระเบี้ยผ่าน LINE คลิก https://www.ocean.co.th/line-auto",
+        "กธ.7076203344 ครบชำระเบี้ยฯ 22 มิถุนายน 2569 จำนวน 6,100 บาท สามารถชำระได้ถึง 7 กรกฎาคม 2569ดาวน์โหลดที่ http://bc.ocean.co.th/a/cppl70762 ขออภัยหากชำระแล้ว, สมัครรับบริการแจ้งเตือนชำระเบี้ยผ่าน LINE คลิก https://www.ocean.co.th/line-auto"
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "send_sms",
+      "argument": "policy_number",
+      "occurrences": 3,
+      "sourced_share": 0.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "7076201234",
+        "7076205678",
+        "7076203344"
+      ],
+      "proposed_source": "system"
+    },
+    {
+      "tool": "submit_feedback",
+      "argument": "customer_id",
+      "occurrences": 14,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "CUST-1736",
+        "CUST-390",
+        "CUST-390",
+        "CID-1274"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_feedback",
+      "argument": "description",
+      "occurrences": 14,
+      "sourced_share": 1.0,
+      "median_length": 60,
+      "has_enum": false,
+      "samples": [
+        "Add more templates for the dashboard.",
+        "แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลยนะ ประทับใจตรงนี้แหละ",
+        "แอปฯ บนมือถือทำงานเร็วขึ้นกว่าเมื่อก่อนเยอะเลยนะ ประทับใจตรงนี้แหละ",
+        "The mobile app experience was very smooth."
+      ],
+      "proposed_source": "free_text"
+    },
+    {
+      "tool": "submit_feedback",
+      "argument": "feedback_type",
+      "occurrences": 14,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "product",
+        "experience",
+        "experience",
+        "experience"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "submit_feedback",
+      "argument": "sentiment",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "neutral",
+        "positive",
+        "positive",
+        "positive"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "submit_meter_reading",
+      "argument": "account_id",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "123456789",
+        "ELEC-7046"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_meter_reading",
+      "argument": "meter_type",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": true,
+      "samples": [
+        "electric",
+        "electric"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "submit_meter_reading",
+      "argument": "reading_value",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        4550.5,
+        4567.8
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_prior_auth",
+      "argument": "patient_id",
+      "occurrences": 42,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "HN7317",
+        "P-99887",
+        "PATIENT_861",
+        "PATIENT_861"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_prior_auth",
+      "argument": "procedure_code",
+      "occurrences": 42,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "PC-4108",
+        "PROC-278",
+        "70551",
+        "70551"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_prior_auth",
+      "argument": "supporting_docs",
+      "occurrences": 9,
+      "sourced_share": 1.0,
+      "median_length": 23,
+      "has_enum": false,
+      "samples": [
+        [
+          "clinical_notes_v2"
+        ],
+        [
+          "medical_history.pdf"
+        ],
+        [
+          "medical_history.pdf"
+        ],
+        [
+          "DOC-REC-01"
+        ]
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_tax_inquiry",
+      "argument": "inquiry_type",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 13,
+      "has_enum": true,
+      "samples": [
+        "refund_status",
+        "filing_status",
+        "filing_status",
+        "filing_status"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "submit_tax_inquiry",
+      "argument": "tax_year",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 4,
+      "has_enum": false,
+      "samples": [
+        2023,
+        2023,
+        2023,
+        2023
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "submit_tax_inquiry",
+      "argument": "taxpayer_id",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "TX-5837",
+        "1100100987654",
+        "CIT-1978",
+        "CIT-14461"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "track_delivery",
+      "argument": "order_id",
+      "occurrences": 10,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "ORD-2484",
+        "#ORD-8141",
+        "TH-1822",
+        "ORD-78500"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "track_delivery",
+      "argument": "tracking_number",
+      "occurrences": 5,
+      "sourced_share": 1.0,
+      "median_length": 10,
+      "has_enum": false,
+      "samples": [
+        "TH92969527",
+        "TRK251490235",
+        "TRACK-5576",
+        "TRACK-843"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "transfer_funds",
+      "argument": "amount",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": false,
+      "samples": [
+        500,
+        5000
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "transfer_funds",
+      "argument": "from_account",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "AC-9961",
+        "ACC-8636"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "transfer_funds",
+      "argument": "placeholder",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "transfer_funds",
+      "argument": "to_account",
+      "occurrences": 2,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": false,
+      "samples": [
+        "AC-2944",
+        "ACC-7579"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "update_policy",
+      "argument": "field",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "address"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "update_policy",
+      "argument": "new_value",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 14,
+      "has_enum": false,
+      "samples": [
+        "456 Oak Avenue"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "update_policy",
+      "argument": "placeholder",
+      "occurrences": 3,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "update_policy",
+      "argument": "policy_id",
+      "occurrences": 1,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "POL-9253"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "update_profile",
+      "argument": "customer_id",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "CUST-9135",
+        "CUST-9135",
+        "CUST-745902",
+        "CUST-6342"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "update_profile",
+      "argument": "field",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": true,
+      "samples": [
+        "phone",
+        "phone",
+        "address",
+        "email"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "update_profile",
+      "argument": "new_value",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "555-0199",
+        "555-0199",
+        "123 สุขุมวิท กรุงเทพฯ",
+        "alex.new@example.com"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_coverage",
+      "argument": "patient_id",
+      "occurrences": 78,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "P-98765",
+        "JS-5748",
+        "JS-5748",
+        "HN7317"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_coverage",
+      "argument": "procedure_code",
+      "occurrences": 78,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "70551",
+        45378,
+        "45378",
+        "PC-4108"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_coverage",
+      "argument": "provider_id",
+      "occurrences": 16,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "PROVIDER-A1",
+        "PRV-8965",
+        "PRV-7050",
+        "PRV-7050"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_document",
+      "argument": "document_number",
+      "occurrences": 8,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "LIC-603178",
+        "LIC-603178",
+        "CERT-224223",
+        "ID-8784"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_document",
+      "argument": "document_type",
+      "occurrences": 8,
+      "sourced_share": 1.0,
+      "median_length": 7,
+      "has_enum": true,
+      "samples": [
+        "license",
+        "license",
+        "certificate",
+        "id_card"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "verify_identity",
+      "argument": "customer_id",
+      "occurrences": 30,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "ACCT-2697",
+        "ACCT-2697",
+        "CUST-4538",
+        "CUST-4538"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_identity",
+      "argument": "verification_method",
+      "occurrences": 30,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": true,
+      "samples": [
+        "pin",
+        "pin",
+        "security_question",
+        "security_question"
+      ],
+      "proposed_source": "derived"
+    },
+    {
+      "tool": "verify_identity",
+      "argument": "verification_value",
+      "occurrences": 22,
+      "sourced_share": 1.0,
+      "median_length": 6,
+      "has_enum": false,
+      "samples": [
+        "5542",
+        "5542",
+        "Barnaby",
+        "8899"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_policy",
+      "argument": "placeholder",
+      "occurrences": 4,
+      "sourced_share": 1.0,
+      "median_length": 5,
+      "has_enum": false,
+      "samples": [
+        "value",
+        "value",
+        "value",
+        "value"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_policy",
+      "argument": "policy_id",
+      "occurrences": 75,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "POL-90903",
+        "POL-46045",
+        "POL-53055",
+        "POL-53055"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "verify_policy",
+      "argument": "policyholder_id",
+      "occurrences": 75,
+      "sourced_share": 1.0,
+      "median_length": 8,
+      "has_enum": false,
+      "samples": [
+        "PID-4013",
+        "PID-8063",
+        "PH-335",
+        "PH-335"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "waive_late_fee",
+      "argument": "fee_amount",
+      "occurrences": 7,
+      "sourced_share": 1.0,
+      "median_length": 3,
+      "has_enum": false,
+      "samples": [
+        100.0,
+        50.0,
+        200,
+        200
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "waive_late_fee",
+      "argument": "invoice_id",
+      "occurrences": 11,
+      "sourced_share": 1.0,
+      "median_length": 9,
+      "has_enum": false,
+      "samples": [
+        "INV-2023-01",
+        "INV-2023-01",
+        "INV-2024-001",
+        "INV-2024-001"
+      ],
+      "proposed_source": "user"
+    },
+    {
+      "tool": "waive_late_fee",
+      "argument": "waiver_reason",
+      "occurrences": 11,
+      "sourced_share": 1.0,
+      "median_length": 43,
+      "has_enum": false,
+      "samples": [
+        "Customer claims system error and usually pays on time",
+        "Customer claims system error and usually pays on time",
+        "Good payment history customer claim timely payment",
+        "Good payment history customer request"
+      ],
+      "proposed_source": "free_text"
+    }
+  ]
+}

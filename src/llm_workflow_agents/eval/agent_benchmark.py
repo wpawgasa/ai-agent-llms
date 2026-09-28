@@ -54,6 +54,7 @@ from llm_workflow_agents.eval.tool_chain_propagation import ChainPropagationMetr
 from llm_workflow_agents.eval.composite_score import DEFAULT_VOICE_WEIGHT, blend_modality_scores
 from llm_workflow_agents.eval.chunk_diagnostics import chunk_diagnostics_by_language
 from llm_workflow_agents.eval.segment_scoring import SegmentStats, reply_texts, segment_scoring_view
+from llm_workflow_agents.eval.argument_provenance import agent_decidable_call
 from llm_workflow_agents.data.system_prompt import build_enriched_system_prompt as _build_system_prompt
 
 logger = structlog.get_logger(__name__)
@@ -1313,6 +1314,11 @@ if __name__ == "__main__":
     conv_reply_preds: list[list[TurnPrediction]] = []
     segment_stats = SegmentStats()
     replay_counts: dict[str, int] = {}
+    # Agent-decidable tool scoring: reported beside the headline metric, never
+    # inside it (R31 — which arguments the model owns is a decision about what
+    # the benchmark measures, and it is not taken by adding a metric).
+    decidable_preds: list[TurnPrediction] = []
+    decidable_gts: list[TurnGroundTruth] = []
 
     for idx, sample in enumerate(samples):
         conv_id = sample.get("conversation_id", f"sample_{idx}")
@@ -1350,6 +1356,14 @@ if __name__ == "__main__":
                 content=pred_msg.get("content", ""),
             )
             gt_tool_calls = (gt_msg.get("annotations") or {}).get("tool_calls") or []
+            # The same gold calls with only the arguments a score may attribute
+            # to the model (eval/argument_provenance.py). Identical to the above
+            # until a schema declares a source, so this cannot move a ranking.
+            decidable_gts.append(TurnGroundTruth(
+                turn_id=turn_idx,
+                tool_calls=[agent_decidable_call(tool_schemas, c) for c in gt_tool_calls],
+            ))
+            decidable_preds.append(TurnPrediction(turn_id=turn_idx, content=pred_msg.get("content", "")))
             tg = TurnGroundTruth(
                 turn_id=turn_idx,
                 tool_calls=gt_tool_calls,
@@ -1388,6 +1402,7 @@ if __name__ == "__main__":
     state_metrics = evaluate_state_machine(state_predictions, state_ground_truths)
     tool_metrics_turn = evaluate_tool_calls(tool_predictions, tool_ground_truths)
     tool_metrics_conv = evaluate_tool_calls_conversation(conv_tool_preds, conv_tool_gts)
+    tool_metrics_decidable = evaluate_tool_calls(decidable_preds, decidable_gts)
     chain_metrics = evaluate_chain_propagation(chain_predictions, chain_ground_truths)
 
     # Use the better of per-turn and conversation-level tool metrics for the
@@ -1462,6 +1477,10 @@ if __name__ == "__main__":
         # 2026-09-17: tool results are shown only for calls actually made.
         "tool_result_gating": "calls_made_only",
         "metrics": quality.to_dict(),
+        # Tool metrics over the agent-decidable arguments only (source "user" or
+        # "derived", plus every undeclared argument). Equal to metrics.tool_metrics
+        # until a schema declares a source; never used by the composite.
+        "tool_metrics_agent_decidable": tool_metrics_decidable.to_dict(),
         # quality_summary now also carries a "chunk_diagnostics" key
         # (guardrails, computed over the voice stratum only; see
         # attach_chunk_diagnostics) alongside the modality blend.
@@ -1487,6 +1506,9 @@ if __name__ == "__main__":
     print(f"  latency_per_turn_avg_ms : {quality.latency_per_turn_avg_ms:.1f}")
     print(f"  ttft_avg_ms             : {quality.ttft_avg_ms:.1f}")
     print(f"  segments (scoring unit) : {result['segment_stats']}")
+    print(f"  tool_call_f1 (agent-decidable, not in composite): "
+          f"{tool_metrics_decidable.tool_call_f1:.3f}  "
+          f"(arg exact {tool_metrics_decidable.argument_exact_match:.3f})")
     print(
         "  quality (blended)       : "
         f"{quality_summary['quality']:.4f}"
