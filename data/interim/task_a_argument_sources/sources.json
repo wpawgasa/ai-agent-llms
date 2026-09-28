@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "reviewed": "2026-09-28",
+  "note": "Declared owners for the tool arguments the v4 benchmark scores. Built by scripts/propose_argument_sources.py and REVIEWED: the rule proposed 22 free_text pairs and 4 were wrong in kind (see corrections). Only pairs that differ from the default are listed; every unlisted argument stays agent-decidable, so nothing leaves scoring by omission.",
+  "corrections": {
+    "block_card.reason": "proposed free_text; the value is 'suspicious_activity', an enum-like token rather than prose. Declared derived.",
+    "redirect_call.reason": "proposed free_text; 'customer_requested_human_agent' is a token, not prose. Declared derived.",
+    "modify_order.modifications": "proposed free_text; the value is a structured dict rendered as a string. Declared user.",
+    "initiate_return.reason": "proposed free_text; 'broken' is a single word the customer said. Declared user."
+  },
+  "sources": {
+    "file_claim.description": "free_text",
+    "register_complaint.description": "free_text",
+    "log_complaint_trend.description": "free_text",
+    "submit_feedback.description": "free_text",
+    "waive_late_fee.waiver_reason": "free_text",
+    "close_case.resolution_summary": "free_text",
+    "escalate_to_supervisor.reason": "free_text",
+    "collect_csat.comments": "free_text",
+    "report_fraud.description": "free_text",
+    "collect_nps.reason": "free_text",
+    "dispatch_emergency.description": "free_text",
+    "dispute_bill.dispute_reason": "free_text",
+    "request_referral.reason": "free_text",
+    "send_sms.message": "free_text",
+    "cancel_order.reason": "free_text",
+    "file_complaint.description": "free_text",
+    "qualify_lead.notes": "free_text",
+    "send_mass_notification.message": "free_text",
+    "block_card.reason": "derived",
+    "redirect_call.reason": "derived",
+    "modify_order.modifications": "user",
+    "initiate_return.reason": "user",
+    "send_sms.policy_number": "system"
+  }
+}

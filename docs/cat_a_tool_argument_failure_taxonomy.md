@@ -151,7 +151,91 @@ cost order:
 Nobody should start (3) expecting 0.9 from it. The decision in (1) is not the
 model's to make, which is why it is written down here rather than acted on.
 
-## 7. Reproduce
+## 7. Option (1), measured: similarity scoring buys +0.014, not 0.9
+
+Section 6 left the free-text decision open. It has now been *measured* rather
+than taken, on every v4 run there is.
+
+`scripts/propose_argument_sources.py` proposed an owner for each of the 248
+(tool, argument) pairs in the v4 benchmark from how the corpus uses them; the
+22 `free_text` proposals were reviewed by hand and **4 were wrong in kind** —
+`block_card.reason` and `redirect_call.reason` hold enum-like tokens
+(`suspicious_activity`), `modify_order.modifications` is a dict rendered as a
+string, `initiate_return.reason` is one word the customer said. The reviewed
+declaration is `data/interim/task_a_argument_sources/sources.json`: **18
+free_text, 2 derived, 2 user, 1 system**, with a `corrections` block recording
+each change and why. Only pairs that differ from the default are listed, so
+nothing leaves scoring by omission.
+
+`scripts/rescore_with_argument_sources.py` then recomputes the tool metric from
+the stored run logs with those owners applied — `free_text` by
+`free_text_similarity.values_match` (fact-guarded, τ = 0.40), `system` supplied
+by the runtime, everything else exact. It uses the production evaluator, so the
+BEFORE column reproduces each run's recorded `tool_metrics_conversation` rather
+than approximating it.
+
+| run (v4, blended quality) | before | after | Δ |
+|---|---|---|---|
+| sft_cat_a_e4b_textturns_ckpt3168 · text | 0.8332 | **0.8469** | +0.0137 |
+| sft_cat_a_e4b_corpus_v4_ckpt3156 · text | 0.8308 | 0.8436 | +0.0128 |
+| sft_cat_a_e4b_corpus_v4_ckpt3156 · native | 0.8189 | 0.8322 | +0.0132 |
+| sft_cat_a_e4b_ckpt3168 · text | 0.8160 | 0.8283 | +0.0123 |
+| sft_cat_a_12b_textturns_ckpt3168 · text | 0.8084 | 0.8222 | +0.0138 |
+| sft_cat_a_e4b_textturns_ckpt3168 · native | 0.8046 | 0.8183 | +0.0137 |
+| sft_cat_a_12b_textturns_ckpt3168 · native | 0.7864 | 0.8017 | +0.0152 |
+| sft_cat_a_e4b_ckpt3168 · native | 0.7763 | 0.7879 | +0.0116 |
+| sft_cat_a_12b_ckpt3168 · native | 0.7749 | 0.7873 | +0.0124 |
+| sft_cat_a_12b_ckpt3168 · text | 0.7712 | 0.7850 | +0.0138 |
+| gemma-4-12B-it untrained · text | 0.7553 | 0.7646 | +0.0094 |
+| gemma-4-12B-it untrained · native | 0.7517 | 0.7604 | +0.0087 |
+| gemma-4-E4B-it untrained · text | 0.6877 | 0.7035 | +0.0157 |
+| gemma-4-E4B-it untrained · native | 0.6867 | 0.7005 | +0.0138 |
+
+Three things to read off it.
+
+**The ranking does not move.** Every run gains between +0.0087 and +0.0157 —
+a level shift, not a re-ordering. Checked explicitly within each tool-turn
+format: the ordering before and after is identical. So this changes what the
+number *means* without changing which model wins, which is the cheapest
+possible form of a metric change.
+
+**It does not get to 0.9.** The best run goes 0.8332 → 0.8469, still **0.053
+short**. Section 5 projected ~0.893 from fixing *every* convention issue; free
+text is only part of that, and this is the measured part. 863 free-text
+comparisons were accepted across the 14 runs and **508 were still rejected**.
+
+**The rejections are not all real errors, so +0.0137 is a floor under this
+backend.** On the best run, 31 free-text arguments were rejected: 9 by the fact
+guard (a number or identifier changed — correctly rejected), 22 by low lexical
+similarity, and several of those 22 are genuine paraphrases the deterministic
+backend cannot see:
+
+```
+0.25  escalate_to_supervisor.reason
+      gold 'SLA breach and high severity delivery damage'
+      got  'SLA breached by 3 days and package was damaged'
+0.17  waive_late_fee.waiver_reason
+      gold 'Good payment history customer claim timely payment'
+      got  'Customer paid on time previously'
+```
+
+Others are correctly rejected and worth seeing, because they are why the guard
+exists at all — `log_complaint_trend.description` gold "your system is very
+slow" against the model's "the satisfaction score is very low" is a different
+complaint, not a paraphrase. A pinned multilingual encoder registered through
+`free_text_similarity.register_backend` would lift the first kind without the
+second; it would also make the score depend on a model, which is the trade the
+module docstring records.
+
+**What is still open, and is not the model's to decide.** This rescore is
+ledger-driven and reads the benchmark without changing it. Making it the *live*
+metric means declaring `source` inside the tool schemas, which are inside the
+frozen `task_a_benchmark_v4` stage — so it is an edit to frozen data, and every
+number recorded before it becomes incomparable with every number after. The
+v4 set has now had the R27 treatment (all 14 runs rescored above), so the
+prerequisite is met; the decision to spend it is not.
+
+## 8. Reproduce
 
 ```bash
 python scripts/triage_tool_call_failures.py \
@@ -161,5 +245,20 @@ python scripts/triage_tool_call_failures.py \
     --out runs/audit/tool_failures_e4b_toolresults_text_v4.json
 ```
 
-No GPU: the run logs keep every `model_response` event. The enum check runs on
-data alone and is part of `scripts/triage_task_a_quality.py`.
+The section 7 rescore, over every v4 run at once:
+
+```bash
+python scripts/propose_argument_sources.py \
+    --data data/output/benchmark/task_a_v4 \
+    --data data/output/benchmark/task_a_voice_v3 \
+    --out data/interim/task_a_argument_sources/proposal.json   # then REVIEW it
+
+python scripts/rescore_with_argument_sources.py results/exp_a/*_v4_auto.log \
+    --data data/output/benchmark/task_a_v4 \
+    --data data/output/benchmark/task_a_voice_v3 \
+    --sources data/interim/task_a_argument_sources/sources.json \
+    --out runs/audit/rescore_argument_sources_v4.json
+```
+
+No GPU for any of it: the run logs keep every `model_response` event. The enum
+check runs on data alone and is part of `scripts/triage_task_a_quality.py`.
